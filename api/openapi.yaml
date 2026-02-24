@@ -1,0 +1,151 @@
+openapi: 3.0.3
+info:
+  title: DARCI Notarization API
+  version: 0.1.0
+servers:
+  - url: http://localhost:4000
+paths:
+  /auth/login:
+    post:
+      summary: Login
+      responses:
+        "200":
+          description: OK
+  /users/me:
+    get:
+      summary: Current user
+      responses:
+        "200":
+          description: OK
+  /documents:
+    post:
+      summary: Create document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+      responses:
+        "201":
+          description: Created
+  /documents/{id}:
+    get:
+      summary: Get document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /documents/{id}/sign:
+    post:
+      summary: Sign document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /documents/{id}/submit-notarization:
+    post:
+      summary: Submit for notarization
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /documents/{id}/append-acknowledgment:
+    post:
+      summary: Append acknowledgment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /documents/{id}/watermark:
+    post:
+      summary: Watermark document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /notary/code/resolve:
+    post:
+      summary: Resolve code
+      responses:
+        "200":
+          description: OK
+  /notary/requests/{id}/sign:
+    post:
+      summary: Notary sign
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /notary/requests/{id}/submit:
+    post:
+      summary: Submit notarized document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /ledger/anchor:
+    post:
+      summary: Anchor ledger entry
+      responses:
+        "200":
+          description: OK
+  /verify/{idn}:
+    get:
+      summary: Verify document authenticity
+      parameters:
+        - in: path
+          name: idn
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string

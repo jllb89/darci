@@ -1,0 +1,9 @@
+{
+  "generatorName": "typescript-fetch",
+  "inputSpec": "./api/openapi.yaml",
+  "output": "./packages/types/src/generated",
+  "additionalProperties": {
+    "supportsES6": true,
+    "npmName": "@darci/api-client"
+  }
+}
