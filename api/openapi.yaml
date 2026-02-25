@@ -4,19 +4,42 @@ info:
   version: 0.1.0
 servers:
   - url: http://localhost:4000
+security:
+  - bearerAuth: []
 paths:
   /auth/login:
     post:
       summary: Login
+      security: []
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users/me:
     get:
       summary: Current user
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents:
     post:
       summary: Create document
@@ -32,6 +55,37 @@ paths:
       responses:
         "201":
           description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDetailResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      summary: List documents
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}:
     get:
       summary: Get document
@@ -44,6 +98,88 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/versions:
+    get:
+      summary: List document versions
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentVersionsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/timeline:
+    get:
+      summary: Get document status timeline
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTimelineResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signature-fields:
+    get:
+      summary: Get signature fields
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignatureFieldsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/sign:
     post:
       summary: Sign document
@@ -56,6 +192,22 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/submit-notarization:
     post:
       summary: Submit for notarization
@@ -68,6 +220,22 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
@@ -80,6 +248,16 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/watermark:
     post:
       summary: Watermark document
@@ -92,12 +270,110 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/code/resolve:
     post:
       summary: Resolve code
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/code/resend:
+    post:
+      summary: Resend code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/code/regenerate:
+    post:
+      summary: Regenerate code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/context:
+    get:
+      summary: Notary context panel data
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryContextResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/sign:
     post:
       summary: Notary sign
@@ -110,6 +386,16 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/submit:
     post:
       summary: Submit notarized document
@@ -122,15 +408,42 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /ledger/anchor:
     post:
       summary: Anchor ledger entry
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /verify/{idn}:
     get:
       summary: Verify document authenticity
+      security: []
       parameters:
         - in: path
           name: idn
@@ -140,12 +453,206 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+        idn:
+          type: string
+        status:
+          type: string
+        documentType:
+          type: string
+        jurisdiction:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    DocumentVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        version:
+          type: integer
+        storagePath:
+          type: string
+        fileName:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        isFinal:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    SignatureField:
+      type: object
+      properties:
+        id:
+          type: string
+        pageNumber:
+          type: integer
+        x:
+          type: number
+        y:
+          type: number
+        width:
+          type: number
+        height:
+          type: number
+        required:
+          type: boolean
+    TimelineEvent:
+      type: object
+      properties:
+        action:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actorId:
+          type: string
+    NotaryContext:
+      type: object
+      properties:
+        requestId:
+          type: string
+        documentId:
+          type: string
+        jurisdiction:
+          type: string
+        idRequirements:
+          type: string
+        acknowledgmentTemplate:
+          type: string
+        venueRequired:
+          type: boolean
+        consentRequired:
+          type: boolean
+    DocumentListResponse:
+      type: object
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Document"
+    DocumentDetailResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/Document"
+    DocumentVersionsResponse:
+      type: object
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentVersion"
+    DocumentTimelineResponse:
+      type: object
+      properties:
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEvent"
+    SignatureFieldsResponse:
+      type: object
+      properties:
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/SignatureField"
+    CodeResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        status:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    NotaryContextResponse:
+      type: object
+      properties:
+        context:
+          $ref: "#/components/schemas/NotaryContext"
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+    UserResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
     ApiResponse:
       type: object
       properties:
         status:
           type: string
         message:
+          type: string
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+    VerificationResponse:
+      type: object
+      properties:
+        idn:
+          type: string
+        hash:
+          type: string
+        ledgerTxId:
+          type: string
+        anchoredAt:
+          type: string
+          format: date-time
+        status:
           type: string

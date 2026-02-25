@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import swaggerUi from "swagger-ui-express";
 import YAML from "yamljs";
+import { requireAuth } from "./middleware/auth";
 import authRoutes from "./routes/auth";
 import documentsRoutes from "./routes/documents";
 import notaryRoutes from "./routes/notary";
@@ -25,12 +26,21 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
+app.use(requireAuth);
+
 app.use("/auth", authRoutes);
 app.get("/users/me", getMe);
 app.use("/documents", documentsRoutes);
 app.use("/notary", notaryRoutes);
 app.use("/ledger", ledgerRoutes);
 app.use("/verify", verifyRoutes);
+
+app.use((_req: Request, res: Response) => {
+  res.status(404).json({
+    error: "not_found",
+    message: "Route not found",
+  });
+});
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: "internal_error", message: err.message });
