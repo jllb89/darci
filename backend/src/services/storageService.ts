@@ -30,6 +30,24 @@ export const createDocumentUploadUrl = async (storagePath: string) => {
   };
 };
 
+export const createSignatureUploadUrl = async (storagePath: string) => {
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(signaturesBucket)
+    .createSignedUploadUrl(storagePath);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message ?? "Failed to create signed upload URL");
+  }
+
+  return {
+    bucket: signaturesBucket,
+    path: data.path,
+    signedUrl: data.signedUrl,
+    token: data.token,
+  };
+};
+
 export const getDocumentObjectMetadata = async (storagePath: string) => {
   const segments = storagePath.split("/");
   const fileName = segments.pop();
@@ -42,6 +60,42 @@ export const getDocumentObjectMetadata = async (storagePath: string) => {
   const { data, error } = await supabaseStorage
     .storage
     .from(documentsBucket)
+    .list(directory, { limit: 200 });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const match = data?.find((item) => item.name === fileName);
+  if (!match) {
+    return null;
+  }
+
+  const metadata = match.metadata ?? {};
+
+  return {
+    sizeBytes: typeof metadata.size === "number" ? metadata.size : null,
+    mimeType:
+      typeof metadata.mimetype === "string"
+        ? metadata.mimetype
+        : typeof metadata.contentType === "string"
+          ? metadata.contentType
+          : null,
+  };
+};
+
+export const getSignatureObjectMetadata = async (storagePath: string) => {
+  const segments = storagePath.split("/");
+  const fileName = segments.pop();
+  const directory = segments.join("/");
+
+  if (!fileName) {
+    return null;
+  }
+
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(signaturesBucket)
     .list(directory, { limit: 200 });
 
   if (error) {

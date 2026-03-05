@@ -152,9 +152,10 @@ This list is structured for creating GitHub issues with labels and weekly milest
 - Milestone: Week 3
 - Description: Support member signature upload and storage.
 - Checklist:
-  - API to save signature asset
-  - Link signature to document
-  - Validate file types and sizes
+  - Done: API to save signature asset
+  - Done: Link signature to document
+  - Done: Validate file types and sizes
+  - Done: OpenAPI updates and tests
 - Acceptance criteria:
   - Signature stored and retrievable
 
@@ -211,6 +212,7 @@ This list is structured for creating GitHub issues with labels and weekly milest
   - Template storage and rendering
   - Attach acknowledgment to document
   - Persist acknowledgment metadata
+  - Block signature capture until acknowledgment is appended
 - Acceptance criteria:
   - Acknowledgment page appended correctly
 

@@ -9,3 +9,11 @@ curl -X POST "https://oqferisuloumoojgbjde.supabase.co/auth/v1/token?grant_type=
   -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xZmVyaXN1bG91bW9vamdiamRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMDc1OTYsImV4cCI6MjA4Nzg4MzU5Nn0.RASghVXFtTUvEf3FSDIB0lfKuRef_kKhQwUKM2dW6pQ" \
   -H "Content-Type: application/json" \
   -d '{"email":"lopezb.jl@gmail.com","password":"darcidev"}'
+
+
+  A clean flow:
+
+Upload doc
+Member signature
+Generate/append acknowledgment (state-specific)
+Submit for notarization

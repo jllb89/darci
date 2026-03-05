@@ -35,6 +35,15 @@ type DocumentVersionRecord = {
   created_at: string;
 };
 
+type SignatureRecord = {
+  id: string;
+  document_id: string;
+  signer_id: string | null;
+  signature_type: string | null;
+  storage_path: string | null;
+  created_at: string;
+};
+
 const fetchUserBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -248,6 +257,50 @@ export const updateDocument = async (
   }
 
   return data as DocumentRecord;
+};
+
+export const createSignatureRecord = async (input: {
+  signatureId: string;
+  documentId: string;
+  signerId: string | null;
+  storagePath: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("signatures")
+    .insert({
+      id: input.signatureId,
+      document_id: input.documentId,
+      signer_id: input.signerId,
+      signature_type: "member",
+      storage_path: input.storagePath,
+    })
+    .select("id, document_id, signer_id, signature_type, storage_path, created_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create signature record");
+  }
+
+  return data as SignatureRecord;
+};
+
+export const getSignatureById = async (
+  signatureId: string,
+  documentId: string
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("signatures")
+    .select("id, document_id, signer_id, signature_type, storage_path, created_at")
+    .eq("id", signatureId)
+    .eq("document_id", documentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as SignatureRecord | null;
 };
 
 export const prepareDocumentForSigning = async (documentId: string) => {

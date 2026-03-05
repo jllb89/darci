@@ -294,6 +294,119 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signatures/request:
+    post:
+      summary: Request member signature upload
+      x-roles:
+        - member
+        - admin
+        - service_role
+      x-audit-events:
+        - member.signature_capture_started
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileSize
+                - mimeType
+              properties:
+                fileName:
+                  type: string
+                fileSize:
+                  type: integer
+                  format: int64
+                mimeType:
+                  type: string
+                  enum:
+                    - image/png
+                    - image/svg+xml
+                    - image/jpeg
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignatureUploadResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signatures/finalize:
+    post:
+      summary: Finalize member signature upload
+      x-roles:
+        - member
+        - admin
+        - service_role
+      x-audit-events:
+        - member.signature_capture_completed
+        - system.signature_linked_to_document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - signatureId
+              properties:
+                signatureId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignatureFinalizeResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/sign:
     post:
       summary: Sign document
@@ -892,6 +1005,29 @@ components:
         message:
           type: string
         signatureId:
+          type: string
+    SignatureUploadResponse:
+      type: object
+      properties:
+        signature:
+          $ref: "#/components/schemas/SignatureUpload"
+        upload:
+          $ref: "#/components/schemas/UploadSession"
+    SignatureFinalizeResponse:
+      type: object
+      properties:
+        signature:
+          $ref: "#/components/schemas/SignatureUpload"
+    SignatureUpload:
+      type: object
+      properties:
+        id:
+          type: string
+        documentId:
+          type: string
+        storagePath:
+          type: string
+        status:
           type: string
     AuditEvent:
       type: object

@@ -8,6 +8,8 @@ import {
   getSignatureFields,
   listDocumentVersions,
   listDocuments,
+  finalizeSignatureUpload,
+  requestSignatureUpload,
   signDocument,
   submitNotarization,
   watermarkDocument,
@@ -23,6 +25,16 @@ router.get("/:id", getDocument);
 router.get("/:id/versions", listDocumentVersions);
 router.get("/:id/timeline", getDocumentTimeline);
 router.get("/:id/signature-fields", getSignatureFields);
+router.post(
+  "/:id/signatures/request",
+  requireRole(["member", "admin", "service_role"]),
+  requestSignatureUpload
+);
+router.post(
+  "/:id/signatures/finalize",
+  requireRole(["member", "admin", "service_role"]),
+  finalizeSignatureUpload
+);
 router.post("/:id/sign", signDocument);
 router.post("/:id/submit-notarization", submitNotarization);
 router.post(
