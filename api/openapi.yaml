@@ -44,6 +44,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /dashboard/member:
+    get:
+      summary: Member dashboard
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: memberId
+          schema:
+            type: string
+          description: Internal member user id (admin/service_role only).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /admin/users/{id}/role:
     patch:
       summary: Update user role
@@ -971,6 +1015,48 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Document"
+    DashboardResponse:
+      type: object
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Document"
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardActivity"
+        counts:
+          $ref: "#/components/schemas/DashboardCounts"
+    DashboardActivity:
+      type: object
+      properties:
+        action:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        documentId:
+          type: string
+          nullable: true
+        entityType:
+          type: string
+        entityId:
+          type: string
+          nullable: true
+    DashboardCounts:
+      type: object
+      properties:
+        draft:
+          type: integer
+        pendingSignature:
+          type: integer
+        pendingNotary:
+          type: integer
+        completed:
+          type: integer
+        total:
+          type: integer
     DocumentDetailResponse:
       type: object
       properties:

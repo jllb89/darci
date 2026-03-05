@@ -11,6 +11,7 @@ import documentsRoutes from "./routes/documents";
 import notaryRoutes from "./routes/notary";
 import ledgerRoutes from "./routes/ledger";
 import verifyRoutes from "./routes/verify";
+import dashboardRoutes from "./routes/dashboard";
 import { getMe } from "./controllers/usersController";
 
 export const app = express();
@@ -40,6 +41,7 @@ app.use(requireAuth);
 app.use("/auth", authRoutes);
 app.use("/admin", adminRoutes);
 app.get("/users/me", getMe);
+app.use("/dashboard", dashboardRoutes);
 app.use("/documents", documentsRoutes);
 app.use("/notary", notaryRoutes);
 app.use("/ledger", ledgerRoutes);

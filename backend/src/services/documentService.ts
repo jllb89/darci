@@ -20,6 +20,7 @@ type DocumentRecord = {
   document_type: string | null;
   jurisdiction: string | null;
   created_at: string;
+  updated_at: string | null;
 };
 
 type DocumentVersionRecord = {
@@ -129,7 +130,9 @@ export const createDocumentWithVersion = async (input: {
       document_type: input.documentType,
       jurisdiction: input.jurisdiction,
     })
-    .select("id, owner_id, idn, status, document_type, jurisdiction, created_at")
+    .select(
+      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
+    )
     .single();
 
   if (documentError || !document) {
@@ -166,7 +169,9 @@ export const createDocumentWithVersion = async (input: {
 export const getDocumentById = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("documents")
-    .select("id, owner_id, idn, status, document_type, jurisdiction, created_at")
+    .select(
+      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
+    )
     .eq("id", documentId)
     .limit(1)
     .maybeSingle();
@@ -181,7 +186,10 @@ export const getDocumentById = async (documentId: string) => {
 export const listDocuments = async (ownerId?: string) => {
   let query = supabaseAdmin
     .from("documents")
-    .select("id, owner_id, idn, status, document_type, jurisdiction, created_at")
+    .select(
+      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
+    )
+    .order("updated_at", { ascending: false })
     .order("created_at", { ascending: false });
 
   if (ownerId) {
@@ -263,11 +271,18 @@ export const updateDocument = async (
   documentId: string,
   updates: Partial<Pick<DocumentRecord, "idn" | "status" | "document_type" | "jurisdiction">>
 ) => {
+  const updatesWithTimestamp = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
+
   const { data, error } = await supabaseAdmin
     .from("documents")
-    .update(updates)
+    .update(updatesWithTimestamp)
     .eq("id", documentId)
-    .select("id, owner_id, idn, status, document_type, jurisdiction, created_at")
+    .select(
+      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
+    )
     .single();
 
   if (error || !data) {

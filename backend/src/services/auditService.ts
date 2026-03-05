@@ -58,3 +58,54 @@ export const recordAuditEvent = async (input: AuditEventInput) => {
     });
   }
 };
+
+type AuditEventRecord = {
+  id: string;
+  actor_id: string | null;
+  entity_type: string;
+  entity_id: string | null;
+  action: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+const buildAuditEventFilter = (documentIds: string[], actorId?: string) => {
+  const ids = documentIds
+    .map((id) => id.replace(/"/g, ""))
+    .map((id) => `"${id}"`)
+    .join(",");
+  const filters = [
+    `entity_id.in.(${ids})`,
+    `metadata->>document_id.in.(${ids})`,
+  ];
+  if (actorId) {
+    const sanitizedActorId = actorId.replace(/"/g, "");
+    filters.push(`actor_id.eq.\"${sanitizedActorId}\"`);
+  }
+  return filters.join(",");
+};
+
+export const listRecentAuditEventsForDocumentIds = async (
+  documentIds: string[],
+  limit = 20,
+  actorId?: string
+) => {
+  if (!documentIds.length) {
+    return [] as AuditEventRecord[];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("audit_events")
+    .select(
+      "id, actor_id, entity_type, entity_id, action, metadata, created_at"
+    )
+    .or(buildAuditEventFilter(documentIds, actorId))
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as AuditEventRecord[];
+};
