@@ -11,9 +11,21 @@ import { requireRole } from "../middleware/roles";
 
 const router = Router();
 
-router.post("/code/resolve", resolveCode);
-router.post("/code/resend", resendCode);
-router.post("/code/regenerate", regenerateCode);
+router.post(
+  "/code/resolve",
+  requireRole(["notary", "admin", "service_role"]),
+  resolveCode
+);
+router.post(
+  "/code/resend",
+  requireRole(["notary", "admin", "service_role"]),
+  resendCode
+);
+router.post(
+  "/code/regenerate",
+  requireRole(["notary", "admin", "service_role"]),
+  regenerateCode
+);
 router.get(
   "/requests/:id/context",
   requireRole(["notary", "admin", "service_role"]),

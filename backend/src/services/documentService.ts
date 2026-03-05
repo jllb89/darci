@@ -60,6 +60,7 @@ type NotarizationCodeRecord = {
   code: string;
   status: string | null;
   expires_at: string | null;
+  consumed_at: string | null;
   created_at: string;
 };
 
@@ -342,7 +343,9 @@ export const createNotarizationCode = async (input: {
       status: "active",
       expires_at: input.expiresAt,
     })
-    .select("id, request_id, code, status, expires_at, created_at")
+    .select(
+      "id, request_id, code, status, expires_at, consumed_at, created_at"
+    )
     .single();
 
   if (error || !data) {
@@ -350,6 +353,76 @@ export const createNotarizationCode = async (input: {
   }
 
   return data as NotarizationCodeRecord;
+};
+
+export const getNotarizationCodeByValue = async (code: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("illuminotarization_codes")
+    .select(
+      "id, request_id, code, status, expires_at, consumed_at, created_at"
+    )
+    .eq("code", code)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as NotarizationCodeRecord | null;
+};
+
+export const updateNotarizationCode = async (
+  codeId: string,
+  updates: Partial<Pick<NotarizationCodeRecord, "status" | "consumed_at">>
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("illuminotarization_codes")
+    .update(updates)
+    .eq("id", codeId)
+    .select(
+      "id, request_id, code, status, expires_at, consumed_at, created_at"
+    )
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to update notarization code");
+  }
+
+  return data as NotarizationCodeRecord;
+};
+
+export const getNotarizationRequestById = async (requestId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("notarization_requests")
+    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .eq("id", requestId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as NotarizationRequestRecord | null;
+};
+
+export const updateNotarizationRequest = async (
+  requestId: string,
+  updates: Partial<Pick<NotarizationRequestRecord, "assigned_notary_id" | "status">>
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("notarization_requests")
+    .update(updates)
+    .eq("id", requestId)
+    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to update notarization request");
+  }
+
+  return data as NotarizationRequestRecord;
 };
 
 export const createSignatureRecord = async (input: {
