@@ -44,6 +44,24 @@ type SignatureRecord = {
   created_at: string;
 };
 
+type NotarizationRequestRecord = {
+  id: string;
+  document_id: string;
+  assigned_notary_id: string | null;
+  status: string | null;
+  submitted_at: string | null;
+  created_at: string;
+};
+
+type NotarizationCodeRecord = {
+  id: string;
+  request_id: string;
+  code: string;
+  status: string | null;
+  expires_at: string | null;
+  created_at: string;
+};
+
 const fetchUserBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -257,6 +275,66 @@ export const updateDocument = async (
   }
 
   return data as DocumentRecord;
+};
+
+export const getActiveNotarizationRequest = async (documentId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("notarization_requests")
+    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .eq("document_id", documentId)
+    .in("status", ["pending", "in_review"])
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as NotarizationRequestRecord | null;
+};
+
+export const createNotarizationRequest = async (input: {
+  documentId: string;
+  submittedAt: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("notarization_requests")
+    .insert({
+      document_id: input.documentId,
+      status: "pending",
+      submitted_at: input.submittedAt,
+    })
+    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create notarization request");
+  }
+
+  return data as NotarizationRequestRecord;
+};
+
+export const createNotarizationCode = async (input: {
+  requestId: string;
+  code: string;
+  expiresAt: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("illuminotarization_codes")
+    .insert({
+      request_id: input.requestId,
+      code: input.code,
+      status: "active",
+      expires_at: input.expiresAt,
+    })
+    .select("id, request_id, code, status, expires_at, created_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create notarization code");
+  }
+
+  return data as NotarizationCodeRecord;
 };
 
 export const createSignatureRecord = async (input: {

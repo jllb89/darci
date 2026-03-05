@@ -164,9 +164,10 @@ This list is structured for creating GitHub issues with labels and weekly milest
 - Milestone: Week 3
 - Description: Create notarization request and issue illuminotarization code.
 - Checklist:
-  - Create request record
-  - Generate code with expiry
-  - Update document status
+  - Done: Create request record
+  - Done: Generate code with expiry
+  - Done: Update document status
+  - Done: OpenAPI updates + tests
 - Acceptance criteria:
   - Request is created and code is issued
 

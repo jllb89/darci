@@ -7,8 +7,11 @@ import { recordAuditEvent } from "../services/auditService";
 import {
   createDocumentWithVersion,
   createSignatureRecord,
+  createNotarizationCode,
+  createNotarizationRequest,
   getDocumentById,
   getDocumentVersionById,
+  getActiveNotarizationRequest,
   getSignatureById,
   getOrCreateUserId,
   getUserIdBySupabaseId,
@@ -848,17 +851,185 @@ export const submitNotarization = async (req: Request, res: Response) => {
     return sendValidationError(res, parsed.error);
   }
 
-  const { webhookUrl } = parsed.data;
-  const webhookJobId = webhookUrl
-    ? await enqueueWebhook({
-        url: webhookUrl,
-        payload: { documentId: req.params.id, status: "submitted" },
-      })
-    : null;
+  if (!req.user?.id) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
 
-  res.status(200).json({
-    status: "ok",
-    message: `TODO: submit notarization request and issue code for ${req.params.id}`,
+  if (typeof req.params.id !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document id is required",
+      details: [
+        {
+          path: "id",
+          message: "Document id is required",
+        },
+      ],
+    });
+  }
+
+  const documentId = req.params.id;
+  const document = await getDocumentById(documentId);
+  if (!document) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document not found",
+    });
+  }
+
+  const role = req.user.role ?? "member";
+  if (role !== "admin" && role !== "service_role") {
+    const ownerId = await getUserIdBySupabaseId(req.user.id);
+    if (!ownerId || document.owner_id !== ownerId) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Document not found",
+      });
+    }
+  }
+
+  if (document.status !== "pending_signature") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document is not ready for notarization",
+      details: [
+        {
+          path: "status",
+          message: "Document is not ready for notarization",
+        },
+      ],
+    });
+  }
+
+  const existing = await getActiveNotarizationRequest(documentId);
+  if (existing) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Notarization request already exists",
+    });
+  }
+
+  const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
+  if (req.user?.id) {
+    actorContext.actorSupabaseId = req.user.id;
+  }
+  if (req.user?.role) {
+    actorContext.actorRole = req.user.role;
+  }
+
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "notarization_request",
+    entityId: null,
+    action: "member.notarization_submit_started",
+    metadata: {
+      document_id: documentId,
+    },
+  });
+
+  const submittedAt = new Date().toISOString();
+  const request = await createNotarizationRequest({
+    documentId,
+    submittedAt,
+  });
+
+  await updateDocument(documentId, { status: "pending_notary" });
+
+  const ttlMinutes = Number(process.env.NOTARIZATION_CODE_TTL_MINUTES ?? 30);
+  const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
+
+  let codeRecord = null as
+    | Awaited<ReturnType<typeof createNotarizationCode>>
+    | null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const code = `NTR-${randomUUID().slice(0, 8).toUpperCase()}`;
+    try {
+      codeRecord = await createNotarizationCode({
+        requestId: request.id,
+        code,
+        expiresAt,
+      });
+      break;
+    } catch (error) {
+      if (attempt === 2) {
+        throw error;
+      }
+    }
+  }
+
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "notarization_request",
+    entityId: request.id,
+    action: "member.notarization_submitted",
+    metadata: {
+      request_id: request.id,
+      document_id: documentId,
+      submitted_at: submittedAt,
+    },
+  });
+
+  if (codeRecord) {
+    await recordAuditEvent({
+      ...actorContext,
+      entityType: "illuminotarization_code",
+      entityId: codeRecord.id,
+      action: "system.code_generated",
+      metadata: {
+        code_id: codeRecord.id,
+        request_id: request.id,
+        expires_at: codeRecord.expires_at,
+      },
+    });
+
+    await recordAuditEvent({
+      ...actorContext,
+      entityType: "illuminotarization_code",
+      entityId: codeRecord.id,
+      action: "system.code_delivered",
+      metadata: {
+        code_id: codeRecord.id,
+        delivery_method: "in_app",
+        delivered_at: new Date().toISOString(),
+      },
+    });
+  }
+
+  const { webhookUrl } = parsed.data;
+  if (webhookUrl) {
+    await enqueueWebhook({
+      url: webhookUrl,
+      payload: {
+        requestId: request.id,
+        documentId,
+        code: codeRecord?.code ?? null,
+        expiresAt,
+      },
+    });
+  }
+
+  res.status(201).json({
+    request: {
+      id: request.id,
+      documentId: request.document_id,
+      status: request.status,
+      submittedAt: request.submitted_at,
+    },
+    document: {
+      id: documentId,
+      status: "pending_notary",
+    },
+    code: codeRecord
+      ? {
+          id: codeRecord.id,
+          code: codeRecord.code,
+          status: codeRecord.status,
+          expiresAt: codeRecord.expires_at,
+        }
+      : null,
   });
 };
 
