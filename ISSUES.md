@@ -131,13 +131,21 @@ This list is structured for creating GitHub issues with labels and weekly milest
 ### W3-01 Document upload + IDN assignment
 - Labels: week-3, backend
 - Milestone: Week 3
-- Description: Implement document upload, versioning, and IDN assignment.
+- Description: Implement document upload (signed URL flow), versioning, and IDN assignment.
 - Checklist:
-  - Upload document to storage
-  - Create document version record
-  - Generate and assign IDN
+  - Done: storage paths + naming scheme (owner_id/document_id/v1)
+  - Done: API request upload (create document row, version row, return signed upload URL)
+  - Done: API finalize upload (confirm object metadata, update version)
+  - Done: server-side validation (PDF only, max 25 MB)
+  - Done: document type handling (template or explicit input)
+  - Done: assign IDN on finalize
+  - Done: audit events for upload request + finalize
+  - Done: OpenAPI schema updates + error responses
+  - Done: smoke tests (happy path, invalid type, oversized, missing object)
+  - Remaining: replace stubbed GETs with real data (documents, document detail, versions)
+  - Remaining: add automated test coverage in CI (if desired beyond smoke script)
 - Acceptance criteria:
-  - API creates document with IDN and version
+  - API creates document with IDN and version via signed URL flow
 
 ### W3-02 Member signature capture
 - Labels: week-3, backend

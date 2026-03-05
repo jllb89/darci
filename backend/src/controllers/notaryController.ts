@@ -52,9 +52,10 @@ export const getNotaryContext = async (req: Request, res: Response) => {
     context: {
       requestId: req.params.id,
       documentId: "TODO_DOCUMENT_ID",
-      jurisdiction: "US-CA",
-      idRequirements: "TODO: acceptable ID types",
+      jurisdiction: "US-OH",
+      idRequirements: "Identity verification handled by notary; not stored by DARCI",
       acknowledgmentTemplate: "TODO: acknowledgment wording",
+      appearanceType: "ipen",
       venueRequired: true,
       consentRequired: true,
     },

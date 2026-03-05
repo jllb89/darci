@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { ZodError } from "zod";
+import { ZodError, ZodIssue } from "zod";
 
 type ValidationIssue = {
   path: string;
@@ -7,7 +7,7 @@ type ValidationIssue = {
 };
 
 export const sendValidationError = (res: Response, error: ZodError) => {
-  const details: ValidationIssue[] = error.errors.map((issue) => ({
+  const details: ValidationIssue[] = error.issues.map((issue: ZodIssue) => ({
     path: issue.path.join("."),
     message: issue.message,
   }));

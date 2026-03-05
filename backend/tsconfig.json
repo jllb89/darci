@@ -10,7 +10,8 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "target": "esnext",
-    "types": [],
+    "types": ["node", "express"],
+    "typeRoots": ["./src/types", "./node_modules/@types"],
     // For nodejs:
     // "lib": ["esnext"],
     // "types": ["node"],

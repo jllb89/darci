@@ -1,9 +1,12 @@
+import "./instrument";
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
+import * as Sentry from "@sentry/node";
 import swaggerUi from "swagger-ui-express";
 import YAML from "yamljs";
 import { requireAuth } from "./middleware/auth";
 import authRoutes from "./routes/auth";
+import adminRoutes from "./routes/admin";
 import documentsRoutes from "./routes/documents";
 import notaryRoutes from "./routes/notary";
 import ledgerRoutes from "./routes/ledger";
@@ -26,9 +29,16 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
+if (process.env.ENABLE_SENTRY_DEBUG_ROUTE === "true") {
+  app.get("/debug-sentry", (_req: Request, _res: Response) => {
+    throw new Error("Sentry debug error");
+  });
+}
+
 app.use(requireAuth);
 
 app.use("/auth", authRoutes);
+app.use("/admin", adminRoutes);
 app.get("/users/me", getMe);
 app.use("/documents", documentsRoutes);
 app.use("/notary", notaryRoutes);
@@ -41,6 +51,10 @@ app.use((_req: Request, res: Response) => {
     message: "Route not found",
   });
 });
+
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: "internal_error", message: err.message });

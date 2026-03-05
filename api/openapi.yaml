@@ -3,7 +3,11 @@ info:
   title: DARCI Notarization API
   version: 0.1.0
 servers:
-  - url: http://localhost:4000
+  - url: "{apiBaseUrl}"
+    description: Base URL for local, staging, or production.
+    variables:
+      apiBaseUrl:
+        default: https://api.example.com
 security:
   - bearerAuth: []
 paths:
@@ -40,17 +44,102 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /documents:
-    post:
-      summary: Create document
+  /admin/users/{id}/role:
+    patch:
+      summary: Update user role
+      description: Updates role for a Supabase Auth user id and the internal users table.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Supabase Auth user id (JWT sub).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  enum:
+                    - member
+                    - notary
+                    - admin
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents:
+    post:
+      summary: Create document
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - member.document_upload_started
+        - system.document_created
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileName
+                - fileSize
+                - mimeType
               properties:
                 title:
+                  type: string
+                templateId:
+                  type: string
+                documentType:
+                  type: string
+                jurisdiction:
+                  type: string
+                fileName:
+                  type: string
+                fileSize:
+                  type: integer
+                  format: int64
+                mimeType:
                   type: string
       responses:
         "201":
@@ -58,7 +147,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentDetailResponse"
+                $ref: "#/components/schemas/DocumentCreateResponse"
         "400":
           description: Bad request
           content:
@@ -73,6 +162,11 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     get:
       summary: List documents
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
       responses:
         "200":
           description: OK
@@ -89,6 +183,11 @@ paths:
   /documents/{id}:
     get:
       summary: Get document
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -117,6 +216,11 @@ paths:
   /documents/{id}/versions:
     get:
       summary: List document versions
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -139,6 +243,11 @@ paths:
   /documents/{id}/timeline:
     get:
       summary: Get document status timeline
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -161,6 +270,11 @@ paths:
   /documents/{id}/signature-fields:
     get:
       summary: Get signature fields
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -183,19 +297,39 @@ paths:
   /documents/{id}/sign:
     post:
       summary: Sign document
+      x-roles:
+        - member
+        - admin
+        - service_role
+      x-audit-events:
+        - member.signature_capture_started
+        - member.signature_capture_completed
+        - system.signature_linked_to_document
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                signatureMethod:
+                  type: string
+                  description: draw|upload|typed
+                deviceType:
+                  type: string
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                $ref: "#/components/schemas/SignatureResponse"
         "400":
           description: Bad request
           content:
@@ -208,9 +342,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/upload-finalize:
+    post:
+      summary: Finalize document upload
+      x-roles:
+        - member
+        - admin
+        - service_role
+      x-audit-events:
+        - member.document_upload_completed
+        - system.document_idn_assigned
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - documentVersionId
+              properties:
+                documentVersionId:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentUploadFinalizeResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/submit-notarization:
     post:
       summary: Submit for notarization
+      x-roles:
+        - member
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -239,6 +429,10 @@ paths:
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
+      x-roles:
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -261,6 +455,10 @@ paths:
   /documents/{id}/watermark:
     post:
       summary: Watermark document
+      x-roles:
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -283,6 +481,10 @@ paths:
   /notary/code/resolve:
     post:
       summary: Resolve code
+      x-roles:
+        - notary
+        - admin
+        - service_role
       responses:
         "200":
           description: OK
@@ -305,6 +507,10 @@ paths:
   /notary/code/resend:
     post:
       summary: Resend code
+      x-roles:
+        - notary
+        - admin
+        - service_role
       requestBody:
         required: true
         content:
@@ -330,6 +536,10 @@ paths:
   /notary/code/regenerate:
     post:
       summary: Regenerate code
+      x-roles:
+        - notary
+        - admin
+        - service_role
       requestBody:
         required: true
         content:
@@ -355,6 +565,10 @@ paths:
   /notary/requests/{id}/context:
     get:
       summary: Notary context panel data
+      x-roles:
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -377,6 +591,10 @@ paths:
   /notary/requests/{id}/sign:
     post:
       summary: Notary sign
+      x-roles:
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -399,6 +617,10 @@ paths:
   /notary/requests/{id}/submit:
     post:
       summary: Submit notarized document
+      x-roles:
+        - notary
+        - admin
+        - service_role
       parameters:
         - in: path
           name: id
@@ -421,6 +643,9 @@ paths:
   /ledger/anchor:
     post:
       summary: Anchor ledger entry
+      x-roles:
+        - admin
+        - service_role
       responses:
         "200":
           description: OK
@@ -434,6 +659,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /audit-events:
+    get:
+      summary: List audit events (guidance)
+      description: Guidance-only endpoint to shape future audit log retrieval.
+      x-roles:
+        - admin
+        - service_role
+      x-experimental: true
+      parameters:
+        - in: query
+          name: documentId
+          schema:
+            type: string
+        - in: query
+          name: signatureId
+          schema:
+            type: string
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: actorId
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int32
+            default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventListResponse"
         "401":
           description: Unauthorized
           content:
@@ -477,6 +746,7 @@ components:
           type: string
         idn:
           type: string
+          nullable: true
         status:
           type: string
         documentType:
@@ -547,6 +817,9 @@ components:
           type: string
         acknowledgmentTemplate:
           type: string
+        appearanceType:
+          type: string
+          description: Appearance model for notarization (e.g., ipen).
         venueRequired:
           type: boolean
         consentRequired:
@@ -563,6 +836,22 @@ components:
       properties:
         document:
           $ref: "#/components/schemas/Document"
+    DocumentCreateResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/Document"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
+        upload:
+          $ref: "#/components/schemas/UploadSession"
+    DocumentUploadFinalizeResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/Document"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
     DocumentVersionsResponse:
       type: object
       properties:
@@ -584,6 +873,53 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SignatureField"
+    UploadSession:
+      type: object
+      properties:
+        bucket:
+          type: string
+        path:
+          type: string
+        signedUrl:
+          type: string
+        token:
+          type: string
+    SignatureResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        signatureId:
+          type: string
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        actorId:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: string
+          nullable: true
+        action:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    AuditEventListResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
     CodeResponse:
       type: object
       properties:
@@ -608,6 +944,10 @@ components:
           type: string
         role:
           type: string
+          enum:
+            - member
+            - notary
+            - admin
         status:
           type: string
     AuthResponse:

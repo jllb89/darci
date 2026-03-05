@@ -5,36 +5,63 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 export const supabaseStorage = createClient(supabaseUrl, supabaseKey);
 
-const documentsBucket = process.env.SUPABASE_STORAGE_BUCKET_DOCUMENTS ?? "documents";
-const signaturesBucket = process.env.SUPABASE_STORAGE_BUCKET_SIGNATURES ?? "signatures";
-const notarizedBucket = process.env.SUPABASE_STORAGE_BUCKET_NOTARIZED ?? "notarized-copies";
+export const documentsBucket =
+  process.env.SUPABASE_STORAGE_BUCKET_DOCUMENTS ?? "documents";
+export const signaturesBucket =
+  process.env.SUPABASE_STORAGE_BUCKET_SIGNATURES ?? "signatures";
+export const notarizedBucket =
+  process.env.SUPABASE_STORAGE_BUCKET_NOTARIZED ?? "notarized-copies";
 
-export const uploadDocument = async (documentId: string, file: Buffer) => {
-  const path = `${documentId}/source.pdf`;
+export const createDocumentUploadUrl = async (storagePath: string) => {
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(documentsBucket)
+    .createSignedUploadUrl(storagePath);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message ?? "Failed to create signed upload URL");
+  }
+
   return {
     bucket: documentsBucket,
-    path,
-    message: "TODO: upload to Supabase Storage",
-    bytes: file.length,
+    path: data.path,
+    signedUrl: data.signedUrl,
+    token: data.token,
   };
 };
 
-export const uploadSignature = async (documentId: string, file: Buffer) => {
-  const path = `${documentId}/signature.png`;
-  return {
-    bucket: signaturesBucket,
-    path,
-    message: "TODO: upload signature image",
-    bytes: file.length,
-  };
-};
+export const getDocumentObjectMetadata = async (storagePath: string) => {
+  const segments = storagePath.split("/");
+  const fileName = segments.pop();
+  const directory = segments.join("/");
 
-export const uploadNotarizedCopy = async (documentId: string, file: Buffer) => {
-  const path = `${documentId}/notarized.pdf`;
+  if (!fileName) {
+    return null;
+  }
+
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(documentsBucket)
+    .list(directory, { limit: 200 });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const match = data?.find((item) => item.name === fileName);
+  if (!match) {
+    return null;
+  }
+
+  const metadata = match.metadata ?? {};
+
   return {
-    bucket: notarizedBucket,
-    path,
-    message: "TODO: upload notarized document",
-    bytes: file.length,
+    sizeBytes: typeof metadata.size === "number" ? metadata.size : null,
+    mimeType:
+      typeof metadata.mimetype === "string"
+        ? metadata.mimetype
+        : typeof metadata.contentType === "string"
+          ? metadata.contentType
+          : null,
   };
 };
