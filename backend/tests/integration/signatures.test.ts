@@ -42,6 +42,29 @@ const signToken = (payload: TokenPayload) => {
   return jwt.sign(payload, secret, { expiresIn: "1h" });
 };
 
+const logResponse = (label: string, response: request.Response) => {
+  console.log(label, {
+    status: response.status,
+    body: response.body,
+  });
+};
+
+const postWithLog = async (
+  path: string,
+  payload: Record<string, unknown>,
+  label: string,
+  token?: string
+) => {
+  console.log("request", { method: "POST", path, payload });
+  let req = request(app).post(path).send(payload);
+  if (token) {
+    req = req.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await req;
+  logResponse(label, response);
+  return response;
+};
+
 describe("member signature capture", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
@@ -85,14 +108,16 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/request")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/request",
+      {
         fileName: "sig.png",
         fileSize: 1024,
         mimeType: "image/png",
-      });
+      },
+      "requests a signature upload",
+      token
+    );
 
     expect(response.status).toBe(201);
     expect(response.body.signature.id).toBe("sig-1");
@@ -104,14 +129,16 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/request")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/request",
+      {
         fileName: "sig.pdf",
         fileSize: 1024,
         mimeType: "application/pdf",
-      });
+      },
+      "rejects invalid signature mime type",
+      token
+    );
 
     expect(response.status).toBe(400);
   });
@@ -122,14 +149,16 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/request")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/request",
+      {
         fileName: "sig.png",
         fileSize: 6 * 1024 * 1024,
         mimeType: "image/png",
-      });
+      },
+      "rejects oversized signature",
+      token
+    );
 
     expect(response.status).toBe(400);
   });
@@ -163,12 +192,14 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/finalize")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/finalize",
+      {
         signatureId: "sig-1",
-      });
+      },
+      "finalizes signature upload",
+      token
+    );
 
     expect(response.status).toBe(200);
     expect(response.body.signature.status).toBe("captured");
@@ -200,12 +231,14 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/finalize")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/finalize",
+      {
         signatureId: "sig-1",
-      });
+      },
+      "rejects missing signature upload",
+      token
+    );
 
     expect(response.status).toBe(404);
   });
@@ -239,12 +272,14 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/finalize")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/finalize",
+      {
         signatureId: "sig-1",
-      });
+      },
+      "rejects invalid signature mime type on finalize",
+      token
+    );
 
     expect(response.status).toBe(400);
   });
@@ -278,12 +313,14 @@ describe("member signature capture", () => {
       app_metadata: { role: "member" },
     });
 
-    const response = await request(app)
-      .post("/documents/doc-1/signatures/finalize")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/finalize",
+      {
         signatureId: "sig-1",
-      });
+      },
+      "rejects oversized signature on finalize",
+      token
+    );
 
     expect(response.status).toBe(400);
   });

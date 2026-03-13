@@ -17,3 +17,10 @@ Upload doc
 Member signature
 Generate/append acknowledgment (state-specific)
 Submit for notarization
+
+new token:
+jorge backend $ set -a && source ../.env.staging && set +a
+curl -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"lopezb.jl@gmail.com","password":"darcidev"}'

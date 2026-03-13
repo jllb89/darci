@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+:root {
+  --color-scheme-1-text: #000000;
+  --color-scheme-1-background: #ffffff;
+  --color-scheme-1-border: #d8d8d8;
+  --color-scheme-2-text: #f2f2f2;
+  --color-neutral-darkest: #191919;
+  --color-neutral-darker: #191919;
+  --color-neutral: #7f7f7f;
+  --color-neutral-lighter: #d8d8d8;
+  --color-neutral-lightest: #f2f2f2;
+  --color-white: #ffffff;
+  --color-green: #0aff4a;
+  --color-green-bright: #0aff4a;
+  --color-green-secondary: #08cc3b;
+}
+
+@theme inline {
+  --color-Color-Scheme-1-Text: var(--color-scheme-1-text);
+  --color-Color-Scheme-1-Background: var(--color-scheme-1-background);
+  --color-Color-Scheme-1-Border: var(--color-scheme-1-border);
+  --color-Color-Scheme-2-Text: var(--color-scheme-2-text);
+  --color-Color-Neutral-Darkest: var(--color-neutral-darkest);
+  --color-Color-Neutral-Darker: var(--color-neutral-darker);
+  --color-Color-Neutral: var(--color-neutral);
+  --color-Color-Neutral-Lighter: var(--color-neutral-lighter);
+  --color-Color-Neutral-Lightest: var(--color-neutral-lightest);
+  --color-Color-White: var(--color-white);
+  --color-Green: var(--color-green);
+  --color-Green-Bright: var(--color-green-bright);
+  --color-Green-Secondary: var(--color-green-secondary);
+  --font-sans: var(--font-inter);
+}
+
+body {
+  background: var(--color-neutral-lightest);
+  color: var(--color-scheme-1-text);
+  font-family: var(--font-inter), "Helvetica Neue", sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-maison), "Times New Roman", serif;
+}
+
+.font-roboto {
+  font-family: var(--font-roboto), "Helvetica Neue", sans-serif;
+}
+
+.text-body-500 {
+  font-family: var(--font-inter), "Helvetica Neue", sans-serif;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+}

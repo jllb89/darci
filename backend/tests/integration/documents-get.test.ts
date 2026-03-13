@@ -28,6 +28,24 @@ const signToken = (payload: TokenPayload) => {
   return jwt.sign(payload, secret, { expiresIn: "1h" });
 };
 
+const logResponse = (label: string, response: request.Response) => {
+  console.log(label, {
+    status: response.status,
+    body: response.body,
+  });
+};
+
+const getWithLog = async (path: string, label: string, token?: string) => {
+  console.log("request", { method: "GET", path });
+  let req = request(app).get(path);
+  if (token) {
+    req = req.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await req;
+  logResponse(label, response);
+  return response;
+};
+
 describe("GET documents endpoints", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
@@ -63,9 +81,11 @@ describe("GET documents endpoints", () => {
       app_metadata: { role: "admin" },
     });
 
-    const response = await request(app)
-      .get("/documents")
-      .set("Authorization", `Bearer ${token}`);
+    const response = await getWithLog(
+      "/documents",
+      "lists documents for admin",
+      token
+    );
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
@@ -106,9 +126,11 @@ describe("GET documents endpoints", () => {
       app_metadata: { role: "admin" },
     });
 
-    const response = await request(app)
-      .get("/documents/doc-1")
-      .set("Authorization", `Bearer ${token}`);
+    const response = await getWithLog(
+      "/documents/doc-1",
+      "gets a document by id for admin",
+      token
+    );
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
@@ -154,9 +176,11 @@ describe("GET documents endpoints", () => {
       app_metadata: { role: "admin" },
     });
 
-    const response = await request(app)
-      .get("/documents/doc-1/versions")
-      .set("Authorization", `Bearer ${token}`);
+    const response = await getWithLog(
+      "/documents/doc-1/versions",
+      "lists document versions for admin",
+      token
+    );
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
