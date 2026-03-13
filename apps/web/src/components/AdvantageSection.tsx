@@ -54,7 +54,7 @@ export default function AdvantageSection() {
             Speed without sacrificing legal rigor
           </div>
         </div>
-        <div className="flex min-h-[520px] flex-col overflow-hidden border border-Color-Neutral-Darker/40 lg:h-[620px] lg:flex-row">
+        <div className="flex min-h-[800px] flex-col overflow-hidden  lg:h-[620px] lg:flex-row">
           {advantageItems.map((item, idx) => {
             const isOpen = activeIndex === idx;
 
@@ -66,30 +66,20 @@ export default function AdvantageSection() {
                 onPointerEnter={() => setActiveIndex(idx)}
                 onFocus={() => setActiveIndex(idx)}
                 onPointerDown={() => setActiveIndex(idx)}
-                className={`flex w-full min-w-0 items-stretch bg-Green-Secondary text-left transition-[flex] duration-300 lg:h-full lg:w-auto ${
+                className={`flex w-full min-w-0 items-stretch bg-Green-Secondary text-left transition-[flex] duration-700 lg:h-full lg:w-auto ${
                   idx < advantageItems.length - 1
                     ? "lg:border-r lg:border-Color-Neutral-Darker/40"
                     : ""
                 }`}
                 style={{
-                  flex: isOpen ? "3.6 1 0%" : "0.18 1 0%",
+                  flex: isOpen ? "3.6 1 0%" : "0.25 1 0%",
                 }}
               >
-                <div
-                  className={`flex h-full flex-col px-6 py-8 ${
-                    isOpen
-                      ? "items-start justify-between"
-                      : "items-center justify-between"
-                  }`}
-                >
-                  <div className="text-Color-Scheme-1-Text text-3xl font-medium font-display leading-10 tracking-tight">
+                <div className="flex h-full w-14 flex-col justify-between px-10 py-6">
+                  <div className="-ml-4 text-Color-Scheme-1-Text text-3xl font-medium font-display tracking-tight">
                     {item.index}
                   </div>
-                  <div
-                    className={`-rotate-90 text-Color-Scheme-1-Text text-3xl font-medium font-display leading-10 tracking-tight ${
-                      isOpen ? "origin-left self-start" : "origin-center self-center"
-                    }`}
-                  >
+                  <div className="-rotate-90 origin-left text-Color-Scheme-1-Text pl-2 text-3xl font-medium font-display leading-10 tracking-tight">
                     {item.label}
                   </div>
                 </div>
@@ -100,7 +90,7 @@ export default function AdvantageSection() {
                   style={{ transitionDelay: isOpen ? "300ms" : "0ms" }}
                   aria-hidden={!isOpen}
                 >
-                  <div className="space-y-6">
+                  <div className="max-w-[520px] space-y-6">
                     <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-[52.8px] tracking-wide md:text-5xl">
                       {item.title}
                     </div>
@@ -108,7 +98,7 @@ export default function AdvantageSection() {
                       {item.description}
                     </div>
                   </div>
-                  <div className="h-64 w-full overflow-hidden">
+                  <div className="max-w-[720px] h-116 w-full overflow-hidden">
                     <img
                       className="h-full w-full object-cover object-top"
                       src={item.image}
