@@ -33,7 +33,7 @@ const advantageItems = [
     title: "Standards built in",
     description:
       "Watermarking, sealing, hashing, and ledger anchoring happen automatically. Compliance isn't something you chase—it's something you get.",
-    image: "/images/advantages/a4.webp",
+    image: "/images/cta/cta2.webp",
   },
 ];
 

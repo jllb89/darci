@@ -1,0 +1,497 @@
+{
+  "tags": {
+    "notaryRequired": ["notary-required", "non-notary"],
+    "scope": ["state-specific", "general"]
+  },
+  "categories": [
+    {
+      "name": "Affidavit",
+      "count": 6,
+      "templates": [
+        { "name": "Affidavit of Identity", "tags": ["notary-required", "general"] },
+        { "name": "Affidavit of Residency", "tags": ["notary-required", "general"] },
+        { "name": "Affidavit of Heirship", "tags": ["notary-required", "state-specific"] },
+        { "name": "Affidavit of Loss", "tags": ["notary-required", "general"] },
+        { "name": "Affidavit of Support", "tags": ["notary-required", "state-specific"] },
+        { "name": "Affidavit of Single Status", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Agreement Template",
+      "count": 6,
+      "templates": [
+        { "name": "Service Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Consulting Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Partnership Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Settlement Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "License Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Confidentiality Agreement", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Attorney Templates",
+      "count": 6,
+      "templates": [
+        { "name": "Attorney Retainer Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Engagement Letter", "tags": ["non-notary", "general"] },
+        { "name": "Fee Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Limited Scope Representation Agreement", "tags": ["non-notary", "state-specific"] },
+        { "name": "Conflict Waiver Letter", "tags": ["non-notary", "general"] },
+        { "name": "Client Intake Form", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Automated Template",
+      "count": 5,
+      "templates": [
+        { "name": "Auto Bill of Sale", "tags": ["notary-required", "state-specific"] },
+        { "name": "Vehicle Power of Attorney", "tags": ["notary-required", "state-specific"] },
+        { "name": "Odometer Disclosure Statement", "tags": ["non-notary", "state-specific"] },
+        { "name": "Vehicle Release of Liability", "tags": ["non-notary", "state-specific"] },
+        { "name": "Title Transfer Affidavit", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Bill of Sale",
+      "count": 6,
+      "templates": [
+        { "name": "General Bill of Sale", "tags": ["notary-required", "state-specific"] },
+        { "name": "Vehicle Bill of Sale", "tags": ["notary-required", "state-specific"] },
+        { "name": "Boat Bill of Sale", "tags": ["notary-required", "state-specific"] },
+        { "name": "Firearm Bill of Sale", "tags": ["notary-required", "state-specific"] },
+        { "name": "Equipment Bill of Sale", "tags": ["notary-required", "state-specific"] },
+        { "name": "Livestock Bill of Sale", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Business Template",
+      "count": 6,
+      "templates": [
+        { "name": "Articles of Incorporation", "tags": ["non-notary", "state-specific"] },
+        { "name": "Bylaws", "tags": ["non-notary", "general"] },
+        { "name": "Shareholder Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Board Resolution", "tags": ["non-notary", "general"] },
+        { "name": "Corporate Minutes", "tags": ["non-notary", "general"] },
+        { "name": "Business Plan", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Commission Agreement",
+      "count": 4,
+      "templates": [
+        { "name": "Sales Commission Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Referral Commission Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Agent Commission Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Broker Commission Agreement", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Consent Form",
+      "count": 5,
+      "templates": [
+        { "name": "Consent to Travel (Minor)", "tags": ["notary-required", "state-specific"] },
+        { "name": "Medical Consent Form", "tags": ["notary-required", "state-specific"] },
+        { "name": "Media Release Consent", "tags": ["non-notary", "general"] },
+        { "name": "Consent to Background Check", "tags": ["non-notary", "state-specific"] },
+        { "name": "Informed Consent", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Contract Template",
+      "count": 6,
+      "templates": [
+        { "name": "Independent Contractor Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Employment Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Purchase Contract", "tags": ["notary-required", "state-specific"] },
+        { "name": "Construction Contract", "tags": ["non-notary", "state-specific"] },
+        { "name": "Non-Compete Agreement", "tags": ["non-notary", "state-specific"] },
+        { "name": "Work for Hire Agreement", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Court Related Templates",
+      "count": 5,
+      "templates": [
+        { "name": "Declaration", "tags": ["notary-required", "state-specific"] },
+        { "name": "Proof of Service", "tags": ["non-notary", "state-specific"] },
+        { "name": "Subpoena", "tags": ["non-notary", "state-specific"] },
+        { "name": "Stipulation", "tags": ["non-notary", "state-specific"] },
+        { "name": "Notice of Hearing", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Document Template",
+      "count": 4,
+      "templates": [
+        { "name": "Document Checklist", "tags": ["non-notary", "general"] },
+        { "name": "Document Transmittal Letter", "tags": ["non-notary", "general"] },
+        { "name": "Document Index", "tags": ["non-notary", "general"] },
+        { "name": "Document Cover Sheet", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "DS-3053 Form",
+      "count": 3,
+      "templates": [
+        { "name": "DS-3053 Statement of Consent", "tags": ["notary-required", "general"] },
+        { "name": "DS-3053 Statement of Special Circumstances", "tags": ["notary-required", "general"] },
+        { "name": "Passport Application Checklist (Minor)", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Effective Document Templates",
+      "count": 4,
+      "templates": [
+        { "name": "Effective Date Addendum", "tags": ["non-notary", "general"] },
+        { "name": "Amendment and Restatement", "tags": ["non-notary", "general"] },
+        { "name": "Execution Page", "tags": ["non-notary", "general"] },
+        { "name": "Effective Date Notice", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Email Templates",
+      "count": 5,
+      "templates": [
+        { "name": "Engagement Confirmation", "tags": ["non-notary", "general"] },
+        { "name": "Signature Request", "tags": ["non-notary", "general"] },
+        { "name": "Reminder to Sign", "tags": ["non-notary", "general"] },
+        { "name": "Document Ready for Notary", "tags": ["non-notary", "general"] },
+        { "name": "Completion Notice", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Form Template",
+      "count": 4,
+      "templates": [
+        { "name": "Intake Form", "tags": ["non-notary", "general"] },
+        { "name": "Application Form", "tags": ["non-notary", "general"] },
+        { "name": "Registration Form", "tags": ["non-notary", "general"] },
+        { "name": "Change Request Form", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Invoice Templates",
+      "count": 4,
+      "templates": [
+        { "name": "Standard Invoice", "tags": ["non-notary", "general"] },
+        { "name": "Recurring Invoice", "tags": ["non-notary", "general"] },
+        { "name": "Proforma Invoice", "tags": ["non-notary", "general"] },
+        { "name": "Past Due Notice", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "IRS Form Template",
+      "count": 5,
+      "templates": [
+        { "name": "W-9", "tags": ["non-notary", "general"] },
+        { "name": "1099-NEC", "tags": ["non-notary", "general"] },
+        { "name": "1099-MISC", "tags": ["non-notary", "general"] },
+        { "name": "4506-T", "tags": ["non-notary", "general"] },
+        { "name": "2848 Power of Attorney", "tags": ["notary-required", "general"] }
+      ]
+    },
+    {
+      "name": "Law Template",
+      "count": 5,
+      "templates": [
+        { "name": "Legal Notice", "tags": ["non-notary", "general"] },
+        { "name": "Demand Letter", "tags": ["non-notary", "general"] },
+        { "name": "Cease and Desist", "tags": ["non-notary", "general"] },
+        { "name": "Settlement Offer", "tags": ["non-notary", "general"] },
+        { "name": "Release of Claims", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Lease Agreement",
+      "count": 5,
+      "templates": [
+        { "name": "Residential Lease", "tags": ["non-notary", "state-specific"] },
+        { "name": "Commercial Lease", "tags": ["non-notary", "state-specific"] },
+        { "name": "Lease Addendum", "tags": ["non-notary", "state-specific"] },
+        { "name": "Lease Renewal", "tags": ["non-notary", "state-specific"] },
+        { "name": "Sublease Agreement", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Letter of Intent",
+      "count": 4,
+      "templates": [
+        { "name": "LOI for Purchase", "tags": ["non-notary", "general"] },
+        { "name": "LOI for Employment", "tags": ["non-notary", "general"] },
+        { "name": "LOI for Partnership", "tags": ["non-notary", "general"] },
+        { "name": "LOI for Lease", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Letter Template",
+      "count": 5,
+      "templates": [
+        { "name": "Reference Letter", "tags": ["non-notary", "general"] },
+        { "name": "Employment Verification Letter", "tags": ["non-notary", "general"] },
+        { "name": "Termination Letter", "tags": ["non-notary", "general"] },
+        { "name": "Resignation Letter", "tags": ["non-notary", "general"] },
+        { "name": "Authorization Letter", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Liability Template",
+      "count": 4,
+      "templates": [
+        { "name": "Liability Release Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Indemnity Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Hold Harmless Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Limitation of Liability Clause", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Liability Waiver Form",
+      "count": 4,
+      "templates": [
+        { "name": "General Liability Waiver", "tags": ["notary-required", "state-specific"] },
+        { "name": "Event Waiver", "tags": ["non-notary", "general"] },
+        { "name": "Gym/Fitness Waiver", "tags": ["non-notary", "general"] },
+        { "name": "Travel Waiver", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "MOU",
+      "count": 4,
+      "templates": [
+        { "name": "MOU for Partnership", "tags": ["non-notary", "general"] },
+        { "name": "MOU for Collaboration", "tags": ["non-notary", "general"] },
+        { "name": "MOU for Joint Venture", "tags": ["non-notary", "general"] },
+        { "name": "MOU for Services", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "NDA Template",
+      "count": 5,
+      "templates": [
+        { "name": "Mutual NDA", "tags": ["non-notary", "general"] },
+        { "name": "Unilateral NDA", "tags": ["non-notary", "general"] },
+        { "name": "Employee NDA", "tags": ["non-notary", "general"] },
+        { "name": "Contractor NDA", "tags": ["non-notary", "general"] },
+        { "name": "Investor NDA", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Note Template",
+      "count": 4,
+      "templates": [
+        { "name": "IOU Note", "tags": ["non-notary", "general"] },
+        { "name": "Demand Note", "tags": ["non-notary", "general"] },
+        { "name": "Secured Note", "tags": ["notary-required", "state-specific"] },
+        { "name": "Unsecured Note", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Operating Agreement",
+      "count": 3,
+      "templates": [
+        { "name": "Single-Member LLC Operating Agreement", "tags": ["non-notary", "state-specific"] },
+        { "name": "Multi-Member LLC Operating Agreement", "tags": ["non-notary", "state-specific"] },
+        { "name": "LLC Amendment", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Pitch Deck Template",
+      "count": 4,
+      "templates": [
+        { "name": "Investor Pitch Deck", "tags": ["non-notary", "general"] },
+        { "name": "Product Pitch Deck", "tags": ["non-notary", "general"] },
+        { "name": "Sales Pitch Deck", "tags": ["non-notary", "general"] },
+        { "name": "Partnership Pitch Deck", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Plan Template",
+      "count": 5,
+      "templates": [
+        { "name": "Business Plan", "tags": ["non-notary", "general"] },
+        { "name": "Project Plan", "tags": ["non-notary", "general"] },
+        { "name": "Marketing Plan", "tags": ["non-notary", "general"] },
+        { "name": "Financial Plan", "tags": ["non-notary", "general"] },
+        { "name": "Implementation Plan", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Policy Template",
+      "count": 5,
+      "templates": [
+        { "name": "Privacy Policy", "tags": ["non-notary", "general"] },
+        { "name": "Terms of Service", "tags": ["non-notary", "general"] },
+        { "name": "Cookie Policy", "tags": ["non-notary", "general"] },
+        { "name": "Acceptable Use Policy", "tags": ["non-notary", "general"] },
+        { "name": "Data Retention Policy", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Power of Attorney",
+      "count": 5,
+      "templates": [
+        { "name": "General Power of Attorney", "tags": ["notary-required", "state-specific"] },
+        { "name": "Limited Power of Attorney", "tags": ["notary-required", "state-specific"] },
+        { "name": "Durable Power of Attorney", "tags": ["notary-required", "state-specific"] },
+        { "name": "Medical Power of Attorney", "tags": ["notary-required", "state-specific"] },
+        { "name": "Vehicle Power of Attorney", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Presentation Template",
+      "count": 4,
+      "templates": [
+        { "name": "Business Presentation", "tags": ["non-notary", "general"] },
+        { "name": "Investor Presentation", "tags": ["non-notary", "general"] },
+        { "name": "Training Presentation", "tags": ["non-notary", "general"] },
+        { "name": "Proposal Presentation", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Promissory Note Template",
+      "count": 4,
+      "templates": [
+        { "name": "Simple Promissory Note", "tags": ["non-notary", "general"] },
+        { "name": "Secured Promissory Note", "tags": ["notary-required", "state-specific"] },
+        { "name": "Unsecured Promissory Note", "tags": ["non-notary", "general"] },
+        { "name": "Installment Note", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Proposal or Offer Template",
+      "count": 4,
+      "templates": [
+        { "name": "Business Proposal", "tags": ["non-notary", "general"] },
+        { "name": "Service Proposal", "tags": ["non-notary", "general"] },
+        { "name": "Project Proposal", "tags": ["non-notary", "general"] },
+        { "name": "Offer Letter", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Purchase Agreement",
+      "count": 4,
+      "templates": [
+        { "name": "Real Estate Purchase Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Asset Purchase Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Stock Purchase Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Vehicle Purchase Agreement", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Quote Template",
+      "count": 4,
+      "templates": [
+        { "name": "Service Quote", "tags": ["non-notary", "general"] },
+        { "name": "Product Quote", "tags": ["non-notary", "general"] },
+        { "name": "Project Quote", "tags": ["non-notary", "general"] },
+        { "name": "Estimate Template", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Real Estate",
+      "count": 6,
+      "templates": [
+        { "name": "Deed", "tags": ["notary-required", "state-specific"] },
+        { "name": "Quitclaim Deed", "tags": ["notary-required", "state-specific"] },
+        { "name": "Warranty Deed", "tags": ["notary-required", "state-specific"] },
+        { "name": "Lease Addendum", "tags": ["non-notary", "state-specific"] },
+        { "name": "Property Disclosure", "tags": ["non-notary", "state-specific"] },
+        { "name": "Closing Statement", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Receipt Template",
+      "count": 4,
+      "templates": [
+        { "name": "Payment Receipt", "tags": ["non-notary", "general"] },
+        { "name": "Rent Receipt", "tags": ["non-notary", "general"] },
+        { "name": "Sales Receipt", "tags": ["non-notary", "general"] },
+        { "name": "Donation Receipt", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Rental Agreement",
+      "count": 4,
+      "templates": [
+        { "name": "Short-Term Rental Agreement", "tags": ["non-notary", "state-specific"] },
+        { "name": "Roommate Agreement", "tags": ["non-notary", "general"] },
+        { "name": "Month-to-Month Rental Agreement", "tags": ["non-notary", "state-specific"] },
+        { "name": "Lease Extension", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Report of Operation of Law",
+      "count": 3,
+      "templates": [
+        { "name": "Transfer on Death Affidavit", "tags": ["notary-required", "state-specific"] },
+        { "name": "Affidavit of Surviving Spouse", "tags": ["notary-required", "state-specific"] },
+        { "name": "Small Estate Affidavit", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Sale Agreement",
+      "count": 3,
+      "templates": [
+        { "name": "Business Sale Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Equipment Sale Agreement", "tags": ["notary-required", "state-specific"] },
+        { "name": "Vehicle Sale Agreement", "tags": ["notary-required", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Statement Template",
+      "count": 4,
+      "templates": [
+        { "name": "Statement of Work", "tags": ["non-notary", "general"] },
+        { "name": "Statement of Account", "tags": ["non-notary", "general"] },
+        { "name": "Statement of Facts", "tags": ["non-notary", "general"] },
+        { "name": "Bank Statement Request", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Success Template",
+      "count": 3,
+      "templates": [
+        { "name": "Success Story Template", "tags": ["non-notary", "general"] },
+        { "name": "Case Study Template", "tags": ["non-notary", "general"] },
+        { "name": "Testimonial Release", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Tax Forms",
+      "count": 4,
+      "templates": [
+        { "name": "State Tax Withholding Form", "tags": ["non-notary", "state-specific"] },
+        { "name": "Local Tax Registration", "tags": ["non-notary", "state-specific"] },
+        { "name": "Sales Tax Exemption Certificate", "tags": ["non-notary", "state-specific"] },
+        { "name": "Business Tax Registration", "tags": ["non-notary", "state-specific"] }
+      ]
+    },
+    {
+      "name": "Template",
+      "count": 3,
+      "templates": [
+        { "name": "Generic Document Template", "tags": ["non-notary", "general"] },
+        { "name": "General Form Template", "tags": ["non-notary", "general"] },
+        { "name": "Checklist Template", "tags": ["non-notary", "general"] }
+      ]
+    },
+    {
+      "name": "Will and Testament",
+      "count": 3,
+      "templates": [
+        { "name": "Last Will and Testament", "tags": ["notary-required", "state-specific"] },
+        { "name": "Codicil to Will", "tags": ["notary-required", "state-specific"] },
+        { "name": "Self-Proving Affidavit", "tags": ["notary-required", "state-specific"] }
+      ]
+    }
+  ],
+  "summary": {
+    "categoryCount": 44,
+    "templateCount": 203,
+    "tagCounts": {
+      "notary-required": 64,
+      "non-notary": 139,
+      "state-specific": 93,
+      "general": 110
+    }
+  }
+}
