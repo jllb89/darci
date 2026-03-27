@@ -15,6 +15,12 @@ paths:
     post:
       summary: Login
       security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
       responses:
         "200":
           description: OK
@@ -22,8 +28,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/signup:
+    post:
+      summary: Sign up
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
@@ -78,6 +119,83 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /dashboard:
+    get:
+      summary: Role-aware dashboard
+      description: Returns the dashboard for the authenticated user's role.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum:
+              - member
+              - notary
+          description: Optional override for admin/service_role.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DashboardResponse"
+                  - $ref: "#/components/schemas/NotaryDashboardResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /dashboard/notary:
+    get:
+      summary: Notary dashboard
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: notaryId
+          schema:
+            type: string
+          description: Internal notary user id (admin/service_role only).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryDashboardResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
           content:
             application/json:
               schema:
@@ -610,6 +728,114 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /requests:
+    get:
+      summary: List notarization requests
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: memberId
+          schema:
+            type: string
+          description: Internal member user id (admin/service_role only).
+        - in: query
+          name: notaryId
+          schema:
+            type: string
+          description: Internal notary user id (admin/service_role only).
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int32
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            format: int32
+            default: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotarizationRequestListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /requests/{id}:
+    get:
+      summary: Get notarization request
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotarizationRequestDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /requests/{id}/timeline:
+    get:
+      summary: Get request timeline
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestTimelineResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
@@ -853,6 +1079,212 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/propose:
+    post:
+      summary: Propose meeting times
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - member.meeting_time_proposed
+        - notary.meeting_time_proposed
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingProposalRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/confirm:
+    post:
+      summary: Confirm meeting time
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - member.meeting_time_confirmed
+        - notary.meeting_time_confirmed
+        - notary.meeting_scheduled
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingConfirmRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/reschedule:
+    post:
+      summary: Reschedule meeting
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - notary.meeting_rescheduled
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingRescheduleRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/cancel:
+    post:
+      summary: Cancel meeting
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - notary.meeting_cancelled
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingCancelRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/no-show:
+    post:
+      summary: Record no-show
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - system.meeting_no_show_recorded
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingNoShowRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /ledger/anchor:
     post:
       summary: Anchor ledger entry
@@ -1037,6 +1469,21 @@ components:
           type: boolean
         consentRequired:
           type: boolean
+        meetingId:
+          type: string
+          nullable: true
+        meetingStatus:
+          type: string
+        meetingScheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        meetingTimezone:
+          type: string
+          nullable: true
+        meetingLocation:
+          type: string
+          nullable: true
     DocumentListResponse:
       type: object
       properties:
@@ -1057,6 +1504,23 @@ components:
             $ref: "#/components/schemas/DashboardActivity"
         counts:
           $ref: "#/components/schemas/DashboardCounts"
+    NotaryDashboardResponse:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotarizationRequest"
+        meetings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Meeting"
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardActivity"
+        counts:
+          $ref: "#/components/schemas/NotaryDashboardCounts"
     DashboardActivity:
       type: object
       properties:
@@ -1081,6 +1545,17 @@ components:
         pendingSignature:
           type: integer
         pendingNotary:
+          type: integer
+        completed:
+          type: integer
+        total:
+          type: integer
+    NotaryDashboardCounts:
+      type: object
+      properties:
+        pending:
+          type: integer
+        scheduled:
           type: integer
         completed:
           type: integer
@@ -1199,6 +1674,133 @@ components:
         submittedAt:
           type: string
           format: date-time
+        meetingId:
+          type: string
+          nullable: true
+        meetingStatus:
+          type: string
+        meetingScheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        meetingTimezone:
+          type: string
+          nullable: true
+        meetingLocation:
+          type: string
+          nullable: true
+    NotarizationRequestListResponse:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotarizationRequest"
+    NotarizationRequestDetailResponse:
+      type: object
+      properties:
+        request:
+          $ref: "#/components/schemas/NotarizationRequest"
+        document:
+          $ref: "#/components/schemas/NotarizationDocument"
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+    RequestTimelineResponse:
+      type: object
+      properties:
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEvent"
+    MeetingResponse:
+      type: object
+      properties:
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+    Meeting:
+      type: object
+      properties:
+        meetingId:
+          type: string
+        requestId:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        timezone:
+          type: string
+        location:
+          type: string
+          nullable: true
+        status:
+          type: string
+    MeetingProposalRequest:
+      type: object
+      required:
+        - proposedSlots
+        - timezone
+      properties:
+        proposedSlots:
+          type: array
+          items:
+            type: string
+            format: date-time
+        timezone:
+          type: string
+        location:
+          type: string
+    MeetingConfirmRequest:
+      type: object
+      required:
+        - scheduledAt
+        - timezone
+      properties:
+        scheduledAt:
+          type: string
+          format: date-time
+        timezone:
+          type: string
+        location:
+          type: string
+    MeetingRescheduleRequest:
+      type: object
+      required:
+        - scheduledAt
+        - timezone
+      properties:
+        scheduledAt:
+          type: string
+          format: date-time
+        timezone:
+          type: string
+        location:
+          type: string
+        rescheduleReason:
+          type: string
+    MeetingCancelRequest:
+      type: object
+      required:
+        - cancelledBy
+      properties:
+        cancelledBy:
+          type: string
+          enum:
+            - member
+            - notary
+            - system
+        cancellationReason:
+          type: string
+    MeetingNoShowRequest:
+      type: object
+      required:
+        - noShowParty
+      properties:
+        noShowParty:
+          type: string
+          enum:
+            - member
+            - notary
     NotarizationCode:
       type: object
       properties:
@@ -1274,6 +1876,12 @@ components:
           type: string
         email:
           type: string
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
         role:
           type: string
           enum:
@@ -1282,13 +1890,45 @@ components:
             - admin
         status:
           type: string
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+    SignupRequest:
+      type: object
+      required:
+        - firstName
+        - lastName
+        - email
+        - password
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
     AuthResponse:
       type: object
       properties:
         accessToken:
           type: string
+          nullable: true
         refreshToken:
           type: string
+          nullable: true
         user:
           $ref: "#/components/schemas/User"
     UserResponse:

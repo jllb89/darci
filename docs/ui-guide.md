@@ -43,7 +43,14 @@ This guide consolidates screen structure, audit-action mapping, component breakd
   - system.code_generated
   - system.code_delivered
   - member.code_shared
+  - member.meeting_time_proposed
+  - member.meeting_time_confirmed
+  - notary.meeting_time_proposed
+  - notary.meeting_time_confirmed
   - notary.meeting_scheduled
+  - notary.meeting_rescheduled
+  - notary.meeting_cancelled
+  - system.meeting_no_show_recorded
   - notary.meeting_started
   - notary.meeting_completed
 - Links: Document Workspace
@@ -65,7 +72,11 @@ This guide consolidates screen structure, audit-action mapping, component breakd
 - Goal: Triage and schedule requests.
 - Core audit actions:
   - notary.request_opened
+  - notary.meeting_time_proposed
+  - notary.meeting_time_confirmed
   - notary.meeting_scheduled
+  - notary.meeting_rescheduled
+  - notary.meeting_cancelled
 - Links: Request Workspace (Notary)
 
 #### Request Workspace (Notary)
@@ -74,6 +85,13 @@ This guide consolidates screen structure, audit-action mapping, component breakd
   - notary.code_entered
   - system.code_validated
   - system.code_consumed
+  - member.meeting_time_proposed
+  - member.meeting_time_confirmed
+  - notary.meeting_time_proposed
+  - notary.meeting_time_confirmed
+  - notary.meeting_rescheduled
+  - notary.meeting_cancelled
+  - system.meeting_no_show_recorded
   - notary.meeting_started
   - notary.identity_verified
   - notary.meeting_completed
@@ -130,7 +148,8 @@ This guide consolidates screen structure, audit-action mapping, component breakd
   - Request timeline.
 - Right panel:
   - Code share card.
-  - Meeting status card.
+  - Meeting negotiation card (proposed slots, confirmations).
+  - Meeting status card (scheduled, rescheduled, cancelled, no-show, completed).
   - Request notifications list.
 
 ### Member Verification
@@ -160,7 +179,7 @@ This guide consolidates screen structure, audit-action mapping, component breakd
   - Right: identity verification and notarization tools.
 - Right panel components:
   - Identity verification form.
-  - Meeting controls.
+  - Meeting controls (propose slots, confirm, reschedule, cancel).
   - Seal and signature tools.
   - Completion card with ledger status.
 
@@ -215,7 +234,8 @@ This guide consolidates screen structure, audit-action mapping, component breakd
   - Request timeline.
 - Right panel:
   - Code share card (Copy, Resend, Share).
-  - Meeting status card.
+  - Meeting negotiation card (propose slots, confirm).
+  - Meeting status card (Scheduled, Rescheduled, Cancelled, No-show, Completed).
   - Notifications list.
 - Empty/Error states:
   - Code not generated yet.
@@ -245,7 +265,7 @@ This guide consolidates screen structure, audit-action mapping, component breakd
   - Request summary.
 - Right panel:
   - Identity verification form.
-  - Meeting controls.
+  - Meeting controls (Propose, Confirm, Reschedule, Cancel).
   - Seal and signature tools.
   - Completion card (Finalize) + ledger status.
 - Empty/Error state: identity verification incomplete.

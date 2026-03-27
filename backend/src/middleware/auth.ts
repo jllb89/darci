@@ -3,7 +3,13 @@ import jwt, { JwtPayload } from "jsonwebtoken";
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import { createClient } from "@supabase/supabase-js";
 
-const publicPaths = ["/health", "/docs", "/openapi.yaml", "/auth/login"];
+const publicPaths = [
+  "/health",
+  "/docs",
+  "/openapi.yaml",
+  "/auth/login",
+  "/auth/signup",
+];
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";

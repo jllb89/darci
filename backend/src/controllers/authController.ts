@@ -1,26 +1,214 @@
 import { Request, Response } from "express";
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { sendValidationError } from "../utils/validation";
+
+const supabaseUrl = process.env.SUPABASE_URL ?? "";
+const supabaseAnonKey =
+  process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+const supabasePublic = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
 });
 
+const signupSchema = z.object({
+  firstName: z.string().trim().min(1),
+  lastName: z.string().trim().min(1),
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+
+const normalizeRole = (role?: string) => {
+  if (role === "notary" || role === "admin") {
+    return role;
+  }
+
+  return "member";
+};
+
+const ensureConfigured = (res: Response) => {
+  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
+    res.status(500).json({
+      error: "internal_error",
+      message: "Supabase auth is not configured",
+    });
+    return false;
+  }
+
+  return true;
+};
+
+const upsertUserProfile = async (input: {
+  supabaseUserId: string;
+  email: string | null;
+  role?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+}) => {
+  const payload = {
+    supabase_user_id: input.supabaseUserId,
+    email: input.email,
+    role: normalizeRole(input.role),
+    first_name: input.firstName ?? null,
+    last_name: input.lastName ?? null,
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .upsert(payload, { onConflict: "supabase_user_id" })
+    .select("id, email, role, status, first_name, last_name")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to sync user profile");
+  }
+
+  return data;
+};
+
 export const login = async (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) {
+    return;
+  }
+
   const parsed = loginSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return sendValidationError(res, parsed.error);
   }
 
-  res.status(200).json({
-    accessToken: "TODO_ACCESS_TOKEN",
-    refreshToken: "TODO_REFRESH_TOKEN",
-    user: {
-      id: "TODO_USER_ID",
-      email: "user@example.com",
-      role: "member",
-      status: "active",
-    },
+  const { data, error } = await supabasePublic.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password,
   });
+
+  if (error || !data.session || !data.user) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: error?.message ?? "Invalid email or password",
+    });
+  }
+
+  try {
+    const profile = await upsertUserProfile({
+      supabaseUserId: data.user.id,
+      email: data.user.email ?? parsed.data.email,
+      role: (data.user.app_metadata?.role as string | undefined) ?? "member",
+      firstName: (data.user.user_metadata?.first_name as string | undefined) ?? null,
+      lastName: (data.user.user_metadata?.last_name as string | undefined) ?? null,
+    });
+
+    return res.status(200).json({
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        role: normalizeRole(profile.role ?? undefined),
+        status: profile.status ?? "active",
+        firstName: profile.first_name,
+        lastName: profile.last_name,
+      },
+    });
+  } catch (syncError) {
+    return res.status(500).json({
+      error: "internal_error",
+      message:
+        syncError instanceof Error ? syncError.message : "Failed to sync user",
+    });
+  }
+};
+
+export const signup = async (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) {
+    return;
+  }
+
+  const parsed = signupSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const { firstName, lastName, email, password } = parsed.data;
+
+  const { data: createdUser, error: createError } =
+    await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: { role: "member" },
+      user_metadata: {
+        first_name: firstName,
+        last_name: lastName,
+      },
+    });
+
+  if (createError || !createdUser.user) {
+    const message = createError?.message ?? "Unable to create account";
+    const status = /already registered|already been registered|already exists/i.test(
+      message
+    )
+      ? 409
+      : 400;
+
+    return res.status(status).json({
+      error: status === 409 ? "conflict" : "validation_error",
+      message,
+    });
+  }
+
+  try {
+    const profile = await upsertUserProfile({
+      supabaseUserId: createdUser.user.id,
+      email: createdUser.user.email ?? email,
+      role: "member",
+      firstName,
+      lastName,
+    });
+
+    const { data: loginData, error: loginError } =
+      await supabasePublic.auth.signInWithPassword({ email, password });
+
+    if (loginError || !loginData.session) {
+      return res.status(201).json({
+        accessToken: null,
+        refreshToken: null,
+        user: {
+          id: profile.id,
+          email: profile.email,
+          role: normalizeRole(profile.role ?? undefined),
+          status: profile.status ?? "active",
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+        },
+      });
+    }
+
+    return res.status(201).json({
+      accessToken: loginData.session.access_token,
+      refreshToken: loginData.session.refresh_token,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        role: normalizeRole(profile.role ?? undefined),
+        status: profile.status ?? "active",
+        firstName: profile.first_name,
+        lastName: profile.last_name,
+      },
+    });
+  } catch (syncError) {
+    return res.status(500).json({
+      error: "internal_error",
+      message:
+        syncError instanceof Error ? syncError.message : "Failed to sync user",
+    });
+  }
 };

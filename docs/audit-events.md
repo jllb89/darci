@@ -75,6 +75,13 @@ Use the following `action` values exactly as written:
 - `system.watermark_started`
 - `system.watermark_completed`
 - `notary.meeting_scheduled`
+- `member.meeting_time_proposed`
+- `notary.meeting_time_proposed`
+- `member.meeting_time_confirmed`
+- `notary.meeting_time_confirmed`
+- `notary.meeting_rescheduled`
+- `notary.meeting_cancelled`
+- `system.meeting_no_show_recorded`
 - `notary.meeting_started`
 - `notary.identity_verified`
 - `notary.meeting_completed`
@@ -100,6 +107,9 @@ Include these fields where applicable. Keep metadata minimal and stable.
 - `acknowledgment_page_id` (uuid)
 - `ledger_entry_id` (uuid)
 - `idn` (text)
+- `meeting_id` (uuid)
+- `meeting_location` (text)
+- `meeting_timezone` (text)
 - `actor_role` (member|notary|system|public)
 - `ip_address` (text)
 - `user_agent` (text)
@@ -306,13 +316,91 @@ Include these fields where applicable. Keep metadata minimal and stable.
 
 ### 10) Illuminotary verifies in person and applies seal/signature
 
+**member.meeting_time_proposed**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `proposed_slots` (array of timestamptz)
+  - `meeting_timezone` (text)
+  - `meeting_location` (text, optional)
+
+**notary.meeting_time_proposed**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `proposed_slots` (array of timestamptz)
+  - `meeting_timezone` (text)
+  - `meeting_location` (text, optional)
+
+**member.meeting_time_confirmed**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `scheduled_at` (timestamptz)
+  - `meeting_timezone` (text)
+  - `meeting_location` (text, optional)
+
+**notary.meeting_time_confirmed**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `scheduled_at` (timestamptz)
+  - `meeting_timezone` (text)
+  - `meeting_location` (text, optional)
+
 **notary.meeting_scheduled**
 - entity_type: `notarization_request`
 - entity_id: `notarization_requests.id`
 - metadata:
   - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
   - `scheduled_at` (timestamptz)
   - `meeting_type` (in_person)
+  - `meeting_timezone` (text)
+  - `meeting_location` (text, optional)
+  - `member_confirmed_at` (timestamptz, optional)
+  - `notary_confirmed_at` (timestamptz, optional)
+
+**notary.meeting_rescheduled**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `previous_scheduled_at` (timestamptz)
+  - `scheduled_at` (timestamptz)
+  - `meeting_timezone` (text)
+  - `meeting_location` (text, optional)
+  - `reschedule_reason` (text, optional)
+
+**notary.meeting_cancelled**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `scheduled_at` (timestamptz)
+  - `cancelled_by` (member|notary|system)
+  - `cancelled_at` (timestamptz)
+  - `cancellation_reason` (text, optional)
+
+**system.meeting_no_show_recorded**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `meeting_id` (uuid, optional)
+  - `scheduled_at` (timestamptz)
+  - `no_show_party` (member|notary)
+  - `recorded_at` (timestamptz)
 
 **notary.meeting_started**
 - entity_type: `notarization_request`

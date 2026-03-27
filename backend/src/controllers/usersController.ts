@@ -29,7 +29,7 @@ export const getMe = async (req: Request, res: Response) => {
 
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, supabase_user_id, email, role, status")
+    .select("id, supabase_user_id, email, role, status, first_name, last_name")
     .eq("supabase_user_id", req.user.id)
     .limit(1)
     .maybeSingle();
@@ -48,6 +48,8 @@ export const getMe = async (req: Request, res: Response) => {
         email: data.email,
         role: normalizeRole(data.role),
         status: data.status ?? "active",
+        firstName: data.first_name,
+        lastName: data.last_name,
       },
     });
   }
@@ -60,7 +62,7 @@ export const getMe = async (req: Request, res: Response) => {
       email: req.user.email ?? null,
       role: fallbackRole,
     })
-    .select("id, supabase_user_id, email, role, status")
+    .select("id, supabase_user_id, email, role, status, first_name, last_name")
     .single();
 
   if (insertError || !inserted) {
@@ -76,6 +78,8 @@ export const getMe = async (req: Request, res: Response) => {
       email: inserted.email,
       role: normalizeRole(inserted.role),
       status: inserted.status ?? "active",
+      firstName: inserted.first_name,
+      lastName: inserted.last_name,
     },
   });
 };

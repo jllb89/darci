@@ -1,0 +1,21 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const documentsController_1 = require("../controllers/documentsController");
+const roles_1 = require("../middleware/roles");
+const router = (0, express_1.Router)();
+router.post("/", documentsController_1.createDocument);
+router.post("/:id/upload-finalize", documentsController_1.finalizeDocumentUpload);
+router.get("/", documentsController_1.listDocuments);
+router.get("/:id", documentsController_1.getDocument);
+router.get("/:id/versions", documentsController_1.listDocumentVersions);
+router.get("/:id/timeline", documentsController_1.getDocumentTimeline);
+router.get("/:id/signature-fields", documentsController_1.getSignatureFields);
+router.post("/:id/signatures/request", (0, roles_1.requireRole)(["member", "admin", "service_role"]), documentsController_1.requestSignatureUpload);
+router.post("/:id/signatures/finalize", (0, roles_1.requireRole)(["member", "admin", "service_role"]), documentsController_1.finalizeSignatureUpload);
+router.post("/:id/sign", documentsController_1.signDocument);
+router.post("/:id/submit-notarization", documentsController_1.submitNotarization);
+router.post("/:id/append-acknowledgment", (0, roles_1.requireRole)(["notary", "admin", "service_role"]), documentsController_1.appendAcknowledgment);
+router.post("/:id/watermark", (0, roles_1.requireRole)(["notary", "admin", "service_role"]), documentsController_1.watermarkDocument);
+exports.default = router;
+//# sourceMappingURL=documents.js.map
