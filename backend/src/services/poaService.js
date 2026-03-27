@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listPoaJurisdictions = exports.getPoaRequirement = exports.normalizeJurisdiction = exports.getJurisdictionLabel = exports.poaTypes = void 0;
+exports.listPoaJurisdictions = exports.getPoaRequirementDetails = exports.getPoaRequirement = exports.normalizeJurisdiction = exports.getJurisdictionLabel = exports.poaTypes = void 0;
 const supabase_js_1 = require("@supabase/supabase-js");
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -135,6 +135,187 @@ const getPoaRequirement = async (jurisdiction, poaType) => {
     return data;
 };
 exports.getPoaRequirement = getPoaRequirement;
+const getPoaFormRules = async (poaRequirementId) => {
+    const { data, error } = await supabaseAdmin
+        .from("poa_form_rules")
+        .select([
+        "id",
+        "poa_requirement_id",
+        "statutory_form_exists",
+        "statutory_form_recommended",
+        "statutory_form_mandatory_for_product",
+        "must_track_statutory_ordering",
+        "must_track_statutory_headings",
+        "must_include_warning_to_principal",
+        "must_include_notice_to_agent",
+        "special_authorities_render_mode",
+        "freeform_special_authority_text_allowed",
+        "hybrid_rendering_allowed",
+        "attorney_customization_recommended",
+        "source_citation",
+        "source_url",
+        "legal_review_status",
+        "reviewed_at",
+        "reviewed_by",
+        "review_notes",
+        "created_at",
+        "updated_at",
+    ].join(", "))
+        .eq("poa_requirement_id", poaRequirementId)
+        .limit(1)
+        .maybeSingle();
+    if (error) {
+        throw new Error(error.message);
+    }
+    return data ?? null;
+};
+const getPoaGlossary = async (poaRequirementId) => {
+    const { data, error } = await supabaseAdmin
+        .from("poa_glossary_terms")
+        .select([
+        "id",
+        "poa_requirement_id",
+        "glossary_key",
+        "generic_label",
+        "state_specific_label",
+        "product_description",
+        "why_user_needs_this",
+        "source_citation",
+        "source_url",
+        "is_materially_state_specific",
+        "legal_review_status",
+        "reviewed_at",
+        "reviewed_by",
+        "review_notes",
+        "sort_order",
+        "created_at",
+        "updated_at",
+    ].join(", "))
+        .eq("poa_requirement_id", poaRequirementId)
+        .order("sort_order", { ascending: true })
+        .order("generic_label", { ascending: true });
+    if (error) {
+        throw new Error(error.message);
+    }
+    return (data ?? []);
+};
+const getPoaSpecialAuthorityRules = async (poaRequirementId) => {
+    const { data, error } = await supabaseAdmin
+        .from("poa_special_authority_rules")
+        .select([
+        "id",
+        "poa_requirement_id",
+        "canonical_authority_id",
+        "explicitly_required",
+        "requirement_type",
+        "applies_to_general_financial_poa",
+        "statutory_form_only",
+        "custom_language_required",
+        "initials_required",
+        "checkbox_required",
+        "freeform_text_allowed",
+        "state_specific_label",
+        "statutory_text_excerpt",
+        "exact_statute_citation",
+        "source_url",
+        "plain_english_rule",
+        "confidence",
+        "legal_review_status",
+        "reviewed_at",
+        "reviewed_by",
+        "review_notes",
+        "effective_start_date",
+        "effective_end_date",
+        "renderer_metadata",
+        "created_at",
+        "updated_at",
+    ].join(", "))
+        .eq("poa_requirement_id", poaRequirementId);
+    if (error) {
+        throw new Error(error.message);
+    }
+    const rules = (data ?? []);
+    if (!rules.length) {
+        return [];
+    }
+    const canonicalIds = [...new Set(rules.map((rule) => rule.canonical_authority_id))];
+    const { data: canonicalData, error: canonicalError } = await supabaseAdmin
+        .from("poa_canonical_special_authorities")
+        .select([
+        "id",
+        "key",
+        "label",
+        "description",
+        "category",
+        "sort_order",
+        "is_core_national_key",
+    ].join(", "))
+        .in("id", canonicalIds);
+    if (canonicalError) {
+        throw new Error(canonicalError.message);
+    }
+    const canonicalById = new Map((canonicalData ?? []).map((record) => [
+        record.id,
+        record,
+    ]));
+    return rules
+        .map((rule) => {
+        const canonical = canonicalById.get(rule.canonical_authority_id);
+        if (!canonical) {
+            return null;
+        }
+        return {
+            id: rule.id,
+            canonical_key: canonical.key,
+            canonical_label: canonical.label,
+            canonical_description: canonical.description,
+            category: canonical.category,
+            sort_order: canonical.sort_order,
+            is_core_national_key: canonical.is_core_national_key,
+            explicitly_required: rule.explicitly_required,
+            requirement_type: rule.requirement_type,
+            applies_to_general_financial_poa: rule.applies_to_general_financial_poa,
+            statutory_form_only: rule.statutory_form_only,
+            custom_language_required: rule.custom_language_required,
+            initials_required: rule.initials_required,
+            checkbox_required: rule.checkbox_required,
+            freeform_text_allowed: rule.freeform_text_allowed,
+            state_specific_label: rule.state_specific_label,
+            statutory_text_excerpt: rule.statutory_text_excerpt,
+            exact_statute_citation: rule.exact_statute_citation,
+            source_url: rule.source_url,
+            plain_english_rule: rule.plain_english_rule,
+            confidence: rule.confidence,
+            legal_review_status: rule.legal_review_status,
+            reviewed_at: rule.reviewed_at,
+            reviewed_by: rule.reviewed_by,
+            review_notes: rule.review_notes,
+            effective_start_date: rule.effective_start_date,
+            effective_end_date: rule.effective_end_date,
+            renderer_metadata: rule.renderer_metadata ?? {},
+        };
+    })
+        .filter((rule) => Boolean(rule))
+        .sort((left, right) => left.sort_order - right.sort_order);
+};
+const getPoaRequirementDetails = async (jurisdiction, poaType) => {
+    const requirement = await (0, exports.getPoaRequirement)(jurisdiction, poaType);
+    if (!requirement) {
+        return null;
+    }
+    const [formRules, glossary, specialAuthorities] = await Promise.all([
+        getPoaFormRules(requirement.id),
+        getPoaGlossary(requirement.id),
+        getPoaSpecialAuthorityRules(requirement.id),
+    ]);
+    return {
+        requirement,
+        formRules,
+        glossary,
+        specialAuthorities,
+    };
+};
+exports.getPoaRequirementDetails = getPoaRequirementDetails;
 const listPoaJurisdictions = async (poaType) => {
     const { data, error } = await supabaseAdmin
         .from("poa_requirements")

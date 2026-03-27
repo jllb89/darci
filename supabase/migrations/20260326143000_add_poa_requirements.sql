@@ -146,12 +146,18 @@ create index if not exists idx_poa_requirements_review_status
 
 alter table public.poa_requirements enable row level security;
 
+drop policy if exists "poa_requirements_read" on public.poa_requirements;
+
 create policy "poa_requirements_read" on public.poa_requirements
   for select using (true);
+
+drop policy if exists "poa_requirements_write" on public.poa_requirements;
 
 create policy "poa_requirements_write" on public.poa_requirements
   for all using (auth.role() = 'service_role')
   with check (auth.role() = 'service_role');
+
+drop policy if exists "poa_requirements_service_role_access" on public.poa_requirements;
 
 create policy "poa_requirements_service_role_access" on public.poa_requirements
   for all using (auth.role() = 'service_role')

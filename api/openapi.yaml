@@ -2143,6 +2143,8 @@ components:
             - approved
             - needs_review
             - deprecated
+            - blocked
+            - needs_update
         reviewedAt:
           type: string
           format: date-time
@@ -2153,6 +2155,17 @@ components:
           $ref: "#/components/schemas/PoaRequirementLegalText"
         source:
           $ref: "#/components/schemas/PoaRequirementSource"
+        formRules:
+          nullable: true
+          $ref: "#/components/schemas/PoaFormRules"
+        glossary:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaGlossaryTerm"
+        specialAuthorities:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaSpecialAuthorityRule"
         inputRequirements:
           $ref: "#/components/schemas/PoaInputRequirements"
         createdAt:
@@ -2186,6 +2199,8 @@ components:
             - approved
             - needs_review
             - deprecated
+            - blocked
+            - needs_update
         workflow:
           $ref: "#/components/schemas/PoaInputRequirementsWorkflow"
         sections:
@@ -2246,6 +2261,8 @@ components:
         key:
           type: string
         title:
+          type: string
+        description:
           type: string
         presence:
           type: string
@@ -2521,6 +2538,195 @@ components:
         notes:
           type: string
           nullable: true
+    PoaFormRules:
+      type: object
+      properties:
+        statutoryFormExists:
+          type: boolean
+        statutoryFormRecommended:
+          type: boolean
+        statutoryFormMandatoryForProduct:
+          type: boolean
+        mustTrackStatutoryOrdering:
+          type: boolean
+        mustTrackStatutoryHeadings:
+          type: boolean
+        mustIncludeWarningToPrincipal:
+          type: boolean
+        mustIncludeNoticeToAgent:
+          type: boolean
+        specialAuthoritiesRenderMode:
+          type: string
+          enum:
+            - hidden
+            - checklist
+            - checklist_with_initials
+            - checkboxes_from_statutory_form
+            - freeform_text
+            - hybrid
+            - manual_review_only
+        freeformSpecialAuthorityTextAllowed:
+          type: boolean
+        hybridRenderingAllowed:
+          type: boolean
+        attorneyCustomizationRecommended:
+          type: boolean
+        sourceCitation:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+          format: uri
+          nullable: true
+        legalReviewStatus:
+          type: string
+          enum:
+            - pending
+            - reviewed
+            - needs_update
+            - blocked
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          type: string
+          nullable: true
+        reviewNotes:
+          type: string
+          nullable: true
+    PoaGlossaryTerm:
+      type: object
+      properties:
+        key:
+          type: string
+        genericLabel:
+          type: string
+        stateSpecificLabel:
+          type: string
+          nullable: true
+        label:
+          type: string
+        productDescription:
+          type: string
+        whyUserNeedsThis:
+          type: string
+          nullable: true
+        sourceCitation:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+          format: uri
+          nullable: true
+        isMateriallyStateSpecific:
+          type: boolean
+        legalReviewStatus:
+          type: string
+          enum:
+            - pending
+            - reviewed
+            - needs_update
+            - blocked
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          type: string
+          nullable: true
+        reviewNotes:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+    PoaSpecialAuthorityRule:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        canonicalLabel:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+        isCoreNationalKey:
+          type: boolean
+        explicitlyRequired:
+          type: boolean
+        requirementType:
+          type: string
+          enum:
+            - express_grant
+            - specific_language
+            - separate_initials
+            - statutory_form_checkbox
+            - not_required
+            - unclear
+        appliesToGeneralFinancialPoa:
+          type: boolean
+        statutoryFormOnly:
+          type: boolean
+        customLanguageRequired:
+          type: boolean
+        initialsRequired:
+          type: boolean
+        checkboxRequired:
+          type: boolean
+        freeformTextAllowed:
+          type: boolean
+        statutoryTextExcerpt:
+          type: string
+          nullable: true
+        exactStatuteCitation:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+          format: uri
+          nullable: true
+        plainEnglishRule:
+          type: string
+        confidence:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+        legalReviewStatus:
+          type: string
+          enum:
+            - pending
+            - reviewed
+            - needs_update
+            - blocked
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          type: string
+          nullable: true
+        reviewNotes:
+          type: string
+          nullable: true
+        effectiveStartDate:
+          type: string
+          format: date
+          nullable: true
+        effectiveEndDate:
+          type: string
+          format: date
+          nullable: true
+        rendererMetadata:
+          type: object
+          additionalProperties: true
     ApiResponse:
       type: object
       properties:

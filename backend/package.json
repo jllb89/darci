@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
+    "dev": "nodemon --exec \"ts-node --preferTsExts\" src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "worker": "ts-node src/worker/index.ts",
-    "test:smoke:upload": "OTEL_SDK_DISABLED=1 ts-node scripts/smoke-document-upload.ts",
+    "worker": "ts-node --preferTsExts src/worker/index.ts",
+    "test:smoke:upload": "OTEL_SDK_DISABLED=1 ts-node --preferTsExts scripts/smoke-document-upload.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -93,6 +93,7 @@ export type PoaInputRequirementField = {
 export type PoaInputRequirementSection = {
   key: string;
   title: string;
+  description?: string;
   presence: SectionPresence;
   repeatable: boolean;
   appliesToPaths: ExecutionPathKey[];
@@ -282,7 +283,6 @@ const buildPrincipalSection = (
       dataType: "string",
       collectFrom: "member",
       defaultSource: "none",
-      helpText: "Collect only if the principal will sign through an authorized proxy.",
     });
   }
 
@@ -339,8 +339,6 @@ const buildAuthorityScopeSection = (
       dataType: "array",
       collectFrom: "member",
       defaultSource: "none",
-      helpText:
-        "Collect explicit authority selections for powers that require additional authorization.",
     });
   }
 

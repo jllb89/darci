@@ -12,6 +12,9 @@ create table if not exists public.meetings (
 );
 
 alter table public.meetings
+  drop constraint if exists meetings_status_check;
+
+alter table public.meetings
   add constraint meetings_status_check
   check (status in (
     'scheduled',
@@ -30,6 +33,9 @@ alter table public.notarization_requests
   add column if not exists meeting_location text;
 
 alter table public.notarization_requests
+  drop constraint if exists notarization_requests_meeting_status_check;
+
+alter table public.notarization_requests
   add constraint notarization_requests_meeting_status_check
   check (meeting_status is null or meeting_status in (
     'scheduled',
@@ -44,6 +50,8 @@ create index if not exists idx_notarization_requests_meeting on public.notarizat
 create index if not exists idx_meetings_request on public.meetings(request_id);
 
 alter table public.meetings enable row level security;
+
+drop policy if exists "meetings_owner_or_notary" on public.meetings;
 
 create policy "meetings_owner_or_notary" on public.meetings
   for all using (

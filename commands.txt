@@ -1,7 +1,7 @@
 bash scripts/gh-create-issues.sh
 
 run backend:
-set -a && source ../.env.staging && set +a && node -r ts-node/register src/index.ts
+set -a && source ../.env.staging && set +a && NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 node -r ts-node/register src/index.ts
 
 Here is the DARCI flow in plain language for a landing page.
 

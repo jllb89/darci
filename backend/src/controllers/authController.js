@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.signup = exports.login = void 0;
+exports.signup = exports.logout = exports.login = void 0;
 const supabase_js_1 = require("@supabase/supabase-js");
 const zod_1 = require("zod");
 const validation_1 = require("../utils/validation");
@@ -23,6 +23,9 @@ const signupSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string().min(8),
 });
+const logoutSchema = zod_1.z.object({
+    refreshToken: zod_1.z.string().trim().min(1),
+});
 const normalizeRole = (role) => {
     if (role === "notary" || role === "admin") {
         return role;
@@ -38,6 +41,22 @@ const ensureConfigured = (res) => {
         return false;
     }
     return true;
+};
+const getBearerToken = (req) => {
+    const authHeader = req.headers.authorization ?? "";
+    if (!authHeader.startsWith("Bearer ")) {
+        return null;
+    }
+    return authHeader.replace("Bearer ", "").trim() || null;
+};
+const createSupabaseSessionClient = () => {
+    return (0, supabase_js_1.createClient)(supabaseUrl, supabaseAnonKey, {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+        },
+    });
 };
 const upsertUserProfile = async (input) => {
     const payload = {
@@ -104,6 +123,53 @@ const login = async (req, res) => {
     }
 };
 exports.login = login;
+const logout = async (req, res) => {
+    if (!ensureConfigured(res)) {
+        return;
+    }
+    if (!req.user?.id) {
+        return res.status(401).json({
+            error: "unauthorized",
+            message: "Missing user context",
+        });
+    }
+    const parsed = logoutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+        return (0, validation_1.sendValidationError)(res, parsed.error);
+    }
+    const accessToken = getBearerToken(req);
+    if (!accessToken) {
+        return res.status(401).json({
+            error: "unauthorized",
+            message: "Missing or invalid authorization header",
+        });
+    }
+    const supabaseSessionClient = createSupabaseSessionClient();
+    const { error: sessionError } = await supabaseSessionClient.auth.setSession({
+        access_token: accessToken,
+        refresh_token: parsed.data.refreshToken,
+    });
+    if (sessionError) {
+        return res.status(401).json({
+            error: "unauthorized",
+            message: sessionError.message,
+        });
+    }
+    const { error: signOutError } = await supabaseSessionClient.auth.signOut({
+        scope: "global",
+    });
+    if (signOutError) {
+        return res.status(500).json({
+            error: "internal_error",
+            message: signOutError.message,
+        });
+    }
+    return res.status(200).json({
+        status: "ok",
+        message: "Signed out",
+    });
+};
+exports.logout = logout;
 const signup = async (req, res) => {
     if (!ensureConfigured(res)) {
         return;
