@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec \"ts-node --preferTsExts\" src/index.ts",
+    "dev": "npm run dev:staging",
+    "dev:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 DOTENV_CONFIG_PATH=../.env.staging nodemon --watch src --ext ts --signal SIGTERM --exec \"node -r dotenv/config -r ts-node/register src/index.ts\"",
+    "start:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "worker": "ts-node --preferTsExts src/worker/index.ts",
