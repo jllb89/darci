@@ -27,6 +27,10 @@ const signupSchema = z.object({
   password: z.string().min(8),
 });
 
+const logoutSchema = z.object({
+  refreshToken: z.string().trim().min(1),
+});
+
 const normalizeRole = (role?: string) => {
   if (role === "notary" || role === "admin") {
     return role;
@@ -45,6 +49,26 @@ const ensureConfigured = (res: Response) => {
   }
 
   return true;
+};
+
+const getBearerToken = (req: Request) => {
+  const authHeader = req.headers.authorization ?? "";
+
+  if (!authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  return authHeader.replace("Bearer ", "").trim() || null;
+};
+
+const createSupabaseSessionClient = () => {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 };
 
 const upsertUserProfile = async (input: {
@@ -125,6 +149,61 @@ export const login = async (req: Request, res: Response) => {
         syncError instanceof Error ? syncError.message : "Failed to sync user",
     });
   }
+};
+
+export const logout = async (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) {
+    return;
+  }
+
+  if (!req.user?.id) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
+
+  const parsed = logoutSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const accessToken = getBearerToken(req);
+  if (!accessToken) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing or invalid authorization header",
+    });
+  }
+
+  const supabaseSessionClient = createSupabaseSessionClient();
+  const { error: sessionError } = await supabaseSessionClient.auth.setSession({
+    access_token: accessToken,
+    refresh_token: parsed.data.refreshToken,
+  });
+
+  if (sessionError) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: sessionError.message,
+    });
+  }
+
+  const { error: signOutError } = await supabaseSessionClient.auth.signOut({
+    scope: "global",
+  });
+
+  if (signOutError) {
+    return res.status(500).json({
+      error: "internal_error",
+      message: signOutError.message,
+    });
+  }
+
+  return res.status(200).json({
+    status: "ok",
+    message: "Signed out",
+  });
 };
 
 export const signup = async (req: Request, res: Response) => {

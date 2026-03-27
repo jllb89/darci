@@ -71,6 +71,10 @@ const jurisdictionAliases: Record<string, string> = {
   WYOMING: "US-WY",
 };
 
+const jurisdictionLabels: Record<string, string> = Object.fromEntries(
+  Object.entries(jurisdictionAliases).map(([label, code]) => [code, label]),
+);
+
 export type PoaRequirementRecord = {
   id: string;
   jurisdiction: string;
@@ -103,6 +107,14 @@ export type PoaRequirementRecord = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type PoaJurisdictionRow = {
+  jurisdiction: string;
+};
+
+export const getJurisdictionLabel = (jurisdiction: string) => {
+  return jurisdictionLabels[jurisdiction] ?? jurisdiction;
 };
 
 export const normalizeJurisdiction = (input: string) => {
@@ -174,4 +186,33 @@ export const getPoaRequirement = async (
   }
 
   return data as PoaRequirementRecord | null;
+};
+
+export const listPoaJurisdictions = async (
+  poaType: (typeof poaTypes)[number],
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("poa_requirements")
+    .select("jurisdiction")
+    .eq("poa_type", poaType)
+    .order("jurisdiction", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const unique = new Map<string, { code: string; label: string }>();
+
+  for (const row of (data ?? []) as PoaJurisdictionRow[]) {
+    if (!unique.has(row.jurisdiction)) {
+      unique.set(row.jurisdiction, {
+        code: row.jurisdiction,
+        label: getJurisdictionLabel(row.jurisdiction),
+      });
+    }
+  }
+
+  return [...unique.values()].sort((left, right) =>
+    left.label.localeCompare(right.label),
+  );
 };

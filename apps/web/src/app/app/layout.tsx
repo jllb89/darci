@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useStoredSession, useStoredUser } from "@/lib/auth";
+import { logoutStoredAuth, useStoredAuth, useStoredSession, useStoredUser } from "@/lib/auth";
 
 type AppRole = "member" | "notary" | "admin";
 
 type NavItem = {
   label: string;
   href: string;
+};
+
+type ToastState = {
+  tone: "success" | "error";
+  message: string;
 };
 
 const ROLE_NAV_ITEMS: Record<AppRole, NavItem[]> = {
@@ -68,10 +73,13 @@ export default function AppLayout({
   const pathname = usePathname();
   const router = useRouter();
   const isAuthorized = useStoredSession();
+  const { accessToken } = useStoredAuth();
   const user = useStoredUser();
   const role: AppRole = user?.role ?? "member";
   const navItems = ROLE_NAV_ITEMS[role];
   const routeLabel = getRouteLabel(pathname);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   useEffect(() => {
     if (!isAuthorized) {
@@ -79,12 +87,64 @@ export default function AppLayout({
     }
   }, [isAuthorized, router]);
 
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setToast(null);
+    }, 4000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [toast]);
+
+  const handleLogout = async () => {
+    if (!accessToken || isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+    setToast(null);
+
+    try {
+      await logoutStoredAuth();
+      setToast({ tone: "success", message: "Signed out" });
+      window.setTimeout(() => {
+        router.replace("/start");
+      }, 250);
+    } catch (error) {
+      setToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Failed to sign out",
+      });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
   if (!isAuthorized) {
     return null;
   }
 
   return (
     <div className="flex h-screen flex-col bg-Color-Neutral-Lightest text-Color-Scheme-1-Text">
+      {toast ? (
+        <div className="pointer-events-none fixed right-6 top-20 z-50">
+          <div
+            className={`min-w-[240px] rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              toast.tone === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+            role="status"
+          >
+            {toast.message}
+          </div>
+        </div>
+      ) : null}
       <div className="w-full bg-Color-Scheme-1-Background">
         <div className="flex w-full items-center justify-between px-6 py-3 md:px-10">
           <Link className="flex items-center gap-2" href="/">
@@ -113,6 +173,14 @@ export default function AppLayout({
                 New document
               </Link>
             ) : null}
+            <button
+              className="rounded border border-Color-Scheme-1-Border/40 px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isLoggingOut}
+              onClick={handleLogout}
+              type="button"
+            >
+              {isLoggingOut ? "Signing out..." : "Log out"}
+            </button>
             <div className="text-xs uppercase text-Color-Neutral">
               {role}
             </div>

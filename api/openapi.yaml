@@ -69,6 +69,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /auth/logout:
+    post:
+      summary: Log out
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users/me:
     get:
       summary: Current user
@@ -832,6 +866,55 @@ paths:
                 $ref: "#/components/schemas/RequestTimelineResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/poa:
+    get:
+      summary: List POA jurisdictions by type
+      description: Returns available jurisdictions for the requested POA type.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum:
+              - general
+              - limited
+              - durable
+              - medical
+              - vehicle
+              - tax
+              - springing
+              - other
+            default: general
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoaJurisdictionListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -1982,6 +2065,14 @@ components:
         password:
           type: string
           minLength: 8
+    LogoutRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
     AuthResponse:
       type: object
       properties:
@@ -2003,6 +2094,20 @@ components:
       properties:
         requirement:
           $ref: "#/components/schemas/PoaRequirement"
+    PoaJurisdictionListResponse:
+      type: object
+      properties:
+        jurisdictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaJurisdictionOption"
+    PoaJurisdictionOption:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
     PoaRequirement:
       type: object
       properties:
@@ -2048,12 +2153,261 @@ components:
           $ref: "#/components/schemas/PoaRequirementLegalText"
         source:
           $ref: "#/components/schemas/PoaRequirementSource"
+        inputRequirements:
+          $ref: "#/components/schemas/PoaInputRequirements"
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    PoaInputRequirements:
+      type: object
+      properties:
+        schemaVersion:
+          type: string
+        jurisdiction:
+          type: string
+        poaType:
+          type: string
+        uiProfile:
+          type: string
+        derivationMode:
+          type: string
+          enum:
+            - rules_only
+            - rules_plus_overrides
+            - manual_review
+        reviewStatus:
+          type: string
+          enum:
+            - draft
+            - reviewed
+            - approved
+            - needs_review
+            - deprecated
+        workflow:
+          $ref: "#/components/schemas/PoaInputRequirementsWorkflow"
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsSection"
+        documentOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsDocumentOutput"
+        notices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsNotice"
+        sourceTrace:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsSourceTrace"
+    PoaInputRequirementsWorkflow:
+      type: object
+      properties:
+        executionPaths:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsExecutionPath"
+        steps:
+          type: array
+          items:
+            type: string
+        submissionChecks:
+          type: array
+          items:
+            type: string
+    PoaInputRequirementsExecutionPath:
+      type: object
+      properties:
+        key:
+          type: string
+          enum:
+            - notary_acknowledgment
+            - witness_execution
+            - notary_and_witness_execution
+            - manual_review
+        label:
+          type: string
+        default:
+          type: boolean
+        availability:
+          type: string
+          enum:
+            - required
+            - allowed
+            - not_allowed
+            - manual_review
+    PoaInputRequirementsSection:
+      type: object
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        presence:
+          type: string
+          enum:
+            - required
+            - optional
+            - conditional
+            - hidden
+            - manual_review
+        repeatable:
+          type: boolean
+        appliesToPaths:
+          type: array
+          items:
+            type: string
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsField"
+    PoaInputRequirementsField:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        semanticType:
+          type: string
+          enum:
+            - person_name
+            - enum_single
+            - enum_multi
+            - boolean
+            - date
+            - text
+            - initials
+            - signature_mark
+            - witness_count
+            - acknowledgment_choice
+            - legal_notice_acceptance
+            - recording_status
+        required:
+          type: boolean
+        dataType:
+          type: string
+          enum:
+            - string
+            - integer
+            - boolean
+            - date
+            - array
+        collectFrom:
+          type: string
+          enum:
+            - member
+            - principal
+            - agent
+            - notary
+            - system
+        defaultSource:
+          type: string
+          enum:
+            - none
+            - user_profile
+            - document_template
+            - jurisdiction_default
+            - system_derived
+        validation:
+          $ref: "#/components/schemas/PoaInputRequirementsFieldValidation"
+        helpText:
+          type: string
+        when:
+          $ref: "#/components/schemas/PoaInputRequirementsCondition"
+    PoaInputRequirementsFieldValidation:
+      type: object
+      properties:
+        minLength:
+          type: integer
+        maxLength:
+          type: integer
+        min:
+          type: integer
+        max:
+          type: integer
+        allowedValues:
+          type: array
+          items:
+            type: string
+    PoaInputRequirementsCondition:
+      type: object
+      properties:
+        all:
+          type: array
+          items:
+            $ref: "#/components/schemas/PoaInputRequirementsConditionClause"
+    PoaInputRequirementsConditionClause:
+      type: object
+      properties:
+        fact:
+          type: string
+          enum:
+            - selected_execution_path
+            - durability_rule
+            - specific_authority_rule
+            - effective_date_rule
+            - statutory_form_rule
+            - review_status
+        operator:
+          type: string
+          enum:
+            - equals
+            - not_equals
+            - in
+            - not_in
+        value:
+          type: string
+    PoaInputRequirementsDocumentOutput:
+      type: object
+      properties:
+        key:
+          type: string
+          enum:
+            - signed_poa_document
+            - principal_signature
+            - notary_acknowledgment
+            - witness_attestation
+            - special_authority_initials
+            - durability_clause
+            - springing_trigger_clause
+            - recording_confirmation
+        required:
+          type: boolean
+        when:
+          $ref: "#/components/schemas/PoaInputRequirementsCondition"
+    PoaInputRequirementsNotice:
+      type: object
+      properties:
+        key:
+          type: string
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - blocking
+        message:
+          type: string
+    PoaInputRequirementsSourceTrace:
+      type: object
+      properties:
+        source:
+          type: string
+          enum:
+            - poa_requirements
+        field:
+          type: string
+        value:
+          nullable: true
+          oneOf:
+            - type: string
+            - type: integer
+            - type: boolean
     PoaRequirementDecisionSet:
       type: object
       properties:

@@ -1,11 +1,30 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useStoredSession } from "@/lib/auth";
+import { useRouter } from "next/navigation";
+import { logoutStoredAuth, useStoredSession } from "@/lib/auth";
 
 export default function Navbar() {
+  const router = useRouter();
   const isAuthenticated = useStoredSession();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+
+    try {
+      await logoutStoredAuth();
+      router.refresh();
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <div className="w-full bg-Color-Scheme-1-Text">
@@ -43,6 +62,18 @@ export default function Navbar() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {isAuthenticated ? (
+              <button
+                className="border border-Color-Scheme-1-Background px-5 py-2 text-Color-Scheme-1-Background disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isLoggingOut}
+                onClick={handleLogout}
+                type="button"
+              >
+                <div className="text-sm font-medium font-sans leading-6">
+                  {isLoggingOut ? "Signing out..." : "Log out"}
+                </div>
+              </button>
+            ) : null}
             <Link
               data-alternate="False"
               data-icon-position="No icon"

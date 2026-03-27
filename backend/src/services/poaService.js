@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPoaRequirement = exports.normalizeJurisdiction = exports.poaTypes = void 0;
+exports.listPoaJurisdictions = exports.getPoaRequirement = exports.normalizeJurisdiction = exports.getJurisdictionLabel = exports.poaTypes = void 0;
 const supabase_js_1 = require("@supabase/supabase-js");
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -69,6 +69,11 @@ const jurisdictionAliases = {
     WISCONSIN: "US-WI",
     WYOMING: "US-WY",
 };
+const jurisdictionLabels = Object.fromEntries(Object.entries(jurisdictionAliases).map(([label, code]) => [code, label]));
+const getJurisdictionLabel = (jurisdiction) => {
+    return jurisdictionLabels[jurisdiction] ?? jurisdiction;
+};
+exports.getJurisdictionLabel = getJurisdictionLabel;
 const normalizeJurisdiction = (input) => {
     const trimmed = input.trim();
     if (!trimmed) {
@@ -130,4 +135,25 @@ const getPoaRequirement = async (jurisdiction, poaType) => {
     return data;
 };
 exports.getPoaRequirement = getPoaRequirement;
+const listPoaJurisdictions = async (poaType) => {
+    const { data, error } = await supabaseAdmin
+        .from("poa_requirements")
+        .select("jurisdiction")
+        .eq("poa_type", poaType)
+        .order("jurisdiction", { ascending: true });
+    if (error) {
+        throw new Error(error.message);
+    }
+    const unique = new Map();
+    for (const row of (data ?? [])) {
+        if (!unique.has(row.jurisdiction)) {
+            unique.set(row.jurisdiction, {
+                code: row.jurisdiction,
+                label: (0, exports.getJurisdictionLabel)(row.jurisdiction),
+            });
+        }
+    }
+    return [...unique.values()].sort((left, right) => left.label.localeCompare(right.label));
+};
+exports.listPoaJurisdictions = listPoaJurisdictions;
 //# sourceMappingURL=poaService.js.map

@@ -1,8 +1,10 @@
 import { Request, Response } from "express";
 import { z } from "zod";
+import { derivePoaInputRequirements } from "../services/poaInputRequirements";
 import { sendValidationError } from "../utils/validation";
 import {
   getPoaRequirement,
+  listPoaJurisdictions,
   normalizeJurisdiction,
   poaTypes,
 } from "../services/poaService";
@@ -92,6 +94,7 @@ export const getPoaRequirementByJurisdiction = async (
           url: requirement.source_url,
           notes: requirement.notes,
         },
+        inputRequirements: derivePoaInputRequirements(requirement),
         createdAt: requirement.created_at,
         updatedAt: requirement.updated_at,
       },
@@ -100,6 +103,40 @@ export const getPoaRequirementByJurisdiction = async (
     return res.status(500).json({
       error: "internal_error",
       message: error instanceof Error ? error.message : "Failed to load POA requirements",
+    });
+  }
+};
+
+export const listPoaJurisdictionsForType = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!req.user?.id) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
+
+  const parsedQuery = poaRequirementQuerySchema.safeParse(req.query ?? {});
+  if (!parsedQuery.success) {
+    return sendValidationError(res, parsedQuery.error);
+  }
+
+  try {
+    const poaType = parsedQuery.data.type ?? "general";
+    const jurisdictions = await listPoaJurisdictions(poaType);
+
+    return res.status(200).json({
+      jurisdictions,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "internal_error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to list POA jurisdictions",
     });
   }
 };

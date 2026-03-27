@@ -140,6 +140,39 @@ export const clearStoredAuth = () => {
   emitAuthChange();
 };
 
+export const logoutStoredAuth = async () => {
+  const { accessToken, refreshToken } = getStoredAuth();
+
+  if (!accessToken || !refreshToken) {
+    clearStoredAuth();
+    return;
+  }
+
+  const apiBaseUrl =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+    "http://localhost:4000";
+
+  const response = await fetch(`${apiBaseUrl}/auth/logout`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (response.ok || response.status === 401) {
+    clearStoredAuth();
+    return;
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { message?: string }
+    | null;
+
+  throw new Error(payload?.message || "Failed to sign out");
+};
+
 const subscribeToAuth = (onChange: () => void) => {
   if (!isBrowser()) {
     return () => undefined;

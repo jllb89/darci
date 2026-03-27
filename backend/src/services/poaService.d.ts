@@ -32,6 +32,11 @@ export type PoaRequirementRecord = {
     created_at: string;
     updated_at: string;
 };
+export declare const getJurisdictionLabel: (jurisdiction: string) => string;
 export declare const normalizeJurisdiction: (input: string) => string;
 export declare const getPoaRequirement: (jurisdiction: string, poaType: (typeof poaTypes)[number]) => Promise<PoaRequirementRecord | null>;
+export declare const listPoaJurisdictions: (poaType: (typeof poaTypes)[number]) => Promise<{
+    code: string;
+    label: string;
+}[]>;
 //# sourceMappingURL=poaService.d.ts.map

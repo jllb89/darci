@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPoaRequirementByJurisdiction = void 0;
+exports.listPoaJurisdictionsForType = exports.getPoaRequirementByJurisdiction = void 0;
 const zod_1 = require("zod");
 const validation_1 = require("../utils/validation");
 const poaService_1 = require("../services/poaService");
@@ -90,4 +90,32 @@ const getPoaRequirementByJurisdiction = async (req, res) => {
     }
 };
 exports.getPoaRequirementByJurisdiction = getPoaRequirementByJurisdiction;
+const listPoaJurisdictionsForType = async (req, res) => {
+    if (!req.user?.id) {
+        return res.status(401).json({
+            error: "unauthorized",
+            message: "Missing user context",
+        });
+    }
+    const parsedQuery = poaRequirementQuerySchema.safeParse(req.query ?? {});
+    if (!parsedQuery.success) {
+        return (0, validation_1.sendValidationError)(res, parsedQuery.error);
+    }
+    try {
+        const poaType = parsedQuery.data.type ?? "general";
+        const jurisdictions = await (0, poaService_1.listPoaJurisdictions)(poaType);
+        return res.status(200).json({
+            jurisdictions,
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            error: "internal_error",
+            message: error instanceof Error
+                ? error.message
+                : "Failed to list POA jurisdictions",
+        });
+    }
+};
+exports.listPoaJurisdictionsForType = listPoaJurisdictionsForType;
 //# sourceMappingURL=poaController.js.map

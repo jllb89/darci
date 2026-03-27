@@ -1,8 +1,17 @@
 import { Router } from "express";
-import { getPoaRequirementByJurisdiction } from "../controllers/poaController";
+import {
+  getPoaRequirementByJurisdiction,
+  listPoaJurisdictionsForType,
+} from "../controllers/poaController";
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
+
+router.get(
+  "/poa",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  listPoaJurisdictionsForType,
+);
 
 router.get(
   "/poa/:jurisdiction",
