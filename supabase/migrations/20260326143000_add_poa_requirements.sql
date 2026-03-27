@@ -79,6 +79,7 @@ create table if not exists public.poa_requirements (
 
   constraint poa_requirements_durability_rule_check
     check (durability_rule in (
+      'conditional',
       'requires_explicit_language',
       'presumed_durable',
       'not_durable_unless_stated',

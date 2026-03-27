@@ -1,0 +1,37 @@
+export declare const poaTypes: readonly ["general", "limited", "durable", "medical", "vehicle", "tax", "springing", "other"];
+export type PoaRequirementRecord = {
+    id: string;
+    jurisdiction: string;
+    poa_type: string;
+    ui_profile: string;
+    notarization_rule: string;
+    witness_rule: string;
+    witness_count: number | null;
+    durability_rule: string;
+    statutory_form_rule: string;
+    effective_date_rule: string;
+    competency_rule: string;
+    special_authority_rule: string;
+    allows_agent_certification: boolean | null;
+    requires_principal_signature: boolean | null;
+    allows_proxy_signature: boolean | null;
+    requires_acknowledgment_certificate: boolean | null;
+    governing_law: string | null;
+    execution_requirements_text: string | null;
+    acknowledgment_witnessing_text: string | null;
+    durability_text: string | null;
+    special_authority_text: string | null;
+    competency_text: string | null;
+    statutory_form_text: string | null;
+    effective_date_text: string | null;
+    source_citation: string | null;
+    source_url: string | null;
+    review_status: string | null;
+    reviewed_at: string | null;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+};
+export declare const normalizeJurisdiction: (input: string) => string;
+export declare const getPoaRequirement: (jurisdiction: string, poaType: (typeof poaTypes)[number]) => Promise<PoaRequirementRecord | null>;
+//# sourceMappingURL=poaService.d.ts.map

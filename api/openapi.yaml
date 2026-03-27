@@ -836,6 +836,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /rules/poa/{jurisdiction}:
+    get:
+      summary: Get POA requirements by jurisdiction and type
+      description: Returns normalized machine-readable POA rules and the original legal text for a jurisdiction.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: jurisdiction
+          required: true
+          schema:
+            type: string
+          description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum:
+              - general
+              - limited
+              - durable
+              - medical
+              - vehicle
+              - tax
+              - springing
+              - other
+            default: general
+          description: POA type to resolve.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoaRequirementResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
@@ -1936,6 +1998,175 @@ components:
       properties:
         user:
           $ref: "#/components/schemas/User"
+    PoaRequirementResponse:
+      type: object
+      properties:
+        requirement:
+          $ref: "#/components/schemas/PoaRequirement"
+    PoaRequirement:
+      type: object
+      properties:
+        id:
+          type: string
+        jurisdiction:
+          type: string
+        poaType:
+          type: string
+          enum:
+            - general
+            - limited
+            - durable
+            - medical
+            - vehicle
+            - tax
+            - springing
+            - other
+        uiProfile:
+          type: string
+          enum:
+            - standard
+            - notary_only
+            - witness_only
+            - notary_or_witness
+            - notary_and_witness
+            - review_required
+        reviewStatus:
+          type: string
+          enum:
+            - draft
+            - reviewed
+            - approved
+            - needs_review
+            - deprecated
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        requirements:
+          $ref: "#/components/schemas/PoaRequirementDecisionSet"
+        legalText:
+          $ref: "#/components/schemas/PoaRequirementLegalText"
+        source:
+          $ref: "#/components/schemas/PoaRequirementSource"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PoaRequirementDecisionSet:
+      type: object
+      properties:
+        notarizationRule:
+          type: string
+          enum:
+            - required
+            - optional
+            - alternative_to_witnesses
+            - not_required
+            - varies_by_type
+            - not_addressed
+        witnessRule:
+          type: string
+          enum:
+            - none
+            - required
+            - optional
+            - alternative_to_notary
+            - additional_to_notary
+            - varies_by_type
+            - not_addressed
+        witnessCount:
+          type: integer
+          nullable: true
+        durabilityRule:
+          type: string
+          enum:
+            - conditional
+            - requires_explicit_language
+            - presumed_durable
+            - not_durable_unless_stated
+            - varies_by_type
+            - not_addressed
+        statutoryFormRule:
+          type: string
+          enum:
+            - available
+            - not_available
+            - multiple_forms
+            - not_addressed
+        effectiveDateRule:
+          type: string
+          enum:
+            - upon_execution
+            - upon_execution_unless_specified
+            - upon_triggering_event
+            - varies_by_type
+            - not_addressed
+        competencyRule:
+          type: string
+          enum:
+            - general_capacity_required
+            - contract_capacity_required
+            - sound_mind_required
+            - understand_nature_and_effect
+            - sufficient_mental_capacity
+            - not_addressed
+        specialAuthorityRule:
+          type: string
+          enum:
+            - required_for_certain_acts
+            - not_required
+            - varies_by_type
+            - not_addressed
+        allowsAgentCertification:
+          type: boolean
+        requiresPrincipalSignature:
+          type: boolean
+        allowsProxySignature:
+          type: boolean
+        requiresAcknowledgmentCertificate:
+          type: boolean
+    PoaRequirementLegalText:
+      type: object
+      properties:
+        governingLaw:
+          type: string
+          nullable: true
+        executionRequirements:
+          type: string
+          nullable: true
+        acknowledgmentWitnessing:
+          type: string
+          nullable: true
+        durability:
+          type: string
+          nullable: true
+        specialAuthority:
+          type: string
+          nullable: true
+        competency:
+          type: string
+          nullable: true
+        statutoryForm:
+          type: string
+          nullable: true
+        effectiveDate:
+          type: string
+          nullable: true
+    PoaRequirementSource:
+      type: object
+      properties:
+        citation:
+          type: string
+          nullable: true
+        url:
+          type: string
+          format: uri
+          nullable: true
+        notes:
+          type: string
+          nullable: true
     ApiResponse:
       type: object
       properties:
