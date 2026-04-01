@@ -1,5 +1,8 @@
 bash scripts/gh-create-issues.sh
 
+
+lsof -nP -iTCP:4000 -sTCP:LISTEN | tail -n +2 | awk '{print $2}' | xargs -r kill
+
 run backend:
 cd backend && npm run dev
 

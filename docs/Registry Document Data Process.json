@@ -1,0 +1,66 @@
+[
+  {
+    "Product Registration\n(Related ID)": "Acknowledgement\n(IDN)",
+    "Document Types": "Acknowledgement",
+    "Use": "When an Acknowledgement is used as a stand-alone product, it is simply an add-on to a notary's normal process; the IDN will not relate to any other Registrations; there will not be any image scanned and uploaded",
+    "Related Data": "Full IDN Data: title, pages, signer(s), date, Illuminotary, address, location, location detail, and others present\n** n.b. Full IDN Data to be collected for all Documents",
+    "Assembly": "* The customer brings the document for notarizing\n* Acknowledgement generated through DARCI\n* Acknowledgement becomes the final page of the document and leaves with the customer",
+    "Result": "DARCI retains Full IDN Data; public can search Basic IDN Data through DARCI; no related image\n** n.b. every Document/IDN to include this functionality"
+  },
+  {
+    "Product Registration\n(Related ID)": "Real Property\n(DARCI Property ID)",
+    "Document Types": "Registration & Notice",
+    "Use": "This document is for use when Member wants to register a deed (or other document by which Member obtained ownership) that has already been executed and recorded sometime in the past.",
+    "Related Data": "Property Data: Address and Tax ID from local government (in California, this is called \"APN\")\nData about the previously executed and recorded document: the record date, record number, and vesting information.",
+    "Assembly": "* Registration & Notice generated through DARCI\n* An acknowledgement page is included as final page of the document",
+    "Result": "DARCI retains all data and an image of the Registration & Notice"
+  },
+  {
+    "Product Registration\n(Related ID)": "",
+    "Document Types": "Property Other",
+    "Use": "This document is for use when Member is registering a deed (or other document by which Member is obtaining ownership) that has yet to be executed and recorded.",
+    "Related Data": "Property Data: Address and Tax ID from local government (in California, this is called an \"Assesor's Parcel Number\" or \"APN\")",
+    "Assembly": "* Member supplies the document\n* The acknowledgement page is generated through DARCI\n* The acknowledgement page becomes the final page of the document, which Illuminotary keeps, scans, and uploads",
+    "Result": "DARCI retains all data and an image of the Document"
+  },
+  {
+    "Product Registration\n(Related ID)": "Trust\n(DARCI Trust ID)",
+    "Document Types": "Trust RRR",
+    "Use": "RRR\" stands for \"Restatement, Republication, and Registration\" This is the document by which a Trust is registered on DARCI and, once assembled, contains all the terms of the Trust.",
+    "Related Data": "Full Trust Data (all fields set forth in the Trust table), Grantor(s), Trustee(s), and Successor Trustee(s), plus date, pages, and title for each prior Trust document",
+    "Assembly": "* RRR generated through DARCI\n* An acknowledgement page is included as final page of the Document\n* Member to bring all prior Trust documents for inclusion in RRR\n* Illuminotary to scan and upload all as one Document",
+    "Result": "DARCI retains all data and an image of the RRR"
+  },
+  {
+    "Product Registration\n(Related ID)": "",
+    "Document Types": "Trust Certification",
+    "Use": "The Trust Certification contains all of the Trust information that is relevant to third parties doing business with the trustee and must remain current. Therefore, we will generate a new Trust Certification when the Trust is registered and anytime that a new document is registered to the Trust",
+    "Related Data": "Full Trust Data (all fields set forth in the Trust table), Grantor(s), Trustee(s), and Successor Trustee(s)",
+    "Assembly": "* Trust Certification generated through DARCI\n* The acknowledgement page is included as final page of the Document, which Illuminotary keeps, scans, and uploads",
+    "Result": "DARCI retains all data and an image of the Trust Certification"
+  },
+  {
+    "Product Registration\n(Related ID)": "",
+    "Document Types": "Trust Other",
+    "Use": "This Document Type is for use when Member is registering any subsequent Trust document, like an amendment or change of trustee",
+    "Related Data": "Full Trust Data (all fields set forth in the Trust table), Grantor(s), Trustee(s), and Successor Trustee(s)",
+    "Assembly": "* Member supplies the document\n* The acknowledgement page is generated through DARCI\n* The acknowledgement page becomes the final page of the Document, which Illuminotary keeps, scans, and uploads",
+    "Result": "DARCI retains all data and an image of the Document"
+  },
+  {
+    "Product Registration\n(Related ID)": "Power of Attorney\n(DARCI POA ID)",
+    "Document Types": "Power of Attorney",
+    "Use": "The Power of Attorney document is the document by which a principal names an agent who is authorized to act on the principal's behalf",
+    "Related Data": "Full POA Data (all fields set forth in the POA table), Principal, Agent(s), and Successor Agent(s)",
+    "Assembly": "* POA generated through DARCI\n* The acknowledgement page is included as final page of the Document, which Illuminotary keeps, scans, and uploads",
+    "Result": "DARCI retains all data and an image of the POA"
+  },
+  {
+    "Product Registration\n(Related ID)": "",
+    "Document Types": "POA Other",
+    "Use": "This Document Type is for use when Member is registering any subsequent POA document, such as a resignation or letter of incapacity",
+    "Related Data": "Full POA Data (all fields set forth in the POA table), Principal, Agent(s), and Successor Agent(s)",
+    "Assembly": "* Member supplies the document\n* The acknowledgement page is generated through DARCI\n* The acknowledgement page becomes the final page of the document, which Illuminotary keeps, scans, and uploads",
+    "Result": "DARCI retains all data and an image of the Document"
+  }
+]

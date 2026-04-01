@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useState } from "react";
 import { useStoredAuth } from "@/lib/auth";
+import { HelpTooltip } from "@/app/app/start/HelpTooltip";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -266,49 +267,10 @@ const formatDecisionValue = (value: string | boolean | number | null) => {
   return formatLabel(value);
 };
 
-const getSeverityStyles = (severity: InputRequirementNotice["severity"]) => {
-  if (severity === "blocking") {
-    return "border-red-200 bg-red-50 text-red-700";
-  }
-
-  if (severity === "warning") {
-    return "border-amber-200 bg-amber-50 text-amber-800";
-  }
-
-  return "border-sky-200 bg-sky-50 text-sky-800";
-};
-
-type HelpTooltipProps = {
-  label: string;
-  content: string;
-  align?: "left" | "right";
-};
-
-function HelpTooltip({ label, content, align = "left" }: HelpTooltipProps) {
-  const alignmentClassName = align === "right" ? "right-0" : "left-0";
-
-  return (
-    <span className="group relative inline-flex items-center gap-2">
-      <button
-        aria-label={label}
-        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-Color-Scheme-1-Border/40 bg-white text-[11px] font-medium text-Color-Neutral"
-        type="button"
-      >
-        ?
-      </button>
-      <span
-        className={`pointer-events-none absolute top-full z-20 mt-2 hidden w-[min(32rem,calc(100vw-4rem))] max-w-xl rounded-lg border border-Color-Scheme-1-Border/40 bg-white p-4 text-left text-sm leading-6 text-Color-Scheme-1-Text shadow-lg group-hover:block group-focus-within:block ${alignmentClassName}`}
-      >
-        {content}
-      </span>
-    </span>
-  );
-}
-
 export default function StartDocumentPage() {
   const { accessToken } = useStoredAuth();
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
-  const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
+  const [selectedJurisdiction, setSelectedJurisdiction] = useState("CA");
   const [requirement, setRequirement] = useState<PoaRequirement | null>(null);
   const [selectedExecutionPath, setSelectedExecutionPath] = useState("");
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
@@ -316,6 +278,7 @@ export default function StartDocumentPage() {
   const [isLoadingRequirement, setIsLoadingRequirement] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
+  const [dismissedNotices, setDismissedNotices] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!accessToken) {
@@ -459,6 +422,7 @@ export default function StartDocumentPage() {
 
   const handleJurisdictionChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setSelectedJurisdiction(event.target.value);
+    setDismissedNotices(new Set());
   };
 
   const handleFieldChange = (key: string, value: FormValue) => {
@@ -603,6 +567,24 @@ export default function StartDocumentPage() {
       .join(" ");
   };
 
+  const statutoryReferenceTooltip = statutoryReferenceRows.length ? (
+    <span className="block space-y-3">
+      {statutoryReferenceRows.map((row) => (
+        <span key={`${row.label}-${row.value}`} className="block space-y-1">
+          <span className="block text-[11px] uppercase tracking-[0.12em] text-white/65">
+            {row.label}
+          </span>
+          <span className="block text-xs leading-5 text-white">{row.value}</span>
+          {row.url ? (
+            <span className="block break-all text-[11px] leading-5 text-white/65">
+              {row.url}
+            </span>
+          ) : null}
+        </span>
+      ))}
+    </span>
+  ) : null;
+
   const renderFieldLabel = (field: InputRequirementField) => {
     const description = getFieldDescription(field);
 
@@ -610,9 +592,6 @@ export default function StartDocumentPage() {
       <div className="flex items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
         <span>{field.label}</span>
         {description ? <HelpTooltip label={`Explain ${field.label}`} content={description} /> : null}
-        {field.required ? (
-          <span className="text-xs uppercase tracking-[0.12em] text-Color-Neutral">Required</span>
-        ) : null}
       </div>
     );
   };
@@ -904,12 +883,18 @@ export default function StartDocumentPage() {
             <div>
               <div className="text-sm font-medium">Jurisdiction</div>
               <div className="mt-1 text-xs text-Color-Neutral">
-                Select a state to inspect POA requirements from the backend rules table.
+                Choose your state to load the Power of Attorney requirements that apply.
               </div>
             </div>
             {requirement ? (
-              <div className="rounded-full border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-1 text-xs uppercase tracking-[0.12em] text-Color-Neutral">
-                {formatLabel(requirement.uiProfile)}
+              <div className="inline-flex items-center gap-1.5">
+                <div className="rounded-full border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-Color-Neutral">
+                  {formatLabel(requirement.uiProfile)}
+                </div>
+                <HelpTooltip
+                  label="What is the execution model?"
+                  content="This badge shows the execution model for the selected state — it determines whether your Power of Attorney must be notarized, witnessed, or both in order to be legally valid."
+                />
               </div>
             ) : null}
           </div>
@@ -942,50 +927,16 @@ export default function StartDocumentPage() {
           <div className="text-xs text-Color-Neutral">
             <div className="group relative inline-flex items-center gap-2">
               <span className="font-medium text-Color-Scheme-1-Text">Statutory reference</span>
-              {statutoryReferenceRows.length ? (
-                <span className="group relative inline-flex items-center gap-2">
-                  <button
-                    aria-label="View statutory reference"
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-Color-Scheme-1-Border/40 bg-white text-[11px] font-medium text-Color-Neutral"
-                    type="button"
-                  >
-                    ?
-                  </button>
-                  <span className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[min(32rem,calc(100vw-4rem))] max-w-xl rounded-lg border border-Color-Scheme-1-Border/40 bg-white p-4 text-left shadow-lg group-hover:block group-focus-within:block">
-                    <span className="block space-y-3">
-                      {statutoryReferenceRows.map((row) => (
-                        <span key={`${row.label}-${row.value}`} className="block space-y-1">
-                          <span className="block text-[11px] uppercase tracking-[0.12em] text-Color-Neutral">
-                            {row.label}
-                          </span>
-                          <span className="block text-sm leading-6 text-Color-Scheme-1-Text">
-                            {row.value}
-                          </span>
-                          {row.url ? (
-                            <span className="block break-all text-xs text-Color-Neutral">
-                              {row.url}
-                            </span>
-                          ) : null}
-                        </span>
-                      ))}
-                    </span>
-                  </span>
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="text-xs text-Color-Neutral">
-            <div className="inline-flex items-center gap-2">
-              <span className="font-medium text-Color-Scheme-1-Text">Workflow logic snapshot</span>
-              {workflowSnapshotTooltip ? (
+              {statutoryReferenceTooltip ? (
                 <HelpTooltip
-                  label="View workflow logic snapshot help"
-                  content={workflowSnapshotTooltip}
+                  label="View statutory reference"
+                  content={statutoryReferenceTooltip}
                 />
               ) : null}
             </div>
           </div>
+
+
 
           {errorMessage ? (
             <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -995,9 +946,9 @@ export default function StartDocumentPage() {
 
           <div className="space-y-4 rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/60 p-4">
               <div>
-                <div className="text-sm font-medium">Required inputs</div>
+                <div className="text-sm font-medium">Document details</div>
                 <div className="mt-1 text-xs text-Color-Neutral">
-                  These fields are rendered from the backend `inputRequirements` contract for the selected jurisdiction.
+                  Fill in the information needed to prepare your Power of Attorney for the selected state.
                 </div>
               </div>
               {isLoadingRequirement ? (
@@ -1006,12 +957,24 @@ export default function StartDocumentPage() {
                 <div className="space-y-4">
                   {inputRequirements?.notices.length ? (
                     <div className="space-y-2">
-                      {inputRequirements.notices.map((notice) => (
+                      {inputRequirements.notices
+                        .filter((notice) => !dismissedNotices.has(notice.key))
+                        .map((notice) => (
                         <div
                           key={notice.key}
-                          className={`rounded border px-3 py-3 text-sm ${getSeverityStyles(notice.severity)}`}
+                          className="flex items-center justify-between gap-3 bg-Color-Neutral-Darker px-3 py-1 text-xs leading-5 text-Color-Neutral-Lightest"
                         >
-                          {notice.message}
+                          <span>{notice.message}</span>
+                          <button
+                            aria-label="Dismiss notice"
+                            className="shrink-0 cursor-pointer text-sm leading-none text-Color-Neutral-Lightest/60 transition hover:text-Color-Neutral-Lightest"
+                            onClick={() =>
+                              setDismissedNotices((prev) => new Set([...prev, notice.key]))
+                            }
+                            type="button"
+                          >
+                            ×
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -1039,9 +1002,7 @@ export default function StartDocumentPage() {
                               />
                             ) : null}
                           </div>
-                          <div className="mt-1 text-xs uppercase tracking-[0.12em] text-Color-Neutral">
-                            {formatLabel(section.presence)}
-                          </div>
+
                         </div>
                         {section.repeatable ? (
                           <div className="text-xs uppercase tracking-[0.12em] text-Color-Neutral">
@@ -1066,16 +1027,10 @@ export default function StartDocumentPage() {
                                   ? null
                                   : renderFieldLabel(field)}
                                 {fieldControl}
-                                <div className="flex flex-wrap gap-2 text-xs text-Color-Neutral">
-                                  <span>From {formatLabel(field.collectFrom)}</span>
-                                  {field.defaultSource !== "none" ? (
-                                    <span>Default: {formatLabel(field.defaultSource)}</span>
-                                  ) : null}
-                                </div>
-                                {renderAllowedValueGlossary(field)}
-                                {field.helpText ? (
-                                  <div className="text-xs text-Color-Neutral">{field.helpText}</div>
+                                {field.required ? (
+                                  <div className="text-xs text-Color-Neutral">Required field</div>
                                 ) : null}
+                                {renderAllowedValueGlossary(field)}
                               </div>
                             );
                           })}
@@ -1088,8 +1043,8 @@ export default function StartDocumentPage() {
                     </div>
                   ))}
 
-                  <div className="rounded-lg border border-Color-Scheme-1-Border/30 bg-white p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
+                  <details className="rounded-lg border border-Color-Scheme-1-Border/30 bg-white">
+                    <summary className="flex cursor-pointer items-center gap-2 p-4 text-sm font-medium text-Color-Scheme-1-Text">
                       <span>Workflow logic snapshot</span>
                       {workflowSnapshotTooltip ? (
                         <HelpTooltip
@@ -1097,8 +1052,8 @@ export default function StartDocumentPage() {
                           content={workflowSnapshotTooltip}
                         />
                       ) : null}
-                    </div>
-                    <div className="mt-3 space-y-2 text-sm">
+                    </summary>
+                    <div className="space-y-2 border-t border-Color-Scheme-1-Border/20 px-4 py-3 text-sm">
                       {decisionRows.map((row) => (
                         <div key={row.label} className="flex items-start justify-between gap-4">
                           <div className="text-Color-Neutral">{row.label}</div>
@@ -1108,7 +1063,7 @@ export default function StartDocumentPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 </div>
               ) : (
                 <div className="text-sm text-Color-Neutral">

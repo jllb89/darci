@@ -1,55 +1,110 @@
-# POA Input Requirements Schema Draft
+# POA Input Requirements Schema v2
 
-This document defines a derived `input_requirements` contract for Power of Attorney workflows.
+This document defines the derived `input_requirements` contract for Power of Attorney workflows.
 
 It is intentionally separate from `docs/POA_requirements.json`.
 
-- `POA_requirements.json` remains the legal/source layer.
-- `input_requirements` is the product/workflow layer.
-- The backend should derive `input_requirements` from normalized POA rules and curated overrides.
-- The frontend should render sections and validations from `input_requirements`, not from raw legal prose.
+- `POA_requirements.json` is the legal/source layer.
+- `input_requirements` is the product/workflow contract.
+- Backend derives workflow requirements from legal rules plus curated overrides.
+- Frontend renders from `input_requirements`, not raw legal prose.
+
+This schema supports all POA workflow branches in one contract:
+
+- `general`
+- `durable`
+- `medical`
+- `limited`
+
+## Core Architecture
+
+Target system model:
+
+1. legal rules -> normalized staging rules
+2. normalized rules -> classification + capabilities + derived requirements
+3. classification + poa_type -> base template
+4. state -> overlay for execution formalities, notices, and clause behavior
+5. member inputs -> fill base template + overlay
+
+This keeps jurisdiction variation concentrated in normalization and overlays, rather than forking full templates per state.
 
 ## Goals
 
-- Express exactly which user inputs DARCI must collect for a given jurisdiction and POA type.
-- Encode workflow semantics, not React component names.
-- Support conditional branches such as `notary_or_witness`.
-- Keep the shape stable enough for API and UI reuse.
-- Allow manual overrides where legal text does not fully determine the UX.
+- One stable API contract for all POA workflows.
+- Explicit classification, capabilities, and template-resolution support.
+- Separate legal/source interpretation from product rendering.
+- Preserve legal-source traceability and derivation auditability.
+- Keep section/field semantics UI-agnostic.
 
 ## Non-Goals
 
-- Storing raw frontend component identifiers such as `Select`, `RadioGroup`, or `Textarea`.
-- Replacing the legal/source record.
-- Modeling every visual detail of the form.
+- Replacing legal text in `POA_requirements.json`.
+- Storing frontend component names.
+- Modeling pixel-level rendering details.
 
-## Recommended Ownership
+## Source Normalization Staging
 
-Short term:
-- Draft and validate this contract in docs.
-- Implement the derivation in the backend first.
-- Return `input_requirements` from the POA API without changing the database yet.
+`POA_requirements.json` is useful but still phrase-heavy and partially mixed (for example `Not addressed`, `Varies by type`).
 
-Later, only if it proves stable:
-- Persist the derived result in Postgres as JSONB, or
-- Persist only curated overrides and keep final assembly in the backend.
+Before deriving final `input_requirements`, backend should generate a staging object from raw legal text:
+
+```json
+{
+  "execution_rule": "NOTARY_OR_WITNESSES",
+  "durability_rule": "DURABLE_IF_STATED",
+  "specific_authority_rule": "EXPLICIT_REQUIRED",
+  "effective_date_rule": "IMMEDIATE_OR_SPECIFIED",
+  "statutory_form_rule": "AVAILABLE",
+  "competency_rule": "CAPACITY_REQUIRED",
+  "normalization_confidence": "high"
+}
+```
+
+Suggested `normalization_confidence` values:
+
+- `high`
+- `medium`
+- `low`
+
+Low confidence should force `manual_review_required = true`.
 
 ## Top-Level Shape
 
 ```json
 {
-  "schema_version": "2026-03-27",
+  "schema_version": "2026-04-01",
   "jurisdiction": "US-CA",
   "poa_type": "general",
   "ui_profile": "poa_standard",
   "derivation_mode": "rules_plus_overrides",
   "review_status": "draft",
+  "api_representation_mode": "sectioned_plus_flattened_summaries",
+  "classification": {
+    "poa_system": "NON_UPOAA_STANDARD",
+    "execution_model": "NOTARY_OR_WITNESSES"
+  },
+  "poa_capabilities": {
+    "notary_required": true,
+    "witnesses_required": true,
+    "alternative_execution_path_allowed": true,
+    "special_authority_initials_required": false,
+    "statutory_form_available": true,
+    "springing_authority_supported": true,
+    "durability_default_presumed": false,
+    "type_specific_execution_rules_present": false
+  },
+  "template_resolution": {
+    "base_template_key": "poa_general_v2",
+    "state_overlay_key": "ca_overlay_v2",
+    "execution_profile": "CA_NOTARY_OR_2W"
+  },
   "workflow": {
-    "execution_paths": [],
     "steps": [],
+    "required_artifacts": [],
     "submission_checks": []
   },
   "sections": [],
+  "section_summaries": {},
   "document_outputs": [],
   "notices": [],
   "source_trace": []
@@ -58,63 +113,203 @@ Later, only if it proves stable:
 
 ## Top-Level Field Definitions
 
-- `schema_version`: version of the derived contract, not the legal source.
-- `jurisdiction`: canonical code such as `US-CA`.
-- `poa_type`: canonical POA type such as `general`, `durable`, `medical`, `limited`.
-- `ui_profile`: coarse rendering profile already aligned with the POA rules table.
-- `derivation_mode`: how this record was produced.
+- `schema_version`: version of this contract.
+- `jurisdiction`: canonical key such as `US-CA`, `US-CT`.
+- `poa_type`: branch for POA workflow behavior.
+  Allowed values: `general`, `durable`, `medical`, `limited`.
+- `ui_profile`: coarse rendering profile.
+- `derivation_mode`: output production mode.
   Allowed values: `rules_only`, `rules_plus_overrides`, `manual_review`.
-- `review_status`: product/compliance confidence level.
+- `review_status`: confidence level.
   Allowed values: `draft`, `verified`, `needs_review`.
-- `workflow`: process decisions that affect which sections appear and in what order.
-- `sections`: canonical form sections and their fields.
-- `document_outputs`: required execution artifacts that must exist before completion.
-- `notices`: disclosures or warnings the UI must show.
-- `source_trace`: pointers back to normalized rules and statutory references.
+- `api_representation_mode`: response shape policy.
+  Allowed values: `sectioned_only`, `sectioned_plus_flattened_summaries`.
+- `classification`: legal/behavioral classification.
+- `poa_capabilities`: normalized capability flags; keeps capability detail out of classification enums.
+- `template_resolution`: base template plus state overlay selection.
+- `workflow`: process sequencing and input prerequisites (`required_artifacts`) used before generation.
+- `sections`: canonical semantic input sections and fields.
+- `section_summaries`: optional flattened section mirrors for convenience reads.
+- `document_outputs`: generated deliverables emitted by the system.
+- `notices`: UI notices and warnings.
+- `source_trace`: source mapping for audit/debug.
 
-## Workflow Object
+### Representation rules
+
+- `sections` is the canonical contract representation.
+- `section_summaries` is optional and read-only; it mirrors selected section values for convenience.
+- If both are present, they must agree on overlapping values.
+- New writes should target canonical `sections` values.
+
+## Classification
 
 ```json
 {
-  "execution_paths": [
-    {
-      "key": "notary_acknowledgment",
-      "label": "Sign before a notary",
-      "default": true,
-      "availability": "allowed"
-    }
-  ],
+  "poa_system": "UPOAA_STANDARD",
+  "execution_model": "NOTARY_ONLY"
+}
+```
+
+### poa_system enum
+
+- `UPOAA_STANDARD`
+- `UPOAA_PLUS`
+- `NON_UPOAA_STANDARD`
+- `CIVIL_LAW_MANDATE`
+- `HIGH_FORMALITY_VARIANT`
+
+### execution_model enum
+
+- `NOTARY_ONLY`
+- `WITNESSES_ONLY`
+- `NOTARY_OR_WITNESSES`
+- `NOTARY_AND_WITNESSES`
+- `FORMAL_ACT`
+- `TYPE_SPECIFIC_VARIANT`
+
+### Suggested classification derivation
+
+- `CIVIL_LAW_MANDATE`
+  - civil-law mandate posture or formal-act execution language.
+- `HIGH_FORMALITY_VARIANT`
+  - still POA-based but with elevated execution complexity (for example initials/capacity/witness/ack overlays).
+- `UPOAA_PLUS`
+  - UPOAA posture with notable execution overlays.
+- `UPOAA_STANDARD`
+  - UPOAA posture without major execution overlays.
+- `NON_UPOAA_STANDARD`
+  - non-UPOAA posture without civil-law/formal-act structure.
+
+- `execution_model = NOTARY_OR_WITNESSES`
+  - execution allows either notary route or witness route.
+- `execution_model = NOTARY_AND_WITNESSES`
+  - both notary and witness requirements apply.
+- `execution_model = NOTARY_ONLY`
+  - notary route required and witness route not required.
+- `execution_model = WITNESSES_ONLY`
+  - witness route required without notary requirement.
+- `execution_model = TYPE_SPECIFIC_VARIANT`
+  - legal text states behavior varies by POA type or transaction type.
+- `execution_model = FORMAL_ACT`
+  - execution follows formal-act/civil-law style requirements.
+
+## POA Capabilities
+
+This object captures feature signals independently from classification.
+
+```json
+{
+  "notary_required": true,
+  "witnesses_required": true,
+  "alternative_execution_path_allowed": false,
+  "special_authority_initials_required": true,
+  "statutory_form_available": true,
+  "springing_authority_supported": true,
+  "durability_default_presumed": false,
+  "type_specific_execution_rules_present": false
+}
+```
+
+### poa_capabilities fields
+
+- `notary_required`: notary execution path is required by default.
+- `witnesses_required`: witness participation is required by default.
+- `alternative_execution_path_allowed`: multiple compliant execution paths are available.
+- `special_authority_initials_required`: explicit initials/signature required for specific authorities.
+- `statutory_form_available`: jurisdiction provides statutory form(s).
+- `springing_authority_supported`: authority can become effective on future condition/event.
+- `durability_default_presumed`: durability is presumed without extra language.
+- `type_specific_execution_rules_present`: legal text indicates type-specific execution variance.
+
+### Capability usage notes
+
+- Keep `classification` coarse; use `poa_capabilities` for feature-level branching.
+- Capabilities are derived and may come from legal rules plus curated overlays.
+- Missing certainty should default conservative and trigger manual review.
+
+## Template Resolution
+
+```json
+{
+  "base_template_key": "poa_general_v2",
+  "state_overlay_key": "ct_overlay_v2",
+  "execution_profile": "CT_NOTARY_AND_2W"
+}
+```
+
+### Template fields
+
+- `base_template_key`: selected by `poa_type` and optionally classification.
+- `state_overlay_key`: state-specific overlays for execution text, notices, and branch behavior.
+- `execution_profile`: execution/certificate profile key (single source of truth for execution profile display behavior).
+
+Do not duplicate execution profile as separate competing profile fields in other sections.
+
+### Suggested execution_profile enum
+
+- `STANDARD_NOTARY`
+- `STANDARD_WITNESSES`
+- `CA_NOTARY_OR_2W`
+- `CT_NOTARY_AND_2W`
+- `FL_2W_PLUS_NOTARY`
+- `NY_HIGH_FORMALITY`
+- `LA_FORMAL_ACT`
+
+## Workflow
+
+```json
+{
   "steps": [
-    "principal_details",
-    "agent_details",
+    "poa_type_selection",
+    "principal",
+    "agent",
     "authority_scope",
-    "execution_requirements",
+    "durability",
+    "effective_date",
+    "execution_choice",
     "review"
   ],
+  "required_artifacts": [
+    "principal_identity_evidence",
+    "agent_identity_information",
+    "witness_information_if_required",
+    "representative_capacity_evidence_if_required"
+  ],
   "submission_checks": [
-    "principal_signed",
-    "required_witnesses_present",
-    "required_notary_path_selected"
+    "required_fields_complete",
+    "required_execution_fields_complete",
+    "required_special_authority_fields_complete",
+    "manual_review_gate_if_applicable"
   ]
 }
 ```
 
-### Workflow Enums
+### Contract boundary: artifacts vs outputs
 
-- `execution_paths[].availability`
-  Allowed values: `required`, `allowed`, `not_allowed`, `manual_review`.
+- `required_artifacts`: prerequisite inputs or uploads required before generation.
+- `document_outputs`: generated deliverables produced after generation.
+- Signed/generated execution artifacts belong in `document_outputs`, not in `required_artifacts`.
 
-### Recommended Execution Path Keys
+### required_artifacts by poa_type
 
-- `notary_acknowledgment`
-- `witness_execution`
-- `notary_and_witness_execution`
-- `recording_dependent_durability`
-- `manual_review`
+- `general`
+  - `principal_identity_evidence`
+  - `agent_identity_information`
+  - `witness_information_if_required`
+- `durable`
+  - `principal_identity_evidence`
+  - `agent_identity_information`
+  - `durability_clause_confirmation`
+- `medical`
+  - `principal_identity_evidence`
+  - `agent_identity_information`
+  - `healthcare_notice_acknowledgment_if_required`
+- `limited`
+  - `principal_identity_evidence`
+  - `agent_identity_information`
+  - `transaction_scope_details`
 
 ## Section Shape
-
-Each section is semantic, not visual.
 
 ```json
 {
@@ -122,30 +317,18 @@ Each section is semantic, not visual.
   "title": "Principal",
   "presence": "required",
   "repeatable": false,
-  "applies_to_paths": ["notary_acknowledgment", "witness_execution"],
+  "applies_to_poa_types": ["general", "durable", "medical", "limited"],
   "fields": []
 }
 ```
 
-### Section Enums
+### Section presence enum
 
-- `presence`
-  Allowed values: `required`, `optional`, `conditional`, `hidden`, `manual_review`.
-
-### Recommended Section Keys
-
-- `principal`
-- `agent`
-- `successor_agent`
-- `co_agents`
-- `authority_scope`
-- `durability`
-- `effective_date`
-- `execution_choice`
-- `witnesses`
-- `notary`
-- `special_instructions`
-- `statutory_notices`
+- `required`
+- `optional`
+- `conditional`
+- `hidden`
+- `manual_review`
 
 ## Field Shape
 
@@ -165,98 +348,416 @@ Each section is semantic, not visual.
 }
 ```
 
-### Field Properties
+### Field properties
 
 - `key`: stable API identifier.
-- `label`: default human-readable label.
-- `semantic_type`: meaning of the field, not the control implementation.
-- `required`: whether the value must be supplied for the current path.
-- `data_type`: storage and validation primitive.
-- `collect_from`: who supplies the value.
-- `default_source`: whether DARCI may prefill it.
-- `validation`: primitive constraints and allowed values.
-- `help_text`: optional short product guidance.
-- `when`: optional conditional expression for path-specific fields.
+- `label`: display label.
+- `semantic_type`: field meaning.
+- `required`: branch-specific required status.
+- `data_type`: primitive type.
+- `collect_from`: input source.
+- `default_source`: prefill policy.
+- `validation`: primitive constraints.
+- `help_text`: optional guidance.
+- `when`: optional condition object.
+- `derivation_rule`: optional source derivation hint.
 
-### Field Enums
+### semantic_type suggested values
 
-- `semantic_type`
-  Allowed values:
-  - `person_name`
-  - `person_address`
-  - `person_contact`
-  - `enum_single`
-  - `enum_multi`
-  - `boolean`
-  - `date`
-  - `text`
-  - `initials`
-  - `signature_mark`
-  - `witness_count`
-  - `acknowledgment_choice`
-  - `legal_notice_acceptance`
-  - `recording_status`
+- `person_name`
+- `person_address`
+- `person_contact`
+- `authority_selection`
+- `special_authority_status`
+- `special_authority_initials`
+- `durability_status`
+- `effective_date_status`
+- `springing_trigger`
+- `execution_model`
+- `execution_requirement_status`
+- `witness_count`
+- `notary_requirement_status`
+- `statutory_form_status`
+- `competency_status`
+- `recording_requirement_note`
+- `legal_notice_acceptance`
+- `manual_review_reason`
 
-- `data_type`
-  Allowed values: `string`, `integer`, `boolean`, `date`, `array`.
+### data_type enum
 
-- `collect_from`
-  Allowed values: `member`, `principal`, `agent`, `notary`, `system`.
+- `string`
+- `integer`
+- `boolean`
+- `date`
+- `array`
+- `object`
 
-- `default_source`
-  Allowed values: `none`, `user_profile`, `document_template`, `jurisdiction_default`, `system_derived`.
+### collect_from enum
 
-## Conditional Expressions
+- `member`
+- `principal`
+- `agent`
+- `notary`
+- `witness`
+- `system`
 
-Only one minimal conditional format is recommended for v1.
+### default_source enum
+
+- `none`
+- `user_profile`
+- `jurisdiction_default`
+- `system_derived`
+- `document_template`
+- `previous_document`
+
+### execution_requirement_status enum
+
+- `required`
+- `not_required`
+- `conditional`
+- `alternative_path`
+
+### durability_default_status enum
+
+- `durable_by_default`
+- `durable_if_stated`
+- `non_durable_by_default`
+- `type_specific`
+- `not_addressed`
+
+### specific_authority_status enum
+
+- `explicit_required`
+- `explicit_required_with_initials`
+- `not_required`
+- `type_specific`
+- `not_addressed`
+
+### effective_date_status enum
+
+- `immediate_default`
+- `immediate_or_specified`
+- `specified_event_allowed`
+- `type_specific`
+- `not_addressed`
+
+### statutory_form_status enum
+
+- `available`
+- `available_not_mandatory`
+- `multiple_forms_available`
+- `not_available`
+- `not_addressed`
+
+### competency_status enum
+
+- `capacity_required`
+- `competent_adult_required`
+- `sound_mind_required`
+- `not_addressed`
+
+## Conditions
 
 ```json
 {
   "all": [
     {
-      "fact": "selected_execution_path",
+      "fact": "poa_type",
       "operator": "equals",
-      "value": "witness_execution"
+      "value": "durable"
     }
   ]
 }
 ```
 
-### Condition Facts
+### condition facts
 
-- `selected_execution_path`
-- `durability_rule`
-- `specific_authority_rule`
-- `effective_date_rule`
-- `statutory_form_rule`
-- `review_status`
+- `poa_type`
+- `poa_system`
+- `execution_model`
+- `execution_profile`
+- `capability_notary_required`
+- `capability_witnesses_required`
+- `capability_alternative_execution_path_allowed`
+- `capability_special_authority_initials_required`
+- `capability_springing_authority_supported`
+- `manual_review_required`
+- `statutory_form_available`
+- `recording_requirement_present`
 
-### Condition Operators
+### condition operators
 
 - `equals`
 - `not_equals`
 - `in`
 - `not_in`
+- `is_true`
+- `is_false`
+
+## Canonical Sections
+
+1. `document_context`
+2. `principal`
+3. `agent`
+4. `successor_agent`
+5. `authority_scope`
+6. `durability`
+7. `effective_date`
+8. `execution_choice`
+9. `witnesses`
+10. `notary`
+11. `special_instructions`
+12. `statutory_notices`
+13. `manual_review`
+
+## Section Presence by POA Type
+
+| Section | General | Durable | Medical | Limited |
+|---|---|---|---|---|
+| document_context | required | required | required | required |
+| principal | required | required | required | required |
+| agent | required | required | required | required |
+| successor_agent | optional | optional | optional | optional |
+| authority_scope | required | required | conditional | required |
+| durability | optional | required | conditional | optional |
+| effective_date | required | required | required | required |
+| execution_choice | required | required | required | required |
+| witnesses | conditional | conditional | conditional | conditional |
+| notary | conditional | conditional | conditional | conditional |
+| special_instructions | optional | optional | optional | optional |
+| statutory_notices | required | required | required | required |
+| manual_review | conditional | conditional | conditional | conditional |
+
+Frontend rendering rule: `manual_review` must remain hidden unless `manual_review_required = true`.
+
+## Core Field Catalog
+
+### document_context
+
+- `poa_type` (enum_single, required)
+- `jurisdiction` (enum_single, required)
+- `base_template_key` (string, required, system_derived)
+- `state_overlay_key` (string, required, system_derived)
+- `execution_profile` (enum_single, required, system_derived)
+
+### principal
+
+- `principal_full_name` (person_name, required)
+- `principal_address` (person_address, required)
+- `principal_contact` (person_contact, optional)
+
+### agent
+
+- `agent_full_name` (person_name, required)
+- `agent_address` (person_address, required)
+- `agent_contact` (person_contact, optional)
+
+### authority_scope
+
+- `authority_scope_selection` (authority_selection, required)
+- `specific_authority_status` (specific_authority_status, required, system_derived)
+- `special_authority_initials_required` (boolean, required, system_derived)
+- `special_authority_initials` (special_authority_initials, conditional)
+
+### durability
+
+- `durability_default_status` (durability_default_status, required, system_derived)
+- `durability_clause_required` (boolean, conditional, system_derived)
+- `durability_clause_text` (text, conditional, system_derived)
+
+### effective_date
+
+- `effective_date_status` (effective_date_status, required, system_derived)
+- `springing_authority_supported` (boolean, required, system_derived)
+- `springing_trigger_description` (springing_trigger, conditional)
+
+### execution_choice
+
+- `execution_model` (execution_model, required, system_derived)
+- `notary_required_status` (execution_requirement_status, required, system_derived)
+- `witnesses_required_status` (execution_requirement_status, required, system_derived)
+- `alternative_execution_path_allowed` (boolean, conditional, system_derived)
+- `execution_model_basis` (text, conditional, system_derived)
+
+### witnesses
+
+- `witness_count_minimum` (witness_count, conditional, system_derived)
+- `witness_eligibility_note` (text, conditional, system_derived)
+
+### notary
+
+- `notary_acknowledgment_required` (boolean, conditional, system_derived)
+- `notary_certificate_note` (text, conditional, system_derived)
+
+### statutory_notices
+
+- `statutory_form_status` (statutory_form_status, required, system_derived)
+- `competency_status` (competency_status, required, system_derived)
+- `competency_notice` (text, conditional, system_derived)
+- `recording_requirement_note` (recording_requirement_note, conditional, system_derived)
+
+### manual_review
+
+- `manual_review_required` (boolean, required, system_derived)
+- `manual_review_reason` (text, conditional, system_derived)
+
+Execution profile source of truth remains `template_resolution.execution_profile`.
+
+## Derivation Mapping From POA Requirements
+
+Mappings are direct and do not reinterpret legal meaning.
+
+- `Jurisdiction` -> `document_context.jurisdiction`
+- `Governing Law` -> classification support + `source_trace`
+- `Execution Requirements` + `Acknowledgment/Witnessing` -> `classification.execution_model`, `execution_choice.*`, `poa_capabilities.notary_required`, `poa_capabilities.witnesses_required`, `poa_capabilities.alternative_execution_path_allowed`
+- `Durability` -> `durability.durability_default_status`, `durability.durability_clause_required`, `poa_capabilities.durability_default_presumed`
+- `Specific Authority Required for Certain Acts` -> `authority_scope.specific_authority_status`, `authority_scope.special_authority_initials_required`, `poa_capabilities.special_authority_initials_required`
+- `Statutory Form Available` -> `statutory_notices.statutory_form_status`, `poa_capabilities.statutory_form_available`
+- `Effective Date` -> `effective_date.effective_date_status`, `effective_date.springing_authority_supported`, `poa_capabilities.springing_authority_supported`
+- `Competency Requirement` -> `statutory_notices.competency_status`, `statutory_notices.competency_notice`
+
+## Normalization Guidance
+
+Normalize source text to lowercase, trim whitespace, and apply first-match-wins in listed priority order.
+
+### Compact normalization decision table
+
+#### execution_model
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "varies by type", "varies" | `TYPE_SPECIFIC_VARIANT` |
+| 2 | "formal act", "authentic act", "civil code mandate" | `FORMAL_ACT` |
+| 3 | "notary public and two witnesses", "notarized and witnessed", "two witnesses, notarized" | `NOTARY_AND_WITNESSES` |
+| 4 | "notary public or two witnesses", "notarized or witnessed" | `NOTARY_OR_WITNESSES` |
+| 5 | "two witnesses" without notary phrasing | `WITNESSES_ONLY` |
+| 6 | "acknowledged before notary public", "signed before notary" | `NOTARY_ONLY` |
+
+#### execution_requirement_status
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "or" between compliant paths | `alternative_path` |
+| 2 | "if", "when", "depending on", "type-specific" | `conditional` |
+| 3 | "not required" | `not_required` |
+| 4 | "required", "must", "shall", "signed before", "acknowledged" | `required` |
+
+#### durability_default_status
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "presumed durable unless stated otherwise", "durable unless stated otherwise" | `durable_by_default` |
+| 2 | "durable if specific language included", "durable if specific notices included" | `durable_if_stated` |
+| 3 | "varies by type" | `type_specific` |
+| 4 | "not addressed" | `not_addressed` |
+
+#### specific_authority_status
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "separate signature/initial", "superpowers" | `explicit_required_with_initials` |
+| 2 | "yes", "for certain acts", "for actions like" | `explicit_required` |
+| 3 | "varies by type" | `type_specific` |
+| 4 | "not addressed" | `not_addressed` |
+
+#### effective_date_status
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "upon execution unless otherwise specified" | `immediate_default` |
+| 2 | "upon execution or as specified" | `immediate_or_specified` |
+| 3 | "upon execution or specified event" | `specified_event_allowed` |
+| 4 | "varies by type" | `type_specific` |
+| 5 | "not addressed" | `not_addressed` |
+
+#### statutory_form_status
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "yes, short and long forms", "general and health care" | `multiple_forms_available` |
+| 2 | "yes, but not mandatory", "yes, but voluntary" | `available_not_mandatory` |
+| 3 | "yes" | `available` |
+| 4 | "not addressed" | `not_addressed` |
+
+#### competency_status
+
+| Priority | Source phrase patterns (case-insensitive) | Normalized status |
+|---|---|---|
+| 1 | "capacity to contract", "capacity to understand" | `capacity_required` |
+| 2 | "competent adult", "competent at time of execution", "sufficient mental capacity" | `competent_adult_required` |
+| 3 | "sound mind" | `sound_mind_required` |
+| 4 | "not addressed" | `not_addressed` |
+
+Default rule when no matching phrase is found:
+
+- set status to the most conservative conditional/type-specific value.
+- set `manual_review_required = true`.
+- include raw text in `source_trace` for explainability.
+
+## Review State Rules
+
+- If `manual_review.manual_review_required = true`, then `review_status` MUST be `needs_review`.
+- If `manual_review.manual_review_required = false`, `review_status` may be `draft` or `verified`.
+- `review_status = verified` requires submission checks to pass and no active manual-review gate.
+- `derivation_mode = manual_review` should set `manual_review.manual_review_required = true` and `review_status = needs_review`.
 
 ## Document Outputs
-
-These are required artifacts, not UI sections.
 
 ```json
 [
   {
-    "key": "signed_poa_document",
-    "required": true
+    "key": "generated_poa_document",
+    "required": true,
+    "output_category": "legal_requirement"
+  },
+  {
+    "key": "notary_acknowledgment",
+    "required": false,
+    "output_category": "legal_requirement",
+    "when": {
+      "all": [
+        {
+          "fact": "capability_notary_required",
+          "operator": "is_true"
+        }
+      ]
+    }
   },
   {
     "key": "witness_attestation",
     "required": false,
+    "output_category": "legal_requirement",
     "when": {
       "all": [
         {
-          "fact": "selected_execution_path",
-          "operator": "equals",
-          "value": "witness_execution"
+          "fact": "capability_witnesses_required",
+          "operator": "is_true"
+        }
+      ]
+    }
+  },
+  {
+    "key": "special_authority_initials_page",
+    "required": false,
+    "output_category": "legal_requirement",
+    "when": {
+      "all": [
+        {
+          "fact": "capability_special_authority_initials_required",
+          "operator": "is_true"
+        }
+      ]
+    }
+  },
+  {
+    "key": "generation_review_report",
+    "required": false,
+    "output_category": "operational_optional",
+    "when": {
+      "all": [
+        {
+          "fact": "manual_review_required",
+          "operator": "is_true"
         }
       ]
     }
@@ -264,31 +765,42 @@ These are required artifacts, not UI sections.
 ]
 ```
 
-### Recommended Output Keys
+### output_category enum
 
-- `signed_poa_document`
-- `notary_acknowledgment`
-- `witness_attestation`
-- `special_authority_initials`
-- `durability_clause`
-- `springing_trigger_clause`
-- `recording_confirmation`
+- `legal_requirement`
+- `operational_optional`
 
 ## Notices
-
-Use notices for compliance or product warnings that must be shown, but are not themselves fields.
 
 ```json
 [
   {
-    "key": "capacity_required",
+    "key": "capacity_required_notice",
     "severity": "info",
-    "message": "The principal must have the required legal capacity at signing."
+    "message": "The principal must have required legal capacity at execution."
+  },
+  {
+    "key": "execution_formality_notice",
+    "severity": "info",
+    "message": "Execution formalities vary by jurisdiction and POA type."
+  },
+  {
+    "key": "manual_review_notice",
+    "severity": "warning",
+    "message": "This jurisdiction requires manual review before final generation.",
+    "when": {
+      "all": [
+        {
+          "fact": "manual_review_required",
+          "operator": "is_true"
+        }
+      ]
+    }
   }
 ]
 ```
 
-### Notice Severities
+### Notice severities
 
 - `info`
 - `warning`
@@ -296,342 +808,193 @@ Use notices for compliance or product warnings that must be shown, but are not t
 
 ## Source Trace
 
-The frontend does not need to interpret this. It exists for debugging, auditability, and later admin tooling.
-
 ```json
 [
   {
     "source": "poa_requirements",
-    "field": "ack_requirement",
-    "value": "notary_or_witness"
+    "field": "Acknowledgment/Witnessing",
+    "value": "Acknowledged before notary public or two witnesses"
   },
   {
     "source": "poa_requirements",
-    "field": "specific_authority_rule",
-    "value": "explicit_required"
+    "field": "Specific Authority Required for Certain Acts",
+    "value": "Yes, \"superpowers\" require separate signature/initial"
   }
 ]
 ```
 
-## Canonical Base Sections For v1
-
-These sections should exist across almost every state, even if some become hidden or optional.
-
-1. `principal`
-2. `agent`
-3. `authority_scope`
-4. `durability`
-5. `effective_date`
-6. `execution_choice`
-7. `witnesses`
-8. `notary`
-9. `special_instructions`
-10. `statutory_notices`
-
-This keeps frontend rendering predictable while still allowing state variation through `presence`, `applies_to_paths`, and per-field `when` conditions.
-
-## Mapping Guidance From Existing POA Rules
-
-These current normalized POA fields should directly influence the derived contract.
-
-- `ack_requirement`
-  Drives available `execution_paths`, `witnesses` section presence, and `notary` section presence.
-
-- `durability_rule`
-  Drives the `durability` section and whether a clause is required, optional, defaulted, or review-only.
-
-- `specific_authority_rule`
-  Drives whether `authority_scope` includes explicit authority picks and initials.
-
-- `statutory_form_rule`
-  Drives notices, optional template selection, and whether freeform drafting should be discouraged.
-
-- `effective_date_rule`
-  Drives whether `effective_date` exposes immediate effect only, optional future date, or springing options.
-
-- `competency_rule`
-  Drives notices and any required acknowledgment checkbox.
-
-- `ui_profile`
-  Drives high-level rendering style, not legal logic.
-
-## Example A: California General POA
-
-This example shows a branching jurisdiction where either a notary path or a two-witness path may be used.
+## Pilot Example A: California General POA
 
 ```json
 {
-  "schema_version": "2026-03-27",
   "jurisdiction": "US-CA",
   "poa_type": "general",
-  "ui_profile": "poa_standard",
-  "derivation_mode": "rules_plus_overrides",
-  "review_status": "draft",
-  "workflow": {
-    "execution_paths": [
-      {
-        "key": "notary_acknowledgment",
-        "label": "Sign before a notary",
-        "default": true,
-        "availability": "allowed"
-      },
-      {
-        "key": "witness_execution",
-        "label": "Use two witnesses instead of a notary",
-        "default": false,
-        "availability": "allowed"
-      }
-    ],
-    "steps": [
-      "principal_details",
-      "agent_details",
-      "authority_scope",
-      "execution_requirements",
-      "review"
-    ],
-    "submission_checks": [
-      "principal_signed",
-      "one_execution_path_selected"
-    ]
+  "api_representation_mode": "sectioned_plus_flattened_summaries",
+  "classification": {
+    "poa_system": "NON_UPOAA_STANDARD",
+    "execution_model": "NOTARY_OR_WITNESSES"
+  },
+  "poa_capabilities": {
+    "notary_required": true,
+    "witnesses_required": true,
+    "alternative_execution_path_allowed": true,
+    "special_authority_initials_required": false,
+    "statutory_form_available": true,
+    "springing_authority_supported": true,
+    "durability_default_presumed": false,
+    "type_specific_execution_rules_present": false
+  },
+  "template_resolution": {
+    "base_template_key": "poa_general_v2",
+    "state_overlay_key": "ca_overlay_v2",
+    "execution_profile": "CA_NOTARY_OR_2W"
+  },
+  "section_summaries": {
+    "execution_choice": {
+      "notary_required_status": "alternative_path",
+      "witnesses_required_status": "alternative_path",
+      "execution_model_basis": "Acknowledgment/Witnessing contains notary OR two witnesses"
+    }
   },
   "sections": [
-    {
-      "key": "principal",
-      "title": "Principal",
-      "presence": "required",
-      "repeatable": false,
-      "applies_to_paths": ["notary_acknowledgment", "witness_execution"],
-      "fields": [
-        {
-          "key": "principal_full_name",
-          "label": "Principal full legal name",
-          "semantic_type": "person_name",
-          "required": true,
-          "data_type": "string",
-          "collect_from": "member",
-          "default_source": "user_profile"
-        }
-      ]
-    },
-    {
-      "key": "witnesses",
-      "title": "Witnesses",
-      "presence": "conditional",
-      "repeatable": true,
-      "applies_to_paths": ["witness_execution"],
-      "fields": [
-        {
-          "key": "witness_count",
-          "label": "Number of witnesses",
-          "semantic_type": "witness_count",
-          "required": true,
-          "data_type": "integer",
-          "collect_from": "member",
-          "default_source": "jurisdiction_default",
-          "validation": {
-            "min": 2,
-            "max": 2
-          }
-        }
-      ]
-    },
-    {
-      "key": "notary",
-      "title": "Notary acknowledgment",
-      "presence": "conditional",
-      "repeatable": false,
-      "applies_to_paths": ["notary_acknowledgment"],
-      "fields": []
-    }
-  ],
-  "document_outputs": [
-    {
-      "key": "signed_poa_document",
-      "required": true
-    },
-    {
-      "key": "notary_acknowledgment",
-      "required": false,
-      "when": {
-        "all": [
-          {
-            "fact": "selected_execution_path",
-            "operator": "equals",
-            "value": "notary_acknowledgment"
-          }
-        ]
-      }
-    },
-    {
-      "key": "witness_attestation",
-      "required": false,
-      "when": {
-        "all": [
-          {
-            "fact": "selected_execution_path",
-            "operator": "equals",
-            "value": "witness_execution"
-          }
-        ]
-      }
-    }
-  ],
-  "notices": [
-    {
-      "key": "capacity_required",
-      "severity": "info",
-      "message": "The principal must have capacity to execute the power of attorney."
-    }
+    { "key": "principal", "presence": "required" },
+    { "key": "agent", "presence": "required" },
+    { "key": "authority_scope", "presence": "required" },
+    { "key": "execution_choice", "presence": "required" },
+    { "key": "witnesses", "presence": "conditional" },
+    { "key": "notary", "presence": "conditional" }
   ]
 }
 ```
 
-## Example B: Connecticut General POA
-
-This example shows a fixed execution requirement: notary plus two witnesses.
+## Pilot Example B: Connecticut General POA
 
 ```json
 {
   "jurisdiction": "US-CT",
   "poa_type": "general",
-  "workflow": {
-    "execution_paths": [
-      {
-        "key": "notary_and_witness_execution",
-        "label": "Notary and two witnesses required",
-        "default": true,
-        "availability": "required"
-      }
-    ]
+  "api_representation_mode": "sectioned_only",
+  "classification": {
+    "poa_system": "UPOAA_PLUS",
+    "execution_model": "NOTARY_AND_WITNESSES"
+  },
+  "poa_capabilities": {
+    "notary_required": true,
+    "witnesses_required": true,
+    "alternative_execution_path_allowed": false,
+    "special_authority_initials_required": false,
+    "statutory_form_available": true,
+    "springing_authority_supported": true,
+    "durability_default_presumed": true,
+    "type_specific_execution_rules_present": false
+  },
+  "template_resolution": {
+    "base_template_key": "poa_general_v2",
+    "state_overlay_key": "ct_overlay_v2",
+    "execution_profile": "CT_NOTARY_AND_2W"
   },
   "sections": [
-    {
-      "key": "witnesses",
-      "title": "Witnesses",
-      "presence": "required",
-      "repeatable": true,
-      "applies_to_paths": ["notary_and_witness_execution"],
-      "fields": [
-        {
-          "key": "witness_count",
-          "label": "Number of witnesses",
-          "semantic_type": "witness_count",
-          "required": true,
-          "data_type": "integer",
-          "collect_from": "member",
-          "default_source": "jurisdiction_default",
-          "validation": {
-            "min": 2,
-            "max": 2
-          }
-        }
-      ]
-    },
-    {
-      "key": "notary",
-      "title": "Notary acknowledgment",
-      "presence": "required",
-      "repeatable": false,
-      "applies_to_paths": ["notary_and_witness_execution"],
-      "fields": []
-    }
+    { "key": "execution_choice", "presence": "required" },
+    { "key": "witnesses", "presence": "required" },
+    { "key": "notary", "presence": "required" }
   ],
   "document_outputs": [
-    {
-      "key": "notary_acknowledgment",
-      "required": true
-    },
-    {
-      "key": "witness_attestation",
-      "required": true
-    }
+    { "key": "notary_acknowledgment", "required": true, "output_category": "legal_requirement" },
+    { "key": "witness_attestation", "required": true, "output_category": "legal_requirement" }
   ]
 }
 ```
 
-## Example C: Florida General POA
-
-This example shows a jurisdiction with explicit authority handling and execution formalities that should force extra collection requirements.
+## Pilot Example C: Florida General POA
 
 ```json
 {
   "jurisdiction": "US-FL",
   "poa_type": "general",
+  "api_representation_mode": "sectioned_plus_flattened_summaries",
+  "classification": {
+    "poa_system": "HIGH_FORMALITY_VARIANT",
+    "execution_model": "NOTARY_AND_WITNESSES"
+  },
+  "poa_capabilities": {
+    "notary_required": true,
+    "witnesses_required": true,
+    "alternative_execution_path_allowed": false,
+    "special_authority_initials_required": true,
+    "statutory_form_available": false,
+    "springing_authority_supported": true,
+    "durability_default_presumed": false,
+    "type_specific_execution_rules_present": false
+  },
+  "template_resolution": {
+    "base_template_key": "poa_general_v2",
+    "state_overlay_key": "fl_overlay_v2",
+    "execution_profile": "FL_2W_PLUS_NOTARY"
+  },
+  "section_summaries": {
+    "authority_scope": {
+      "specific_authority_status": "explicit_required_with_initials",
+      "special_authority_initials_required": true
+    }
+  },
   "sections": [
-    {
-      "key": "authority_scope",
-      "title": "Authority scope",
-      "presence": "required",
-      "repeatable": false,
-      "applies_to_paths": ["notary_and_witness_execution"],
-      "fields": [
-        {
-          "key": "special_authorities",
-          "label": "Special authorities",
-          "semantic_type": "enum_multi",
-          "required": true,
-          "data_type": "array",
-          "collect_from": "member",
-          "default_source": "none"
-        },
-        {
-          "key": "special_authority_initials",
-          "label": "Principal initials for special authorities",
-          "semantic_type": "initials",
-          "required": true,
-          "data_type": "string",
-          "collect_from": "principal",
-          "default_source": "none",
-          "when": {
-            "all": [
-              {
-                "fact": "specific_authority_rule",
-                "operator": "equals",
-                "value": "explicit_required"
-              }
-            ]
-          }
-        }
-      ]
-    }
-  ],
-  "document_outputs": [
-    {
-      "key": "special_authority_initials",
-      "required": true
-    }
+    { "key": "authority_scope", "presence": "required" },
+    { "key": "witnesses", "presence": "required" },
+    { "key": "notary", "presence": "required" }
   ]
 }
 ```
 
-## Edge Cases That Need Explicit Override Support
+## Pilot Example D: New York General POA
 
-- California and similar states where users may choose between notary and witness paths.
-- South Carolina style conditional durability rules where recording status can change the workflow.
-- States where statutory forms exist but custom drafting is still allowed.
-- States where medical POA or real-estate POA execution differs from general POA.
-- States with witness eligibility restrictions that cannot be fully inferred from the current source fields.
+```json
+{
+  "jurisdiction": "US-NY",
+  "poa_type": "general",
+  "api_representation_mode": "sectioned_plus_flattened_summaries",
+  "classification": {
+    "poa_system": "HIGH_FORMALITY_VARIANT",
+    "execution_model": "NOTARY_AND_WITNESSES"
+  },
+  "poa_capabilities": {
+    "notary_required": true,
+    "witnesses_required": true,
+    "alternative_execution_path_allowed": false,
+    "special_authority_initials_required": true,
+    "statutory_form_available": true,
+    "springing_authority_supported": true,
+    "durability_default_presumed": true,
+    "type_specific_execution_rules_present": false
+  },
+  "template_resolution": {
+    "base_template_key": "poa_general_v2",
+    "state_overlay_key": "ny_overlay_v2",
+    "execution_profile": "NY_HIGH_FORMALITY"
+  },
+  "section_summaries": {
+    "execution_choice": {
+      "execution_model_basis": "Acknowledgment as real-property conveyance plus two witnesses"
+    },
+    "authority_scope": {
+      "special_authority_initials_required": true
+    }
+  },
+  "sections": [
+    { "key": "principal", "presence": "required" },
+    { "key": "agent", "presence": "required" },
+    { "key": "authority_scope", "presence": "required" },
+    { "key": "execution_choice", "presence": "required" },
+    { "key": "witnesses", "presence": "required" },
+    { "key": "notary", "presence": "required" }
+  ]
+}
+```
 
-These cases justify a `rules_plus_overrides` derivation mode.
+## Implementation Notes
 
-## Recommended Derivation Strategy
-
-Use a layered derivation pipeline.
-
-1. Start from normalized fields in `public.poa_requirements`.
-2. Build base execution paths from `ack_requirement`.
-3. Build canonical sections from a shared template.
-4. Adjust `presence`, `fields`, and `document_outputs` using rule mappings.
-5. Apply curated jurisdiction overrides for edge cases.
-6. If confidence is low, return `review_status: needs_review` and a blocking notice.
-
-## Recommended Next Step
-
-Before any DB migration:
-
-1. Implement this contract in the backend as a pure TypeScript derivation function.
-2. Return it from the POA rules endpoint next to the normalized legal fields.
-3. Test it against at least `US-CA`, `US-CT`, `US-FL`, and `US-SC`.
-4. Only then decide whether any of it belongs in Postgres.
-
-That keeps the database focused on legal facts while we prove the workflow contract in code.
+- Derive a normalization staging layer before assembling final `input_requirements`.
+- Keep `sections` canonical and use `section_summaries` only for convenience reads.
+- Keep `template_resolution.execution_profile` as single source of truth for execution profile behavior.
+- Keep `required_artifacts` as inputs and `document_outputs` as generated outputs.
+- Force manual review for low-confidence normalization or type-specific ambiguity.
+- Test first with `US-CA`, `US-CT`, `US-FL`, and `US-NY` to validate execution complexity.
