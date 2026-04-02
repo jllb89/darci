@@ -20,6 +20,12 @@ type WebhookJobData = {
   payload: Record<string, unknown>;
 };
 
+const redisConnection = connection;
+
+if (!redisConnection) {
+  throw new Error("REDIS_URL must be set to start workers");
+}
+
 const hashingWorker = new Worker<HashingJobData>(
   "hashing",
   async (job) => {
@@ -33,7 +39,7 @@ const hashingWorker = new Worker<HashingJobData>(
       idn,
     };
   },
-  { connection }
+  { connection: redisConnection }
 );
 
 const ledgerWorker = new Worker<LedgerJobData>(
@@ -50,7 +56,7 @@ const ledgerWorker = new Worker<LedgerJobData>(
       status: result.status,
     };
   },
-  { connection }
+  { connection: redisConnection }
 );
 
 const webhookWorker = new Worker<WebhookJobData>(
@@ -65,7 +71,7 @@ const webhookWorker = new Worker<WebhookJobData>(
       status: result.status,
     };
   },
-  { connection }
+  { connection: redisConnection }
 );
 
 const shutdown = async () => {
@@ -74,7 +80,7 @@ const shutdown = async () => {
     ledgerWorker.close(),
     webhookWorker.close(),
   ]);
-  await connection.quit();
+  await redisConnection.quit();
 };
 
 process.on("SIGINT", shutdown);

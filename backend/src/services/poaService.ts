@@ -7,13 +7,9 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
 export const poaTypes = [
   "general",
-  "limited",
   "durable",
   "medical",
-  "vehicle",
-  "tax",
-  "springing",
-  "other",
+  "limited",
 ] as const;
 
 const jurisdictionAliases: Record<string, string> = {
@@ -80,6 +76,26 @@ export type PoaRequirementRecord = {
   jurisdiction: string;
   poa_type: string;
   ui_profile: string;
+  api_representation_mode:
+    | "sectioned_only"
+    | "sectioned_plus_flattened_summaries";
+  derivation_mode: "rules_only" | "rules_plus_overrides" | "manual_review";
+  poa_system:
+    | "UPOAA_STANDARD"
+    | "UPOAA_PLUS"
+    | "NON_UPOAA_STANDARD"
+    | "CIVIL_LAW_MANDATE"
+    | "HIGH_FORMALITY_VARIANT"
+    | null;
+  execution_model:
+    | "NOTARY_ONLY"
+    | "WITNESSES_ONLY"
+    | "NOTARY_OR_WITNESSES"
+    | "NOTARY_AND_WITNESSES"
+    | "FORMAL_ACT"
+    | "TYPE_SPECIFIC_VARIANT"
+    | null;
+  execution_profile: string | null;
   notarization_rule: string;
   witness_rule: string;
   witness_count: number | null;
@@ -92,6 +108,54 @@ export type PoaRequirementRecord = {
   requires_principal_signature: boolean | null;
   allows_proxy_signature: boolean | null;
   requires_acknowledgment_certificate: boolean | null;
+  notary_required: boolean;
+  witnesses_required: boolean;
+  alternative_execution_path_allowed: boolean;
+  special_authority_initials_required: boolean;
+  statutory_form_available: boolean;
+  springing_authority_supported: boolean;
+  durability_default_presumed: boolean;
+  type_specific_execution_rules_present: boolean;
+
+  execution_rule: string | null;
+  durability_default_status:
+    | "durable_by_default"
+    | "durable_if_stated"
+    | "non_durable_by_default"
+    | "type_specific"
+    | "not_addressed"
+    | null;
+  specific_authority_status:
+    | "explicit_required"
+    | "explicit_required_with_initials"
+    | "not_required"
+    | "type_specific"
+    | "not_addressed"
+    | null;
+  effective_date_status:
+    | "immediate_default"
+    | "immediate_or_specified"
+    | "specified_event_allowed"
+    | "type_specific"
+    | "not_addressed"
+    | null;
+  statutory_form_status:
+    | "available"
+    | "available_not_mandatory"
+    | "multiple_forms_available"
+    | "not_available"
+    | "not_addressed"
+    | null;
+  competency_status:
+    | "capacity_required"
+    | "competent_adult_required"
+    | "sound_mind_required"
+    | "not_addressed"
+    | null;
+  normalization_confidence: "high" | "medium" | "low";
+  base_template_key: string | null;
+  state_overlay_key: string | null;
+
   governing_law: string | null;
   execution_requirements_text: string | null;
   acknowledgment_witnessing_text: string | null;
@@ -104,7 +168,13 @@ export type PoaRequirementRecord = {
   source_url: string | null;
   review_status: string | null;
   reviewed_at: string | null;
+  reviewed_by: string | null;
   notes: string | null;
+
+  input_requirements: Record<string, unknown>;
+  input_requirements_schema_version: string | null;
+  input_requirements_updated_at: string | null;
+
   created_at: string;
   updated_at: string;
 };
@@ -287,6 +357,11 @@ export const getPoaRequirement = async (
         "jurisdiction",
         "poa_type",
         "ui_profile",
+        "api_representation_mode",
+        "derivation_mode",
+        "poa_system",
+        "execution_model",
+        "execution_profile",
         "notarization_rule",
         "witness_rule",
         "witness_count",
@@ -299,6 +374,23 @@ export const getPoaRequirement = async (
         "requires_principal_signature",
         "allows_proxy_signature",
         "requires_acknowledgment_certificate",
+        "notary_required",
+        "witnesses_required",
+        "alternative_execution_path_allowed",
+        "special_authority_initials_required",
+        "statutory_form_available",
+        "springing_authority_supported",
+        "durability_default_presumed",
+        "type_specific_execution_rules_present",
+        "execution_rule",
+        "durability_default_status",
+        "specific_authority_status",
+        "effective_date_status",
+        "statutory_form_status",
+        "competency_status",
+        "normalization_confidence",
+        "base_template_key",
+        "state_overlay_key",
         "governing_law",
         "execution_requirements_text",
         "acknowledgment_witnessing_text",
@@ -311,7 +403,11 @@ export const getPoaRequirement = async (
         "source_url",
         "review_status",
         "reviewed_at",
+        "reviewed_by",
         "notes",
+        "input_requirements",
+        "input_requirements_schema_version",
+        "input_requirements_updated_at",
         "created_at",
         "updated_at",
       ].join(", "),

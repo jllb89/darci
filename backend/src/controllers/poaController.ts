@@ -60,8 +60,7 @@ const attachGlossaryToInputRequirements = (
 
   return sections.map((section) => ({
     ...section,
-    description:
-      glossaryByKey.get(sectionGlossaryKeys[section.key] ?? "") ?? section.description,
+    description: glossaryByKey.get(sectionGlossaryKeys[section.key] ?? "") ?? section.title,
     fields: section.fields.map((field): PoaInputRequirementField => {
       const nextHelpText =
         glossaryByKey.get(fieldGlossaryKeys[field.key] ?? "") ?? field.helpText;
@@ -122,6 +121,15 @@ export const buildPoaRequirementResponse = (details: PoaRequirementDetails) => {
         url: requirement.source_url,
         notes: requirement.notes,
       },
+      derivation: {
+        mode: inputRequirements.derivation_mode,
+        reviewStatus: inputRequirements.review_status,
+        apiRepresentationMode: inputRequirements.api_representation_mode,
+        schemaVersion: inputRequirements.schema_version,
+      },
+      classification: inputRequirements.classification,
+      capabilities: inputRequirements.poa_capabilities,
+      templateResolution: inputRequirements.template_resolution,
       formRules: formRules
         ? {
             statutoryFormExists: formRules.statutory_form_exists,
