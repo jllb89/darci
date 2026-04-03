@@ -1,8 +1,13 @@
 "use client";
 
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useStoredAuth } from "@/lib/auth";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
+import {
+  computeFieldRuntime,
+  getVisibleSections,
+  type MemberFormFamily,
+} from "@/app/app/start/memberFormRuntime";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -13,236 +18,114 @@ type JurisdictionOption = {
   label: string;
 };
 
-type RequirementDecisionSet = {
-  notarizationRule: string;
-  witnessRule: string;
-  witnessCount: number | null;
-  durabilityRule: string;
-  statutoryFormRule: string;
-  effectiveDateRule: string;
-  competencyRule: string;
-  specialAuthorityRule: string;
-  allowsAgentCertification: boolean;
-  requiresPrincipalSignature: boolean;
-  allowsProxySignature: boolean;
-  requiresAcknowledgmentCertificate: boolean;
+type ConditionOperator =
+  | "equals"
+  | "not_equals"
+  | "in"
+  | "not_in"
+  | "is_true"
+  | "is_false";
+
+type ConditionClause = {
+  fact: string;
+  operator: ConditionOperator;
+  value?: unknown;
 };
 
-type RequirementLegalText = {
-  governingLaw: string | null;
-  executionRequirements: string | null;
-  acknowledgmentWitnessing: string | null;
-  durability: string | null;
-  specialAuthority: string | null;
-  competency: string | null;
-  statutoryForm: string | null;
-  effectiveDate: string | null;
+type Condition = {
+  all: ConditionClause[];
 };
 
-type InputRequirementConditionClause = {
-  fact:
-    | "selected_execution_path"
-    | "durability_rule"
-    | "specific_authority_rule"
-    | "effective_date_rule"
-    | "statutory_form_rule"
-    | "review_status";
-  operator: "equals" | "not_equals" | "in" | "not_in";
-  value: string;
+type ConditionFactValue = string | string[] | boolean | null;
+type FactContext = Record<string, ConditionFactValue>;
+
+type MemberFacingFieldSource = {
+  family: MemberFormFamily;
+  document_type: string;
+  section_key: string;
+  field_key: string;
+  original_label: string;
+  original_required?: boolean;
+  original_when?: Condition;
 };
 
-type InputRequirementCondition = {
-  all: InputRequirementConditionClause[];
-};
-
-type InputRequirementField = {
-  key: string;
+type MemberFacingField = {
+  canonical_key: string;
   label: string;
-  semanticType:
-    | "person_name"
-    | "enum_single"
-    | "enum_multi"
-    | "boolean"
-    | "date"
-    | "text"
-    | "initials"
-    | "signature_mark"
-    | "witness_count"
-    | "acknowledgment_choice"
-    | "legal_notice_acceptance"
-    | "recording_status";
+  semantic_type: string;
+  data_type: "string" | "integer" | "boolean" | "date" | "array" | "object";
   required: boolean;
-  dataType: "string" | "integer" | "boolean" | "date" | "array";
-  collectFrom: "member" | "principal" | "agent" | "notary" | "system";
-  defaultSource:
-    | "none"
-    | "user_profile"
-    | "document_template"
-    | "jurisdiction_default"
-    | "system_derived";
-  validation?: {
-    minLength?: number;
-    maxLength?: number;
-    min?: number;
-    max?: number;
-    allowedValues?: string[];
-  };
-  helpText?: string;
-  when?: InputRequirementCondition;
-};
-
-type InputRequirementSection = {
-  key: string;
-  title: string;
-  description?: string;
-  presence: "required" | "optional" | "conditional" | "hidden" | "manual_review";
   repeatable: boolean;
-  appliesToPaths: string[];
-  fields: InputRequirementField[];
+  help_text?: string;
+  validation?: Record<string, unknown>;
+  when?: Condition;
+  condition_merge_mode?: "exact" | "source_only";
+  sources: MemberFacingFieldSource[];
+  ui_group: "basic_info" | "people" | "authority" | "execution" | "documents" | "advanced";
 };
 
-type ExecutionPath = {
-  key: string;
-  label: string;
-  default: boolean;
-  availability: "required" | "allowed" | "not_allowed" | "manual_review";
+type MemberFacingSection = {
+  key: "basic_info" | "people" | "authority" | "execution" | "documents" | "advanced";
+  title: string;
+  fields: MemberFacingField[];
 };
 
-type InputRequirementNotice = {
-  key: string;
-  severity: "info" | "warning" | "blocking";
-  message: string;
-};
-
-type InputRequirements = {
-  schemaVersion: string;
+type MemberFacingFormContract = {
   jurisdiction: string;
-  poaType: string;
-  uiProfile: string;
-  derivationMode: "rules_only" | "rules_plus_overrides" | "manual_review";
-  reviewStatus: string;
-  workflow: {
-    executionPaths: ExecutionPath[];
-    steps: string[];
-    submissionChecks: string[];
-  };
-  sections: InputRequirementSection[];
-  documentOutputs: Array<{
-    key: string;
-    required: boolean;
-    when?: InputRequirementCondition;
+  families: MemberFormFamily[];
+  document_types: string[];
+  sections: MemberFacingSection[];
+  source_trace: Array<{
+    source: string;
+    field: string;
+    value: string | number | boolean | null;
   }>;
-  notices: InputRequirementNotice[];
 };
 
-type FormRules = {
-  statutoryFormExists: boolean;
-  statutoryFormRecommended: boolean;
-  statutoryFormMandatoryForProduct: boolean;
-  mustTrackStatutoryOrdering: boolean;
-  mustTrackStatutoryHeadings: boolean;
-  mustIncludeWarningToPrincipal: boolean;
-  mustIncludeNoticeToAgent: boolean;
-  specialAuthoritiesRenderMode:
-    | "hidden"
-    | "checklist"
-    | "checklist_with_initials"
-    | "checkboxes_from_statutory_form"
-    | "freeform_text"
-    | "hybrid"
-    | "manual_review_only";
-  freeformSpecialAuthorityTextAllowed: boolean;
-  hybridRenderingAllowed: boolean;
-  attorneyCustomizationRecommended: boolean;
-  sourceCitation: string | null;
-  sourceUrl: string | null;
-  legalReviewStatus: "pending" | "reviewed" | "needs_update" | "blocked";
-  reviewedAt: string | null;
-  reviewedBy: string | null;
-  reviewNotes: string | null;
+type FamilyContract = {
+  family: MemberFormFamily;
+  documentType: string;
+  inputRequirements: unknown;
+  factContext: FactContext;
 };
 
-type GlossaryTerm = {
-  key: string;
-  genericLabel: string;
-  stateSpecificLabel: string | null;
-  label: string;
-  productDescription: string;
-  whyUserNeedsThis: string | null;
-  sourceCitation: string | null;
-  sourceUrl: string | null;
-  isMateriallyStateSpecific: boolean;
-  legalReviewStatus: "pending" | "reviewed" | "needs_update" | "blocked";
-  reviewedAt: string | null;
-  reviewedBy: string | null;
-  reviewNotes: string | null;
-  sortOrder: number;
+type SourceConditionContext = {
+  family: MemberFormFamily;
+  documentType: string;
+  sectionKey: string;
+  fieldKey: string;
+  facts: FactContext;
 };
 
-type SpecialAuthority = {
-  key: string;
-  label: string;
-  canonicalLabel: string;
-  description: string;
-  category: string | null;
-  sortOrder: number;
-  isCoreNationalKey: boolean;
-  explicitlyRequired: boolean;
-  requirementType:
-    | "express_grant"
-    | "specific_language"
-    | "separate_initials"
-    | "statutory_form_checkbox"
-    | "not_required"
-    | "unclear";
-  appliesToGeneralFinancialPoa: boolean;
-  statutoryFormOnly: boolean;
-  customLanguageRequired: boolean;
-  initialsRequired: boolean;
-  checkboxRequired: boolean;
-  freeformTextAllowed: boolean;
-  statutoryTextExcerpt: string | null;
-  exactStatuteCitation: string | null;
-  sourceUrl: string | null;
-  plainEnglishRule: string;
-  confidence: "high" | "medium" | "low";
-  legalReviewStatus: "pending" | "reviewed" | "needs_update" | "blocked";
-  reviewedAt: string | null;
-  reviewedBy: string | null;
-  reviewNotes: string | null;
-  effectiveStartDate: string | null;
-  effectiveEndDate: string | null;
-  rendererMetadata: Record<string, unknown>;
-};
-
-type PoaRequirement = {
-  id: string;
+type MemberFormRulesContract = {
   jurisdiction: string;
-  poaType: string;
-  uiProfile: string;
-  reviewStatus: string;
-  reviewedAt: string | null;
-  requirements: RequirementDecisionSet;
-  legalText: RequirementLegalText;
-  source: {
-    citation: string | null;
-    url: string | null;
-    notes: string | null;
-  };
-  formRules: FormRules | null;
-  glossary: GlossaryTerm[];
-  specialAuthorities: SpecialAuthority[];
-  inputRequirements?: InputRequirements | null;
-  createdAt: string;
-  updatedAt: string;
+  families: MemberFormFamily[];
+  documentTypes: string[];
+  aggregatedForm: MemberFacingFormContract;
+  familyContracts: FamilyContract[];
+  sourceConditionContexts: SourceConditionContext[];
+};
+
+type MemberFormJurisdictionsPayload = {
+  jurisdictions?: JurisdictionOption[];
+  message?: string;
+};
+
+type MemberFormPayload = {
+  memberForm?: MemberFormRulesContract;
+  message?: string;
+  details?: Array<{
+    family?: string;
+    documentType?: string;
+  }>;
+};
+
+type MissingRequirement = {
+  family: string;
+  documentType: string;
 };
 
 type FormValue = string | boolean | string[];
-type StatutoryReferenceRow = {
-  label: string;
-  value: string;
-  url: string | null;
-};
 
 const formatLabel = (value: string) => {
   return value
@@ -251,34 +134,46 @@ const formatLabel = (value: string) => {
     .join(" ");
 };
 
-const formatDecisionValue = (value: string | boolean | number | null) => {
-  if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+const getAllowedValues = (field: MemberFacingField) => {
+  const validation = field.validation;
+  if (!validation) {
+    return [] as string[];
   }
 
-  if (typeof value === "number") {
-    return String(value);
+  const raw = validation["allowed_values"] ?? validation["allowedValues"];
+  if (!Array.isArray(raw)) {
+    return [] as string[];
   }
 
-  if (!value) {
-    return "Not available";
+  return raw.filter((value): value is string => typeof value === "string");
+};
+
+const getNumberConstraint = (
+  field: MemberFacingField,
+  key: "min" | "max" | "minLength" | "maxLength",
+) => {
+  const validation = field.validation;
+  if (!validation) {
+    return undefined;
   }
 
-  return formatLabel(value);
+  const value = validation[key];
+  return typeof value === "number" ? value : undefined;
 };
 
 export default function StartDocumentPage() {
   const { accessToken } = useStoredAuth();
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
-  const [selectedJurisdiction, setSelectedJurisdiction] = useState("CA");
-  const [requirement, setRequirement] = useState<PoaRequirement | null>(null);
-  const [selectedExecutionPath, setSelectedExecutionPath] = useState("");
+  const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
+
+  const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
-  const [isLoadingJurisdictions, setIsLoadingJurisdictions] = useState(true);
-  const [isLoadingRequirement, setIsLoadingRequirement] = useState(false);
+
+  const [isLoadingJurisdictions, setIsLoadingJurisdictions] = useState(false);
+  const [isLoadingMemberForm, setIsLoadingMemberForm] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [compatibilityMessage, setCompatibilityMessage] = useState<string | null>(null);
-  const [dismissedNotices, setDismissedNotices] = useState<Set<string>>(new Set());
+  const [missingRequirements, setMissingRequirements] = useState<MissingRequirement[]>([]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -290,17 +185,17 @@ export default function StartDocumentPage() {
     const loadJurisdictions = async () => {
       setIsLoadingJurisdictions(true);
       setErrorMessage(null);
-      setCompatibilityMessage(null);
+      setMissingRequirements([]);
 
       try {
-        const response = await fetch(`${apiBaseUrl}/rules/poa?type=general`, {
+        const response = await fetch(`${apiBaseUrl}/rules/member-form`, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
         });
 
         const payload = (await response.json().catch(() => null)) as
-          | { jurisdictions?: JurisdictionOption[]; message?: string }
+          | MemberFormJurisdictionsPayload
           | null;
 
         if (!response.ok || !payload?.jurisdictions) {
@@ -312,17 +207,25 @@ export default function StartDocumentPage() {
         }
 
         const nextJurisdictions = payload.jurisdictions;
-
         setJurisdictions(nextJurisdictions);
         setSelectedJurisdiction((current) => {
-          if (current) {
+          if (nextJurisdictions.some((jurisdiction) => jurisdiction.code === current)) {
             return current;
           }
 
           return nextJurisdictions[0]?.code ?? "";
         });
+
+        if (nextJurisdictions.length === 0) {
+          setMemberForm(null);
+          setFormValues({});
+        }
       } catch (error) {
         if (!cancelled) {
+          setJurisdictions([]);
+          setSelectedJurisdiction("");
+          setMemberForm(null);
+          setFormValues({});
           setErrorMessage(
             error instanceof Error ? error.message : "Failed to load jurisdictions",
           );
@@ -348,81 +251,99 @@ export default function StartDocumentPage() {
 
     let cancelled = false;
 
-    const loadRequirement = async () => {
-      setIsLoadingRequirement(true);
+    const loadMemberForm = async () => {
+      setIsLoadingMemberForm(true);
       setErrorMessage(null);
-      setCompatibilityMessage(null);
+      setMissingRequirements([]);
 
       try {
-        const response = await fetch(
-          `${apiBaseUrl}/rules/poa/${selectedJurisdiction}?type=general`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
+        const response = await fetch(`${apiBaseUrl}/rules/member-form/${selectedJurisdiction}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
           },
-        );
+        });
 
-        const payload = (await response.json().catch(() => null)) as
-          | { requirement?: PoaRequirement; message?: string }
-          | null;
+        const payload = (await response.json().catch(() => null)) as MemberFormPayload | null;
 
-        if (!response.ok || !payload?.requirement) {
-          throw new Error(payload?.message || "Failed to load POA requirements");
-        }
+        if (!response.ok || !payload?.memberForm) {
+          if (response.status === 404) {
+            const details = (payload?.details ?? [])
+              .filter(
+                (detail): detail is { family: string; documentType: string } =>
+                  typeof detail.family === "string" &&
+                  typeof detail.documentType === "string",
+              )
+              .map((detail) => ({
+                family: detail.family,
+                documentType: detail.documentType,
+              }));
 
-        if (!cancelled) {
-          setRequirement(payload.requirement);
-          const inputRequirements = payload.requirement.inputRequirements ?? null;
-
-          if (!inputRequirements) {
-            setSelectedExecutionPath("");
-            setFormValues({});
-            setCompatibilityMessage(
-              "The running backend returned POA requirements without generated inputRequirements. Restart the API on the latest code so the selected state can render actual UI fields.",
-            );
-            return;
+            if (!cancelled) {
+              setMissingRequirements(details);
+            }
           }
 
-          const defaultExecutionPath =
-            inputRequirements.workflow.executionPaths.find(
-              (path) => path.default,
-            )?.key ?? inputRequirements.workflow.executionPaths[0]?.key ?? "";
-
-          setSelectedExecutionPath(defaultExecutionPath);
-          setFormValues(
-            defaultExecutionPath
-              ? { selected_execution_path: defaultExecutionPath }
-              : {},
-          );
+          throw new Error(payload?.message || "Failed to load member form requirements");
         }
+
+        if (cancelled) {
+          return;
+        }
+
+        setMemberForm(payload.memberForm);
+
+        const nextValues: Record<string, FormValue> = {};
+        for (const section of payload.memberForm.aggregatedForm.sections) {
+          for (const field of section.fields) {
+            if (field.canonical_key === "jurisdiction") {
+              nextValues[field.canonical_key] = payload.memberForm.jurisdiction;
+            }
+          }
+        }
+
+        setFormValues(nextValues);
       } catch (error) {
         if (!cancelled) {
-          setRequirement(null);
-          setSelectedExecutionPath("");
+          setMemberForm(null);
           setFormValues({});
-          setCompatibilityMessage(null);
           setErrorMessage(
-            error instanceof Error ? error.message : "Failed to load POA requirements",
+            error instanceof Error
+              ? error.message
+              : "Failed to load member form requirements",
           );
         }
       } finally {
         if (!cancelled) {
-          setIsLoadingRequirement(false);
+          setIsLoadingMemberForm(false);
         }
       }
     };
 
-    void loadRequirement();
+    void loadMemberForm();
 
     return () => {
       cancelled = true;
     };
   }, [accessToken, selectedJurisdiction]);
 
+  const fieldRuntime = useMemo(() => computeFieldRuntime(memberForm), [memberForm]);
+
+  const visibleSections = useMemo(
+    () => getVisibleSections(memberForm, fieldRuntime),
+    [fieldRuntime, memberForm],
+  );
+
+  const sourceOnlyVisibleCount = useMemo(() => {
+    return visibleSections.reduce((count, section) => {
+      return (
+        count +
+        section.fields.filter((field) => field.condition_merge_mode === "source_only").length
+      );
+    }, 0);
+  }, [visibleSections]);
+
   const handleJurisdictionChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setSelectedJurisdiction(event.target.value);
-    setDismissedNotices(new Set());
   };
 
   const handleFieldChange = (key: string, value: FormValue) => {
@@ -430,234 +351,153 @@ export default function StartDocumentPage() {
       ...current,
       [key]: value,
     }));
-
-    if (key === "selected_execution_path" && typeof value === "string") {
-      setSelectedExecutionPath(value);
-    }
   };
 
-  const evaluateCondition = (condition?: InputRequirementCondition) => {
-    if (!condition || !requirement) {
-      return true;
-    }
-
-    const factValues: Record<InputRequirementConditionClause["fact"], string> = {
-      selected_execution_path: selectedExecutionPath,
-      durability_rule: requirement.requirements.durabilityRule,
-      specific_authority_rule: requirement.requirements.specialAuthorityRule,
-      effective_date_rule: requirement.requirements.effectiveDateRule,
-      statutory_form_rule: requirement.requirements.statutoryFormRule,
-      review_status: requirement.reviewStatus,
-    };
-
-    return condition.all.every((clause) => {
-      const actualValue = factValues[clause.fact] ?? "";
-
-      switch (clause.operator) {
-        case "equals":
-          return actualValue === clause.value;
-        case "not_equals":
-          return actualValue !== clause.value;
-        case "in":
-          return clause.value.split(",").includes(actualValue);
-        case "not_in":
-          return !clause.value.split(",").includes(actualValue);
-        default:
-          return true;
-      }
-    });
-  };
-
-  const visibleSections = requirement
-    ? (requirement.inputRequirements?.sections ?? []).filter((section) => {
-        if (section.presence === "hidden") {
-          return false;
-        }
-
-        if (
-          section.appliesToPaths.length > 0 &&
-          selectedExecutionPath &&
-          !section.appliesToPaths.includes(selectedExecutionPath)
-        ) {
-          return false;
-        }
-
-        return (
-          section.fields.some((field) => evaluateCondition(field.when)) ||
-          section.fields.length === 0
-        );
-      })
-    : [];
-
-  const inputRequirements = requirement?.inputRequirements ?? null;
-  const specialAuthorityByKey = new Map(
-    (requirement?.specialAuthorities ?? []).map((authority) => [authority.key, authority]),
-  );
-
-  const statutoryReferenceRows: StatutoryReferenceRow[] = requirement
-    ? [
-        requirement.formRules?.sourceCitation
-          ? {
-              label: "Form rules",
-              value: requirement.formRules.sourceCitation,
-              url: requirement.formRules.sourceUrl,
-            }
-          : null,
-        ...(requirement.specialAuthorities ?? [])
-          .filter((authority) => Boolean(authority.exactStatuteCitation))
-          .map((authority) => ({
-            label: authority.label,
-            value: authority.exactStatuteCitation ?? "",
-            url: authority.sourceUrl ?? null,
-          })),
-      ].filter((row): row is StatutoryReferenceRow => row !== null)
-    : [];
-
-  const decisionRows: Array<{ label: string; value: string | boolean | number | null }> = requirement
-    ? [
-        { label: "Notarization rule", value: requirement.requirements.notarizationRule },
-        { label: "Witness rule", value: requirement.requirements.witnessRule },
-        { label: "Witness count", value: requirement.requirements.witnessCount },
-        { label: "Durability rule", value: requirement.requirements.durabilityRule },
-        { label: "Statutory form", value: requirement.requirements.statutoryFormRule },
-        { label: "Effective date", value: requirement.requirements.effectiveDateRule },
-        { label: "Competency", value: requirement.requirements.competencyRule },
-        { label: "Special authority", value: requirement.requirements.specialAuthorityRule },
-        {
-          label: "Acknowledgment certificate",
-          value: requirement.requirements.requiresAcknowledgmentCertificate,
-        },
-        {
-          label: "Proxy signature allowed",
-          value: requirement.requirements.allowsProxySignature,
-        },
-      ]
-    : [];
-
-  const getFieldDescription = (field: InputRequirementField) => {
-    return field.helpText ?? null;
-  };
-
-  const getSectionDescription = (section: InputRequirementSection) => {
-    return section.description ?? null;
-  };
-
-  const getValueDescription = (value: string) => {
-    return specialAuthorityByKey.get(value)?.plainEnglishRule ?? null;
-  };
-
-  const workflowSnapshotTooltip = [
-    requirement?.formRules?.reviewNotes ?? null,
-    requirement?.formRules?.sourceCitation
-      ? `Source: ${requirement.formRules.sourceCitation}`
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const getSpecialAuthorityTooltip = (authority: SpecialAuthority) => {
-    return [
-      authority.plainEnglishRule,
-      authority.description,
-      authority.exactStatuteCitation
-        ? `Source: ${authority.exactStatuteCitation}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join(" ");
-  };
-
-  const statutoryReferenceTooltip = statutoryReferenceRows.length ? (
-    <span className="block space-y-3">
-      {statutoryReferenceRows.map((row) => (
-        <span key={`${row.label}-${row.value}`} className="block space-y-1">
-          <span className="block text-[11px] uppercase tracking-[0.12em] text-white/65">
-            {row.label}
-          </span>
-          <span className="block text-xs leading-5 text-white">{row.value}</span>
-          {row.url ? (
-            <span className="block break-all text-[11px] leading-5 text-white/65">
-              {row.url}
-            </span>
-          ) : null}
-        </span>
-      ))}
-    </span>
-  ) : null;
-
-  const renderFieldLabel = (field: InputRequirementField) => {
-    const description = getFieldDescription(field);
-
+  const renderFieldLabel = (field: MemberFacingField, required: boolean) => {
     return (
-      <div className="flex items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
+      <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
         <span>{field.label}</span>
-        {description ? <HelpTooltip label={`Explain ${field.label}`} content={description} /> : null}
-      </div>
-    );
-  };
-
-  const renderAllowedValueGlossary = (field: InputRequirementField) => {
-    const describedValues = (field.validation?.allowedValues ?? []).filter((value) =>
-      Boolean(getValueDescription(value)),
-    );
-
-    if (!describedValues.length) {
-      return null;
-    }
-
-    return (
-      <div className="flex flex-wrap gap-2 text-xs text-Color-Neutral">
-        {describedValues.map((value) => (
-          <span
-            key={value}
-            className="inline-flex items-center gap-2 rounded-full border border-Color-Scheme-1-Border/30 bg-Color-Neutral-Lightest px-2 py-1"
-          >
-            <span>{formatLabel(value)}</span>
-            <HelpTooltip label={`Explain ${formatLabel(value)}`} content={getValueDescription(value) ?? ""} />
+        {required ? (
+          <span className="rounded-full border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-Color-Neutral">
+            Required
           </span>
-        ))}
+        ) : null}
+        {field.condition_merge_mode === "source_only" ? (
+          <span className="inline-flex items-center rounded-full border border-amber-300/60 bg-amber-50 px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-amber-800">
+            Source-conditioned
+          </span>
+        ) : null}
+        {field.help_text ? (
+          <HelpTooltip label={`Explain ${field.label}`} content={field.help_text} />
+        ) : null}
       </div>
     );
   };
 
-  const renderField = (field: InputRequirementField) => {
-    if (!evaluateCondition(field.when)) {
-      return null;
-    }
-
+  const renderFieldControl = (field: MemberFacingField) => {
+    const fieldValue = formValues[field.canonical_key];
+    const allowedValues = getAllowedValues(field);
     const baseInputClassName =
       "w-full rounded border border-Color-Scheme-1-Border/40 bg-white px-3 py-2 text-sm text-Color-Scheme-1-Text outline-none transition focus:border-Color-Scheme-1-Text";
-    const fieldValue = formValues[field.key];
-    const allowedValues = field.validation?.allowedValues ?? [];
 
-    if (field.key === "selected_execution_path" && inputRequirements) {
+    if (field.semantic_type === "signature_mark") {
       return (
-        <select
-          className={baseInputClassName}
-          value={typeof fieldValue === "string" ? fieldValue : selectedExecutionPath}
-          onChange={(event) => handleFieldChange(field.key, event.target.value)}
-        >
-          {inputRequirements.workflow.executionPaths
-            .filter((path) => path.availability !== "manual_review")
-            .map((path) => (
-              <option key={path.key} value={path.key}>
-                {path.label}
-              </option>
-            ))}
-        </select>
+        <div className="rounded border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-sm text-Color-Neutral">
+          Signature capture occurs in a later step.
+        </div>
       );
     }
 
-    if (
-      field.semanticType === "enum_single" ||
-      field.semanticType === "acknowledgment_choice" ||
-      field.semanticType === "recording_status"
-    ) {
+    if (field.data_type === "object") {
+      return (
+        <div className="rounded border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-sm text-Color-Neutral">
+          This input is captured through an upload or generated artifact step.
+        </div>
+      );
+    }
+
+    if (field.data_type === "boolean") {
+      return (
+        <label className="flex items-center gap-3 rounded border border-Color-Scheme-1-Border/40 bg-white px-3 py-3 text-sm text-Color-Scheme-1-Text">
+          <input
+            checked={Boolean(fieldValue)}
+            className="h-4 w-4"
+            onChange={(event) =>
+              handleFieldChange(field.canonical_key, event.target.checked)
+            }
+            type="checkbox"
+          />
+          <span>{field.label}</span>
+        </label>
+      );
+    }
+
+    if (field.data_type === "integer") {
+      return (
+        <input
+          className={baseInputClassName}
+          max={getNumberConstraint(field, "max")}
+          min={getNumberConstraint(field, "min")}
+          onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
+          type="number"
+          value={typeof fieldValue === "string" ? fieldValue : ""}
+        />
+      );
+    }
+
+    if (field.data_type === "date") {
+      return (
+        <input
+          className={baseInputClassName}
+          onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
+          type="date"
+          value={typeof fieldValue === "string" ? fieldValue : ""}
+        />
+      );
+    }
+
+    if (field.data_type === "array") {
+      if (allowedValues.length > 0) {
+        const selectedValues = Array.isArray(fieldValue) ? fieldValue : [];
+
+        return (
+          <div className="space-y-2 rounded border border-Color-Scheme-1-Border/40 bg-white p-3">
+            {allowedValues.map((value) => {
+              const checked = selectedValues.includes(value);
+
+              return (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-sm text-Color-Scheme-1-Text"
+                >
+                  <input
+                    checked={checked}
+                    className="h-4 w-4"
+                    onChange={(event) => {
+                      const nextValues = event.target.checked
+                        ? [...selectedValues, value]
+                        : selectedValues.filter((item) => item !== value);
+
+                      handleFieldChange(field.canonical_key, nextValues);
+                    }}
+                    type="checkbox"
+                  />
+                  <span>{formatLabel(value)}</span>
+                </label>
+              );
+            })}
+          </div>
+        );
+      }
+
+      const textareaValue = Array.isArray(fieldValue)
+        ? fieldValue.join("\n")
+        : typeof fieldValue === "string"
+          ? fieldValue
+          : "";
+
+      return (
+        <textarea
+          className={`${baseInputClassName} min-h-28`}
+          onChange={(event) => {
+            const nextValues = event.target.value
+              .split("\n")
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+
+            handleFieldChange(field.canonical_key, nextValues);
+          }}
+          value={textareaValue}
+        />
+      );
+    }
+
+    if (allowedValues.length > 0) {
       return (
         <select
           className={baseInputClassName}
+          onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
           value={typeof fieldValue === "string" ? fieldValue : ""}
-          onChange={(event) => handleFieldChange(field.key, event.target.value)}
         >
           <option value="">Select an option</option>
           {allowedValues.map((value) => (
@@ -669,163 +509,12 @@ export default function StartDocumentPage() {
       );
     }
 
-    if (field.semanticType === "enum_multi") {
-      const renderMode = requirement?.formRules?.specialAuthoritiesRenderMode ?? "hidden";
-      const specialAuthorityOptions =
-        field.key === "special_authorities" &&
-        renderMode !== "freeform_text" &&
-        renderMode !== "manual_review_only"
-          ? requirement?.specialAuthorities ?? []
-          : [];
-
-      if (specialAuthorityOptions.length > 0) {
-        const selectedValues = Array.isArray(fieldValue) ? fieldValue : [];
-
-        return (
-          <div className="space-y-2 rounded border border-Color-Scheme-1-Border/40 bg-white p-3">
-            {specialAuthorityOptions.map((authority) => {
-              const checked = selectedValues.includes(authority.key);
-
-              return (
-                <label
-                  key={authority.key}
-                  className="flex items-center gap-2 text-sm text-Color-Scheme-1-Text"
-                >
-                  <input
-                    checked={checked}
-                    className="h-4 w-4"
-                    onChange={(event) => {
-                      const nextValues = event.target.checked
-                        ? [...selectedValues, authority.key]
-                        : selectedValues.filter((item) => item !== authority.key);
-
-                      handleFieldChange(field.key, nextValues);
-                    }}
-                    type="checkbox"
-                  />
-                  <span className="inline-flex items-center gap-2">
-                    <span>{authority.label}</span>
-                    <HelpTooltip
-                      label={`Explain ${authority.label}`}
-                      content={getSpecialAuthorityTooltip(authority)}
-                    />
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        );
-      }
-
-      if (allowedValues.length > 0) {
-        const selectedValues = Array.isArray(fieldValue) ? fieldValue : [];
-
-        return (
-          <div className="space-y-2 rounded border border-Color-Scheme-1-Border/40 bg-white p-3">
-            {allowedValues.map((value) => {
-              const checked = selectedValues.includes(value);
-
-              return (
-                <label key={value} className="flex items-center gap-2 text-sm text-Color-Scheme-1-Text">
-                  <input
-                    checked={checked}
-                    className="h-4 w-4"
-                    onChange={(event) => {
-                      const nextValues = event.target.checked
-                        ? [...selectedValues, value]
-                        : selectedValues.filter((item) => item !== value);
-
-                      handleFieldChange(field.key, nextValues);
-                    }}
-                    type="checkbox"
-                  />
-                  <span className="inline-flex items-center gap-2">
-                    <span>{formatLabel(value)}</span>
-                    {getValueDescription(value) ? (
-                      <HelpTooltip
-                        label={`Explain ${formatLabel(value)}`}
-                        content={getValueDescription(value) ?? ""}
-                      />
-                    ) : null}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        );
-      }
-
+    if (field.semantic_type.includes("text")) {
       return (
         <textarea
           className={`${baseInputClassName} min-h-28`}
-          onChange={(event) => handleFieldChange(field.key, event.target.value)}
-          placeholder="Enter one authority per line"
-          value={typeof fieldValue === "string" ? fieldValue : ""}
-        />
-      );
-    }
-
-    if (
-      field.semanticType === "boolean" ||
-      field.semanticType === "legal_notice_acceptance"
-    ) {
-      const description = getFieldDescription(field);
-
-      return (
-        <label className="flex items-center gap-3 rounded border border-Color-Scheme-1-Border/40 bg-white px-3 py-3 text-sm text-Color-Scheme-1-Text">
-          <input
-            checked={Boolean(fieldValue)}
-            className="h-4 w-4"
-            onChange={(event) => handleFieldChange(field.key, event.target.checked)}
-            type="checkbox"
-          />
-          <span className="inline-flex items-center gap-2">
-            <span>{field.label}</span>
-            {description ? (
-              <HelpTooltip label={`Explain ${field.label}`} content={description} />
-            ) : null}
-          </span>
-        </label>
-      );
-    }
-
-    if (field.semanticType === "signature_mark") {
-      return (
-        <div className="rounded border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-sm text-Color-Neutral">
-          This signature is required and will be captured later in the signing step.
-        </div>
-      );
-    }
-
-    if (field.dataType === "integer" || field.semanticType === "witness_count") {
-      return (
-        <input
-          className={baseInputClassName}
-          max={field.validation?.max}
-          min={field.validation?.min}
-          onChange={(event) => handleFieldChange(field.key, event.target.value)}
-          type="number"
-          value={typeof fieldValue === "string" ? fieldValue : ""}
-        />
-      );
-    }
-
-    if (field.dataType === "date") {
-      return (
-        <input
-          className={baseInputClassName}
-          onChange={(event) => handleFieldChange(field.key, event.target.value)}
-          type="date"
-          value={typeof fieldValue === "string" ? fieldValue : ""}
-        />
-      );
-    }
-
-    if (field.semanticType === "text") {
-      return (
-        <textarea
-          className={`${baseInputClassName} min-h-28`}
-          onChange={(event) => handleFieldChange(field.key, event.target.value)}
+          maxLength={getNumberConstraint(field, "maxLength")}
+          onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
           value={typeof fieldValue === "string" ? fieldValue : ""}
         />
       );
@@ -834,9 +523,9 @@ export default function StartDocumentPage() {
     return (
       <input
         className={baseInputClassName}
-        maxLength={field.validation?.maxLength}
-        minLength={field.validation?.minLength}
-        onChange={(event) => handleFieldChange(field.key, event.target.value)}
+        maxLength={getNumberConstraint(field, "maxLength")}
+        minLength={getNumberConstraint(field, "minLength")}
+        onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
         type="text"
         value={typeof fieldValue === "string" ? fieldValue : ""}
       />
@@ -848,7 +537,9 @@ export default function StartDocumentPage() {
       <div>
         <div className="text-2xl font-medium">Start a document</div>
         <div className="text-sm text-Color-Neutral">
-          Select the jurisdiction and inspect the live POA requirements before upload.
+          Load jurisdiction-specific intake requirements for POA (General) and Trust
+          (RRR). Trust certification and IDN are generated downstream during rendering
+          and execution.
         </div>
       </div>
 
@@ -856,15 +547,15 @@ export default function StartDocumentPage() {
         {[
           {
             title: "1. Jurisdiction",
-            description: "Load the state-specific POA requirements from DARCi rules.",
+            description: "Use jurisdictions available for both POA General and Trust RRR.",
           },
           {
-            title: "2. Upload",
-            description: "Add the document that will be notarized.",
+            title: "2. Prepare",
+            description: "Complete the merged intake fields required for that jurisdiction.",
           },
           {
-            title: "3. Prepare",
-            description: "Review details, then move to signing and submission.",
+            title: "3. Continue",
+            description: "Generate POA and Trust outputs; IDN is produced during execution.",
           },
         ].map((step) => (
           <div
@@ -879,197 +570,169 @@ export default function StartDocumentPage() {
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-4 rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-medium">Jurisdiction</div>
-              <div className="mt-1 text-xs text-Color-Neutral">
-                Choose your state to load the Power of Attorney requirements that apply.
+          <div className="space-y-4 rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/60 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium">Jurisdiction</div>
+                <div className="mt-1 text-xs text-Color-Neutral">
+                  Intake profile is POA General + Trust RRR for every jurisdiction.
+                </div>
+              </div>
+              {memberForm ? (
+                <div className="inline-flex items-center gap-2">
+                  <div className="rounded-full border border-Color-Scheme-1-Border/40 bg-white px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-Color-Neutral">
+                    {memberForm.families.join(" + ")}
+                  </div>
+                  <HelpTooltip
+                    label="Current contract composition"
+                    content={`Document types: ${memberForm.documentTypes
+                      .map((type) => formatLabel(type))
+                      .join(", ")}`}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="relative max-w-sm">
+              <select
+                className="w-full appearance-none rounded border border-Color-Scheme-1-Border/40 bg-white px-4 py-3 pr-12 text-sm text-Color-Scheme-1-Text outline-none transition focus:border-Color-Scheme-1-Text"
+                disabled={isLoadingJurisdictions || jurisdictions.length === 0}
+                onChange={handleJurisdictionChange}
+                value={selectedJurisdiction}
+              >
+                {jurisdictions.length === 0 ? (
+                  <option value="">
+                    {isLoadingJurisdictions ? "Loading jurisdictions..." : "No jurisdictions"}
+                  </option>
+                ) : null}
+                {jurisdictions.map((jurisdiction) => (
+                  <option key={jurisdiction.code} value={jurisdiction.code}>
+                    {jurisdiction.label}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-Color-Neutral">
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M5.25 7.5 10 12.25 14.75 7.5" />
+                </svg>
               </div>
             </div>
-            {requirement ? (
-              <div className="inline-flex items-center gap-1.5">
-                <div className="rounded-full border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-Color-Neutral">
-                  {formatLabel(requirement.uiProfile)}
-                </div>
-                <HelpTooltip
-                  label="What is the execution model?"
-                  content="This badge shows the execution model for the selected state — it determines whether your Power of Attorney must be notarized, witnessed, or both in order to be legally valid."
-                />
+
+            {errorMessage ? (
+              <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {errorMessage}
               </div>
             ) : null}
-          </div>
 
-          <div className="relative max-w-sm">
-            <select
-              className="w-full appearance-none rounded border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-4 py-3 pr-12 text-sm text-Color-Scheme-1-Text outline-none transition focus:border-Color-Scheme-1-Text"
-              value={selectedJurisdiction}
-              onChange={handleJurisdictionChange}
-              disabled={isLoadingJurisdictions || !jurisdictions.length}
-            >
-              {!jurisdictions.length ? (
-                <option value="">
-                  {isLoadingJurisdictions ? "Loading states..." : "No states available"}
-                </option>
-              ) : null}
-              {jurisdictions.map((jurisdiction) => (
-                <option key={jurisdiction.code} value={jurisdiction.code}>
-                  {jurisdiction.label}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4 text-Color-Neutral">
-              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor">
-                <path d="M5.25 7.5 10 12.25 14.75 7.5" />
-              </svg>
-            </div>
-          </div>
-
-          <div className="text-xs text-Color-Neutral">
-            <div className="group relative inline-flex items-center gap-2">
-              <span className="font-medium text-Color-Scheme-1-Text">Statutory reference</span>
-              {statutoryReferenceTooltip ? (
-                <HelpTooltip
-                  label="View statutory reference"
-                  content={statutoryReferenceTooltip}
-                />
-              ) : null}
-            </div>
-          </div>
-
-
-
-          {errorMessage ? (
-            <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {errorMessage}
-            </div>
-          ) : null}
-
-          <div className="space-y-4 rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/60 p-4">
-              <div>
-                <div className="text-sm font-medium">Document details</div>
-                <div className="mt-1 text-xs text-Color-Neutral">
-                  Fill in the information needed to prepare your Power of Attorney for the selected state.
-                </div>
+            {missingRequirements.length > 0 ? (
+              <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Missing rules for: {missingRequirements
+                  .map((entry) => `${entry.family} (${formatLabel(entry.documentType)})`)
+                  .join(", ")}
               </div>
-              {isLoadingRequirement ? (
-                <div className="text-sm text-Color-Neutral">Loading POA requirements...</div>
-              ) : requirement ? (
-                <div className="space-y-4">
-                  {inputRequirements?.notices.length ? (
-                    <div className="space-y-2">
-                      {inputRequirements.notices
-                        .filter((notice) => !dismissedNotices.has(notice.key))
-                        .map((notice) => (
-                        <div
-                          key={notice.key}
-                          className="flex items-center justify-between gap-3 bg-Color-Neutral-Darker px-3 py-1 text-xs leading-5 text-Color-Neutral-Lightest"
-                        >
-                          <span>{notice.message}</span>
-                          <button
-                            aria-label="Dismiss notice"
-                            className="shrink-0 cursor-pointer text-sm leading-none text-Color-Neutral-Lightest/60 transition hover:text-Color-Neutral-Lightest"
-                            onClick={() =>
-                              setDismissedNotices((prev) => new Set([...prev, notice.key]))
-                            }
-                            type="button"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+            ) : null}
 
-                  {compatibilityMessage ? (
-                    <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      {compatibilityMessage}
-                    </div>
-                  ) : null}
+            {sourceOnlyVisibleCount > 0 ? (
+              <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {sourceOnlyVisibleCount} visible field
+                {sourceOnlyVisibleCount > 1 ? "s are" : " is"} source-conditioned. Field
+                visibility and requiredness are resolved using source-level conditions.
+              </div>
+            ) : null}
 
-                  {visibleSections.map((section) => (
-                    <div
-                      key={section.key}
-                      className="space-y-3 rounded-lg border border-Color-Scheme-1-Border/30 bg-white p-4"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
-                            <span>{section.title}</span>
-                            {getSectionDescription(section) ? (
-                              <HelpTooltip
-                                label={`Explain ${section.title}`}
-                                content={getSectionDescription(section) ?? ""}
-                              />
+            <div>
+              <div className="text-sm font-medium">Document details</div>
+              <div className="mt-1 text-xs text-Color-Neutral">
+                Complete fields that are active for the selected jurisdiction.
+              </div>
+            </div>
+
+            {isLoadingMemberForm ? (
+              <div className="text-sm text-Color-Neutral">Loading member form requirements...</div>
+            ) : memberForm ? (
+              <div className="space-y-4">
+                {visibleSections.map((section) => (
+                  <div
+                    key={section.key}
+                    className="space-y-3 rounded-lg border border-Color-Scheme-1-Border/30 bg-white p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                        {section.title}
+                      </div>
+                      <div className="text-xs uppercase tracking-[0.12em] text-Color-Neutral">
+                        {section.fields.length} field{section.fields.length > 1 ? "s" : ""}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {section.fields.map((field) => {
+                        const fieldRenderKey = [
+                          section.key,
+                          field.canonical_key,
+                          field.sources
+                            .map(
+                              (source) =>
+                                `${source.family}:${source.document_type}:${source.section_key}:${source.field_key}`,
+                            )
+                            .join("|"),
+                        ].join(":");
+                        const runtime = fieldRuntime.get(field.canonical_key);
+                        const required = runtime?.required ?? field.required;
+                        const activeSourceSummary = (runtime?.activeSources ?? [])
+                          .map(
+                            (source) =>
+                              `${source.family.toUpperCase()} ${formatLabel(
+                                source.document_type,
+                              )} / ${formatLabel(source.field_key)}`,
+                          )
+                          .join(" | ");
+
+                        return (
+                          <div key={fieldRenderKey} className="space-y-2">
+                            {field.data_type === "boolean"
+                              ? null
+                              : renderFieldLabel(field, required)}
+                            {renderFieldControl(field)}
+                            {field.data_type === "boolean" ? (
+                              <div>{renderFieldLabel(field, required)}</div>
+                            ) : null}
+                            {activeSourceSummary ? (
+                              <div className="text-[11px] text-Color-Neutral">
+                                Active source: {activeSourceSummary}
+                              </div>
                             ) : null}
                           </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
 
+                <details className="rounded-lg border border-Color-Scheme-1-Border/30 bg-white">
+                  <summary className="cursor-pointer p-4 text-sm font-medium text-Color-Scheme-1-Text">
+                    Source trace snapshot ({memberForm.aggregatedForm.source_trace.length})
+                  </summary>
+                  <div className="space-y-2 border-t border-Color-Scheme-1-Border/20 px-4 py-3 text-sm">
+                    {memberForm.aggregatedForm.source_trace.slice(0, 20).map((item) => (
+                      <div
+                        key={`${item.source}:${item.field}:${String(item.value)}`}
+                        className="flex items-start justify-between gap-4"
+                      >
+                        <div className="text-Color-Neutral">{item.field}</div>
+                        <div className="text-right font-medium text-Color-Scheme-1-Text">
+                          {String(item.value)}
                         </div>
-                        {section.repeatable ? (
-                          <div className="text-xs uppercase tracking-[0.12em] text-Color-Neutral">
-                            Repeatable
-                          </div>
-                        ) : null}
                       </div>
-
-                      {section.fields.length ? (
-                        <div className="grid gap-4 md:grid-cols-2">
-                          {section.fields.map((field) => {
-                            const fieldControl = renderField(field);
-
-                            if (!fieldControl) {
-                              return null;
-                            }
-
-                            return (
-                              <div key={field.key} className="space-y-2">
-                                {field.semanticType === "boolean" ||
-                                field.semanticType === "legal_notice_acceptance"
-                                  ? null
-                                  : renderFieldLabel(field)}
-                                {fieldControl}
-                                {field.required ? (
-                                  <div className="text-xs text-Color-Neutral">Required field</div>
-                                ) : null}
-                                {renderAllowedValueGlossary(field)}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-Color-Neutral">
-                          No direct data entry is required in this section, but the workflow still applies.
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  <details className="rounded-lg border border-Color-Scheme-1-Border/30 bg-white">
-                    <summary className="flex cursor-pointer items-center gap-2 p-4 text-sm font-medium text-Color-Scheme-1-Text">
-                      <span>Workflow logic snapshot</span>
-                      {workflowSnapshotTooltip ? (
-                        <HelpTooltip
-                          label="Explain workflow logic snapshot"
-                          content={workflowSnapshotTooltip}
-                        />
-                      ) : null}
-                    </summary>
-                    <div className="space-y-2 border-t border-Color-Scheme-1-Border/20 px-4 py-3 text-sm">
-                      {decisionRows.map((row) => (
-                        <div key={row.label} className="flex items-start justify-between gap-4">
-                          <div className="text-Color-Neutral">{row.label}</div>
-                          <div className="text-right font-medium text-Color-Scheme-1-Text">
-                            {formatDecisionValue(row.value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              ) : (
-                <div className="text-sm text-Color-Neutral">
-                  Select a state to load the generated POA input requirements.
-                </div>
-              )}
+                    ))}
+                  </div>
+                </details>
+              </div>
+            ) : (
+              <div className="text-sm text-Color-Neutral">
+                Select a jurisdiction to load merged member-facing requirements.
+              </div>
+            )}
           </div>
         </div>
 

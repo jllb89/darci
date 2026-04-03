@@ -981,6 +981,283 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /rules/trust:
+    get:
+      summary: List trust jurisdictions by document type
+      description: Returns available jurisdictions for the requested trust document type.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum:
+              - rrr
+              - certification
+              - other
+            default: rrr
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustJurisdictionListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/trust/{jurisdiction}:
+    get:
+      summary: Get trust requirements by jurisdiction and document type
+      description: Returns trust requirement metadata and derived input requirements for a jurisdiction.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: jurisdiction
+          required: true
+          schema:
+            type: string
+          description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum:
+              - rrr
+              - certification
+              - other
+            default: rrr
+          description: Trust document type to resolve.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrustRequirementResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/idn:
+    get:
+      summary: List IDN jurisdictions by document type
+      description: Returns available jurisdictions for the requested IDN document type.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum:
+              - acknowledgment
+              - authentic_act
+              - public_instrument
+            default: acknowledgment
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdnJurisdictionListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/idn/{jurisdiction}:
+    get:
+      summary: Get IDN requirements by jurisdiction and document type
+      description: Returns IDN requirement metadata and derived input requirements for a jurisdiction.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: jurisdiction
+          required: true
+          schema:
+            type: string
+          description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum:
+              - acknowledgment
+              - authentic_act
+              - public_instrument
+            default: acknowledgment
+          description: IDN document type to resolve.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdnRequirementResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/member-form:
+    get:
+      summary: List jurisdictions for member-form intake selection
+      description: Returns jurisdictions where all selected intake families are available.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberFormJurisdictionListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/member-form/{jurisdiction}:
+    get:
+      summary: Get merged member-form contract by jurisdiction
+      description: Returns aggregated member-facing sections/fields plus per-family source contexts.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: jurisdiction
+          required: true
+          schema:
+            type: string
+          description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberFormRulesResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
@@ -2108,6 +2385,343 @@ components:
           type: string
         label:
           type: string
+    JurisdictionOption:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+    RequirementSource:
+      type: object
+      properties:
+        citation:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    TrustJurisdictionListResponse:
+      type: object
+      properties:
+        jurisdictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/JurisdictionOption"
+    TrustRequirementResponse:
+      type: object
+      properties:
+        requirement:
+          $ref: "#/components/schemas/TrustRequirement"
+    TrustRequirement:
+      type: object
+      properties:
+        id:
+          type: string
+        jurisdiction:
+          type: string
+        documentType:
+          type: string
+          enum:
+            - rrr
+            - certification
+            - other
+        uiProfile:
+          type: string
+        reviewStatus:
+          type: string
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          type: string
+          nullable: true
+        source:
+          $ref: "#/components/schemas/RequirementSource"
+        inputRequirements:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    IdnJurisdictionListResponse:
+      type: object
+      properties:
+        jurisdictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/JurisdictionOption"
+    IdnRequirementResponse:
+      type: object
+      properties:
+        requirement:
+          $ref: "#/components/schemas/IdnRequirement"
+    IdnRequirement:
+      type: object
+      properties:
+        id:
+          type: string
+        jurisdiction:
+          type: string
+        documentType:
+          type: string
+          enum:
+            - acknowledgment
+            - authentic_act
+            - public_instrument
+        uiProfile:
+          type: string
+        reviewStatus:
+          type: string
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          type: string
+          nullable: true
+        source:
+          $ref: "#/components/schemas/RequirementSource"
+        inputRequirements:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    MemberFormSelection:
+      type: object
+      properties:
+        families:
+          type: array
+          items:
+            type: string
+            enum:
+              - poa
+              - trust
+              - idn
+        poaType:
+          type: string
+        trustType:
+          type: string
+        idnType:
+          type: string
+    MemberFormJurisdictionListResponse:
+      type: object
+      properties:
+        selection:
+          $ref: "#/components/schemas/MemberFormSelection"
+        jurisdictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/JurisdictionOption"
+    MemberFormRulesResponse:
+      type: object
+      properties:
+        memberForm:
+          $ref: "#/components/schemas/MemberFormRulesContract"
+    MemberFormRulesContract:
+      type: object
+      properties:
+        jurisdiction:
+          type: string
+        families:
+          type: array
+          items:
+            type: string
+            enum:
+              - poa
+              - trust
+              - idn
+        documentTypes:
+          type: array
+          items:
+            type: string
+        aggregatedForm:
+          $ref: "#/components/schemas/MemberFacingFormContract"
+        familyContracts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormFamilyContract"
+        sourceConditionContexts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormSourceConditionContext"
+    MemberFacingFormContract:
+      type: object
+      properties:
+        jurisdiction:
+          type: string
+        families:
+          type: array
+          items:
+            type: string
+            enum:
+              - poa
+              - trust
+              - idn
+        document_types:
+          type: array
+          items:
+            type: string
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFacingSection"
+        source_trace:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFacingSourceTraceItem"
+    MemberFacingSection:
+      type: object
+      properties:
+        key:
+          type: string
+          enum:
+            - basic_info
+            - people
+            - authority
+            - execution
+            - documents
+            - advanced
+        title:
+          type: string
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFacingField"
+    MemberFacingField:
+      type: object
+      properties:
+        canonical_key:
+          type: string
+        label:
+          type: string
+        semantic_type:
+          type: string
+        data_type:
+          type: string
+          enum:
+            - string
+            - integer
+            - boolean
+            - date
+            - array
+            - object
+        required:
+          type: boolean
+        repeatable:
+          type: boolean
+        help_text:
+          type: string
+          nullable: true
+        validation:
+          type: object
+          additionalProperties: true
+          nullable: true
+        when:
+          type: object
+          additionalProperties: true
+          nullable: true
+        condition_merge_mode:
+          type: string
+          enum:
+            - exact
+            - source_only
+          nullable: true
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFacingFieldSource"
+        ui_group:
+          type: string
+          enum:
+            - basic_info
+            - people
+            - authority
+            - execution
+            - documents
+            - advanced
+    MemberFacingFieldSource:
+      type: object
+      properties:
+        family:
+          type: string
+          enum:
+            - poa
+            - trust
+            - idn
+        document_type:
+          type: string
+        section_key:
+          type: string
+        field_key:
+          type: string
+        original_label:
+          type: string
+        original_required:
+          type: boolean
+          nullable: true
+        original_when:
+          type: object
+          additionalProperties: true
+          nullable: true
+    MemberFacingSourceTraceItem:
+      type: object
+      properties:
+        source:
+          type: string
+        field:
+          type: string
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+    MemberFormFamilyContract:
+      type: object
+      properties:
+        family:
+          type: string
+          enum:
+            - poa
+            - trust
+            - idn
+        documentType:
+          type: string
+        inputRequirements:
+          type: object
+          additionalProperties: true
+        factContext:
+          type: object
+          additionalProperties: true
+    MemberFormSourceConditionContext:
+      type: object
+      properties:
+        family:
+          type: string
+          enum:
+            - poa
+            - trust
+            - idn
+        documentType:
+          type: string
+        sectionKey:
+          type: string
+        fieldKey:
+          type: string
+        facts:
+          type: object
+          additionalProperties: true
     PoaRequirement:
       type: object
       properties:
@@ -2420,7 +3034,6 @@ components:
         field:
           type: string
         value:
-          nullable: true
           oneOf:
             - type: string
             - type: integer

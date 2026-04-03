@@ -1586,6 +1586,22 @@ const deriveTrustContract = (
 
   const notarizationStatus = toExecutionStatus(record.notarization_required);
   const witnessStatus = toExecutionStatus(record.witnesses_required);
+  const requiredCertificationElements = splitList(record.certification_required_elements);
+  const permissiveCertificationElements = splitList(record.certification_permissive_elements);
+  const prohibitedCertificationElements = splitList(record.certification_prohibited_elements);
+  const certificationElementsPreview = [
+    requiredCertificationElements.length > 0
+      ? `Required: ${requiredCertificationElements.join("; ")}`
+      : null,
+    permissiveCertificationElements.length > 0
+      ? `Permitted: ${permissiveCertificationElements.join("; ")}`
+      : null,
+    prohibitedCertificationElements.length > 0
+      ? `Prohibited: ${prohibitedCertificationElements.join("; ")}`
+      : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 
   const sections: InputRequirementSection[] = [
     {
@@ -1714,6 +1730,62 @@ const deriveTrustContract = (
           collect_from: "member",
           default_source: "none",
         },
+        {
+          key: "revocability_status",
+          label: "Revocability status",
+          semantic_type: "enum_single",
+          required: documentType !== "other",
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+          validation: {
+            allowed_values: [
+              "revocable",
+              "irrevocable",
+              "limited_or_conditional",
+              "unspecified_or_unknown",
+            ],
+          },
+        },
+        {
+          key: "revocation_holders",
+          label: "Revocation holders",
+          semantic_type: "person_list",
+          required: false,
+          data_type: "array",
+          collect_from: "member",
+          default_source: "none",
+        },
+        {
+          key: "trustee_signature_authority",
+          label: "Trustee signature authority",
+          semantic_type: "signature_authority_rule",
+          required: false,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+        },
+        {
+          key: "tax_id_owner",
+          label: "Tax ID owner",
+          semantic_type: "tax_id_owner",
+          required: false,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+          validation: {
+            allowed_values: ["trust", "grantor", "trustee", "other_or_unknown"],
+          },
+        },
+        {
+          key: "asset_titling_format",
+          label: "Asset titling format",
+          semantic_type: "text",
+          required: false,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+        },
       ],
     },
     {
@@ -1735,6 +1807,24 @@ const deriveTrustContract = (
         {
           key: "key_trust_terms",
           label: "Key trust terms",
+          semantic_type: "text",
+          required: false,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+        },
+        {
+          key: "trustee_incapacity_standard",
+          label: "Trustee incapacity standard",
+          semantic_type: "trustee_incapacity_standard",
+          required: false,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+        },
+        {
+          key: "trustee_power_matrix",
+          label: "Trustee power matrix",
           semantic_type: "text",
           required: false,
           data_type: "string",
@@ -1767,6 +1857,42 @@ const deriveTrustContract = (
           data_type: "array",
           collect_from: "system",
           default_source: "system_derived",
+          validation: {
+            allowed_values: requiredCertificationElements,
+          },
+        },
+        {
+          key: "permitted_optional_certification_elements",
+          label: "Permitted optional certification elements",
+          semantic_type: "enum_multi",
+          required: false,
+          data_type: "array",
+          collect_from: "system",
+          default_source: "system_derived",
+          validation: {
+            allowed_values: permissiveCertificationElements,
+          },
+        },
+        {
+          key: "prohibited_certification_elements",
+          label: "Prohibited certification elements",
+          semantic_type: "enum_multi",
+          required: false,
+          data_type: "array",
+          collect_from: "system",
+          default_source: "system_derived",
+          validation: {
+            allowed_values: prohibitedCertificationElements,
+          },
+        },
+        {
+          key: "certification_elements_preview",
+          label: "Certification elements preview",
+          semantic_type: "text",
+          required: false,
+          data_type: "string",
+          collect_from: "system",
+          default_source: "system_derived",
         },
       ],
     },
@@ -1785,6 +1911,36 @@ const deriveTrustContract = (
           data_type: "array",
           collect_from: "member",
           default_source: "none",
+          validation: {
+            item_shape: {
+              document_type: {
+                type: "string",
+                allowed_values: [
+                  "trust_agreement",
+                  "amendment",
+                  "restatement",
+                  "certification",
+                  "change_of_trustee",
+                  "other",
+                ],
+              },
+              title: {
+                type: "string",
+                max_length: 200,
+              },
+              pages: {
+                type: "string",
+                max_length: 50,
+              },
+              date: {
+                type: "date",
+              },
+              recording_reference: {
+                type: "string",
+                max_length: 120,
+              },
+            },
+          },
         },
       ],
     },
@@ -1921,6 +2077,15 @@ const deriveTrustContract = (
           collect_from: "system",
           default_source: "system_derived",
         },
+        {
+          key: "revocability_presumption_note",
+          label: "Revocability presumption",
+          semantic_type: "text",
+          required: true,
+          data_type: "string",
+          collect_from: "system",
+          default_source: "system_derived",
+        },
       ],
     },
     {
@@ -2044,6 +2209,15 @@ const deriveTrustContract = (
         notarization_required_status: notarizationStatus,
         witnesses_required_status: witnessStatus,
       },
+      trust_parties: {
+        revocability_presumption: record.revocability_presumption,
+      },
+      certification_scope: {
+        required_certification_elements: requiredCertificationElements,
+        permitted_optional_certification_elements: permissiveCertificationElements,
+        prohibited_certification_elements: prohibitedCertificationElements,
+        certification_elements_preview: certificationElementsPreview || null,
+      },
     },
     document_outputs: documentOutputs,
     notices,
@@ -2065,6 +2239,11 @@ const deriveTrustContract = (
       },
       {
         source: "trust_requirements",
+        field: "Revocability Presumption",
+        value: record.revocability_presumption,
+      },
+      {
+        source: "trust_requirements",
         field: "Registration Requirement",
         value: record.registration_requirement,
       },
@@ -2077,6 +2256,26 @@ const deriveTrustContract = (
         source: "trust_requirements",
         field: "Real Property Rule",
         value: record.real_property_rule,
+      },
+      {
+        source: "trust_requirements",
+        field: "Certification Required Elements",
+        value: record.certification_required_elements,
+      },
+      {
+        source: "trust_requirements",
+        field: "Certification Permissive Elements",
+        value: record.certification_permissive_elements,
+      },
+      {
+        source: "trust_requirements",
+        field: "Certification Prohibited Elements",
+        value: record.certification_prohibited_elements,
+      },
+      {
+        source: "trust_requirements",
+        field: "Competency Requirement",
+        value: record.competency_requirement,
       },
     ],
   };

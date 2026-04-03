@@ -89,64 +89,84 @@ type TrustJurisdictionRow = {
   jurisdiction: string;
 };
 
-export const getTrustRequirement = async (
+const fallbackWarningKeys = new Set<string>();
+
+const warnTrustFallbackUsed = (
+  jurisdiction: string,
+  requestedDocumentType: TrustDocumentType,
+) => {
+  const warningKey = `${jurisdiction}|${requestedDocumentType}`;
+  if (fallbackWarningKeys.has(warningKey)) {
+    return;
+  }
+
+  fallbackWarningKeys.add(warningKey);
+
+  console.warn("Trust requirement fallback used; explicit row should be seeded", {
+    jurisdiction,
+    requestedDocumentType,
+    fallbackDocumentType: "rrr",
+  });
+};
+
+const TRUST_REQUIREMENT_SELECT = [
+  "id",
+  "jurisdiction",
+  "document_type",
+  "ui_profile",
+  "derivation_mode",
+  "api_representation_mode",
+  "manual_review_required",
+  "governing_law",
+  "utc_adopted",
+  "revocability_presumption",
+  "writing_required",
+  "signature_required",
+  "notarization_required",
+  "witnesses_required",
+  "special_execution_rules",
+  "trust_certification_statutory_basis",
+  "certification_required_elements",
+  "certification_permissive_elements",
+  "certification_prohibited_elements",
+  "non_default_powers_requiring_express_authority",
+  "statutory_form_available",
+  "pour_over_will_recognized",
+  "registration_requirement",
+  "real_property_rule",
+  "competency_requirement",
+  "specific_authority_required_for_certain_acts",
+  "manual_review_required_text",
+  "trust_system",
+  "execution_level",
+  "acknowledgment_profile",
+  "base_template_key",
+  "state_overlay_key",
+  "asset_protection",
+  "directed_trusts",
+  "decanting_friendly",
+  "silent_trust_friendly",
+  "normalization_confidence",
+  "source_citation",
+  "source_url",
+  "review_status",
+  "reviewed_at",
+  "reviewed_by",
+  "notes",
+  "input_requirements",
+  "input_requirements_schema_version",
+  "input_requirements_updated_at",
+  "created_at",
+  "updated_at",
+].join(", ");
+
+const getTrustRequirementExact = async (
   jurisdiction: string,
   documentType: TrustDocumentType,
 ) => {
   const { data, error } = await supabaseAdmin
     .from("trust_requirements")
-    .select(
-      [
-        "id",
-        "jurisdiction",
-        "document_type",
-        "ui_profile",
-        "derivation_mode",
-        "api_representation_mode",
-        "manual_review_required",
-        "governing_law",
-        "utc_adopted",
-        "revocability_presumption",
-        "writing_required",
-        "signature_required",
-        "notarization_required",
-        "witnesses_required",
-        "special_execution_rules",
-        "trust_certification_statutory_basis",
-        "certification_required_elements",
-        "certification_permissive_elements",
-        "certification_prohibited_elements",
-        "non_default_powers_requiring_express_authority",
-        "statutory_form_available",
-        "pour_over_will_recognized",
-        "registration_requirement",
-        "real_property_rule",
-        "competency_requirement",
-        "specific_authority_required_for_certain_acts",
-        "manual_review_required_text",
-        "trust_system",
-        "execution_level",
-        "acknowledgment_profile",
-        "base_template_key",
-        "state_overlay_key",
-        "asset_protection",
-        "directed_trusts",
-        "decanting_friendly",
-        "silent_trust_friendly",
-        "normalization_confidence",
-        "source_citation",
-        "source_url",
-        "review_status",
-        "reviewed_at",
-        "reviewed_by",
-        "notes",
-        "input_requirements",
-        "input_requirements_schema_version",
-        "input_requirements_updated_at",
-        "created_at",
-        "updated_at",
-      ].join(", "),
-    )
+    .select(TRUST_REQUIREMENT_SELECT)
     .eq("jurisdiction", jurisdiction)
     .eq("document_type", documentType)
     .limit(1)
@@ -158,6 +178,50 @@ export const getTrustRequirement = async (
 
   return data as TrustRequirementRecord | null;
 };
+
+export const getTrustRequirement = async (
+  jurisdiction: string,
+  documentType: TrustDocumentType,
+) => {
+  const exact = await getTrustRequirementExact(jurisdiction, documentType);
+  if (exact) {
+    return exact;
+  }
+
+  // Trust certification and trust-other generation can be derived from the same
+  // jurisdictional trust rule row when dedicated per-type rows are not yet seeded.
+  if (documentType !== "rrr") {
+    const fallback = await getTrustRequirementExact(jurisdiction, "rrr");
+    if (fallback) {
+      warnTrustFallbackUsed(jurisdiction, documentType);
+
+      return {
+        ...fallback,
+        document_type: documentType,
+      } satisfies TrustRequirementRecord;
+    }
+  }
+
+  return null;
+};
+
+const mapJurisdictionRows = (rows: TrustJurisdictionRow[]) => {
+  const unique = new Map<string, { code: string; label: string }>();
+
+  for (const row of rows) {
+    if (!unique.has(row.jurisdiction)) {
+      unique.set(row.jurisdiction, {
+        code: row.jurisdiction,
+        label: getJurisdictionLabel(row.jurisdiction),
+      });
+    }
+  }
+
+  return [...unique.values()].sort((left, right) =>
+    left.label.localeCompare(right.label),
+  );
+};
+
 
 export const getTrustRequirementDetails = async (
   jurisdiction: string,
@@ -185,20 +249,24 @@ export const listTrustJurisdictions = async (documentType: TrustDocumentType) =>
     throw new Error(error.message);
   }
 
-  const unique = new Map<string, { code: string; label: string }>();
-
-  for (const row of (data ?? []) as TrustJurisdictionRow[]) {
-    if (!unique.has(row.jurisdiction)) {
-      unique.set(row.jurisdiction, {
-        code: row.jurisdiction,
-        label: getJurisdictionLabel(row.jurisdiction),
-      });
-    }
+  const exactRows = (data ?? []) as TrustJurisdictionRow[];
+  if (exactRows.length > 0 || documentType === "rrr") {
+    return mapJurisdictionRows(exactRows);
   }
 
-  return [...unique.values()].sort((left, right) =>
-    left.label.localeCompare(right.label),
-  );
+  warnTrustFallbackUsed("*", documentType);
+
+  const { data: rrrData, error: rrrError } = await supabaseAdmin
+    .from("trust_requirements")
+    .select("jurisdiction")
+    .eq("document_type", "rrr")
+    .order("jurisdiction", { ascending: true });
+
+  if (rrrError) {
+    throw new Error(rrrError.message);
+  }
+
+  return mapJurisdictionRows((rrrData ?? []) as TrustJurisdictionRow[]);
 };
 
 export const normalizeTrustJurisdiction = normalizeJurisdiction;

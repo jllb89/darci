@@ -105,3 +105,51 @@ Phase 3 — Integration
 - Wire the document flow so that generating a POA or Trust automatically triggers the correct IDN/acknowledgement page generation for that jurisdiction
 
 - The "Start a document" page gets a document type selector (POA, Trust RRR, Trust Certification) before jurisdiction
+
+
+
+
+
+Roadmap
+
+1. Backend orchestration service
+Build one service that loads POA/Trust/IDN requirement records for a jurisdiction and selected document types.
+Use canonical derivation for all families via inputRequirements.ts:2834, not the POA legacy wrapper.
+Feed contracts into memberInputAggregator.ts:659.
+
+2. New member-form rules endpoint
+Add a new endpoint under rules (for example: member-form by jurisdiction) that returns:
+selected families and document types
+canonical per-family contracts (for traceability/debug)
+aggregated member form contract
+fact context per source (family + document_type), so frontend can evaluate source-level conditions deterministically
+Keep existing family endpoints untouched for backward compatibility.
+
+3. Frontend start-page integration
+Keep authenticated route at page.tsx.
+Replace POA-only fetching with the new aggregated endpoint.
+Add UI selectors for active families/document types before rendering fields.
+Render aggregated sections/fields from member form contract, preserving current section-first UX structure.
+
+4. Condition engine upgrade (critical)
+Extend condition evaluation to support full operators and value shapes from shared contracts.
+For fields with exact mode: evaluate field-level condition normally.
+For fields with source_only mode: evaluate each source.original_when using that source fact context; do not treat missing top-level condition as unconditional.
+Required state must be computed from active sources only.
+
+5. Writeback mapping (when you wire submit)
+Build canonical-field-to-source mapping using merged sources.
+Persist values only into source fields whose original_when is active for the selected family/document path.
+This is where the source_only rule matters most to avoid over-collecting or wrongly required inputs.
+
+6. Tests and rollout
+Backend tests: endpoint contract, mixed-family merge, source_only behavior, missing-family behavior.
+Frontend tests: operator handling, source_only visibility/required behavior, multi-family switching.
+Roll out behind a flag so POA-only path remains available during transition.
+
+
+Highest-Risk Point To Lock Early
+
+The source_only semantics in memberInputAggregator.ts:109 and memberInputAggregator.ts:480 must drive both UI activation and submission mapping. If this is skipped, fields can appear unconditional and create legal-flow regressions.
+If you want, I can implement Phase 1 now: new backend member-form endpoint plus tests.
+After that, I can wire Phase 2 in page.tsx in a backward-compatible flag path.

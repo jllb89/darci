@@ -11,6 +11,10 @@ import {
   getIdnRequirementByJurisdiction,
   listIdnJurisdictionsForType,
 } from "../controllers/idnController";
+import {
+  getMemberFormRulesByJurisdiction,
+  listMemberFormJurisdictionsForSelection,
+} from "../controllers/memberFormRulesController";
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
@@ -49,6 +53,18 @@ router.get(
   "/idn/:jurisdiction",
   requireRole(["member", "notary", "admin", "service_role"]),
   getIdnRequirementByJurisdiction,
+);
+
+router.get(
+  "/member-form",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  listMemberFormJurisdictionsForSelection,
+);
+
+router.get(
+  "/member-form/:jurisdiction",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  getMemberFormRulesByJurisdiction,
 );
 
 export default router;
