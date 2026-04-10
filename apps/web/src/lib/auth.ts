@@ -54,6 +54,13 @@ const emitAuthChange = () => {
   window.dispatchEvent(new Event(AUTH_STORAGE_EVENT));
 };
 
+const getApiBaseUrl = () => {
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+    "http://localhost:4000"
+  );
+};
+
 export const getStoredAuth = (): StoredAuth => {
   if (!isBrowser()) {
     return emptyAuth;
@@ -63,7 +70,7 @@ export const getStoredAuth = (): StoredAuth => {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
   const rawUser = localStorage.getItem(USER_KEY);
 
-   if (
+  if (
     cachedStoredAuth.accessToken === accessToken &&
     cachedStoredAuth.refreshToken === refreshToken &&
     cachedStoredAuth.rawUser === rawUser
@@ -148,11 +155,7 @@ export const logoutStoredAuth = async () => {
     return;
   }
 
-  const apiBaseUrl =
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-    "http://localhost:4000";
-
-  const response = await fetch(`${apiBaseUrl}/auth/logout`, {
+  const response = await fetch(`${getApiBaseUrl()}/auth/logout`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -171,6 +174,68 @@ export const logoutStoredAuth = async () => {
     | null;
 
   throw new Error(payload?.message || "Failed to sign out");
+};
+
+let refreshStoredAuthRequest: Promise<StoredAuth | null> | null = null;
+
+const runRefreshStoredAuth = async (): Promise<StoredAuth | null> => {
+  const { refreshToken } = getStoredAuth();
+
+  if (!refreshToken) {
+    clearStoredAuth();
+    return null;
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        accessToken?: string | null;
+        refreshToken?: string | null;
+        user?: StoredUser | null;
+        message?: string;
+      }
+    | null;
+
+  if (
+    !response.ok ||
+    !payload?.accessToken ||
+    !payload.refreshToken ||
+    !payload.user
+  ) {
+    if (response.status === 400 || response.status === 401) {
+      clearStoredAuth();
+      return null;
+    }
+
+    throw new Error(payload?.message || "Failed to refresh session");
+  }
+
+  setStoredAuth({
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    user: payload.user,
+  });
+
+  return getStoredAuth();
+};
+
+export const refreshStoredAuth = async (): Promise<StoredAuth | null> => {
+  if (refreshStoredAuthRequest) {
+    return refreshStoredAuthRequest;
+  }
+
+  refreshStoredAuthRequest = runRefreshStoredAuth().finally(() => {
+    refreshStoredAuthRequest = null;
+  });
+
+  return refreshStoredAuthRequest;
 };
 
 const subscribeToAuth = (onChange: () => void) => {

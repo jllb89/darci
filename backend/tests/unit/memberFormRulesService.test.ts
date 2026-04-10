@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyMemberFormFallbackHelpText,
   applyPoaGlossaryHelpText,
+  applyPoaSpecialAuthorityOptions,
+  applyTrusteePowersOptions,
   buildContractFactContext,
   buildMemberFormRulesContract,
 } from "../../src/services/memberFormRulesService";
@@ -186,6 +188,32 @@ const buildIdnContract = (
   ...overrides,
 });
 
+type PoaSpecialAuthorityOptionInput =
+  Parameters<typeof applyPoaSpecialAuthorityOptions>[1][number];
+
+const buildPoaSpecialAuthorityOption = (
+  overrides: Partial<PoaSpecialAuthorityOptionInput>,
+): PoaSpecialAuthorityOptionInput => ({
+  canonical_key: "create_or_modify_trust",
+  canonical_label: "Create or modify a trust",
+  state_specific_label: null,
+  sort_order: 10,
+  ...overrides,
+});
+
+type TrusteePowerOptionInput =
+  Parameters<typeof applyTrusteePowersOptions>[1][number];
+
+const buildTrusteePowerOption = (
+  overrides: Partial<TrusteePowerOptionInput>,
+): TrusteePowerOptionInput => ({
+  canonical_key: "real_property",
+  canonical_label: "Real property",
+  state_specific_label: null,
+  sort_order: 10,
+  ...overrides,
+});
+
 describe("memberFormRulesService", () => {
   it("builds a condition fact context from canonical contracts", () => {
     const contract = buildPoaContract({
@@ -355,6 +383,100 @@ describe("memberFormRulesService", () => {
     ]);
 
     expect(result).toBe(trustContract);
+  });
+
+  it("applies DB-provided POA special-authority options to authority scope selection", () => {
+    const poaContract = buildPoaContract({
+      sections: [
+        buildSection({
+          key: "authority_scope",
+          title: "Authority Scope",
+          fields: [
+            buildMemberField({
+              key: "authority_scope_selection",
+              label: "Authority scope selection",
+              semantic_type: "authority_selection",
+              data_type: "array",
+              required: true,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const enriched = applyPoaSpecialAuthorityOptions(poaContract, [
+      buildPoaSpecialAuthorityOption({
+        canonical_key: "make_gifts",
+        canonical_label: "Make gifts",
+        state_specific_label: "Make gifts (CA)",
+        sort_order: 20,
+      }),
+      buildPoaSpecialAuthorityOption({
+        canonical_key: "create_or_modify_trust",
+        canonical_label: "Create or modify a trust",
+        state_specific_label: null,
+        sort_order: 10,
+      }),
+    ]);
+
+    const authorityField = enriched.sections[0]?.fields.find(
+      (field) => field.key === "authority_scope_selection",
+    );
+
+    expect(authorityField?.validation).toMatchObject({
+      allowed_values: ["create_or_modify_trust", "make_gifts"],
+      allowed_value_labels: {
+        create_or_modify_trust: "Create or modify a trust",
+        make_gifts: "Make gifts (CA)",
+      },
+    });
+  });
+
+  it("applies DB-provided trustee powers to trustee power matrix field", () => {
+    const trustContract = buildTrustContract({
+      sections: [
+        buildSection({
+          key: "authority",
+          title: "Authority",
+          fields: [
+            buildMemberField({
+              key: "trustee_power_matrix",
+              label: "Trustee powers",
+              semantic_type: "enum_multi",
+              data_type: "array",
+              required: false,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const enriched = applyTrusteePowersOptions(trustContract, [
+      buildTrusteePowerOption({
+        canonical_key: "tax_matters",
+        canonical_label: "Tax matters",
+        state_specific_label: null,
+        sort_order: 20,
+      }),
+      buildTrusteePowerOption({
+        canonical_key: "real_property",
+        canonical_label: "Real property",
+        state_specific_label: "Real property and deeds",
+        sort_order: 10,
+      }),
+    ]);
+
+    const trusteePowerField = enriched.sections[0]?.fields.find(
+      (field) => field.key === "trustee_power_matrix",
+    );
+
+    expect(trusteePowerField?.validation).toMatchObject({
+      allowed_values: ["real_property", "tax_matters"],
+      allowed_value_labels: {
+        real_property: "Real property and deeds",
+        tax_matters: "Tax matters",
+      },
+    });
   });
 
   it("applies fallback help text for trust/basic/document fields", () => {

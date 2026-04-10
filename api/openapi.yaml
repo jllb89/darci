@@ -103,6 +103,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /auth/refresh:
+    post:
+      summary: Refresh auth session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users/me:
     get:
       summary: Current user
@@ -397,6 +432,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DocumentDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/parties:
+    get:
+      summary: List document parties
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentPartiesResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      summary: Replace document parties
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentPartiesUpdateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentPartiesResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
           content:
@@ -2011,6 +2121,87 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DocumentVersion"
+    DocumentPartyRole:
+      type: string
+      enum:
+        - principal
+        - agent
+        - successor_agent
+        - grantor
+        - trustee
+        - successor_trustee
+    DocumentParty:
+      type: object
+      properties:
+        id:
+          type: string
+        partyRole:
+          $ref: "#/components/schemas/DocumentPartyRole"
+        fullName:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phoneCountryCode:
+          type: string
+          default: "+1"
+        phone:
+          type: string
+          nullable: true
+        isSigningParty:
+          type: boolean
+        sortOrder:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    DocumentPartyInput:
+      type: object
+      required:
+        - partyRole
+        - fullName
+      properties:
+        partyRole:
+          $ref: "#/components/schemas/DocumentPartyRole"
+        fullName:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phoneCountryCode:
+          type: string
+          default: "+1"
+        phone:
+          type: string
+          nullable: true
+        isSigningParty:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+          additionalProperties: true
+    DocumentPartiesUpdateRequest:
+      type: object
+      required:
+        - parties
+      properties:
+        parties:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentPartyInput"
+    DocumentPartiesResponse:
+      type: object
+      properties:
+        parties:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentParty"
     DocumentTimelineResponse:
       type: object
       properties:
@@ -2350,6 +2541,14 @@ components:
         refreshToken:
           type: string
           minLength: 1
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
     AuthResponse:
       type: object
       properties:
@@ -2442,6 +2641,10 @@ components:
           nullable: true
         source:
           $ref: "#/components/schemas/RequirementSource"
+        trusteePowers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrusteePowerOption"
         inputRequirements:
           type: object
           additionalProperties: true
@@ -2451,6 +2654,17 @@ components:
         updatedAt:
           type: string
           format: date-time
+    TrusteePowerOption:
+      type: object
+      properties:
+        key:
+          type: string
+        canonicalLabel:
+          type: string
+        label:
+          type: string
+        sortOrder:
+          type: integer
     IdnJurisdictionListResponse:
       type: object
       properties:

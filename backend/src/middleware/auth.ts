@@ -9,6 +9,7 @@ const publicPaths = [
   "/openapi.yaml",
   "/auth/login",
   "/auth/signup",
+  "/auth/refresh",
 ];
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";

@@ -659,4 +659,270 @@ describe("memberInputAggregator", () => {
     ]);
     expect(merged.find((item) => item.canonical_key === "jurisdiction")?.merged_from).toHaveLength(2);
   });
+
+  it("replaces restatement summary with a structured restatement context field", () => {
+    const form = deriveMemberFacingFormContract([
+      buildTrustContract({
+        source_trace: [
+          {
+            source: "trust_requirements",
+            field: "Restatement Summary",
+            value: "legacy textual summary",
+          },
+        ],
+        sections: [
+          buildSection({
+            key: "documents",
+            title: "Documents",
+            fields: [
+              buildMemberField({
+                key: "restatement_summary",
+                label: "Restatement summary",
+                semantic_type: "text",
+                data_type: "string",
+                required: false,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const fields = flattenFields(form);
+    const restatementField = getField(fields, "restatement_context_type");
+
+    expect(restatementField).toBeDefined();
+    expect(restatementField?.label).toBe("What kind of trust update is this?");
+    expect(restatementField?.semantic_type).toBe("enum_single");
+    expect(restatementField?.data_type).toBe("string");
+    expect(restatementField?.validation).toEqual({
+      allowed_values: [
+        "initial_registration",
+        "amendment",
+        "restatement",
+        "amendment_and_restatement",
+        "unsure",
+      ],
+    });
+    expect(restatementField?.sources[0]?.field_key).toBe("restatement_summary");
+    expect(form.source_trace).toEqual([
+      {
+        source: "trust_requirements",
+        field: "Restatement Summary",
+        value: "legacy textual summary",
+      },
+    ]);
+  });
+
+  it("keeps prior document items optional in aggregated baseline", () => {
+    const form = deriveMemberFacingFormContract([
+      buildTrustContract({
+        sections: [
+          buildSection({
+            key: "documents",
+            title: "Documents",
+            fields: [
+              buildMemberField({
+                key: "prior_document_items",
+                label: "Prior document items",
+                semantic_type: "uploaded_document_list",
+                data_type: "array",
+                required: true,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const priorDocumentItemsField = getField(flattenFields(form), "prior_document_items");
+
+    expect(priorDocumentItemsField?.required).toBe(false);
+    expect(priorDocumentItemsField?.sources[0]?.field_key).toBe("prior_document_items");
+    expect(priorDocumentItemsField?.sources[0]?.original_required).toBe(true);
+  });
+
+  it("replaces trustee power matrix with structured trustee powers options", () => {
+    const form = deriveMemberFacingFormContract([
+      buildTrustContract({
+        sections: [
+          buildSection({
+            key: "authority",
+            title: "Authority",
+            fields: [
+              buildMemberField({
+                key: "trustee_power_matrix",
+                label: "Trustee power matrix",
+                semantic_type: "text",
+                data_type: "string",
+                required: false,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const trusteePowersField = getField(flattenFields(form), "trustee_powers");
+
+    expect(trusteePowersField).toBeDefined();
+    expect(trusteePowersField?.semantic_type).toBe("enum_multi");
+    expect(trusteePowersField?.data_type).toBe("array");
+    expect(trusteePowersField?.validation).toEqual({
+      allowed_values: [
+        "real_property",
+        "personal_property",
+        "banking_and_financial",
+        "stocks_and_bonds",
+        "commodities_and_options",
+        "insurance_and_annuities",
+        "government_securities",
+        "margin_transactions",
+        "mutual_funds",
+        "claims_and_litigation",
+        "business_operations",
+        "tax_matters",
+      ],
+    });
+    expect(trusteePowersField?.sources[0]?.field_key).toBe("trustee_power_matrix");
+  });
+
+  it("preserves DB-provided trustee power labels when available", () => {
+    const form = deriveMemberFacingFormContract([
+      buildTrustContract({
+        sections: [
+          buildSection({
+            key: "authority",
+            title: "Authority",
+            fields: [
+              buildMemberField({
+                key: "trustee_power_matrix",
+                label: "Trustee power matrix",
+                semantic_type: "text",
+                data_type: "string",
+                required: false,
+                validation: {
+                  allowed_values: ["real_property", "tax_matters"],
+                  allowed_value_labels: {
+                    real_property: "Real property and deeds",
+                    tax_matters: "Tax matters",
+                  },
+                },
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const trusteePowersField = getField(flattenFields(form), "trustee_powers");
+
+    expect(trusteePowersField).toBeDefined();
+    expect(trusteePowersField?.validation).toEqual({
+      allowed_values: ["real_property", "tax_matters"],
+      allowed_value_labels: {
+        real_property: "Real property and deeds",
+        tax_matters: "Tax matters",
+      },
+    });
+  });
+
+  it("replaces trustee incapacity standard with structured select options", () => {
+    const form = deriveMemberFacingFormContract([
+      buildTrustContract({
+        sections: [
+          buildSection({
+            key: "authority",
+            title: "Authority",
+            fields: [
+              buildMemberField({
+                key: "trustee_incapacity_standard",
+                label: "Trustee incapacity standard",
+                semantic_type: "text",
+                data_type: "string",
+                required: true,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const incapacityField = getField(flattenFields(form), "trustee_incapacity_standard");
+
+    expect(incapacityField).toBeDefined();
+    expect(incapacityField?.label).toBe("How is trustee incapacity determined?");
+    expect(incapacityField?.semantic_type).toBe("enum_single");
+    expect(incapacityField?.data_type).toBe("string");
+    expect(incapacityField?.validation).toEqual({
+      allowed_values: [
+        "licensed_physician_determination",
+        "two_physician_determination",
+        "court_determination",
+        "written_resignation",
+        "unanimous_trustee_determination",
+        "unable_to_manage_financial_affairs",
+        "other",
+        "unsure",
+      ],
+    });
+    expect(incapacityField?.sources[0]?.field_key).toBe("trustee_incapacity_standard");
+  });
+
+  it("replaces revocation holders with structured options and custom follow-up", () => {
+    const form = deriveMemberFacingFormContract([
+      buildTrustContract({
+        sections: [
+          buildSection({
+            key: "authority",
+            title: "Authority",
+            fields: [
+              buildMemberField({
+                key: "revocation_holders",
+                label: "Revocation holders",
+                semantic_type: "person_list",
+                data_type: "array",
+                required: false,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+
+    const fields = flattenFields(form);
+    const revocationHoldersField = getField(fields, "revocation_holders");
+    const revocationCustomField = getField(fields, "revocation_holders_custom_text");
+
+    expect(revocationHoldersField).toBeDefined();
+    expect(revocationHoldersField?.label).toBe("Who can revoke the trust?");
+    expect(revocationHoldersField?.semantic_type).toBe("enum_single");
+    expect(revocationHoldersField?.data_type).toBe("string");
+    expect(revocationHoldersField?.validation).toEqual({
+      allowed_values: [
+        "trustmaker_only",
+        "all_trustmakers_jointly",
+        "each_trustmaker_as_to_own_property",
+        "trustee_controlled",
+        "custom",
+        "unsure",
+      ],
+    });
+    expect(revocationHoldersField?.sources[0]?.field_key).toBe("revocation_holders");
+
+    expect(revocationCustomField).toBeDefined();
+    expect(revocationCustomField?.semantic_type).toBe("textarea");
+    expect(revocationCustomField?.data_type).toBe("string");
+    expect(revocationCustomField?.required).toBe(true);
+    expect(revocationCustomField?.when).toEqual({
+      all: [
+        {
+          fact: "revocation_holders",
+          operator: "equals",
+          value: "custom",
+        },
+      ],
+    });
+    expect(revocationCustomField?.sources[0]?.field_key).toBe("revocation_holders");
+  });
 });

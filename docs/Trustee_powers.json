@@ -1,0 +1,2756 @@
+[
+  {
+    "Jurisdiction": "California",
+    "Jurisdiction Code": "US-CA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Ohio",
+    "Jurisdiction Code": "US-OH",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Alabama",
+    "Jurisdiction Code": "US-AL",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Alaska",
+    "Jurisdiction Code": "US-AK",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Arizona",
+    "Jurisdiction Code": "US-AZ",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Arkansas",
+    "Jurisdiction Code": "US-AR",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Colorado",
+    "Jurisdiction Code": "US-CO",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Connecticut",
+    "Jurisdiction Code": "US-CT",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Delaware",
+    "Jurisdiction Code": "US-DE",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "District of Columbia",
+    "Jurisdiction Code": "US-DC",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Florida",
+    "Jurisdiction Code": "US-FL",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Georgia",
+    "Jurisdiction Code": "US-GA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Hawaii",
+    "Jurisdiction Code": "US-HI",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Idaho",
+    "Jurisdiction Code": "US-ID",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Illinois",
+    "Jurisdiction Code": "US-IL",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Indiana",
+    "Jurisdiction Code": "US-IN",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Iowa",
+    "Jurisdiction Code": "US-IA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Kansas",
+    "Jurisdiction Code": "US-KS",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Kentucky",
+    "Jurisdiction Code": "US-KY",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Louisiana",
+    "Jurisdiction Code": "US-LA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Maine",
+    "Jurisdiction Code": "US-ME",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Maryland",
+    "Jurisdiction Code": "US-MD",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Massachusetts",
+    "Jurisdiction Code": "US-MA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Michigan",
+    "Jurisdiction Code": "US-MI",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Minnesota",
+    "Jurisdiction Code": "US-MN",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Mississippi",
+    "Jurisdiction Code": "US-MS",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Missouri",
+    "Jurisdiction Code": "US-MO",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Montana",
+    "Jurisdiction Code": "US-MT",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Nebraska",
+    "Jurisdiction Code": "US-NE",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Nevada",
+    "Jurisdiction Code": "US-NV",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "New Hampshire",
+    "Jurisdiction Code": "US-NH",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "New Jersey",
+    "Jurisdiction Code": "US-NJ",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "New Mexico",
+    "Jurisdiction Code": "US-NM",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "New York",
+    "Jurisdiction Code": "US-NY",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "North Carolina",
+    "Jurisdiction Code": "US-NC",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "North Dakota",
+    "Jurisdiction Code": "US-ND",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Oklahoma",
+    "Jurisdiction Code": "US-OK",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Oregon",
+    "Jurisdiction Code": "US-OR",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Pennsylvania",
+    "Jurisdiction Code": "US-PA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Rhode Island",
+    "Jurisdiction Code": "US-RI",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "South Carolina",
+    "Jurisdiction Code": "US-SC",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "South Dakota",
+    "Jurisdiction Code": "US-SD",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Tennessee",
+    "Jurisdiction Code": "US-TN",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Texas",
+    "Jurisdiction Code": "US-TX",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Utah",
+    "Jurisdiction Code": "US-UT",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Vermont",
+    "Jurisdiction Code": "US-VT",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Virginia",
+    "Jurisdiction Code": "US-VA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Washington",
+    "Jurisdiction Code": "US-WA",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "West Virginia",
+    "Jurisdiction Code": "US-WV",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Wisconsin",
+    "Jurisdiction Code": "US-WI",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Wyoming",
+    "Jurisdiction Code": "US-WY",
+    "Trustee Powers": [
+      {
+        "key": "real_property",
+        "label": "Real property"
+      },
+      {
+        "key": "personal_property",
+        "label": "Personal property"
+      },
+      {
+        "key": "banking_and_financial",
+        "label": "Banking and financial"
+      },
+      {
+        "key": "stocks_and_bonds",
+        "label": "Stocks and bonds"
+      },
+      {
+        "key": "commodities_and_options",
+        "label": "Commodities and options"
+      },
+      {
+        "key": "insurance_and_annuities",
+        "label": "Insurance and annuities"
+      },
+      {
+        "key": "government_securities",
+        "label": "Government securities"
+      },
+      {
+        "key": "margin_transactions",
+        "label": "Margin transactions"
+      },
+      {
+        "key": "mutual_funds",
+        "label": "Mutual funds"
+      },
+      {
+        "key": "claims_and_litigation",
+        "label": "Claims and litigation"
+      },
+      {
+        "key": "business_operations",
+        "label": "Business operations"
+      },
+      {
+        "key": "tax_matters",
+        "label": "Tax matters"
+      }
+    ]
+  }
+]

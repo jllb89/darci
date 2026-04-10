@@ -19,11 +19,13 @@ import {
   normalizeJurisdiction,
   poaTypes,
   type PoaGlossaryTermRecord,
+  type PoaSpecialAuthorityRuleRecord,
 } from "./poaService";
 import {
-  getTrustRequirement,
+  getTrustRequirementDetails,
   listTrustJurisdictions,
   trustDocumentTypes,
+  type TrustTrusteePowerRecord,
   type TrustDocumentType,
 } from "./trustService";
 
@@ -132,7 +134,7 @@ const MEMBER_FORM_FALLBACK_HELP_TEXT_BY_FIELD_KEY: Readonly<Record<string, strin
   trustee_power_matrix:
     "Summarize trustee powers relevant to third-party transactions and any limits that apply.",
   prior_document_items:
-    "List prior trust documents or amendments that should be considered during generation.",
+      "Upload the trust documents to include in this filing.",
   uploaded_document_file:
     "Upload the source document so DARCi can extract and validate required trust details.",
 };
@@ -176,6 +178,128 @@ export const applyPoaGlossaryHelpText = (
         return {
           ...field,
           help_text: glossaryHelpText,
+        };
+      }),
+    })),
+  };
+};
+
+export const applyPoaSpecialAuthorityOptions = (
+  contract: InputRequirementsContract,
+  specialAuthorities: Pick<
+    PoaSpecialAuthorityRuleRecord,
+    "canonical_key" | "canonical_label" | "state_specific_label" | "sort_order"
+  >[],
+): InputRequirementsContract => {
+  if (!("poa_type" in contract) || specialAuthorities.length === 0) {
+    return contract;
+  }
+
+  const sortedAuthorities = [...specialAuthorities].sort((left, right) => {
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order;
+    }
+
+    return left.canonical_key.localeCompare(right.canonical_key);
+  });
+
+  const seenKeys = new Set<string>();
+  const allowedValues: string[] = [];
+  const allowedValueLabels: Record<string, string> = {};
+
+  for (const authority of sortedAuthorities) {
+    const canonicalKey = authority.canonical_key.trim();
+    if (!canonicalKey || seenKeys.has(canonicalKey)) {
+      continue;
+    }
+
+    seenKeys.add(canonicalKey);
+    allowedValues.push(canonicalKey);
+    allowedValueLabels[canonicalKey] =
+      authority.state_specific_label ?? authority.canonical_label;
+  }
+
+  if (allowedValues.length === 0) {
+    return contract;
+  }
+
+  return {
+    ...contract,
+    sections: contract.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map((field) => {
+        if (field.key !== "authority_scope_selection") {
+          return field;
+        }
+
+        return {
+          ...field,
+          validation: {
+            ...(field.validation ?? {}),
+            allowed_values: allowedValues,
+            allowed_value_labels: allowedValueLabels,
+          },
+        };
+      }),
+    })),
+  };
+};
+
+export const applyTrusteePowersOptions = (
+  contract: InputRequirementsContract,
+  trusteePowers: Pick<
+    TrustTrusteePowerRecord,
+    "canonical_key" | "canonical_label" | "state_specific_label" | "sort_order"
+  >[],
+): InputRequirementsContract => {
+  if (!("trust_capabilities" in contract) || trusteePowers.length === 0) {
+    return contract;
+  }
+
+  const sortedPowers = [...trusteePowers].sort((left, right) => {
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order;
+    }
+
+    return left.canonical_key.localeCompare(right.canonical_key);
+  });
+
+  const seenKeys = new Set<string>();
+  const allowedValues: string[] = [];
+  const allowedValueLabels: Record<string, string> = {};
+
+  for (const trusteePower of sortedPowers) {
+    const canonicalKey = trusteePower.canonical_key.trim();
+    if (!canonicalKey || seenKeys.has(canonicalKey)) {
+      continue;
+    }
+
+    seenKeys.add(canonicalKey);
+    allowedValues.push(canonicalKey);
+    allowedValueLabels[canonicalKey] =
+      trusteePower.state_specific_label ?? trusteePower.canonical_label;
+  }
+
+  if (allowedValues.length === 0) {
+    return contract;
+  }
+
+  return {
+    ...contract,
+    sections: contract.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map((field) => {
+        if (field.key !== "trustee_power_matrix") {
+          return field;
+        }
+
+        return {
+          ...field,
+          validation: {
+            ...(field.validation ?? {}),
+            allowed_values: allowedValues,
+            allowed_value_labels: allowedValueLabels,
+          },
         };
       }),
     })),
@@ -518,19 +642,22 @@ const buildContractsBySelection = async (
 
       contracts.push(
         applyMemberFormFallbackHelpText(
-          applyPoaGlossaryHelpText(poaContract, poaDetails.glossary),
+          applyPoaSpecialAuthorityOptions(
+            applyPoaGlossaryHelpText(poaContract, poaDetails.glossary),
+            poaDetails.specialAuthorities,
+          ),
         ),
       );
     }
   }
 
   if (selection.families.includes("trust")) {
-    const trustRequirement = await getTrustRequirement(
+    const trustRequirementDetails = await getTrustRequirementDetails(
       jurisdiction,
       selection.trustType,
     );
 
-    if (!trustRequirement) {
+    if (!trustRequirementDetails) {
       missing.push({
         family: "trust",
         documentType: selection.trustType,
@@ -538,11 +665,14 @@ const buildContractsBySelection = async (
     } else {
       contracts.push(
         applyMemberFormFallbackHelpText(
-          deriveInputRequirements({
-            family: "trust",
-            documentType: selection.trustType,
-            record: trustRequirement,
-          }),
+          applyTrusteePowersOptions(
+            deriveInputRequirements({
+              family: "trust",
+              documentType: selection.trustType,
+              record: trustRequirementDetails.requirement,
+            }),
+            trustRequirementDetails.trusteePowers,
+          ),
         ),
       );
     }

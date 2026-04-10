@@ -64,6 +64,43 @@ type NotarizationCodeRecord = {
   created_at: string;
 };
 
+export type DocumentPartyRole =
+  | "principal"
+  | "agent"
+  | "successor_agent"
+  | "grantor"
+  | "trustee"
+  | "successor_trustee";
+
+export type DocumentPartyRecord = {
+  id: string;
+  document_id: string;
+  party_role: DocumentPartyRole;
+  full_name: string;
+  email: string | null;
+  phone_country_code: string;
+  phone: string | null;
+  is_signing_party: boolean;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DocumentPartyUpsertInput = {
+  party_role: DocumentPartyRole;
+  full_name: string;
+  email: string | null;
+  phone_country_code: string;
+  phone: string | null;
+  is_signing_party: boolean;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+};
+
+const documentPartySelectColumns =
+  "id, document_id, party_role, full_name, email, phone_country_code, phone, is_signing_party, sort_order, metadata, created_at, updated_at";
+
 const fetchUserBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -291,6 +328,52 @@ export const updateDocument = async (
   }
 
   return data as DocumentRecord;
+};
+
+export const listDocumentParties = async (documentId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_parties")
+    .select(documentPartySelectColumns)
+    .eq("document_id", documentId)
+    .order("party_role", { ascending: true })
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as DocumentPartyRecord[];
+};
+
+export const replaceDocumentParties = async (input: {
+  documentId: string;
+  parties: DocumentPartyUpsertInput[];
+}) => {
+  const { error: deleteError } = await supabaseAdmin
+    .from("document_parties")
+    .delete()
+    .eq("document_id", input.documentId);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  if (input.parties.length > 0) {
+    const { error: insertError } = await supabaseAdmin
+      .from("document_parties")
+      .insert(
+        input.parties.map((party) => ({
+          document_id: input.documentId,
+          ...party,
+        })),
+      );
+
+    if (insertError) {
+      throw new Error(insertError.message);
+    }
+  }
+
+  return listDocumentParties(input.documentId);
 };
 
 export const getActiveNotarizationRequest = async (documentId: string) => {

@@ -15,3 +15,6 @@ trust registry - one way we generate documents inside the platform vs documents 
 stamp dataset is the same we will request for illuminotaries
 
 In‑person verification notified when sharing the code
+
+
+the current trust record model is mostly legal-text oriented and the trust contract only exposes a subset of member-facing trust facts

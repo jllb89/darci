@@ -4,6 +4,7 @@ import {
   createDocument,
   finalizeDocumentUpload,
   getDocument,
+  getDocumentParties,
   getDocumentTimeline,
   getSignatureFields,
   listDocumentVersions,
@@ -12,6 +13,7 @@ import {
   requestSignatureUpload,
   signDocument,
   submitNotarization,
+  updateDocumentParties,
   watermarkDocument,
 } from "../controllers/documentsController";
 import { requireRole } from "../middleware/roles";
@@ -22,6 +24,16 @@ router.post("/", createDocument);
 router.post("/:id/upload-finalize", finalizeDocumentUpload);
 router.get("/", listDocuments);
 router.get("/:id", getDocument);
+router.get(
+  "/:id/parties",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentParties
+);
+router.put(
+  "/:id/parties",
+  requireRole(["member", "admin", "service_role"]),
+  updateDocumentParties
+);
 router.get("/:id/versions", listDocumentVersions);
 router.get("/:id/timeline", getDocumentTimeline);
 router.get("/:id/signature-fields", getSignatureFields);

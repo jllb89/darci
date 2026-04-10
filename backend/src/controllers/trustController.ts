@@ -14,9 +14,70 @@ const trustRequirementQuerySchema = z.object({
   type: z.enum(trustDocumentTypes).optional(),
 });
 
+const applyTrusteePowersToInputRequirements = (
+  inputRequirements: ReturnType<typeof deriveTrustInputRequirements>,
+  trusteePowers: TrustRequirementDetails["trusteePowers"],
+) => {
+  if (trusteePowers.length === 0) {
+    return inputRequirements;
+  }
+
+  const sortedPowers = [...trusteePowers].sort((left, right) => {
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order;
+    }
+
+    return left.canonical_key.localeCompare(right.canonical_key);
+  });
+
+  const seenKeys = new Set<string>();
+  const allowedValues: string[] = [];
+  const allowedValueLabels: Record<string, string> = {};
+
+  for (const trusteePower of sortedPowers) {
+    const canonicalKey = trusteePower.canonical_key.trim();
+    if (!canonicalKey || seenKeys.has(canonicalKey)) {
+      continue;
+    }
+
+    seenKeys.add(canonicalKey);
+    allowedValues.push(canonicalKey);
+    allowedValueLabels[canonicalKey] =
+      trusteePower.state_specific_label ?? trusteePower.canonical_label;
+  }
+
+  if (allowedValues.length === 0) {
+    return inputRequirements;
+  }
+
+  return {
+    ...inputRequirements,
+    sections: inputRequirements.sections.map((section) => ({
+      ...section,
+      fields: section.fields.map((field) => {
+        if (field.key !== "trustee_power_matrix") {
+          return field;
+        }
+
+        return {
+          ...field,
+          validation: {
+            ...(field.validation ?? {}),
+            allowed_values: allowedValues,
+            allowed_value_labels: allowedValueLabels,
+          },
+        };
+      }),
+    })),
+  };
+};
+
 const buildTrustRequirementResponse = (details: TrustRequirementDetails) => {
-  const { requirement } = details;
-  const inputRequirements = deriveTrustInputRequirements(requirement);
+  const { requirement, trusteePowers } = details;
+  const inputRequirements = applyTrusteePowersToInputRequirements(
+    deriveTrustInputRequirements(requirement),
+    trusteePowers,
+  );
 
   return {
     requirement: {
@@ -32,6 +93,12 @@ const buildTrustRequirementResponse = (details: TrustRequirementDetails) => {
         url: requirement.source_url,
         notes: requirement.notes,
       },
+      trusteePowers: trusteePowers.map((trusteePower) => ({
+        key: trusteePower.canonical_key,
+        canonicalLabel: trusteePower.canonical_label,
+        label: trusteePower.state_specific_label ?? trusteePower.canonical_label,
+        sortOrder: trusteePower.sort_order,
+      })),
       inputRequirements,
       createdAt: requirement.created_at,
       updatedAt: requirement.updated_at,

@@ -1898,14 +1898,14 @@ const deriveTrustContract = (
     },
     {
       key: "prior_documents",
-      title: "Prior Documents",
+        title: "Documents to Include",
       presence: presence.prior_documents,
       repeatable: true,
       applies_to_document_types: appliesTo,
       fields: [
         {
           key: "prior_document_items",
-          label: "Prior document items",
+            label: "Documents to Include",
           semantic_type: "object",
           required: documentType === "rrr",
           data_type: "array",

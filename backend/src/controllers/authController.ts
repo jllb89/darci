@@ -31,6 +31,10 @@ const logoutSchema = z.object({
   refreshToken: z.string().trim().min(1),
 });
 
+const refreshSchema = z.object({
+  refreshToken: z.string().trim().min(1),
+});
+
 const normalizeRole = (role?: string) => {
   if (role === "notary" || role === "admin") {
     return role;
@@ -204,6 +208,58 @@ export const logout = async (req: Request, res: Response) => {
     status: "ok",
     message: "Signed out",
   });
+};
+
+export const refresh = async (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) {
+    return;
+  }
+
+  const parsed = refreshSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const supabaseSessionClient = createSupabaseSessionClient();
+  const { data, error } = await supabaseSessionClient.auth.refreshSession({
+    refresh_token: parsed.data.refreshToken,
+  });
+
+  if (error || !data.session || !data.user) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: error?.message ?? "Invalid refresh token",
+    });
+  }
+
+  try {
+    const profile = await upsertUserProfile({
+      supabaseUserId: data.user.id,
+      email: data.user.email ?? null,
+      role: (data.user.app_metadata?.role as string | undefined) ?? "member",
+      firstName: (data.user.user_metadata?.first_name as string | undefined) ?? null,
+      lastName: (data.user.user_metadata?.last_name as string | undefined) ?? null,
+    });
+
+    return res.status(200).json({
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        role: normalizeRole(profile.role ?? undefined),
+        status: profile.status ?? "active",
+        firstName: profile.first_name,
+        lastName: profile.last_name,
+      },
+    });
+  } catch (syncError) {
+    return res.status(500).json({
+      error: "internal_error",
+      message:
+        syncError instanceof Error ? syncError.message : "Failed to sync user",
+    });
+  }
 };
 
 export const signup = async (req: Request, res: Response) => {

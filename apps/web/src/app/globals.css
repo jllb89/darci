@@ -55,3 +55,104 @@ body {
   font-weight: 500;
   line-height: 1.5rem;
 }
+
+.platform-control {
+  width: 100%;
+  border-radius: 0;
+  border: 1px solid color-mix(in srgb, var(--color-scheme-1-border) 65%, transparent);
+  background: var(--color-white);
+  color: var(--color-scheme-1-text);
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.platform-control::placeholder {
+  color: var(--color-neutral);
+}
+
+.platform-control:focus {
+  border-color: var(--color-scheme-1-text);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-scheme-1-text) 12%, transparent);
+}
+
+.platform-select-wrap {
+  position: relative;
+}
+
+.platform-select-wrap > .platform-control {
+  appearance: none;
+  padding-right: 2.25rem;
+}
+
+.platform-select-icon {
+  pointer-events: none;
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  height: 1rem;
+  width: 1rem;
+  transform: translateY(-50%);
+  color: var(--color-neutral);
+}
+
+.platform-date-input::-webkit-calendar-picker-indicator {
+  border-radius: 0;
+  cursor: pointer;
+  opacity: 0.7;
+  filter: grayscale(1) contrast(1.2);
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.platform-date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-neutral-lightest) 75%, transparent);
+}
+
+.platform-btn-primary {
+  border-radius: 0;
+  background: var(--color-green);
+  color: var(--color-neutral-darkest);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.platform-btn-primary:hover {
+  background: var(--color-green-secondary);
+}
+
+.platform-btn-primary:active {
+  transform: translateY(1px);
+}
+
+.platform-btn-secondary {
+  border-radius: 0;
+  border: 1px solid color-mix(in srgb, var(--color-scheme-1-border) 65%, transparent);
+  background: var(--color-white);
+  color: var(--color-scheme-1-text);
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.platform-btn-secondary:hover {
+  background: color-mix(in srgb, var(--color-neutral-lightest) 55%, transparent);
+  border-color: color-mix(in srgb, var(--color-scheme-1-border) 90%, var(--color-scheme-1-text));
+}
+
+.platform-btn-subtle {
+  border-radius: 0;
+  border: 1px solid color-mix(in srgb, var(--color-scheme-1-border) 60%, transparent);
+  background: color-mix(in srgb, var(--color-neutral-lightest) 65%, transparent);
+  color: var(--color-neutral-darkest);
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.platform-btn-subtle:hover {
+  background: color-mix(in srgb, var(--color-neutral-lightest) 90%, transparent);
+  border-color: color-mix(in srgb, var(--color-scheme-1-border) 95%, var(--color-scheme-1-text));
+}

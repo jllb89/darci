@@ -8,7 +8,7 @@ export default function Home() {
   return (
     <div className="w-full bg-Color-Neutral-Lightest text-Color-Scheme-1-Text">
       <div className="w-full">
-        <Navbar />
+        <Navbar showLogout={false} />
 
         <div
           className="relative w-full bg-black/40 bg-cover bg-center px-6 py-24 md:px-24 md:py-48"

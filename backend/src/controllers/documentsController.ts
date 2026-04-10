@@ -6,6 +6,8 @@ import { sendValidationError } from "../utils/validation";
 import { recordAuditEvent } from "../services/auditService";
 import {
   createDocumentWithVersion,
+  type DocumentPartyRecord,
+  type DocumentPartyRole,
   createSignatureRecord,
   createNotarizationCode,
   createNotarizationRequest,
@@ -15,8 +17,10 @@ import {
   getSignatureById,
   getOrCreateUserId,
   getUserIdBySupabaseId,
+  listDocumentParties as listDocumentPartiesFromDb,
   listDocuments as listDocumentsFromDb,
   listDocumentVersions as listDocumentVersionsFromDb,
+  replaceDocumentParties,
   updateDocument,
   updateDocumentVersion,
 } from "../services/documentService";
@@ -39,6 +43,20 @@ const SIGNATURE_EXTENSION_MAP: Record<string, string> = {
   "image/svg+xml": "svg",
   "image/jpeg": "jpg",
 };
+const DEFAULT_PHONE_COUNTRY_CODE = "+1";
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phoneCountryCodePattern = /^\+\d{1,4}$/;
+
+const documentPartyRoles = [
+  "principal",
+  "agent",
+  "successor_agent",
+  "grantor",
+  "trustee",
+  "successor_trustee",
+] as const;
+
+const normalizePhoneDigits = (value: string) => value.replace(/\D/g, "");
 
 const createDocumentSchema = z
   .object({
@@ -86,6 +104,64 @@ const signatureFinalizeSchema = z
     signatureId: z.string().min(1),
   })
   .passthrough();
+
+const documentPartiesUpdateSchema = z.object({
+  parties: z.array(
+    z.object({
+      partyRole: z.enum(documentPartyRoles),
+      fullName: z.string().trim().min(1).max(200),
+      email: z
+        .string()
+        .trim()
+        .optional()
+        .refine(
+          (value) => value === undefined || value.length === 0 || emailPattern.test(value),
+          "Invalid email format",
+        ),
+      phoneCountryCode: z
+        .string()
+        .trim()
+        .optional()
+        .refine(
+          (value) =>
+            value === undefined ||
+            value.length === 0 ||
+            phoneCountryCodePattern.test(value),
+          "Invalid phone country code",
+        ),
+      phone: z
+        .string()
+        .trim()
+        .optional()
+        .refine((value) => {
+          if (value === undefined || value.length === 0) {
+            return true;
+          }
+
+          const digits = normalizePhoneDigits(value);
+          return digits.length >= 7 && digits.length <= 15;
+        }, "Invalid phone format"),
+      isSigningParty: z.boolean().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ),
+});
+
+const mapDocumentPartyResponse = (party: DocumentPartyRecord) => {
+  return {
+    id: party.id,
+    partyRole: party.party_role,
+    fullName: party.full_name,
+    email: party.email,
+    phoneCountryCode: party.phone_country_code,
+    phone: party.phone,
+    isSigningParty: party.is_signing_party,
+    sortOrder: party.sort_order,
+    metadata: party.metadata ?? {},
+    createdAt: party.created_at,
+    updatedAt: party.updated_at,
+  };
+};
 
 export const createDocument = async (req: Request, res: Response) => {
   const parsed = createDocumentSchema.safeParse(req.body ?? {});
@@ -367,16 +443,18 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
   });
 };
 
-export const getDocument = async (req: Request, res: Response) => {
+const getAuthorizedDocument = async (req: Request, res: Response) => {
   if (!req.user?.id) {
-    return res.status(401).json({
+    res.status(401).json({
       error: "unauthorized",
       message: "Missing user context",
     });
+
+    return null;
   }
 
   if (typeof req.params.id !== "string") {
-    return res.status(400).json({
+    res.status(400).json({
       error: "validation_error",
       message: "Document id is required",
       details: [
@@ -386,26 +464,41 @@ export const getDocument = async (req: Request, res: Response) => {
         },
       ],
     });
+
+    return null;
   }
 
   const documentId = req.params.id;
   const document = await getDocumentById(documentId);
   if (!document) {
-    return res.status(404).json({
+    res.status(404).json({
       error: "not_found",
       message: "Document not found",
     });
+
+    return null;
   }
 
   const role = req.user.role ?? "member";
   if (role !== "admin" && role !== "service_role") {
     const ownerId = await getUserIdBySupabaseId(req.user.id);
     if (!ownerId || document.owner_id !== ownerId) {
-      return res.status(404).json({
+      res.status(404).json({
         error: "not_found",
         message: "Document not found",
       });
+
+      return null;
     }
+  }
+
+  return document;
+};
+
+export const getDocument = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
   }
 
   res.status(200).json({
@@ -456,47 +549,12 @@ export const listDocuments = async (req: Request, res: Response) => {
 };
 
 export const listDocumentVersions = async (req: Request, res: Response) => {
-  if (!req.user?.id) {
-    return res.status(401).json({
-      error: "unauthorized",
-      message: "Missing user context",
-    });
-  }
-
-  if (typeof req.params.id !== "string") {
-    return res.status(400).json({
-      error: "validation_error",
-      message: "Document id is required",
-      details: [
-        {
-          path: "id",
-          message: "Document id is required",
-        },
-      ],
-    });
-  }
-
-  const documentId = req.params.id;
-  const document = await getDocumentById(documentId);
+  const document = await getAuthorizedDocument(req, res);
   if (!document) {
-    return res.status(404).json({
-      error: "not_found",
-      message: "Document not found",
-    });
+    return;
   }
 
-  const role = req.user.role ?? "member";
-  if (role !== "admin" && role !== "service_role") {
-    const ownerId = await getUserIdBySupabaseId(req.user.id);
-    if (!ownerId || document.owner_id !== ownerId) {
-      return res.status(404).json({
-        error: "not_found",
-        message: "Document not found",
-      });
-    }
-  }
-
-  const versions = await listDocumentVersionsFromDb(documentId);
+  const versions = await listDocumentVersionsFromDb(document.id);
 
   res.status(200).json({
     versions: versions.map((version) => ({
@@ -509,6 +567,62 @@ export const listDocumentVersions = async (req: Request, res: Response) => {
       isFinal: version.is_final,
       createdAt: version.created_at,
     })),
+  });
+};
+
+export const getDocumentParties = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const parties = await listDocumentPartiesFromDb(document.id);
+
+  res.status(200).json({
+    parties: parties.map(mapDocumentPartyResponse),
+  });
+};
+
+export const updateDocumentParties = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const parsed = documentPartiesUpdateSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const sortOrderByRole = new Map<DocumentPartyRole, number>();
+  const normalizedParties = parsed.data.parties.map((party) => {
+    const role = party.partyRole as DocumentPartyRole;
+    const sortOrder = sortOrderByRole.get(role) ?? 0;
+    sortOrderByRole.set(role, sortOrder + 1);
+
+    const email = party.email?.trim() ?? "";
+    const phone = party.phone?.trim() ?? "";
+    const phoneCountryCode = party.phoneCountryCode?.trim() || DEFAULT_PHONE_COUNTRY_CODE;
+
+    return {
+      party_role: role,
+      full_name: party.fullName.trim(),
+      email: email.length > 0 ? email : null,
+      phone_country_code: phoneCountryCode,
+      phone: phone.length > 0 ? phone : null,
+      is_signing_party: Boolean(party.isSigningParty),
+      sort_order: sortOrder,
+      metadata: party.metadata ?? {},
+    };
+  });
+
+  const updatedParties = await replaceDocumentParties({
+    documentId: document.id,
+    parties: normalizedParties,
+  });
+
+  res.status(200).json({
+    parties: updatedParties.map(mapDocumentPartyResponse),
   });
 };
 

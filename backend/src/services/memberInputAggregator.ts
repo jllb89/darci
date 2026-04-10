@@ -40,10 +40,14 @@ const SAFE_CANONICAL_FIELD_MAP: Readonly<Record<string, string>> = {
   jurisdiction: "jurisdiction",
   state: "jurisdiction",
   trust_state: "jurisdiction",
+  restatement_summary: "restatement_context_type",
+  trustee_power_matrix: "trustee_powers",
 };
 
 const CANONICAL_LABEL_MAP: Readonly<Record<string, string>> = {
   jurisdiction: "Jurisdiction",
+  restatement_context_type: "What kind of trust update is this?",
+  trustee_powers: "Trustee powers",
 };
 
 const CANONICAL_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
@@ -58,6 +62,7 @@ const CANONICAL_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
   successor_agent_name: "people",
   signing_authority: "authority",
   signature_authority: "authority",
+  trustee_signature_authority: "authority",
   revocation_authority: "authority",
   revocability_status: "authority",
   incapacity_standard: "authority",
@@ -70,6 +75,9 @@ const CANONICAL_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
   uploaded_document_file: "documents",
   supporting_document_file: "documents",
   trust_document_file: "documents",
+  restatement_context_type: "documents",
+  trustee_powers: "authority",
+  revocation_holders_custom_text: "authority",
 };
 
 const FIELD_KEY_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
@@ -137,6 +145,10 @@ export type ExtractedMemberField = {
   section_key: string;
   section_title: string;
   field_key: string;
+  source_field_key?: string;
+  source_label?: string;
+  source_required?: boolean;
+  source_when?: Condition;
   label: string;
   semantic_type: string;
   data_type: "string" | "integer" | "boolean" | "date" | "array" | "object";
@@ -254,17 +266,217 @@ const toExtractedMemberField = (
     section_key: section.key,
     section_title: section.title,
     field_key: field.key,
+    source_field_key: field.key,
+    source_label: field.label,
+    source_required: field.required,
     label: field.label,
     semantic_type: field.semantic_type,
     data_type: field.data_type,
     required: field.required,
     repeatable: section.repeatable,
+    ...(field.when ? { source_when: field.when } : {}),
     ...(field.help_text ? { help_text: field.help_text } : {}),
     ...(field.validation ? { validation: field.validation } : {}),
     ...(field.when ? { when: field.when } : {}),
   };
 
   return extracted;
+};
+
+const RESTATEMENT_CONTEXT_OPTIONS = [
+  "initial_registration",
+  "amendment",
+  "restatement",
+  "amendment_and_restatement",
+  "unsure",
+] as const;
+
+const TRUSTEE_POWER_OPTIONS = [
+  "real_property",
+  "personal_property",
+  "banking_and_financial",
+  "stocks_and_bonds",
+  "commodities_and_options",
+  "insurance_and_annuities",
+  "government_securities",
+  "margin_transactions",
+  "mutual_funds",
+  "claims_and_litigation",
+  "business_operations",
+  "tax_matters",
+] as const;
+
+const REVOCATION_HOLDER_OPTIONS = [
+  "trustmaker_only",
+  "all_trustmakers_jointly",
+  "each_trustmaker_as_to_own_property",
+  "trustee_controlled",
+  "custom",
+  "unsure",
+] as const;
+
+const TRUSTEE_INCAPACITY_STANDARD_OPTIONS = [
+  "licensed_physician_determination",
+  "two_physician_determination",
+  "court_determination",
+  "written_resignation",
+  "unanimous_trustee_determination",
+  "unable_to_manage_financial_affairs",
+  "other",
+  "unsure",
+] as const;
+
+const REVOCATION_HOLDER_CUSTOM_CONDITION: Condition = {
+  all: [
+    {
+      fact: "revocation_holders",
+      operator: "equals",
+      value: "custom",
+    },
+  ],
+};
+
+const getValidationAllowedValues = (validation: Record<string, unknown> | undefined) => {
+  if (!validation) {
+    return [] as string[];
+  }
+
+  const raw = validation.allowed_values;
+  if (!Array.isArray(raw)) {
+    return [] as string[];
+  }
+
+  return raw.filter((value): value is string => typeof value === "string");
+};
+
+const getValidationAllowedValueLabels = (
+  validation: Record<string, unknown> | undefined,
+) => {
+  if (!validation) {
+    return {} as Record<string, string>;
+  }
+
+  const raw = validation.allowed_value_labels;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {} as Record<string, string>;
+  }
+
+  const labels: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string" && key.trim().length > 0) {
+      labels[key] = value;
+    }
+  }
+
+  return labels;
+};
+
+const applyMemberFacingFieldOverrides = (
+  field: ExtractedMemberField,
+): ExtractedMemberField[] => {
+  if (field.family !== "trust") {
+    return [field];
+  }
+
+  if (field.field_key === "restatement_summary") {
+    return [
+      {
+        ...field,
+        label: "What kind of trust update is this?",
+        semantic_type: "enum_single",
+        data_type: "string",
+        required: true,
+        validation: {
+          allowed_values: [...RESTATEMENT_CONTEXT_OPTIONS],
+        },
+      },
+    ];
+  }
+
+  if (field.field_key === "prior_document_items") {
+    return [
+      {
+        ...field,
+        required: false,
+      },
+    ];
+  }
+
+  if (field.field_key === "trustee_power_matrix") {
+    const configuredAllowedValues = getValidationAllowedValues(field.validation);
+    const configuredAllowedValueLabels = getValidationAllowedValueLabels(
+      field.validation,
+    );
+    const allowedValues =
+      configuredAllowedValues.length > 0
+        ? configuredAllowedValues
+        : [...TRUSTEE_POWER_OPTIONS];
+
+    return [
+      {
+        ...field,
+        label: "Trustee powers",
+        semantic_type: "enum_multi",
+        data_type: "array",
+        validation: {
+          ...(field.validation ?? {}),
+          allowed_values: allowedValues,
+          ...(Object.keys(configuredAllowedValueLabels).length > 0
+            ? { allowed_value_labels: configuredAllowedValueLabels }
+            : {}),
+        },
+      },
+    ];
+  }
+
+  if (field.field_key === "trustee_incapacity_standard") {
+    return [
+      {
+        ...field,
+        label: "How is trustee incapacity determined?",
+        semantic_type: "enum_single",
+        data_type: "string",
+        validation: {
+          allowed_values: [...TRUSTEE_INCAPACITY_STANDARD_OPTIONS],
+        },
+      },
+    ];
+  }
+
+  if (field.field_key === "revocation_holders") {
+    const structured: ExtractedMemberField = {
+      ...field,
+      label: "Who can revoke the trust?",
+      semantic_type: "enum_single",
+      data_type: "string",
+      validation: {
+        allowed_values: [...REVOCATION_HOLDER_OPTIONS],
+      },
+    };
+
+    const customFollowUp: ExtractedMemberField = {
+      ...field,
+      field_key: "revocation_holders_custom_text",
+      label: "Describe the revocation rule",
+      semantic_type: "textarea",
+      data_type: "string",
+      required: true,
+      validation: {
+        maxLength: 500,
+      },
+      when: REVOCATION_HOLDER_CUSTOM_CONDITION,
+      source_field_key: field.source_field_key ?? field.field_key,
+      source_label: field.source_label ?? field.label,
+      source_required: field.source_required ?? field.required,
+      ...(field.source_when ?? field.when
+        ? { source_when: field.source_when ?? field.when }
+        : {}),
+    };
+
+    return [structured, customFollowUp];
+  }
+
+  return [field];
 };
 
 export const extractMemberFacingFields = (
@@ -283,7 +495,8 @@ export const extractMemberFacingFields = (
           continue;
         }
 
-        extractedFields.push(toExtractedMemberField(contract, section, field));
+        const extracted = toExtractedMemberField(contract, section, field);
+        extractedFields.push(...applyMemberFacingFieldOverrides(extracted));
       }
     }
   }
@@ -404,10 +617,12 @@ const toMemberFacingSource = (field: ExtractedMemberField): MemberFacingFieldSou
     family: field.family,
     document_type: field.document_type,
     section_key: field.section_key,
-    field_key: field.field_key,
-    original_label: field.label,
-    original_required: field.required,
-    ...(field.when ? { original_when: field.when } : {}),
+    field_key: field.source_field_key ?? field.field_key,
+    original_label: field.source_label ?? field.label,
+    original_required: field.source_required ?? field.required,
+    ...(field.source_when ?? field.when
+      ? { original_when: field.source_when ?? field.when }
+      : {}),
   };
 };
 

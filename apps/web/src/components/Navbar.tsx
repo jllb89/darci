@@ -6,7 +6,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { logoutStoredAuth, useStoredSession } from "@/lib/auth";
 
-export default function Navbar() {
+type NavbarProps = {
+  showLogout?: boolean;
+};
+
+export default function Navbar({ showLogout = true }: NavbarProps) {
   const router = useRouter();
   const isAuthenticated = useStoredSession();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -62,7 +66,7 @@ export default function Navbar() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {isAuthenticated ? (
+            {showLogout && isAuthenticated ? (
               <button
                 className="border border-Color-Scheme-1-Background px-5 py-2 text-Color-Scheme-1-Background disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={isLoggingOut}

@@ -1,0 +1,542 @@
+[
+  {
+    "Jurisdiction": "California",
+    "Jurisdiction Code": "US-CA",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, modify, revoke, or terminate a trust"
+      },
+      {
+        "key": "fund_trust_not_created_by_principal",
+        "label": "Fund a trust not created by the principal"
+      },
+      {
+        "key": "make_or_revoke_gift",
+        "label": "Make or revoke a gift"
+      },
+      {
+        "key": "disclaim_or_modify_property_interest",
+        "label": "Disclaim or modify property interests"
+      },
+      {
+        "key": "change_survivorship_interests",
+        "label": "Change survivorship interests"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Change beneficiary designations"
+      },
+      {
+        "key": "make_loan_to_agent",
+        "label": "Make a loan to the agent"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Ohio",
+    "Jurisdiction Code": "US-OH",
+    "Authority Scope": [
+      {
+        "key": "create_trust",
+        "label": "Create a trust"
+      },
+      {
+        "key": "amend_revoke_or_terminate_trust",
+        "label": "Amend, revoke, or terminate a trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make gifts"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Change survivorship rights"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Change beneficiary designations"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate authority"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive joint and survivor annuity"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Alabama",
+    "Jurisdiction Code": "US-AL",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Alaska",
+    "Jurisdiction Code": "US-AK",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Arizona",
+    "Jurisdiction Code": "US-AZ",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Arkansas",
+    "Jurisdiction Code": "US-AR",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Colorado",
+    "Jurisdiction Code": "US-CO",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Connecticut",
+    "Jurisdiction Code": "US-CT",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Delaware",
+    "Jurisdiction Code": "US-DE",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, amend, revoke, or terminate an inter vivos trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate authority granted under the personal power of attorney (subject to statutory conditions)"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers that the principal has authority to delegate"
+      },
+      {
+        "key": "disclaim_or_modify_property_interest",
+        "label": "Reject, renounce, disclaim, release, or consent to reduction/modification of a share in or payment from an estate, trust, or other beneficial interest"
+      },
+      {
+        "key": "fiduciary_access_to_digital_assets",
+        "label": "Exercise rights and powers under the Fiduciary Access to Digital Assets and Digital Accounts Act (Title 12, Chapter 50)"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "District of Columbia",
+    "Jurisdiction Code": "US-DC",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, amend, revoke, or terminate an inter vivos trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate authority granted under the power of attorney"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive the principal's right to be a beneficiary of a joint and survivor annuity (including survivor benefit under a retirement plan)"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers that the principal has authority to delegate"
+      },
+      {
+        "key": "disclaim_or_modify_property_interest",
+        "label": "Disclaim property, including a power of appointment"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Florida",
+    "Jurisdiction Code": "US-FL",
+    "Authority Scope": [
+      {
+        "key": "create_trust",
+        "label": "Create an inter vivos trust"
+      },
+      {
+        "key": "amend_revoke_or_terminate_trust",
+        "label": "Amend, modify, revoke, or terminate a trust created by or on behalf of the principal (if the trust instrument explicitly authorizes)"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive the principal's right to be a beneficiary of a joint and survivor annuity (including survivor benefit under a retirement plan)"
+      },
+      {
+        "key": "disclaim_or_modify_property_interest",
+        "label": "Disclaim property and powers of appointment"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Georgia",
+    "Jurisdiction Code": "US-GA",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Hawaii",
+    "Jurisdiction Code": "US-HI",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Idaho",
+    "Jurisdiction Code": "US-ID",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Illinois",
+    "Jurisdiction Code": "US-IL",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Indiana",
+    "Jurisdiction Code": "US-IN",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Iowa",
+    "Jurisdiction Code": "US-IA",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, amend, revoke, or terminate an inter vivos trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate authority granted under the power of attorney"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive the principal's right to be a beneficiary of a joint and survivor annuity (including survivor benefit under a retirement plan)"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers that the principal has authority to delegate"
+      },
+      {
+        "key": "disclaim_or_modify_property_interest",
+        "label": "Disclaim property, including a power of appointment"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Kansas",
+    "Jurisdiction Code": "US-KS",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Kentucky",
+    "Jurisdiction Code": "US-KY",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Louisiana",
+    "Jurisdiction Code": "US-LA",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Maine",
+    "Jurisdiction Code": "US-ME",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Maryland",
+    "Jurisdiction Code": "US-MD",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Massachusetts",
+    "Jurisdiction Code": "US-MA",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Michigan",
+    "Jurisdiction Code": "US-MI",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, amend, revoke, or terminate an inter vivos trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate authority granted under the power of attorney"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive the principal's right to be a beneficiary of a joint and survivor annuity, including a survivor benefit under a retirement plan"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers that the principal has authority to delegate"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Minnesota",
+    "Jurisdiction Code": "US-MN",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Mississippi",
+    "Jurisdiction Code": "US-MS",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Missouri",
+    "Jurisdiction Code": "US-MO",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Montana",
+    "Jurisdiction Code": "US-MT",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Nebraska",
+    "Jurisdiction Code": "US-NE",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Nevada",
+    "Jurisdiction Code": "US-NV",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "New Hampshire",
+    "Jurisdiction Code": "US-NH",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "New Jersey",
+    "Jurisdiction Code": "US-NJ",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "New Mexico",
+    "Jurisdiction Code": "US-NM",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "New York",
+    "Jurisdiction Code": "US-NY",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "North Carolina",
+    "Jurisdiction Code": "US-NC",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "North Dakota",
+    "Jurisdiction Code": "US-ND",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Oklahoma",
+    "Jurisdiction Code": "US-OK",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Oregon",
+    "Jurisdiction Code": "US-OR",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Pennsylvania",
+    "Jurisdiction Code": "US-PA",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, amend, revoke, or terminate an inter vivos trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate authority granted under the power of attorney"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive the principal's right to be a beneficiary of a joint and survivor annuity (including survivor benefit under a retirement plan)"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers that the principal has authority to delegate"
+      },
+      {
+        "key": "disclaim_or_modify_property_interest",
+        "label": "Disclaim property, including a power of appointment"
+      },
+      {
+        "key": "access_electronic_communications",
+        "label": "Access the content of electronic communications sent or received by the principal"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "Rhode Island",
+    "Jurisdiction Code": "US-RI",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "South Carolina",
+    "Jurisdiction Code": "US-SC",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "South Dakota",
+    "Jurisdiction Code": "US-SD",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Tennessee",
+    "Jurisdiction Code": "US-TN",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Texas",
+    "Jurisdiction Code": "US-TX",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Utah",
+    "Jurisdiction Code": "US-UT",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Vermont",
+    "Jurisdiction Code": "US-VT",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Virginia",
+    "Jurisdiction Code": "US-VA",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Washington",
+    "Jurisdiction Code": "US-WA",
+    "Authority Scope": [
+      {
+        "key": "create_modify_revoke_or_terminate_trust",
+        "label": "Create, amend, revoke, or terminate an inter vivos trust"
+      },
+      {
+        "key": "make_gifts",
+        "label": "Make a gift"
+      },
+      {
+        "key": "change_survivorship_rights",
+        "label": "Create or change rights of survivorship"
+      },
+      {
+        "key": "change_beneficiary_designations",
+        "label": "Create or change a beneficiary designation"
+      },
+      {
+        "key": "delegate_authority",
+        "label": "Delegate some but not all authority granted under the power of attorney (subject to statutory limits)"
+      },
+      {
+        "key": "waive_joint_and_survivor_annuity",
+        "label": "Waive the principal's right to be a beneficiary of a joint and survivor annuity (including survivor benefit under a retirement plan)"
+      },
+      {
+        "key": "exercise_fiduciary_powers",
+        "label": "Exercise fiduciary powers that the principal has authority to delegate"
+      }
+    ]
+  },
+  {
+    "Jurisdiction": "West Virginia",
+    "Jurisdiction Code": "US-WV",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Wisconsin",
+    "Jurisdiction Code": "US-WI",
+    "Authority Scope": null
+  },
+  {
+    "Jurisdiction": "Wyoming",
+    "Jurisdiction Code": "US-WY",
+    "Authority Scope": null
+  }
+]

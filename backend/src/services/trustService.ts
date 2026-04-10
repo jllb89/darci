@@ -81,8 +81,23 @@ export type TrustRequirementRecord = {
   updated_at: string;
 };
 
+export type TrustTrusteePowerRecord = {
+  id: string;
+  jurisdiction: string;
+  canonical_key: string;
+  canonical_label: string;
+  state_specific_label: string | null;
+  sort_order: number;
+  is_active: boolean;
+  source_citation: string | null;
+  source_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TrustRequirementDetails = {
   requirement: TrustRequirementRecord;
+  trusteePowers: TrustTrusteePowerRecord[];
 };
 
 type TrustJurisdictionRow = {
@@ -160,6 +175,20 @@ const TRUST_REQUIREMENT_SELECT = [
   "updated_at",
 ].join(", ");
 
+const TRUST_TRUSTEE_POWER_SELECT = [
+  "id",
+  "jurisdiction",
+  "canonical_key",
+  "canonical_label",
+  "state_specific_label",
+  "sort_order",
+  "is_active",
+  "source_citation",
+  "source_url",
+  "created_at",
+  "updated_at",
+].join(", ");
+
 const getTrustRequirementExact = async (
   jurisdiction: string,
   documentType: TrustDocumentType,
@@ -222,6 +251,24 @@ const mapJurisdictionRows = (rows: TrustJurisdictionRow[]) => {
   );
 };
 
+export const listTrusteePowersByJurisdiction = async (jurisdiction: string) => {
+  const normalizedJurisdiction = normalizeJurisdiction(jurisdiction);
+
+  const { data, error } = await supabaseAdmin
+    .from("trust_trustee_powers")
+    .select(TRUST_TRUSTEE_POWER_SELECT)
+    .eq("jurisdiction", normalizedJurisdiction)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("canonical_key", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as unknown as TrustTrusteePowerRecord[];
+};
+
 
 export const getTrustRequirementDetails = async (
   jurisdiction: string,
@@ -233,8 +280,11 @@ export const getTrustRequirementDetails = async (
     return null;
   }
 
+  const trusteePowers = await listTrusteePowersByJurisdiction(requirement.jurisdiction);
+
   return {
     requirement,
+    trusteePowers,
   } satisfies TrustRequirementDetails;
 };
 
