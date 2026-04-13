@@ -1368,6 +1368,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /rules/member-form/{jurisdiction}/document-extraction:
+    get:
+      summary: Get canonical extraction payload for trust RRR and POA generation
+      description: Returns a JSON extraction payload from the merged member-form contract with canonical keys for document generation.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: jurisdiction
+          required: true
+          schema:
+            type: string
+          description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberFormDocumentExtractionResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
@@ -2743,6 +2790,258 @@ components:
       properties:
         memberForm:
           $ref: "#/components/schemas/MemberFormRulesContract"
+    MemberFormDocumentExtractionResponse:
+      type: object
+      properties:
+        extraction:
+          $ref: "#/components/schemas/MemberFormDocumentExtractionPayload"
+    MemberFormDocumentExtractionPayload:
+      type: object
+      properties:
+        jurisdiction:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        families:
+          type: array
+          items:
+            type: string
+            enum:
+              - trust
+              - poa
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormDocumentExtractionContract"
+        canonicalFieldIndex:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormCanonicalFieldIndexItem"
+        sharedCanonicalKeys:
+          type: array
+          items:
+            type: string
+    MemberFormDocumentExtractionContract:
+      type: object
+      properties:
+        documentKey:
+          type: string
+        family:
+          type: string
+          enum:
+            - trust
+            - poa
+        documentType:
+          type: string
+        jurisdiction:
+          type: string
+        uiProfile:
+          type: string
+        derivationMode:
+          type: string
+        reviewStatus:
+          type: string
+        templateResolution:
+          type: object
+          additionalProperties: true
+        classification:
+          type: object
+          additionalProperties: true
+        capabilities:
+          type: object
+          additionalProperties: true
+        workflow:
+          type: object
+          properties:
+            steps:
+              type: array
+              items:
+                type: string
+            requiredArtifacts:
+              type: array
+              items:
+                type: string
+            submissionChecks:
+              type: array
+              items:
+                type: string
+        documentOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormDocumentExtractionOutput"
+        notices:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormDocumentExtractionNotice"
+        templateBindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormDocumentTemplateBinding"
+        templateCoverage:
+          $ref: "#/components/schemas/MemberFormDocumentTemplateCoverage"
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormDocumentExtractionSectionSummary"
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormDocumentExtractionField"
+    MemberFormDocumentExtractionSectionSummary:
+      type: object
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        presence:
+          type: string
+        repeatable:
+          type: boolean
+        fieldCount:
+          type: integer
+    MemberFormDocumentExtractionField:
+      type: object
+      properties:
+        canonicalKey:
+          type: string
+        sourceFieldKey:
+          type: string
+        sourceLabel:
+          type: string
+        sourceRequired:
+          type: boolean
+        sectionKey:
+          type: string
+        sectionTitle:
+          type: string
+        sectionPresence:
+          type: string
+        label:
+          type: string
+        semanticType:
+          type: string
+        dataType:
+          type: string
+          enum:
+            - string
+            - integer
+            - boolean
+            - date
+            - array
+            - object
+        required:
+          type: boolean
+        repeatable:
+          type: boolean
+        collectFrom:
+          type: string
+        defaultSource:
+          type: string
+        helpText:
+          type: string
+          nullable: true
+        validation:
+          type: object
+          additionalProperties: true
+          nullable: true
+        when:
+          type: object
+          additionalProperties: true
+          nullable: true
+    MemberFormDocumentExtractionOutput:
+      type: object
+      properties:
+        key:
+          type: string
+        required:
+          type: boolean
+        outputCategory:
+          type: string
+          nullable: true
+        when:
+          type: object
+          additionalProperties: true
+          nullable: true
+    MemberFormDocumentExtractionNotice:
+      type: object
+      properties:
+        key:
+          type: string
+        severity:
+          type: string
+        message:
+          type: string
+        when:
+          type: object
+          additionalProperties: true
+          nullable: true
+    MemberFormDocumentTemplateBinding:
+      type: object
+      properties:
+        placeholder:
+          type: string
+        description:
+          type: string
+        required:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - member_form
+            - system
+            - notary
+        status:
+          type: string
+          enum:
+            - mapped
+            - missing_canonical_field
+            - system_value
+        canonicalKey:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    MemberFormDocumentTemplateCoverage:
+      type: object
+      properties:
+        totalBindings:
+          type: integer
+        mappedBindings:
+          type: integer
+        missingBindings:
+          type: integer
+        systemBindings:
+          type: integer
+    MemberFormCanonicalFieldIndexItem:
+      type: object
+      properties:
+        canonicalKey:
+          type: string
+        inDocuments:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormCanonicalFieldOccurrence"
+    MemberFormCanonicalFieldOccurrence:
+      type: object
+      properties:
+        documentKey:
+          type: string
+        family:
+          type: string
+          enum:
+            - trust
+            - poa
+        documentType:
+          type: string
+        sourceFieldKey:
+          type: string
+        required:
+          type: boolean
+        collectFrom:
+          type: string
     MemberFormRulesContract:
       type: object
       properties:

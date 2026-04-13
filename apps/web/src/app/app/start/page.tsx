@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
 import ProcessBand from "@/app/app/start/ProcessBand";
+import { MockDataToggle } from "@/app/app/start/MockDataToggle";
 import {
   buildInitialMemberFormValues,
   computeFieldRuntime,
@@ -33,6 +34,7 @@ import {
   type PersonListItem,
   type PriorDocumentItem,
 } from "@/app/app/start/memberFormControls";
+import { buildMockFormValues } from "@/app/app/start/memberFormMockData";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -508,6 +510,7 @@ export default function StartDocumentPage() {
   const { accessToken } = useStoredAuth();
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
   const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
+  const [isMockDataEnabled, setIsMockDataEnabled] = useState(false);
 
   const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
@@ -538,6 +541,10 @@ export default function StartDocumentPage() {
 
     return formatJurisdictionDisplayLabel(selected.label, selected.code);
   }, [jurisdictions, selectedJurisdiction]);
+
+  const isMockDataToggleVisible = process.env.NODE_ENV !== "production";
+  const isMockDataToggleDisabled =
+    !selectedJurisdiction || isLoadingMemberForm || !memberForm;
 
   useEffect(() => {
     if (!accessToken) {
@@ -687,6 +694,25 @@ export default function StartDocumentPage() {
       cancelled = true;
     };
   }, [accessToken, selectedJurisdiction, selectedJurisdictionLabel]);
+
+  useEffect(() => {
+    if (!isMockDataEnabled || !memberForm || !selectedJurisdiction || isLoadingMemberForm) {
+      return;
+    }
+
+    setFormValues(
+      buildMockFormValues(memberForm, {
+        jurisdictionCode: selectedJurisdiction,
+        jurisdictionLabel: selectedJurisdictionLabel,
+      }),
+    );
+  }, [
+    isLoadingMemberForm,
+    isMockDataEnabled,
+    memberForm,
+    selectedJurisdiction,
+    selectedJurisdictionLabel,
+  ]);
 
   const fieldRuntime = useMemo(
     () => computeFieldRuntime(memberForm, formValues),
@@ -1129,12 +1155,38 @@ export default function StartDocumentPage() {
     setSelectedJurisdiction(nextJurisdiction);
 
     if (!nextJurisdiction) {
+      setIsMockDataEnabled(false);
       setMemberForm(null);
       setFormValues({});
       setCurrentFormStep("people");
       setMissingRequirements([]);
       setErrorMessage(null);
     }
+  };
+
+  const handleMockDataToggleChange = (nextEnabled: boolean) => {
+    setIsMockDataEnabled(nextEnabled);
+
+    if (!memberForm || !selectedJurisdiction) {
+      return;
+    }
+
+    if (!nextEnabled) {
+      setFormValues(
+        buildInitialMemberFormValues(memberForm, {
+          jurisdictionCode: selectedJurisdiction,
+          jurisdictionLabel: selectedJurisdictionLabel,
+        }),
+      );
+      return;
+    }
+
+    setFormValues(
+      buildMockFormValues(memberForm, {
+        jurisdictionCode: selectedJurisdiction,
+        jurisdictionLabel: selectedJurisdictionLabel,
+      }),
+    );
   };
 
   const handleFieldChange = (key: string, value: FormValue) => {
@@ -2117,7 +2169,16 @@ export default function StartDocumentPage() {
           <div id="contract-container" ref={contractContainerRef} className="space-y-4 bg-white p-4">
             <div className="space-y-4 p-4">
               <div>
-                <div className="text-sm font-medium">New document details</div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm font-medium">New document details</div>
+                  {isMockDataToggleVisible ? (
+                    <MockDataToggle
+                      checked={isMockDataEnabled}
+                      disabled={isMockDataToggleDisabled}
+                      onChange={handleMockDataToggleChange}
+                    />
+                  ) : null}
+                </div>
                 <div className="mt-1 text-xs text-Color-Neutral">
                   Answer each question in plain terms. If you're unsure, choose the closest option
                   and continue.

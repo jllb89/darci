@@ -4,6 +4,7 @@ import {
   deriveMemberFormRulesByJurisdiction,
   listMemberFormJurisdictions,
 } from "../services/memberFormRulesService";
+import { buildMemberFormDocumentExtractionPayload } from "../services/memberFormDocumentExtractionService";
 
 const ensureAuthenticatedUser = (req: Request, res: Response) => {
   if (req.user?.id) {
@@ -91,6 +92,56 @@ export const getMemberFormRulesByJurisdiction = async (
         error instanceof Error
           ? error.message
           : "Failed to load member form requirements",
+    });
+  }
+};
+
+export const getMemberFormDocumentExtractionByJurisdiction = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!ensureAuthenticatedUser(req, res)) {
+    return;
+  }
+
+  if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "jurisdiction is required",
+      details: [
+        {
+          path: "jurisdiction",
+          message: "jurisdiction is required",
+        },
+      ],
+    });
+  }
+
+  try {
+    const selection = buildMemberFormIntakeSelection();
+    const result = await deriveMemberFormRulesByJurisdiction(
+      req.params.jurisdiction,
+      selection,
+    );
+
+    if (!result.contract || result.missing.length > 0) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Member form requirements not found for one or more selected families",
+        details: result.missing,
+      });
+    }
+
+    return res.status(200).json({
+      extraction: buildMemberFormDocumentExtractionPayload(result.contract),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "internal_error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to build member form document extraction payload",
     });
   }
 };

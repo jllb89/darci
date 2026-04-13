@@ -12,6 +12,7 @@ import {
   listIdnJurisdictionsForType,
 } from "../controllers/idnController";
 import {
+  getMemberFormDocumentExtractionByJurisdiction,
   getMemberFormRulesByJurisdiction,
   listMemberFormJurisdictionsForSelection,
 } from "../controllers/memberFormRulesController";
@@ -65,6 +66,12 @@ router.get(
   "/member-form/:jurisdiction",
   requireRole(["member", "notary", "admin", "service_role"]),
   getMemberFormRulesByJurisdiction,
+);
+
+router.get(
+  "/member-form/:jurisdiction/document-extraction",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  getMemberFormDocumentExtractionByJurisdiction,
 );
 
 export default router;
