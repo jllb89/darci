@@ -58,10 +58,11 @@ body {
 
 .platform-control {
   width: 100%;
-  border-radius: 0;
+  border-radius: 0.5rem;
   border: 1px solid color-mix(in srgb, var(--color-scheme-1-border) 65%, transparent);
   background: var(--color-white);
   color: var(--color-scheme-1-text);
+  min-height: 2.5rem;
   padding: 0.625rem 0.75rem;
   font-size: 0.875rem;
   outline: none;
@@ -112,8 +113,10 @@ body {
 
 .platform-btn-primary {
   border-radius: 0;
+  border: none;
   background: var(--color-green);
   color: var(--color-neutral-darkest);
+  min-height: 2.5rem;
   font-size: 0.875rem;
   font-weight: 500;
   transition: background-color 120ms ease, transform 120ms ease;
@@ -129,30 +132,52 @@ body {
 
 .platform-btn-secondary {
   border-radius: 0;
-  border: 1px solid color-mix(in srgb, var(--color-scheme-1-border) 65%, transparent);
+  border: none;
   background: var(--color-white);
   color: var(--color-scheme-1-text);
+  min-height: 2.5rem;
   font-size: 0.75rem;
   font-weight: 500;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color 120ms ease;
 }
 
 .platform-btn-secondary:hover {
   background: color-mix(in srgb, var(--color-neutral-lightest) 55%, transparent);
-  border-color: color-mix(in srgb, var(--color-scheme-1-border) 90%, var(--color-scheme-1-text));
 }
 
 .platform-btn-subtle {
   border-radius: 0;
-  border: 1px solid color-mix(in srgb, var(--color-scheme-1-border) 60%, transparent);
+  border: none;
   background: color-mix(in srgb, var(--color-neutral-lightest) 65%, transparent);
   color: var(--color-neutral-darkest);
+  min-height: 2.5rem;
   font-size: 0.75rem;
   font-weight: 500;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color 120ms ease;
 }
 
 .platform-btn-subtle:hover {
   background: color-mix(in srgb, var(--color-neutral-lightest) 90%, transparent);
-  border-color: color-mix(in srgb, var(--color-scheme-1-border) 95%, var(--color-scheme-1-text));
+}
+
+@keyframes darciContentFadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes darciProcessStepFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

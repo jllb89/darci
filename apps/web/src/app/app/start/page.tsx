@@ -1,9 +1,10 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
+import ProductSelectionBand from "@/app/app/start/ProductSelectionBand";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import { MockDataToggle } from "@/app/app/start/MockDataToggle";
 import {
@@ -12,7 +13,6 @@ import {
   getSectionLayoutMode,
   groupSectionFieldsByFamily,
   getVisibleSections,
-  type MemberFormFamily,
 } from "@/app/app/start/memberFormRuntime";
 import {
   DEFAULT_PHONE_COUNTRY_CODE,
@@ -22,9 +22,6 @@ import {
   getMemberFieldControlKind,
   hasSigningTrustee,
   isTemporarilyHiddenCreateFlowField,
-  isValidEmailFormat,
-  isValidPhoneCountryCode,
-  isValidPhoneFormat,
   parsePriorDocumentItems,
   parsePersonContact,
   parsePersonListItems,
@@ -35,456 +32,78 @@ import {
   type PriorDocumentItem,
 } from "@/app/app/start/memberFormControls";
 import { buildMockFormValues } from "@/app/app/start/memberFormMockData";
+import {
+  priorDocumentTypeOptions,
+  productFlowModesWithoutDocumentsColumn,
+  productFlowStepFamilyScopes,
+  productFlowStepLabels,
+  productFlowStepOrderByMode,
+  productFlowStepSectionKeys,
+  productFlowUploadDefaultsByMode,
+} from "@/app/app/start/startPageConstants";
+import type {
+  FormStep,
+  FormValue,
+  JurisdictionOption,
+  MemberFacingField,
+  MemberFacingSection,
+  MemberFormJurisdictionsPayload,
+  MemberFormPayload,
+  MemberFormRulesContract,
+  MemberFormValidationResponse,
+  MissingRequirement,
+  ProductFlowModeDefinition,
+  ProductFlowModesPayload,
+  ProductFlowStepDefinition,
+  ProductFlowModeKey,
+} from "@/app/app/start/startPageTypes";
+import {
+  formatJurisdictionDisplayLabel,
+  formatLabel,
+  getAllowedValueLabels,
+  getAllowedValues,
+  getFieldMicrocopy,
+  getFilledPersonRows,
+  getFilledPriorDocumentRows,
+  getIncompletePersonRowCount,
+  getIncompletePriorDocumentRowCount,
+  getInvalidPersonRowFormatCount,
+  getNumberConstraint,
+  getPriorDocumentChronologyOutOfOrderCount,
+  getRepeatableAddLabel,
+  getRepeatablePlaceholder,
+  getSectionMicrocopy,
+  hasOriginatingPriorDocumentType,
+  isNameInList,
+  isProductFlowModeKey,
+  isProductFlowStepKey,
+  isTaxIdOwnerSelectionBoundToTrustmakers,
+  isTrusteeListField,
+  normalizeCanonicalKey,
+  normalizeNameForComparison,
+  normalizeSignatureAuthorityMode,
+  readStartFormDraft,
+  toStringArrayValue,
+  validatePersonContact,
+  writeStartFormDraft,
+} from "@/app/app/start/startPageUtils";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
 
-type JurisdictionOption = {
-  code: string;
-  label: string;
-};
-
-type ConditionOperator =
-  | "equals"
-  | "not_equals"
-  | "in"
-  | "not_in"
-  | "is_true"
-  | "is_false";
-
-type ConditionClause = {
-  fact: string;
-  operator: ConditionOperator;
-  value?: unknown;
-};
-
-type Condition = {
-  all: ConditionClause[];
-};
-
-type ConditionFactValue = string | string[] | boolean | null;
-type FactContext = Record<string, ConditionFactValue>;
-
-type MemberFacingFieldSource = {
-  family: MemberFormFamily;
-  document_type: string;
-  section_key: string;
-  field_key: string;
-  original_label: string;
-  original_required?: boolean;
-  original_when?: Condition;
-};
-
-type MemberFacingField = {
-  canonical_key: string;
-  label: string;
-  semantic_type: string;
-  data_type: "string" | "integer" | "boolean" | "date" | "array" | "object";
-  required: boolean;
-  repeatable: boolean;
-  help_text?: string;
-  validation?: Record<string, unknown>;
-  when?: Condition;
-  condition_merge_mode?: "exact" | "source_only";
-  sources: MemberFacingFieldSource[];
-  ui_group: "basic_info" | "people" | "authority" | "execution" | "documents" | "advanced";
-};
-
-type MemberFacingSection = {
-  key: "basic_info" | "people" | "authority" | "execution" | "documents" | "advanced";
-  title: string;
-  fields: MemberFacingField[];
-};
-
-type MemberFacingFormContract = {
-  jurisdiction: string;
-  families: MemberFormFamily[];
-  document_types: string[];
-  sections: MemberFacingSection[];
-  source_trace: Array<{
-    source: string;
-    field: string;
-    value: string | number | boolean | null;
-  }>;
-};
-
-type FamilyContract = {
-  family: MemberFormFamily;
-  documentType: string;
-  inputRequirements: unknown;
-  factContext: FactContext;
-};
-
-type SourceConditionContext = {
-  family: MemberFormFamily;
-  documentType: string;
-  sectionKey: string;
-  fieldKey: string;
-  facts: FactContext;
-};
-
-type MemberFormRulesContract = {
-  jurisdiction: string;
-  families: MemberFormFamily[];
-  documentTypes: string[];
-  aggregatedForm: MemberFacingFormContract;
-  familyContracts: FamilyContract[];
-  sourceConditionContexts: SourceConditionContext[];
-};
-
-type MemberFormJurisdictionsPayload = {
-  jurisdictions?: JurisdictionOption[];
-  message?: string;
-};
-
-type MemberFormPayload = {
-  memberForm?: MemberFormRulesContract;
-  message?: string;
-  details?: Array<{
-    family?: string;
-    documentType?: string;
-  }>;
-};
-
-type MissingRequirement = {
-  family: string;
-  documentType: string;
-};
-
-type FormValue = string | boolean | string[];
-type FormStep = "people" | "authority";
-
-type StartFormDraft = {
-  currentFormStep: FormStep;
-  formValues: Record<string, FormValue>;
-};
-
-const START_FORM_DRAFT_STORAGE_KEY_PREFIX = "darci:start-form-draft:v1";
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-};
-
-const isFormValue = (value: unknown): value is FormValue => {
-  if (typeof value === "string" || typeof value === "boolean") {
-    return true;
-  }
-
-  return (
-    Array.isArray(value) &&
-    value.every((item) => typeof item === "string")
-  );
-};
-
-const sanitizeStoredFormValues = (
-  value: unknown,
-): Record<string, FormValue> => {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  const sanitized: Record<string, FormValue> = {};
-  for (const [key, candidate] of Object.entries(value)) {
-    if (!key.trim() || !isFormValue(candidate)) {
-      continue;
-    }
-
-    sanitized[key] = candidate;
-  }
-
-  return sanitized;
-};
-
-const getStartFormDraftStorageKey = (jurisdictionCode: string) => {
-  return `${START_FORM_DRAFT_STORAGE_KEY_PREFIX}:${jurisdictionCode}`;
-};
-
-const readStartFormDraft = (jurisdictionCode: string): StartFormDraft | null => {
-  if (typeof window === "undefined" || !jurisdictionCode) {
-    return null;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(
-      getStartFormDraftStorageKey(jurisdictionCode),
-    );
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed)) {
-      return null;
-    }
-
-    const currentFormStep =
-      parsed.currentFormStep === "authority" ? "authority" : "people";
-
-    return {
-      currentFormStep,
-      formValues: sanitizeStoredFormValues(parsed.formValues),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const writeStartFormDraft = (
-  jurisdictionCode: string,
-  draft: StartFormDraft,
-) => {
-  if (typeof window === "undefined" || !jurisdictionCode) {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(
-      getStartFormDraftStorageKey(jurisdictionCode),
-      JSON.stringify(draft),
-    );
-  } catch {
-    // Swallow quota/private-mode errors to keep form editing uninterrupted.
-  }
-};
-
-const priorDocumentTypeOptions = [
-  "trust_agreement",
-  "amendment",
-  "restatement",
-  "trust_certification",
-  "power_of_attorney",
-  "other",
-] as const;
-
-const fieldMicrocopyByCanonicalKey: Record<string, string> = {
-  restatement_context_type:
-    "Pick the option that best describes this filing so we can request the right supporting records.",
-  prior_document_items:
-    "Upload the trust documents to include in this filing.",
-  trustee_powers:
-    "Select every authority that should appear in the trustee powers section.",
-  revocation_holders:
-    "Choose who has revocation authority under the trust terms.",
-  revocation_holders_custom_text:
-    "Describe the exact revocation language if the standard options do not match.",
-  special_instructions_text:
-    "Keep this concise and directive. These instructions are copied into the final document package.",
-};
-
-const sectionMicrocopyByKey: Record<string, string> = {
-  basic_info: "Start with your core details so your document is prepared correctly.",
-  people: "List parties in execution order. Add each person as a separate row.",
-  authority: "Confirm who may act, revoke, and sign. Trust-specific authority appears first.",
-  execution: "Execution preferences for signatures, dates, and witness handling.",
-  documents: "List documents to include and any supporting uploads needed for this filing.",
-  advanced: "Optional edge-case inputs. Leave blank unless your case explicitly requires them.",
-};
-
-const formatLabel = (value: string) => {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-};
-
-const toTitleCaseWords = (value: string) => {
-  return value
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-};
-
-const formatJurisdictionDisplayLabel = (label: string | undefined, code: string) => {
-  const raw =
-    typeof label === "string" && label.trim().length > 0
-      ? label
-      : code;
-
-  const withoutTrailingCode = raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
-  if (!withoutTrailingCode) {
-    return toTitleCaseWords(code);
-  }
-
-  return toTitleCaseWords(withoutTrailingCode);
-};
-
-const getAllowedValues = (field: MemberFacingField) => {
-  const validation = field.validation;
-  if (!validation) {
-    return [] as string[];
-  }
-
-  const raw = validation["allowed_values"] ?? validation["allowedValues"];
-  if (!Array.isArray(raw)) {
-    return [] as string[];
-  }
-
-  return raw.filter((value): value is string => typeof value === "string");
-};
-
-const getAllowedValueLabels = (field: MemberFacingField) => {
-  const validation = field.validation;
-  if (!validation) {
-    return {} as Record<string, string>;
-  }
-
-  const raw = validation["allowed_value_labels"] ?? validation["allowedValueLabels"];
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return {} as Record<string, string>;
-  }
-
-  const labels: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (typeof value === "string" && key.trim().length > 0) {
-      labels[key] = value;
-    }
-  }
-
-  return labels;
-};
-
-const getNumberConstraint = (
-  field: MemberFacingField,
-  key: "min" | "max" | "minLength" | "maxLength",
-) => {
-  const validation = field.validation;
-  if (!validation) {
-    return undefined;
-  }
-
-  const value = validation[key];
-  return typeof value === "number" ? value : undefined;
-};
-
-const normalizeCanonicalKey = (canonicalKey: string) => {
-  return canonicalKey.replace(/__\d+$/, "");
-};
-
-const getFieldMicrocopy = (canonicalKey: string) => {
-  return fieldMicrocopyByCanonicalKey[normalizeCanonicalKey(canonicalKey)] ?? null;
-};
-
-const getSectionMicrocopy = (sectionKey: string) => {
-  return sectionMicrocopyByKey[sectionKey] ?? null;
-};
-
-const toStringArrayValue = (value: FormValue | undefined) => {
-  if (!Array.isArray(value)) {
-    return [] as string[];
-  }
-
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim());
-};
-
-const repeatableAddLabelByCanonicalKey: Record<string, string> = {
-  grantors: "Add grantor",
-  successor_agents: "Add successor agent",
-  successor_agent_list: "Add successor agent",
-};
-
-const repeatablePlaceholderByCanonicalKey: Record<string, string> = {
-  grantors: "Grantor name",
-  successor_agents: "Successor agent name",
-  successor_agent_list: "Successor agent name",
-};
-
-const getRepeatableAddLabel = (canonicalKey: string) => {
-  return repeatableAddLabelByCanonicalKey[normalizeCanonicalKey(canonicalKey)] ?? "Add entry";
-};
-
-const getRepeatablePlaceholder = (canonicalKey: string, index: number) => {
-  return (
-    repeatablePlaceholderByCanonicalKey[normalizeCanonicalKey(canonicalKey)] ??
-    `Entry ${index + 1}`
-  );
-};
-
-const isTrusteeListField = (canonicalKey: string) => {
-  return normalizeCanonicalKey(canonicalKey) === "trustees";
-};
-
-const isSuccessorTrusteeListField = (canonicalKey: string) => {
-  return normalizeCanonicalKey(canonicalKey) === "successor_trustees";
-};
-
-const hasPersonRowValue = (item: PersonListItem) => {
-  return (
-    item.fullName.trim().length > 0 ||
-    item.email.trim().length > 0 ||
-    item.phone.trim().length > 0
-  );
-};
-
-const getFilledPersonRows = (items: PersonListItem[]) => {
-  return items.filter((item) => hasPersonRowValue(item));
-};
-
-const getIncompletePersonRowCount = (items: PersonListItem[]) => {
-  const filledRows = getFilledPersonRows(items);
-  return filledRows.filter((item) => {
-    return (
-      item.fullName.trim().length === 0 ||
-      item.email.trim().length === 0 ||
-      item.phone.trim().length === 0
-    );
-  }).length;
-};
-
-const hasInvalidPersonRowFormat = (item: PersonListItem) => {
-  if (!hasPersonRowValue(item)) {
-    return false;
-  }
-
-  if (!isValidPhoneCountryCode(item.phoneCountryCode)) {
-    return true;
-  }
-
-  if (!isValidEmailFormat(item.email)) {
-    return true;
-  }
-
-  if (!isValidPhoneFormat(item.phone)) {
-    return true;
-  }
-
-  return false;
-};
-
-const getInvalidPersonRowFormatCount = (items: PersonListItem[]) => {
-  return getFilledPersonRows(items).filter((item) => hasInvalidPersonRowFormat(item)).length;
-};
-
-const validatePersonContact = (value: FormValue | undefined) => {
-  const contact = parsePersonContact(value);
-
-  const missingEmail = contact.email.trim().length === 0;
-  const missingPhone = contact.phone.trim().length === 0;
-  const invalidEmail = !missingEmail && !isValidEmailFormat(contact.email);
-  const invalidPhone = !missingPhone && !isValidPhoneFormat(contact.phone);
-  const invalidCountryCode = !isValidPhoneCountryCode(contact.phoneCountryCode);
-
-  return {
-    missingEmail,
-    missingPhone,
-    invalidEmail,
-    invalidPhone,
-    invalidCountryCode,
-  };
-};
-
 const fetchWithTokenRefresh = async (
   url: string,
   accessToken: string,
+  init?: RequestInit,
 ): Promise<Response> => {
   const requestWithToken = (token: string) => {
+    const headers = new Headers(init?.headers ?? {});
+    headers.set("Authorization", `Bearer ${token}`);
+
     return fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      ...init,
+      headers,
     });
   };
 
@@ -505,26 +124,41 @@ const fetchWithTokenRefresh = async (
   }
 };
 
+type LeaveAction =
+  | { type: "href"; href: string }
+  | { type: "history-back" }
+  | { type: "reload" }
+  | { type: "clear-product-selection" }
+  | { type: "change-jurisdiction"; jurisdiction: string };
+
 export default function StartDocumentPage() {
   const router = useRouter();
   const { accessToken } = useStoredAuth();
+  const [productFlowModes, setProductFlowModes] = useState<ProductFlowModeDefinition[]>([]);
+  const [selectedProductFlowMode, setSelectedProductFlowMode] = useState<
+    ProductFlowModeKey | ""
+  >("");
+  const [resolvedProductFlowMode, setResolvedProductFlowMode] =
+    useState<ProductFlowModeDefinition | null>(null);
+  const [isLoadingProductFlowModes, setIsLoadingProductFlowModes] = useState(false);
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
   const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
-  const [isMockDataEnabled, setIsMockDataEnabled] = useState(false);
+  const [isMockDataEnabled, setIsMockDataEnabled] = useState(true);
 
   const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
 
   const [isLoadingJurisdictions, setIsLoadingJurisdictions] = useState(false);
   const [isLoadingMemberForm, setIsLoadingMemberForm] = useState(false);
+  const [isValidatingMemberFormSubmission, setIsValidatingMemberFormSubmission] =
+    useState(false);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [submissionErrorMessage, setSubmissionErrorMessage] = useState<string | null>(null);
   const [missingRequirements, setMissingRequirements] = useState<MissingRequirement[]>([]);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
-  const [pendingLeaveAction, setPendingLeaveAction] = useState<
-    { type: "href"; href: string } | { type: "history-back" } | { type: "reload" } | null
-  >(null);
-  const [currentFormStep, setCurrentFormStep] = useState<FormStep>("people");
+  const [pendingLeaveAction, setPendingLeaveAction] = useState<LeaveAction | null>(null);
+  const [currentFormStep, setCurrentFormStep] = useState<FormStep>("general_information");
   const [activeDropzoneFieldKey, setActiveDropzoneFieldKey] = useState<string | null>(null);
   const allowLeavingRef = useRef(false);
   const hasPushedHistoryGuardRef = useRef(false);
@@ -542,12 +176,109 @@ export default function StartDocumentPage() {
     return formatJurisdictionDisplayLabel(selected.label, selected.code);
   }, [jurisdictions, selectedJurisdiction]);
 
+  const selectedProductFlowModeDefinition = useMemo(() => {
+    if (!selectedProductFlowMode) {
+      return null;
+    }
+
+    const fromResolvedMode =
+      resolvedProductFlowMode?.modeKey === selectedProductFlowMode
+        ? resolvedProductFlowMode
+        : null;
+
+    return (
+      fromResolvedMode ??
+      productFlowModes.find((mode) => mode.modeKey === selectedProductFlowMode) ??
+      null
+    );
+  }, [productFlowModes, resolvedProductFlowMode, selectedProductFlowMode]);
+
   const isMockDataToggleVisible = process.env.NODE_ENV !== "production";
   const isMockDataToggleDisabled =
-    !selectedJurisdiction || isLoadingMemberForm || !memberForm;
+    !selectedProductFlowMode ||
+    !selectedJurisdiction ||
+    isLoadingMemberForm ||
+    !memberForm;
 
   useEffect(() => {
     if (!accessToken) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProductFlowModes = async () => {
+      setIsLoadingProductFlowModes(true);
+      setErrorMessage(null);
+
+      try {
+        const response = await fetchWithTokenRefresh(
+          `${apiBaseUrl}/rules/product-flow-modes`,
+          accessToken,
+        );
+
+        const payload = (await response.json().catch(() => null)) as
+          | ProductFlowModesPayload
+          | null;
+
+        if (!response.ok || !payload?.modes) {
+          throw new Error(payload?.message || "Failed to load product modes");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextModes = payload.modes
+          .filter((mode) => mode.isActive)
+          .sort((left, right) => left.sortOrder - right.sortOrder);
+
+        setProductFlowModes(nextModes);
+
+        setSelectedProductFlowMode((current) => {
+          if (current && nextModes.some((mode) => mode.modeKey === current)) {
+            return current;
+          }
+
+          return "";
+        });
+
+        setResolvedProductFlowMode((current) => {
+          if (!current) {
+            return null;
+          }
+
+          return nextModes.find((mode) => mode.modeKey === current.modeKey) ?? null;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setProductFlowModes([]);
+          setSelectedProductFlowMode("");
+          setResolvedProductFlowMode(null);
+          setJurisdictions([]);
+          setSelectedJurisdiction("");
+          setMemberForm(null);
+          setFormValues({});
+          setErrorMessage(
+            error instanceof Error ? error.message : "Failed to load product modes",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingProductFlowModes(false);
+        }
+      }
+    };
+
+    void loadProductFlowModes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedProductFlowMode) {
       return;
     }
 
@@ -559,8 +290,11 @@ export default function StartDocumentPage() {
       setMissingRequirements([]);
 
       try {
+        const query = new URLSearchParams({
+          mode: selectedProductFlowMode,
+        }).toString();
         const response = await fetchWithTokenRefresh(
-          `${apiBaseUrl}/rules/member-form`,
+          `${apiBaseUrl}/rules/member-form?${query}`,
           accessToken,
         );
 
@@ -577,6 +311,12 @@ export default function StartDocumentPage() {
         }
 
         const nextJurisdictions = payload.jurisdictions;
+        const modeFromPayload = payload.mode;
+        setResolvedProductFlowMode(
+          modeFromPayload ??
+            productFlowModes.find((mode) => mode.modeKey === selectedProductFlowMode) ??
+            null,
+        );
         setJurisdictions(nextJurisdictions);
         setSelectedJurisdiction((current) => {
           if (nextJurisdictions.some((jurisdiction) => jurisdiction.code === current)) {
@@ -596,6 +336,10 @@ export default function StartDocumentPage() {
           setSelectedJurisdiction("");
           setMemberForm(null);
           setFormValues({});
+          setResolvedProductFlowMode(
+            productFlowModes.find((mode) => mode.modeKey === selectedProductFlowMode) ??
+              null,
+          );
           setErrorMessage(
             error instanceof Error ? error.message : "Failed to load jurisdictions",
           );
@@ -612,10 +356,10 @@ export default function StartDocumentPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, productFlowModes, selectedProductFlowMode]);
 
   useEffect(() => {
-    if (!accessToken || !selectedJurisdiction) {
+    if (!accessToken || !selectedProductFlowMode || !selectedJurisdiction) {
       return;
     }
 
@@ -627,8 +371,11 @@ export default function StartDocumentPage() {
       setMissingRequirements([]);
 
       try {
+        const query = new URLSearchParams({
+          mode: selectedProductFlowMode,
+        }).toString();
         const response = await fetchWithTokenRefresh(
-          `${apiBaseUrl}/rules/member-form/${selectedJurisdiction}`,
+          `${apiBaseUrl}/rules/member-form/${selectedJurisdiction}?${query}`,
           accessToken,
         );
 
@@ -659,18 +406,26 @@ export default function StartDocumentPage() {
           return;
         }
 
+        if (payload.memberForm.productFlowMode) {
+          setResolvedProductFlowMode(payload.memberForm.productFlowMode);
+        }
+
         setMemberForm(payload.memberForm);
         const initialValues = buildInitialMemberFormValues(payload.memberForm, {
           jurisdictionCode: selectedJurisdiction,
           jurisdictionLabel: selectedJurisdictionLabel,
         });
-        const draft = readStartFormDraft(selectedJurisdiction);
+        const draft = readStartFormDraft(selectedProductFlowMode, selectedJurisdiction);
 
         setFormValues({
           ...initialValues,
           ...(draft?.formValues ?? {}),
         });
-        setCurrentFormStep(draft?.currentFormStep ?? "people");
+        setCurrentFormStep(
+          selectedProductFlowMode === "trust_bundle"
+            ? "general_information"
+            : (draft?.currentFormStep ?? "general_information"),
+        );
       } catch (error) {
         if (!cancelled) {
           setMemberForm(null);
@@ -693,7 +448,12 @@ export default function StartDocumentPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, selectedJurisdiction, selectedJurisdictionLabel]);
+  }, [
+    accessToken,
+    selectedJurisdiction,
+    selectedJurisdictionLabel,
+    selectedProductFlowMode,
+  ]);
 
   useEffect(() => {
     if (!isMockDataEnabled || !memberForm || !selectedJurisdiction || isLoadingMemberForm) {
@@ -732,17 +492,105 @@ export default function StartDocumentPage() {
     return visibleSections.filter((section) => section.key === "documents");
   }, [visibleSections]);
 
+  const configuredWizardStepKeys = useMemo<FormStep[]>(() => {
+    const modeDefinition = selectedProductFlowModeDefinition ?? resolvedProductFlowMode;
+
+    const configuredKeys = [...(modeDefinition?.ui ?? [])]
+      .filter((entry) => entry.layoutMode === "wizard-step")
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+      .map((entry) => entry.groupKey)
+      .filter((groupKey): groupKey is FormStep => isProductFlowStepKey(groupKey));
+
+    if (configuredKeys.length > 0) {
+      return [...new Set(configuredKeys)];
+    }
+
+    if (selectedProductFlowMode) {
+      return productFlowStepOrderByMode[selectedProductFlowMode];
+    }
+
+    return productFlowStepOrderByMode.trust_bundle;
+  }, [resolvedProductFlowMode, selectedProductFlowMode, selectedProductFlowModeDefinition]);
+
+  const formStepDefinitions = useMemo<ProductFlowStepDefinition[]>(() => {
+    return configuredWizardStepKeys
+      .map((stepKey) => {
+        const sectionKeys = productFlowStepSectionKeys[stepKey];
+        const sections = primarySections.filter((section) => sectionKeys.includes(section.key));
+
+        return {
+          stepKey,
+          label: productFlowStepLabels[stepKey],
+          sectionKeys,
+          sections,
+        };
+      })
+      .filter((step) => step.sections.length > 0);
+  }, [configuredWizardStepKeys, primarySections]);
+
+  const activeFormStepIndex = useMemo(() => {
+    const stepIndex = formStepDefinitions.findIndex(
+      (stepDefinition) => stepDefinition.stepKey === currentFormStep,
+    );
+
+    return stepIndex >= 0 ? stepIndex : 0;
+  }, [currentFormStep, formStepDefinitions]);
+
+  const activeFormStep = formStepDefinitions[activeFormStepIndex] ?? null;
+
+  const previousFormStep =
+    activeFormStepIndex > 0 ? formStepDefinitions[activeFormStepIndex - 1] ?? null : null;
+
+  const nextFormStep =
+    activeFormStepIndex >= 0 && activeFormStepIndex < formStepDefinitions.length - 1
+      ? formStepDefinitions[activeFormStepIndex + 1] ?? null
+      : null;
+
   const documentsColumnFields = useMemo<MemberFacingField[]>(() => {
     return documentSections
       .flatMap((section) => section.fields)
       .filter((field) => !isTemporarilyHiddenCreateFlowField(field.canonical_key)) as MemberFacingField[];
   }, [documentSections]);
 
-  const requiresDocumentsUpload = useMemo(() => {
-    return documentsColumnFields.some(
-      (field) => normalizeCanonicalKey(field.canonical_key) === "prior_document_items",
+  const selectedModeKeyForLayout =
+    selectedProductFlowMode || selectedProductFlowModeDefinition?.modeKey || "";
+  const shouldHideDocumentsColumn =
+    selectedModeKeyForLayout.length > 0 &&
+    productFlowModesWithoutDocumentsColumn.has(
+      selectedModeKeyForLayout as ProductFlowModeKey,
     );
-  }, [documentsColumnFields]);
+
+  const uploadColumnBehavior = useMemo(() => {
+    const modeKey = selectedProductFlowMode || selectedProductFlowModeDefinition?.modeKey;
+    if (modeKey && productFlowModesWithoutDocumentsColumn.has(modeKey)) {
+      return {
+        showUploadColumn: false,
+        uploadRequired: false,
+      };
+    }
+
+    const fallbackBehavior = modeKey
+      ? productFlowUploadDefaultsByMode[modeKey]
+      : {
+          showUploadColumn: false,
+          uploadRequired: false,
+        };
+
+    const modeDefinition = selectedProductFlowModeDefinition ?? resolvedProductFlowMode;
+    if (!modeDefinition || modeDefinition.ui.length === 0) {
+      return fallbackBehavior;
+    }
+
+    return {
+      showUploadColumn: modeDefinition.ui.some((entry) => entry.showUploadColumn),
+      uploadRequired: modeDefinition.ui.some((entry) => entry.uploadRequired),
+    };
+  }, [resolvedProductFlowMode, selectedProductFlowMode, selectedProductFlowModeDefinition]);
+
+  const shouldRenderDocumentsColumn = !shouldHideDocumentsColumn;
+
+  const shouldShowUploadColumn = uploadColumnBehavior.showUploadColumn;
+  const uploadRequiredByMode = uploadColumnBehavior.uploadRequired;
 
   const hasDocumentsUploadValue = useMemo(() => {
     const value = formValues.prior_document_items;
@@ -757,48 +605,44 @@ export default function StartDocumentPage() {
     return false;
   }, [formValues.prior_document_items]);
 
-  const isDocumentsColumnComplete = !requiresDocumentsUpload || hasDocumentsUploadValue;
+  const isDocumentsColumnComplete =
+    !shouldShowUploadColumn || !uploadRequiredByMode || hasDocumentsUploadValue;
 
-  const peopleStepSections = useMemo(() => {
-    return primarySections.filter(
-      (section) => section.key !== "authority" && section.key !== "advanced",
-    );
-  }, [primarySections]);
+  const displayedPrimarySections = activeFormStep?.sections ?? [];
 
-  const authorityStepSections = useMemo(() => {
-    return primarySections.filter(
-      (section) => section.key === "authority" || section.key === "advanced",
-    );
-  }, [primarySections]);
-
-  const displayedPrimarySections = useMemo(() => {
-    return currentFormStep === "people" ? peopleStepSections : authorityStepSections;
-  }, [authorityStepSections, currentFormStep, peopleStepSections]);
-
-  const hasAuthoritySection = useMemo(() => {
-    return authorityStepSections.length > 0;
-  }, [authorityStepSections]);
+  const hasPreviousFormStep = previousFormStep !== null;
+  const hasNextFormStep = nextFormStep !== null;
 
   useEffect(() => {
-    setCurrentFormStep("people");
+    setCurrentFormStep("general_information");
   }, [selectedJurisdiction]);
 
   useEffect(() => {
-    if (!hasAuthoritySection && currentFormStep !== "people") {
-      setCurrentFormStep("people");
-    }
-  }, [currentFormStep, hasAuthoritySection]);
-
-  useEffect(() => {
-    if (!selectedJurisdiction || !memberForm) {
+    if (formStepDefinitions.length === 0) {
       return;
     }
 
-    writeStartFormDraft(selectedJurisdiction, {
+    if (!formStepDefinitions.some((stepDefinition) => stepDefinition.stepKey === currentFormStep)) {
+      setCurrentFormStep(formStepDefinitions[0]?.stepKey ?? "general_information");
+    }
+  }, [currentFormStep, formStepDefinitions]);
+
+  useEffect(() => {
+    if (!selectedProductFlowMode || !selectedJurisdiction || !memberForm) {
+      return;
+    }
+
+    writeStartFormDraft(selectedProductFlowMode, selectedJurisdiction, {
       currentFormStep,
       formValues,
     });
-  }, [currentFormStep, formValues, memberForm, selectedJurisdiction]);
+  }, [
+    currentFormStep,
+    formValues,
+    memberForm,
+    selectedJurisdiction,
+    selectedProductFlowMode,
+  ]);
 
   const sourceOnlyVisibleCount = useMemo(() => {
     return visibleSections.reduce((count, section) => {
@@ -816,6 +660,110 @@ export default function StartDocumentPage() {
       ),
     );
   }, [visibleSections]);
+
+  const trustmakerNames = useMemo(() => {
+    const names = parsePersonListItems(formValues.grantors)
+      .map((item) => item.fullName.trim())
+      .filter((name) => name.length > 0);
+
+    const uniqueNames: string[] = [];
+    const seen = new Set<string>();
+
+    for (const name of names) {
+      const normalized = normalizeNameForComparison(name);
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+
+      seen.add(normalized);
+      uniqueNames.push(name);
+    }
+
+    return uniqueNames;
+  }, [formValues.grantors]);
+
+  const getResolvedAllowedValues = useCallback((field: MemberFacingField) => {
+    if (isTaxIdOwnerSelectionBoundToTrustmakers(field) && trustmakerNames.length > 1) {
+      return trustmakerNames;
+    }
+
+    return getAllowedValues(field);
+  }, [trustmakerNames]);
+
+  const getResolvedAllowedValueLabels = useCallback((
+    field: MemberFacingField,
+    allowedValues: string[],
+  ) => {
+    if (isTaxIdOwnerSelectionBoundToTrustmakers(field) && trustmakerNames.length > 1) {
+      return Object.fromEntries(allowedValues.map((value) => [value, value])) as Record<
+        string,
+        string
+      >;
+    }
+
+    return getAllowedValueLabels(field);
+  }, [trustmakerNames]);
+
+  const taxIdOwnerField = useMemo(() => {
+    return visibleSections
+      .flatMap((section) => section.fields)
+      .find((field) => normalizeCanonicalKey(field.canonical_key) === "tax_id_owner");
+  }, [visibleSections]);
+
+  const taxIdOwnerValidation = useMemo(() => {
+    if (!taxIdOwnerField) {
+      return {
+        requiresTrustmakerSelection: false,
+        isValid: true,
+      };
+    }
+
+    const requiresTrustmakerSelection =
+      isTaxIdOwnerSelectionBoundToTrustmakers(taxIdOwnerField) && trustmakerNames.length > 1;
+
+    if (!requiresTrustmakerSelection) {
+      return {
+        requiresTrustmakerSelection: false,
+        isValid: true,
+      };
+    }
+
+    const selectedTaxIdOwner =
+      typeof formValues.tax_id_owner === "string" ? formValues.tax_id_owner.trim() : "";
+
+    return {
+      requiresTrustmakerSelection: true,
+      isValid: isNameInList(selectedTaxIdOwner, trustmakerNames),
+    };
+  }, [formValues.tax_id_owner, taxIdOwnerField, trustmakerNames]);
+
+  const trusteeSignatureAuthorityMode = useMemo(() => {
+    return normalizeSignatureAuthorityMode(formValues.trustee_signature_authority);
+  }, [formValues.trustee_signature_authority]);
+
+  const requiresNamedSigningTrusteeSelection =
+    trusteeSignatureAuthorityMode === "named_signing_trustee";
+
+  useEffect(() => {
+    if (requiresNamedSigningTrusteeSelection) {
+      return;
+    }
+
+    const trusteeRows = parsePersonListItems(formValues.trustees);
+    if (!trusteeRows.some((row) => row.isSigningTrustee)) {
+      return;
+    }
+
+    const normalizedRows = trusteeRows.map((row) => ({
+      ...row,
+      isSigningTrustee: false,
+    }));
+
+    setFormValues((current) => ({
+      ...current,
+      trustees: serializePersonListItems(normalizedRows),
+    }));
+  }, [formValues.trustees, requiresNamedSigningTrusteeSelection]);
 
   const principalContactValidation = useMemo(() => {
     if (!visibleCanonicalKeys.has("principal_contact")) {
@@ -862,19 +810,28 @@ export default function StartDocumentPage() {
     const filledRows = getFilledPersonRows(trusteeRows);
     const incompleteCount = getIncompletePersonRowCount(trusteeRows);
     const invalidFormatCount = getInvalidPersonRowFormatCount(trusteeRows);
-    const missingSigner =
+    const signingTrusteeCount = filledRows.filter(
+      (item) => item.fullName.trim().length > 0 && item.isSigningTrustee,
+    ).length;
+    const missingNamedSigner =
+      requiresNamedSigningTrusteeSelection &&
       filledRows.length > 0 &&
-      !hasSigningTrustee(
-        filledRows.filter((item) => item.fullName.trim().length > 0),
-      );
+      signingTrusteeCount === 0;
+    const multipleNamedSigners =
+      requiresNamedSigningTrusteeSelection &&
+      signingTrusteeCount > 1;
+    const namedSignerModeConflict =
+      !requiresNamedSigningTrusteeSelection && signingTrusteeCount > 0;
 
     return {
       hasRows: filledRows.length > 0,
       incompleteCount,
       invalidFormatCount,
-      missingSigner,
+      missingNamedSigner,
+      multipleNamedSigners,
+      namedSignerModeConflict,
     };
-  }, [formValues]);
+  }, [formValues, requiresNamedSigningTrusteeSelection]);
 
   const successorTrusteeValidation = useMemo(() => {
     const rows = parsePersonListItems(formValues.successor_trustees);
@@ -886,12 +843,44 @@ export default function StartDocumentPage() {
     };
   }, [formValues]);
 
+  const priorDocumentItemsValidation = useMemo(() => {
+    if (!visibleCanonicalKeys.has("prior_document_items")) {
+      return {
+        hasRows: false,
+        incompleteCount: 0,
+        missingOriginatingDocument: false,
+        chronologyOutOfOrderCount: 0,
+      };
+    }
+
+    const items = parsePriorDocumentItems(formValues.prior_document_items);
+    const filledRows = getFilledPriorDocumentRows(items);
+    const incompleteCount = getIncompletePriorDocumentRowCount(items);
+    const missingOriginatingDocument =
+      filledRows.length > 0 && !hasOriginatingPriorDocumentType(filledRows[0]);
+    const chronologyOutOfOrderCount =
+      incompleteCount === 0 ? getPriorDocumentChronologyOutOfOrderCount(items) : 0;
+
+    return {
+      hasRows: filledRows.length > 0,
+      incompleteCount,
+      missingOriginatingDocument,
+      chronologyOutOfOrderCount,
+    };
+  }, [formValues.prior_document_items, visibleCanonicalKeys]);
+
   const hasBlockingValidation =
     principalContactValidation.hasErrors ||
     agentContactValidation.hasErrors ||
     trusteeValidation.incompleteCount > 0 ||
     trusteeValidation.invalidFormatCount > 0 ||
-    trusteeValidation.missingSigner ||
+    trusteeValidation.missingNamedSigner ||
+    trusteeValidation.multipleNamedSigners ||
+    trusteeValidation.namedSignerModeConflict ||
+    priorDocumentItemsValidation.incompleteCount > 0 ||
+    priorDocumentItemsValidation.missingOriginatingDocument ||
+    priorDocumentItemsValidation.chronologyOutOfOrderCount > 0 ||
+    !taxIdOwnerValidation.isValid ||
     successorTrusteeValidation.incompleteCount > 0 ||
     successorTrusteeValidation.invalidFormatCount > 0;
 
@@ -908,7 +897,8 @@ export default function StartDocumentPage() {
         }
 
         const fieldValue = formValues[field.canonical_key];
-        const controlKind = getMemberFieldControlKind(field, getAllowedValues(field));
+        const resolvedAllowedValues = getResolvedAllowedValues(field);
+        const controlKind = getMemberFieldControlKind(field, resolvedAllowedValues);
 
         if (controlKind === "boolean") {
           return typeof fieldValue === "boolean";
@@ -942,6 +932,7 @@ export default function StartDocumentPage() {
 
           if (
             isTrusteeListField(field.canonical_key) &&
+            requiresNamedSigningTrusteeSelection &&
             !hasSigningTrustee(filledRows.filter((item) => item.fullName.trim().length > 0))
           ) {
             return false;
@@ -956,24 +947,49 @@ export default function StartDocumentPage() {
 
         if (controlKind === "repeatable-document-list") {
           const items = parsePriorDocumentItems(fieldValue);
-          return items.some((item) => {
-            return (
-              item.documentType.trim().length > 0 ||
-              item.documentLabel.trim().length > 0 ||
-              item.documentDate.trim().length > 0 ||
-              item.attachmentReference.trim().length > 0
-            );
-          });
+          const filledRows = getFilledPriorDocumentRows(items);
+
+          if (filledRows.length === 0) {
+            return false;
+          }
+
+          if (getIncompletePriorDocumentRowCount(items) > 0) {
+            return false;
+          }
+
+          if (!hasOriginatingPriorDocumentType(filledRows[0])) {
+            return false;
+          }
+
+          if (getPriorDocumentChronologyOutOfOrderCount(items) > 0) {
+            return false;
+          }
+
+          return true;
         }
 
         if (controlKind === "file-upload") {
           return typeof fieldValue === "string" && fieldValue.trim().length > 0;
         }
 
+        if (controlKind === "select") {
+          if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
+            return false;
+          }
+
+          if (
+            isTaxIdOwnerSelectionBoundToTrustmakers(field) &&
+            trustmakerNames.length > 1
+          ) {
+            return isNameInList(fieldValue, trustmakerNames);
+          }
+
+          return true;
+        }
+
         if (
           controlKind === "number" ||
           controlKind === "date" ||
-          controlKind === "select" ||
           controlKind === "textarea" ||
           controlKind === "text"
         ) {
@@ -983,7 +999,14 @@ export default function StartDocumentPage() {
         return true;
       });
     });
-  }, [fieldRuntime, formValues, visibleSections]);
+  }, [
+    fieldRuntime,
+    formValues,
+    getResolvedAllowedValues,
+    requiresNamedSigningTrusteeSelection,
+    trustmakerNames,
+    visibleSections,
+  ]);
 
   const hasUnsavedProgress = useMemo(() => {
     if (!selectedJurisdiction) {
@@ -993,9 +1016,33 @@ export default function StartDocumentPage() {
     return Object.keys(formValues).length > 0;
   }, [formValues, selectedJurisdiction]);
 
-  const openLeaveModal = (
-    action: { type: "href"; href: string } | { type: "history-back" } | { type: "reload" },
-  ) => {
+  const leaveModalCopy = useMemo(() => {
+    if (pendingLeaveAction?.type === "clear-product-selection") {
+      return {
+        title: "Clear selected product?",
+        description:
+          "You have in-progress details that could be lost if you clear this product selection.",
+        confirmLabel: "Clear selection",
+      };
+    }
+
+    if (pendingLeaveAction?.type === "change-jurisdiction") {
+      return {
+        title: "Change jurisdiction?",
+        description:
+          "You have in-progress details that could be lost if you switch jurisdictions now.",
+        confirmLabel: "Switch jurisdiction",
+      };
+    }
+
+    return {
+      title: "Leave this page?",
+      description: "You have in-progress details that could be lost if you leave now.",
+      confirmLabel: "Leave page",
+    };
+  }, [pendingLeaveAction]);
+
+  const openLeaveModal = (action: LeaveAction) => {
     setPendingLeaveAction(action);
     setIsLeaveModalOpen(true);
   };
@@ -1012,9 +1059,22 @@ export default function StartDocumentPage() {
       return;
     }
 
-    allowLeavingRef.current = true;
+    if (action.type === "href" || action.type === "reload" || action.type === "history-back") {
+      allowLeavingRef.current = true;
+    }
+
     setIsLeaveModalOpen(false);
     setPendingLeaveAction(null);
+
+    if (action.type === "clear-product-selection") {
+      applyProductFlowModeSelection("");
+      return;
+    }
+
+    if (action.type === "change-jurisdiction") {
+      applyJurisdictionSelection(action.jurisdiction);
+      return;
+    }
 
     if (action.type === "href") {
       router.push(action.href);
@@ -1029,27 +1089,93 @@ export default function StartDocumentPage() {
     window.history.go(-2);
   };
 
-  const scrollToContractContainerTop = () => {
-    contractContainerRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+  const continueToNextSectionGroup = () => {
+    if (!nextFormStep) {
+      return;
+    }
+
+    setCurrentFormStep(nextFormStep.stepKey);
   };
 
-  const continueToAuthorityScope = () => {
-    setCurrentFormStep("authority");
+  const returnToPreviousSectionGroup = () => {
+    if (!previousFormStep) {
+      return;
+    }
 
-    window.requestAnimationFrame(() => {
-      scrollToContractContainerTop();
-    });
+    setCurrentFormStep(previousFormStep.stepKey);
   };
 
-  const returnToFirstSection = () => {
-    setCurrentFormStep("people");
+  const validateMemberFormSubmissionOnServer = useCallback(async () => {
+    if (!accessToken || !selectedProductFlowMode || !selectedJurisdiction || !memberForm) {
+      setSubmissionErrorMessage("Missing context to validate member form submission.");
+      return false;
+    }
 
-    window.requestAnimationFrame(() => {
-      scrollToContractContainerTop();
-    });
+    setIsValidatingMemberFormSubmission(true);
+    setSubmissionErrorMessage(null);
+
+    try {
+      const query = new URLSearchParams({
+        mode: selectedProductFlowMode,
+      }).toString();
+
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/rules/member-form/${selectedJurisdiction}/validate?${query}`,
+        accessToken,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            formValues,
+          }),
+        },
+      );
+
+      const payload = (await response.json().catch(() => null)) as
+        | MemberFormValidationResponse
+        | null;
+
+      if (!response.ok || payload?.valid !== true) {
+        const firstErrorMessage = payload?.errors?.find(
+          (item) => typeof item.message === "string" && item.message.trim().length > 0,
+        )?.message;
+
+        setSubmissionErrorMessage(
+          firstErrorMessage ??
+            payload?.message ??
+            "Member form validation failed. Review your entries and try again.",
+        );
+        return false;
+      }
+
+      setSubmissionErrorMessage(null);
+      return true;
+    } catch (error) {
+      setSubmissionErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to validate member form submission.",
+      );
+      return false;
+    } finally {
+      setIsValidatingMemberFormSubmission(false);
+    }
+  }, [
+    accessToken,
+    formValues,
+    memberForm,
+    selectedJurisdiction,
+    selectedProductFlowMode,
+  ]);
+
+  const handleFinalContinue = async () => {
+    if (isContinueDisabled || hasNextFormStep) {
+      return;
+    }
+
+    await validateMemberFormSubmissionOnServer();
   };
 
   useEffect(() => {
@@ -1150,18 +1276,63 @@ export default function StartDocumentPage() {
     };
   }, [hasUnsavedProgress, isLeaveModalOpen]);
 
-  const handleJurisdictionChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextJurisdiction = event.target.value;
+  const applyProductFlowModeSelection = (normalizedMode: ProductFlowModeKey | "") => {
+    setSelectedProductFlowMode(normalizedMode);
+    setResolvedProductFlowMode(
+      normalizedMode
+        ? productFlowModes.find((mode) => mode.modeKey === normalizedMode) ?? null
+        : null,
+    );
+    setJurisdictions([]);
+    setSelectedJurisdiction("");
+    setIsMockDataEnabled(true);
+    setMemberForm(null);
+    setFormValues({});
+    setCurrentFormStep("general_information");
+    setMissingRequirements([]);
+    setErrorMessage(null);
+    setSubmissionErrorMessage(null);
+  };
+
+  const applyJurisdictionSelection = (nextJurisdiction: string) => {
     setSelectedJurisdiction(nextJurisdiction);
 
     if (!nextJurisdiction) {
-      setIsMockDataEnabled(false);
+      setIsMockDataEnabled(true);
       setMemberForm(null);
       setFormValues({});
-      setCurrentFormStep("people");
+      setCurrentFormStep("general_information");
       setMissingRequirements([]);
       setErrorMessage(null);
+      setSubmissionErrorMessage(null);
     }
+  };
+
+  const handleClearSelectedProductFlowMode = () => {
+    if (!hasUnsavedProgress || allowLeavingRef.current) {
+      applyProductFlowModeSelection("");
+      return;
+    }
+
+    openLeaveModal({ type: "clear-product-selection" });
+  };
+
+  const handleJurisdictionChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextJurisdiction = event.target.value;
+
+    if (nextJurisdiction === selectedJurisdiction) {
+      return;
+    }
+
+    if (!hasUnsavedProgress || allowLeavingRef.current) {
+      applyJurisdictionSelection(nextJurisdiction);
+      return;
+    }
+
+    openLeaveModal({
+      type: "change-jurisdiction",
+      jurisdiction: nextJurisdiction,
+    });
   };
 
   const handleMockDataToggleChange = (nextEnabled: boolean) => {
@@ -1190,6 +1361,7 @@ export default function StartDocumentPage() {
   };
 
   const handleFieldChange = (key: string, value: FormValue) => {
+    setSubmissionErrorMessage(null);
     setFormValues((current) => ({
       ...current,
       [key]: value,
@@ -1209,10 +1381,12 @@ export default function StartDocumentPage() {
 
   const renderFieldControl = (field: MemberFacingField) => {
     const fieldValue = formValues[field.canonical_key];
-    const allowedValues = getAllowedValues(field);
-    const allowedValueLabels = getAllowedValueLabels(field);
+    const allowedValues = getResolvedAllowedValues(field);
+    const allowedValueLabels = getResolvedAllowedValueLabels(field, allowedValues);
     const controlKind = getMemberFieldControlKind(field, allowedValues);
     const baseInputClassName = "platform-control";
+    const fieldLabelClassName =
+      "flex flex-wrap items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text";
     const secondaryButtonClassName = "platform-btn-secondary px-3 py-2";
     const subtleButtonClassName = "platform-btn-subtle px-3 py-1.5";
     const normalizedCanonicalKey = normalizeCanonicalKey(field.canonical_key);
@@ -1235,11 +1409,13 @@ export default function StartDocumentPage() {
 
     if (controlKind === "person-contact") {
       const contact = parsePersonContact(fieldValue);
-      const missingEmail = contact.email.trim().length === 0;
-      const missingPhone = contact.phone.trim().length === 0;
-      const invalidEmail = !missingEmail && !isValidEmailFormat(contact.email);
-      const invalidPhone = !missingPhone && !isValidPhoneFormat(contact.phone);
-      const invalidCountryCode = !isValidPhoneCountryCode(contact.phoneCountryCode);
+      const {
+        missingEmail,
+        missingPhone,
+        invalidEmail,
+        invalidPhone,
+        invalidCountryCode,
+      } = validatePersonContact(fieldValue);
       const hasFormatError = invalidCountryCode || invalidEmail || invalidPhone;
 
       return (
@@ -1536,9 +1712,17 @@ export default function StartDocumentPage() {
 
     if (controlKind === "repeatable-text-list") {
       const values = toStringArrayValue(fieldValue);
+      const isTrustmakerListField = normalizedCanonicalKey === "grantors";
 
       return (
         <div className="space-y-2 border border-Color-Scheme-1-Border/40 bg-white p-3">
+          {isTrustmakerListField ? (
+            <div className="text-xs text-Color-Neutral">
+              Add every Trustmaker exactly as named in your trust documents. Trustees are listed
+              separately.
+            </div>
+          ) : null}
+
           {values.length > 0 ? (
             values.map((value, index) => (
               <div key={`${field.canonical_key}-${index}`} className="flex items-center gap-2">
@@ -1585,9 +1769,9 @@ export default function StartDocumentPage() {
       const items = parsePersonListItems(fieldValue);
       const isTrusteeField = normalizedCanonicalKey === "trustees";
       const isSuccessorTrusteeField = normalizedCanonicalKey === "successor_trustees";
-      const roleLabel = isTrusteeField ? "Trustee" : "Successor trustee";
+      const roleLabel = isTrusteeField ? "Acting trustee" : "Successor trustee";
       const addButtonLabel = isTrusteeField
-        ? "Add trustee"
+        ? "Add acting trustee"
         : isSuccessorTrusteeField
           ? "Add successor trustee"
           : "Add person";
@@ -1595,24 +1779,23 @@ export default function StartDocumentPage() {
       const filledRows = getFilledPersonRows(items);
       const incompleteCount = getIncompletePersonRowCount(items);
       const invalidFormatCount = getInvalidPersonRowFormatCount(items);
-      const missingSigner =
+      const signingTrusteeCount = filledRows.filter(
+        (item) => item.fullName.trim().length > 0 && item.isSigningTrustee,
+      ).length;
+      const missingNamedSigner =
         isTrusteeField &&
+        requiresNamedSigningTrusteeSelection &&
         filledRows.length > 0 &&
-        !hasSigningTrustee(filledRows.filter((item) => item.fullName.trim().length > 0));
+        signingTrusteeCount === 0;
+      const multipleNamedSigners =
+        isTrusteeField && requiresNamedSigningTrusteeSelection && signingTrusteeCount > 1;
+      const namedSignerModeConflict =
+        isTrusteeField && !requiresNamedSigningTrusteeSelection && signingTrusteeCount > 0;
+      const showNamedSignerCheckbox =
+        isTrusteeField && requiresNamedSigningTrusteeSelection;
 
       const updateItems = (nextItems: PersonListItem[]) => {
         handleFieldChange(field.canonical_key, serializePersonListItems(nextItems));
-
-        if (isTrusteeField) {
-          const signer = nextItems.find((item) => {
-            return item.isSigningTrustee && item.fullName.trim().length > 0;
-          });
-
-          handleFieldChange(
-            "trustee_signature_authority",
-            signer ? signer.fullName.trim() : "",
-          );
-        }
       };
 
       return (
@@ -1702,7 +1885,7 @@ export default function StartDocumentPage() {
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
-                  {isTrusteeField ? (
+                  {showNamedSignerCheckbox ? (
                     <label className="flex items-center gap-2 text-xs text-Color-Scheme-1-Text">
                       <input
                         checked={Boolean(item.isSigningTrustee)}
@@ -1727,8 +1910,12 @@ export default function StartDocumentPage() {
                         }}
                         type="checkbox"
                       />
-                      This trustee will sign
+                      This trustee is the named signing trustee
                     </label>
+                  ) : isTrusteeField ? (
+                    <div className="text-xs text-Color-Neutral">
+                      Choose "Named signing trustee" in Signing Authority to select a specific signer.
+                    </div>
                   ) : (
                     <div className="text-xs text-Color-Neutral">Email and phone are required.</div>
                   )}
@@ -1762,9 +1949,21 @@ export default function StartDocumentPage() {
             </div>
           ) : null}
 
-          {missingSigner ? (
+          {missingNamedSigner ? (
             <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              Select exactly one signing trustee before continuing.
+              Select exactly one trustee as the named signing trustee before continuing.
+            </div>
+          ) : null}
+
+          {multipleNamedSigners ? (
+            <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              Choose only one named signing trustee.
+            </div>
+          ) : null}
+
+          {namedSignerModeConflict ? (
+            <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              Clear trustee signer selections or switch Signing Authority to "Named signing trustee".
             </div>
           ) : null}
 
@@ -1793,22 +1992,68 @@ export default function StartDocumentPage() {
 
     if (controlKind === "repeatable-document-list") {
       const items = parsePriorDocumentItems(fieldValue);
+      const filledRows = getFilledPriorDocumentRows(items);
+      const incompleteCount = getIncompletePriorDocumentRowCount(items);
+      const missingOriginatingDocument =
+        filledRows.length > 0 && !hasOriginatingPriorDocumentType(filledRows[0]);
+      const chronologyOutOfOrderCount =
+        incompleteCount === 0 ? getPriorDocumentChronologyOutOfOrderCount(items) : 0;
 
       const updateItems = (nextItems: PriorDocumentItem[]) => {
         handleFieldChange(field.canonical_key, serializePriorDocumentItems(nextItems));
       };
 
+      const handlePickedDocumentFile = (
+        file: File | null | undefined,
+        index: number,
+      ) => {
+        if (!file) {
+          return;
+        }
+
+        const isPdfFile =
+          file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+        if (!isPdfFile) {
+          return;
+        }
+
+        const nextItems = [...items];
+        const currentItem = nextItems[index];
+
+        if (!currentItem) {
+          return;
+        }
+
+        nextItems[index] = {
+          ...currentItem,
+          attachmentReference: file.name,
+        };
+
+        updateItems(nextItems);
+      };
+
       return (
-        <div className="space-y-3 border border-Color-Scheme-1-Border/40 bg-white p-3">
+        <div className="space-y-3">
           {items.length > 0 ? (
             items.map((item, index) => (
               <div
                 key={`${field.canonical_key}-document-${index}`}
-                className="space-y-2 border border-Color-Scheme-1-Border/30 p-3"
+                className="space-y-2 rounded-md bg-Color-Neutral-Lightest/35 p-3"
               >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] uppercase tracking-[0.08em] text-Color-Neutral">
+                    Document {index + 1}
+                  </div>
+                  {index === 0 ? (
+                    <div className="text-[11px] text-Color-Neutral">Originating document</div>
+                  ) : (
+                    <div className="text-[11px] text-Color-Neutral">Amendment/supporting</div>
+                  )}
+                </div>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] uppercase tracking-[0.08em] text-Color-Neutral">
+                  <div className="space-y-3">
+                    <label className={fieldLabelClassName}>
                       Type
                     </label>
                     <div className="platform-select-wrap">
@@ -1842,9 +2087,9 @@ export default function StartDocumentPage() {
                       </svg>
                     </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] uppercase tracking-[0.08em] text-Color-Neutral">
-                      Date
+                  <div className="space-y-3">
+                    <label className={fieldLabelClassName}>
+                      Signed date
                     </label>
                     <input
                       className={`${baseInputClassName} platform-date-input`}
@@ -1861,8 +2106,8 @@ export default function StartDocumentPage() {
                     />
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] uppercase tracking-[0.08em] text-Color-Neutral">
+                <div className="space-y-3">
+                  <label className={fieldLabelClassName}>
                     Document label
                   </label>
                   <input
@@ -1875,14 +2120,14 @@ export default function StartDocumentPage() {
                       };
                       updateItems(nextItems);
                     }}
-                    placeholder="Original trust agreement"
+                    placeholder="Original trust agreement, amendment, affidavit, etc."
                     type="text"
                     value={item.documentLabel}
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] uppercase tracking-[0.08em] text-Color-Neutral">
-                    Attachment reference
+                <div className="space-y-3">
+                  <label className={fieldLabelClassName}>
+                    Recording or attachment reference
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -1895,7 +2140,7 @@ export default function StartDocumentPage() {
                         };
                         updateItems(nextItems);
                       }}
-                      placeholder="agreement-2021.pdf"
+                      placeholder="Book 20, Page 104 or agreement-2021.pdf"
                       type="text"
                       value={item.attachmentReference}
                     />
@@ -1911,11 +2156,77 @@ export default function StartDocumentPage() {
                     </button>
                   </div>
                 </div>
+
+                <label
+                  className={`block rounded-md border border-dashed px-4 py-4 text-sm transition-colors ${
+                    activeDropzoneFieldKey === `${field.canonical_key}__document__${index}`
+                      ? "cursor-pointer border-black bg-white text-black"
+                      : "cursor-pointer border-Color-Scheme-1-Border/50 bg-white text-Color-Scheme-1-Text hover:border-Color-Scheme-1-Border"
+                  }`}
+                  onDragEnter={(event: DragEvent<HTMLLabelElement>) => {
+                    event.preventDefault();
+                    setActiveDropzoneFieldKey(`${field.canonical_key}__document__${index}`);
+                  }}
+                  onDragOver={(event: DragEvent<HTMLLabelElement>) => {
+                    event.preventDefault();
+                    setActiveDropzoneFieldKey(`${field.canonical_key}__document__${index}`);
+                  }}
+                  onDragLeave={(event: DragEvent<HTMLLabelElement>) => {
+                    const related = event.relatedTarget;
+                    if (related instanceof Node && event.currentTarget.contains(related)) {
+                      return;
+                    }
+
+                    setActiveDropzoneFieldKey((current) => {
+                      return current === `${field.canonical_key}__document__${index}`
+                        ? null
+                        : current;
+                    });
+                  }}
+                  onDrop={(event: DragEvent<HTMLLabelElement>) => {
+                    event.preventDefault();
+                    setActiveDropzoneFieldKey(null);
+                    handlePickedDocumentFile(event.dataTransfer.files?.[0], index);
+                  }}
+                >
+                  <div className="space-y-1">
+                    <div className="font-medium">
+                      Drop PDF attachment here or click to browse
+                    </div>
+                    <div className="text-xs text-Color-Neutral">PDF only</div>
+                  </div>
+                  <input
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                    onChange={(event) => {
+                      handlePickedDocumentFile(event.target.files?.[0], index);
+                    }}
+                    type="file"
+                  />
+                </label>
               </div>
             ))
           ) : (
-              <div className="text-xs text-Color-Neutral">No documents to include listed yet.</div>
+            <div className="text-xs text-Color-Neutral">No documents to include listed yet.</div>
           )}
+
+          {incompleteCount > 0 ? (
+            <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Complete type, date, document label, and recording/attachment reference for each listed document.
+            </div>
+          ) : null}
+
+          {missingOriginatingDocument ? (
+            <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Document 1 must be either a Trust Agreement or Declaration of Trust.
+            </div>
+          ) : null}
+
+          {chronologyOutOfOrderCount > 0 ? (
+            <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Keep document dates in chronological order from oldest to newest.
+            </div>
+          ) : null}
 
           <button
             className={subtleButtonClassName}
@@ -1923,7 +2234,8 @@ export default function StartDocumentPage() {
               updateItems([
                 ...items,
                 {
-                  documentType: "other",
+                  chronologyOrder: items.length + 1,
+                  documentType: items.length === 0 ? "trust_agreement" : "amendment",
                   documentLabel: "",
                   documentDate: "",
                   attachmentReference: "",
@@ -1932,36 +2244,65 @@ export default function StartDocumentPage() {
             }}
             type="button"
           >
-              Add document to include
+            Add document to include
           </button>
         </div>
       );
     }
 
     if (controlKind === "select") {
+      const isTrustmakerTaxIdSelection =
+        normalizedCanonicalKey === "tax_id_owner" &&
+        isTaxIdOwnerSelectionBoundToTrustmakers(field) &&
+        trustmakerNames.length > 1;
+
+      const selectPlaceholder = isTrustmakerTaxIdSelection
+        ? "Select primary trustmaker"
+        : "Select an option";
+
+      const hasInvalidTrustmakerSelection =
+        isTrustmakerTaxIdSelection &&
+        typeof fieldValue === "string" &&
+        fieldValue.trim().length > 0 &&
+        !isNameInList(fieldValue, trustmakerNames);
+
       return (
-        <div className="platform-select-wrap">
-          <select
-            className={baseInputClassName}
-            onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
-            value={typeof fieldValue === "string" ? fieldValue : ""}
-          >
-            <option value="">Select an option</option>
-            {allowedValues.map((value) => (
-              <option key={value} value={value}>
-                {allowedValueLabels[value] ?? formatLabel(value)}
-              </option>
-            ))}
-          </select>
-          <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-            <path
-              d="M5.5 7.75 10 12.25l4.5-4.5"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="1.5"
-            />
-          </svg>
+        <div className="space-y-2">
+          <div className="platform-select-wrap">
+            <select
+              className={baseInputClassName}
+              onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
+              value={typeof fieldValue === "string" ? fieldValue : ""}
+            >
+              <option value="">{selectPlaceholder}</option>
+              {allowedValues.map((value) => (
+                <option key={value} value={value}>
+                  {allowedValueLabels[value] ?? formatLabel(value)}
+                </option>
+              ))}
+            </select>
+            <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
+              <path
+                d="M5.5 7.75 10 12.25l4.5-4.5"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+              />
+            </svg>
+          </div>
+
+          {isTrustmakerTaxIdSelection ? (
+            <div className="text-xs text-Color-Neutral">
+              Select the Trustmaker whose tax ID is primary for this trust.
+            </div>
+          ) : null}
+
+          {hasInvalidTrustmakerSelection ? (
+            <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Select a primary tax ID owner from the listed Trustmakers.
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -2022,6 +2363,19 @@ export default function StartDocumentPage() {
       filteredSection,
       fieldRuntime,
     );
+    const allowedFamilyScopes = productFlowStepFamilyScopes[currentFormStep] ?? [
+      "shared",
+      "poa",
+      "trust",
+      "unknown",
+    ];
+    const scopedFamilyGroups = familyGroups.filter((group) =>
+      allowedFamilyScopes.includes(group.scope),
+    );
+
+    if (scopedFamilyGroups.length === 0) {
+      return null;
+    }
     const sectionLayoutMode = getSectionLayoutMode(String(section.key));
     const sectionMicrocopy = getSectionMicrocopy(String(section.key));
     const groupGridClassName =
@@ -2038,7 +2392,7 @@ export default function StartDocumentPage() {
 
     const sectionContent = (
       <div className="space-y-4">
-        {familyGroups.map((group) => (
+        {scopedFamilyGroups.map((group) => (
           <div key={`${section.key}-${group.scope}`} className="space-y-3">
             <div className={groupGridClassName}>
               {group.fields.map((field) => {
@@ -2120,238 +2474,362 @@ export default function StartDocumentPage() {
       >
         {sectionHeader}
         {sectionContent}
-        {section.key === "people" && hasAuthoritySection ? (
-          <div className="pt-2">
-            <button
-              type="button"
-                className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border/40 bg-Color-Scheme-1-Text px-4 py-2 text-sm font-medium text-white transition hover:bg-Color-Scheme-1-Text/90"
-              onClick={continueToAuthorityScope}
-            >
-              Continue to Authority Scope
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
-                <path
-                  d="m7.5 5.5 5 4.5-5 4.5"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.5"
-                />
-              </svg>
-            </button>
-          </div>
-        ) : null}
       </div>
     );
   };
 
   const isContinueDisabled =
+    !selectedProductFlowMode ||
+    isLoadingProductFlowModes ||
     hasBlockingValidation ||
+    isValidatingMemberFormSubmission ||
     isLoadingMemberForm ||
     !memberForm ||
     !allRequiredVisibleFieldsComplete ||
     !isDocumentsColumnComplete ||
-    (hasAuthoritySection && currentFormStep === "people");
+    hasNextFormStep;
+
+  const isProductSelectionStep = !selectedProductFlowMode;
+  const selectedProductLabel = useMemo(() => {
+    if (!selectedProductFlowMode) {
+      return null;
+    }
+
+    const selectedMode =
+      selectedProductFlowModeDefinition ??
+      resolvedProductFlowMode ??
+      productFlowModes.find((mode) => mode.modeKey === selectedProductFlowMode) ??
+      null;
+
+    if (selectedMode) {
+      return selectedMode.displayName;
+    }
+
+    return formatLabel(selectedProductFlowMode);
+  }, [
+    productFlowModes,
+    resolvedProductFlowMode,
+    selectedProductFlowMode,
+    selectedProductFlowModeDefinition,
+  ]);
+
+  const startPageTitle = isProductSelectionStep
+    ? "Choose your DARCi product"
+    : "Create and secure your document";
+  const startPageSubtitle = isProductSelectionStep
+    ? "Select a product based on your needs."
+    : "Fill in your details to generate your document. You\'ll review, sign and finalize it securely.";
 
   return (
     <div className="space-y-8">
       <div className="space-y-2 pb-2">
-        <div className="text-2xl font-medium">Create and secure your document</div>
-        <div className="text-sm text-Color-Neutral">
-          Fill in your details to generate your document.
-          You’ll review, sign and finalize it securely.
-        </div>
+        <div className="text-2xl font-medium">{startPageTitle}</div>
+        <div className="text-sm text-Color-Neutral">{startPageSubtitle}</div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+      {isProductSelectionStep ? (
+        <ProductSelectionBand
+          productFlowModes={productFlowModes}
+          isLoadingProductFlowModes={isLoadingProductFlowModes}
+          onSelectModeAction={(modeKey) => {
+            applyProductFlowModeSelection(modeKey);
+          }}
+        />
+      ) : (
         <div className="space-y-6">
-          <ProcessBand />
-
-          <div id="contract-container" ref={contractContainerRef} className="space-y-4 bg-white p-4">
-            <div className="space-y-4 p-4">
-              <div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm font-medium">New document details</div>
-                  {isMockDataToggleVisible ? (
-                    <MockDataToggle
-                      checked={isMockDataEnabled}
-                      disabled={isMockDataToggleDisabled}
-                      onChange={handleMockDataToggleChange}
-                    />
-                  ) : null}
-                </div>
-                <div className="mt-1 text-xs text-Color-Neutral">
-                  Answer each question in plain terms. If you're unsure, choose the closest option
-                  and continue.
-                </div>
+          <div
+            className="flex flex-wrap items-center gap-2"
+            style={{ animation: "darciContentFadeIn 220ms ease-out both" }}
+          >
+            <div className="text-xs font-regular text-Color-Neutral">
+              Selected product:
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full bg-black px-3 py-1.5">
+              <div className="text-xs font-medium text-white">
+                {selectedProductLabel ?? "Selected product"}
               </div>
-
-              <div className="space-y-2 rounded-md  bg-white p-3">
-                <div className="text-sm font-medium">Jurisdiction</div>
-                <div className="text-xs text-Color-Neutral">
-                  Jurisdiction determines which state law governs this document, including signing
-                  formalities, trustee authority language, and enforceability standards.
-                </div>
-
-                <div className="relative max-w-sm">
-                  <div className="platform-select-wrap">
-                    <select
-                      className="platform-control"
-                      disabled={isLoadingJurisdictions || jurisdictions.length === 0}
-                      onChange={handleJurisdictionChange}
-                      value={selectedJurisdiction}
-                    >
-                      <option value="">
-                        {isLoadingJurisdictions
-                          ? "Loading jurisdictions..."
-                          : jurisdictions.length === 0
-                            ? "No jurisdictions"
-                            : "Select a jurisdiction"}
-                      </option>
-                      {jurisdictions.map((jurisdiction) => (
-                        <option key={jurisdiction.code} value={jurisdiction.code}>
-                          {formatJurisdictionDisplayLabel(
-                            jurisdiction.label,
-                            jurisdiction.code,
-                          )}
-                        </option>
-                      ))}
-                    </select>
-                    <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-                      <path
-                        d="M5.5 7.75 10 12.25l4.5-4.5"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="1.5"
-                      />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              {errorMessage ? (
-                <div className="bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div>
-              ) : null}
-
-              {missingRequirements.length > 0 ? (
-                <div className="bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  Missing rules for: {missingRequirements
-                    .map((entry) => `${entry.family} (${formatLabel(entry.documentType)})`)
-                    .join(", ")}
-                </div>
-              ) : null}
-
-              {sourceOnlyVisibleCount > 0 ? (
-                <div className="bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  {sourceOnlyVisibleCount} field{sourceOnlyVisibleCount > 1 ? "s" : ""} shown
-                  here appear only when needed for your selected setup.
-                </div>
-              ) : null}
-
-              {isLoadingMemberForm ? (
-                <div className="text-sm text-Color-Neutral">Loading member form requirements...</div>
-              ) : memberForm ? (
-                  <div className="space-y-4">
-                    {displayedPrimarySections.map((section) => renderSection(section))}
-
-                    {currentFormStep === "authority" && hasAuthoritySection ? (
-                      <div className="pt-2">
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border/40 bg-white px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text transition hover:bg-Color-Neutral-Lightest"
-                          onClick={returnToFirstSection}
-                        >
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
-                            <path
-                              d="m12.5 5.5-5 4.5 5 4.5"
-                              stroke="currentColor"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="1.5"
-                            />
-                          </svg>
-                          Back to first section
-                        </button>
-                      </div>
-                    ) : null}
-
-                  {/* <details className="bg-Color-Neutral-Lightest/40">
-                    <summary className="cursor-pointer p-4 text-sm font-medium text-Color-Scheme-1-Text">
-                      Source trace snapshot ({memberForm.aggregatedForm.source_trace.length})
-                    </summary>
-                    <div className="space-y-2 px-4 py-3 text-sm">
-                      {memberForm.aggregatedForm.source_trace.slice(0, 20).map((item) => (
-                        <div
-                          key={`${item.source}:${item.field}:${String(item.value)}`}
-                          className="flex items-start justify-between gap-4"
-                        >
-                          <div className="text-Color-Neutral">{item.field}</div>
-                          <div className="text-right font-medium text-Color-Scheme-1-Text">
-                            {String(item.value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </details> */}
-                </div>
-              ) : null}
+              <button
+                type="button"
+                aria-label="Clear selected product"
+                onClick={() => {
+                  handleClearSelectedProductFlowMode();
+                }}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-white transition hover:bg-white/15"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 20 20">
+                  <path
+                    d="M6 6l8 8M14 6l-8 8"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.8"
+                  />
+                </svg>
+              </button>
             </div>
           </div>
-        </div>
 
-          <div className="space-y-4 overflow-visible border border-Color-Scheme-1-Border/40 bg-white p-4 lg:sticky lg:top-20 lg:self-start">
-          {!selectedJurisdiction ? (
-            <div className="rounded-md border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-xs text-Color-Neutral">
-              Select a jurisdiction first to unlock document uploads.
-            </div>
-          ) : isLoadingMemberForm ? (
-            <div className="text-sm text-Color-Neutral">Loading document requirements...</div>
-            ) : memberForm ? (
-              <div className="space-y-4">
-                {documentsColumnFields.length > 0 ? (
-                  documentsColumnFields.map((field) => {
-                    const fieldMicrocopy = getFieldMicrocopy(field.canonical_key);
+          <div
+            className="relative z-[500]"
+            style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
+          >
+            <ProcessBand />
+          </div>
 
-                    return (
-                      <div key={`documents-column-${field.canonical_key}`} className="space-y-2">
-                        {field.data_type === "boolean" ? null : renderFieldLabel(field)}
-                        {renderFieldControl(field)}
-                        {field.data_type === "boolean" ? <div>{renderFieldLabel(field)}</div> : null}
-                        {fieldMicrocopy ? (
-                          <div className="text-xs text-Color-Neutral">{fieldMicrocopy}</div>
-                        ) : null}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-xs text-Color-Neutral">
-                    No document uploads are required for this jurisdiction.
+          <div
+            className="relative z-0 grid gap-6 lg:grid-cols-[2fr_1fr]"
+            style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "120ms" }}
+          >
+            <div className="space-y-6">
+              <div
+                id="contract-container"
+                ref={contractContainerRef}
+                className="relative z-0 space-y-4 bg-white p-4"
+              >
+                <div className="space-y-4 p-4">
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-sm font-medium">New document details</div>
+                      {isMockDataToggleVisible ? (
+                        <MockDataToggle
+                          checked={isMockDataEnabled}
+                          disabled={isMockDataToggleDisabled}
+                          onChange={handleMockDataToggleChange}
+                        />
+                      ) : null}
+                    </div>
+                    <div className="mt-1 text-xs text-Color-Neutral">
+                      Answer each question in plain terms. If you&apos;re unsure, choose the closest option and continue.
+                    </div>
                   </div>
-                )}
-              </div>
-          ) : (
-            <div className="text-xs text-Color-Neutral">
-              No additional supporting document inputs are required for this jurisdiction.
-            </div>
-          )}
 
-          {selectedJurisdiction ? (
-            <button
-              className={`w-full px-4 py-2 text-sm font-medium transition ${
-                isContinueDisabled
-                  ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
-                  : "platform-btn-primary"
-              }`}
-                disabled={isContinueDisabled}
-            >
-              Continue
-            </button>
-          ) : null}
+                  <div className="space-y-2 rounded-md bg-white p-3">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-Color-Neutral">
+                      Step 1
+                    </div>
+                    <div className="text-sm font-medium">Jurisdiction</div>
+                    <div className="text-xs text-Color-Neutral">
+                      Jurisdiction determines which state law governs this document, including signing formalities, trustee authority language, and enforceability standards.
+                    </div>
+
+                    <div className="relative max-w-sm">
+                      <div className="platform-select-wrap">
+                        <select
+                          className="platform-control"
+                          disabled={
+                            !selectedProductFlowMode ||
+                            isLoadingProductFlowModes ||
+                            isLoadingJurisdictions ||
+                            jurisdictions.length === 0
+                          }
+                          onChange={handleJurisdictionChange}
+                          value={selectedJurisdiction}
+                        >
+                          <option value="">
+                            {!selectedProductFlowMode
+                              ? "Select a product mode first"
+                              : isLoadingJurisdictions
+                                ? "Loading jurisdictions..."
+                                : jurisdictions.length === 0
+                                  ? "No jurisdictions"
+                                  : "Select a jurisdiction"}
+                          </option>
+                          {jurisdictions.map((jurisdiction) => (
+                            <option key={jurisdiction.code} value={jurisdiction.code}>
+                              {formatJurisdictionDisplayLabel(jurisdiction.label, jurisdiction.code)}
+                            </option>
+                          ))}
+                        </select>
+                        <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
+                          <path
+                            d="M5.5 7.75 10 12.25l4.5-4.5"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="1.5"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {errorMessage ? (
+                    <div className="bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div>
+                  ) : null}
+
+                  {missingRequirements.length > 0 ? (
+                    <div className="bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      Missing rules for: {missingRequirements
+                        .map((entry) => `${entry.family} (${formatLabel(entry.documentType)})`)
+                        .join(", ")}
+                    </div>
+                  ) : null}
+
+                  {sourceOnlyVisibleCount > 0 ? (
+                    <div className="bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      {sourceOnlyVisibleCount} field{sourceOnlyVisibleCount > 1 ? "s" : ""} shown here appear only when needed for your selected setup.
+                    </div>
+                  ) : null}
+
+                  {isLoadingMemberForm ? (
+                    <div className="text-sm text-Color-Neutral">Loading member form requirements...</div>
+                  ) : memberForm ? (
+                    <div className="space-y-4">
+                      {activeFormStep ? (
+                        <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                          {activeFormStep.label}
+                        </div>
+                      ) : null}
+
+                      {displayedPrimarySections.map((section) => renderSection(section))}
+
+                      {hasPreviousFormStep || hasNextFormStep ? (
+                        <div className="flex flex-wrap items-center gap-2 pt-2">
+                          {hasPreviousFormStep ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border/40 bg-white px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text transition hover:bg-Color-Neutral-Lightest"
+                              onClick={returnToPreviousSectionGroup}
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
+                                <path
+                                  d="m12.5 5.5-5 4.5 5 4.5"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="1.5"
+                                />
+                              </svg>
+                              Back to {previousFormStep?.label}
+                            </button>
+                          ) : null}
+
+                          {hasNextFormStep ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border/40 bg-Color-Scheme-1-Text px-4 py-2 text-sm font-medium text-white transition hover:bg-Color-Scheme-1-Text/90"
+                              onClick={continueToNextSectionGroup}
+                            >
+                              Continue to {nextFormStep?.label}
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
+                                <path
+                                  d="m7.5 5.5 5 4.5-5 4.5"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="1.5"
+                                />
+                              </svg>
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {!shouldRenderDocumentsColumn ? (
+                    <div className="space-y-4 pt-2">
+                      {submissionErrorMessage ? (
+                        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                          {submissionErrorMessage}
+                        </div>
+                      ) : null}
+
+                      {selectedJurisdiction ? (
+                        <button
+                          onClick={() => {
+                            void handleFinalContinue();
+                          }}
+                          className={`inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition ${
+                            isContinueDisabled
+                              ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                              : "platform-btn-primary"
+                          }`}
+                          disabled={isContinueDisabled}
+                        >
+                          {isValidatingMemberFormSubmission
+                            ? "Validating..."
+                            : "Continue to generate documents"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            {shouldRenderDocumentsColumn ? (
+              <div className="relative z-0 space-y-4 overflow-visible bg-white p-4 lg:sticky lg:top-20 lg:self-start">
+              {!selectedJurisdiction ? (
+                <div className="rounded-md border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-xs text-Color-Neutral">
+                  Select a jurisdiction first to unlock document uploads.
+                </div>
+              ) : isLoadingMemberForm ? (
+                <div className="text-sm text-Color-Neutral">Loading document requirements...</div>
+              ) : memberForm ? (
+                <div className="space-y-4">
+                  {shouldShowUploadColumn && documentsColumnFields.length > 0 ? (
+                    documentsColumnFields.map((field) => {
+                      const fieldMicrocopy = getFieldMicrocopy(field.canonical_key);
+
+                      return (
+                        <div key={`documents-column-${field.canonical_key}`} className="space-y-2">
+                          {field.data_type === "boolean" ? null : renderFieldLabel(field)}
+                          {renderFieldControl(field)}
+                          {field.data_type === "boolean" ? <div>{renderFieldLabel(field)}</div> : null}
+                          {fieldMicrocopy ? (
+                            <div className="text-xs text-Color-Neutral">{fieldMicrocopy}</div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  ) : shouldShowUploadColumn ? (
+                    <div className="text-xs text-Color-Neutral">
+                      No document uploads are required for this jurisdiction.
+                    </div>
+                  ) : null}
+
+                  {shouldShowUploadColumn && uploadRequiredByMode ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      At least one supporting document entry is required for this product mode.
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="text-xs text-Color-Neutral">
+                  No additional supporting document inputs are required for this jurisdiction.
+                </div>
+              )}
+
+              {submissionErrorMessage ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {submissionErrorMessage}
+                </div>
+              ) : null}
+
+              {selectedJurisdiction ? (
+                <button
+                  onClick={() => {
+                    void handleFinalContinue();
+                  }}
+                  className={`w-full px-4 py-2 text-sm font-medium transition ${
+                    isContinueDisabled
+                      ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                      : "platform-btn-primary"
+                  }`}
+                  disabled={isContinueDisabled}
+                >
+                  {isValidatingMemberFormSubmission ? "Validating..." : "Continue"}
+                </button>
+              ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
 
       {isLeaveModalOpen ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 px-4">
           <div
             className="w-full max-w-md space-y-4 border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest p-5 shadow-2xl"
             role="dialog"
@@ -2360,10 +2838,10 @@ export default function StartDocumentPage() {
           >
             <div className="space-y-1">
               <div id="leave-start-modal-title" className="text-base font-medium text-Color-Scheme-1-Text">
-                Leave this page?
+                {leaveModalCopy.title}
               </div>
               <div className="text-sm text-Color-Neutral">
-                You have in-progress details that could be lost if you leave now.
+                {leaveModalCopy.description}
               </div>
             </div>
 
@@ -2380,7 +2858,7 @@ export default function StartDocumentPage() {
                 className="platform-btn-primary px-3 py-2"
                 onClick={confirmLeaveModal}
               >
-                Leave page
+                {leaveModalCopy.confirmLabel}
               </button>
             </div>
           </div>

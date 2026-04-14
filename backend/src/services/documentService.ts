@@ -19,6 +19,9 @@ type DocumentRecord = {
   status: string | null;
   document_type: string | null;
   jurisdiction: string | null;
+  product_flow_mode: string | null;
+  selected_families: string[] | null;
+  output_bundle: Array<Record<string, unknown>>;
   created_at: string;
   updated_at: string | null;
 };
@@ -101,6 +104,9 @@ export type DocumentPartyUpsertInput = {
 const documentPartySelectColumns =
   "id, document_id, party_role, full_name, email, phone_country_code, phone, is_signing_party, sort_order, metadata, created_at, updated_at";
 
+const documentSelectColumns =
+  "id, owner_id, idn, status, document_type, jurisdiction, product_flow_mode, selected_families, output_bundle, created_at, updated_at";
+
 const fetchUserBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -153,6 +159,9 @@ export const createDocumentWithVersion = async (input: {
   ownerId: string;
   documentType: string | null;
   jurisdiction: string | null;
+  productFlowMode?: string | null;
+  selectedFamilies?: string[] | null;
+  outputBundle?: Array<Record<string, unknown>>;
   storagePath: string;
   fileName: string;
   fileSize: number;
@@ -167,10 +176,14 @@ export const createDocumentWithVersion = async (input: {
       status: "draft",
       document_type: input.documentType,
       jurisdiction: input.jurisdiction,
+      product_flow_mode: input.productFlowMode ?? null,
+      selected_families:
+        input.selectedFamilies && input.selectedFamilies.length > 0
+          ? input.selectedFamilies
+          : null,
+      output_bundle: input.outputBundle ?? [],
     })
-    .select(
-      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
-    )
+    .select(documentSelectColumns)
     .single();
 
   if (documentError || !document) {
@@ -207,9 +220,7 @@ export const createDocumentWithVersion = async (input: {
 export const getDocumentById = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("documents")
-    .select(
-      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
-    )
+    .select(documentSelectColumns)
     .eq("id", documentId)
     .limit(1)
     .maybeSingle();
@@ -224,9 +235,7 @@ export const getDocumentById = async (documentId: string) => {
 export const listDocuments = async (ownerId?: string) => {
   let query = supabaseAdmin
     .from("documents")
-    .select(
-      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
-    )
+    .select(documentSelectColumns)
     .order("updated_at", { ascending: false })
     .order("created_at", { ascending: false });
 
@@ -307,7 +316,18 @@ export const updateDocumentVersion = async (
 
 export const updateDocument = async (
   documentId: string,
-  updates: Partial<Pick<DocumentRecord, "idn" | "status" | "document_type" | "jurisdiction">>
+  updates: Partial<
+    Pick<
+      DocumentRecord,
+      | "idn"
+      | "status"
+      | "document_type"
+      | "jurisdiction"
+      | "product_flow_mode"
+      | "selected_families"
+      | "output_bundle"
+    >
+  >
 ) => {
   const updatesWithTimestamp = {
     ...updates,
@@ -318,9 +338,7 @@ export const updateDocument = async (
     .from("documents")
     .update(updatesWithTimestamp)
     .eq("id", documentId)
-    .select(
-      "id, owner_id, idn, status, document_type, jurisdiction, created_at, updated_at"
-    )
+    .select(documentSelectColumns)
     .single();
 
   if (error || !data) {

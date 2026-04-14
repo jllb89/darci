@@ -30,6 +30,11 @@ import {
   getDocumentObjectMetadata,
   getSignatureObjectMetadata,
 } from "../services/storageService";
+import {
+  buildSelectionForMode,
+  productFlowModeKeys,
+  resolveExpectedOutputsForMode,
+} from "../services/productFlowModeService";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 5 * 1024 * 1024;
@@ -56,7 +61,62 @@ const documentPartyRoles = [
   "successor_trustee",
 ] as const;
 
+const documentFlowFamilies = ["poa", "trust", "idn"] as const;
+
 const normalizePhoneDigits = (value: string) => value.replace(/\D/g, "");
+
+const normalizeSelectedFamilies = (
+  families: readonly (typeof documentFlowFamilies)[number][],
+) => {
+  const requested = new Set(families);
+
+  return documentFlowFamilies.filter((family) => requested.has(family));
+};
+
+const mapDocumentResponse = (document: {
+  id: string;
+  idn: string | null;
+  status: string | null;
+  document_type: string | null;
+  jurisdiction: string | null;
+  product_flow_mode?: string | null;
+  selected_families?: string[] | null;
+  output_bundle?: Array<Record<string, unknown>> | null;
+  created_at: string;
+}) => {
+  const response: {
+    id: string;
+    idn: string | null;
+    status: string | null;
+    documentType: string | null;
+    jurisdiction: string | null;
+    createdAt: string;
+    productFlowMode?: string;
+    selectedFamilies?: string[];
+    outputBundle?: Array<Record<string, unknown>>;
+  } = {
+    id: document.id,
+    idn: document.idn,
+    status: document.status,
+    documentType: document.document_type,
+    jurisdiction: document.jurisdiction,
+    createdAt: document.created_at,
+  };
+
+  if (typeof document.product_flow_mode === "string" && document.product_flow_mode) {
+    response.productFlowMode = document.product_flow_mode;
+  }
+
+  if (Array.isArray(document.selected_families) && document.selected_families.length > 0) {
+    response.selectedFamilies = document.selected_families;
+  }
+
+  if (Array.isArray(document.output_bundle) && document.output_bundle.length > 0) {
+    response.outputBundle = document.output_bundle;
+  }
+
+  return response;
+};
 
 const createDocumentSchema = z
   .object({
@@ -64,6 +124,8 @@ const createDocumentSchema = z
     templateId: z.string().optional(),
     documentType: z.string().optional(),
     jurisdiction: z.string().optional(),
+    productFlowMode: z.enum(productFlowModeKeys).optional(),
+    selectedFamilies: z.array(z.enum(documentFlowFamilies)).optional(),
     fileName: z.string().min(1),
     fileSize: z.number().int().positive().max(MAX_UPLOAD_BYTES),
     mimeType: z.string().min(1),
@@ -181,6 +243,29 @@ export const createDocument = async (req: Request, res: Response) => {
     ? parsed.data.documentType ?? "template"
     : parsed.data.documentType ?? "generic";
   const jurisdiction = parsed.data.jurisdiction ?? "US-OH";
+
+  let productFlowMode: string | null = null;
+  let selectedFamilies: string[] | null = null;
+  let outputBundle: Array<Record<string, unknown>> = [];
+
+  if (parsed.data.productFlowMode) {
+    const selection = await buildSelectionForMode(parsed.data.productFlowMode);
+    const expectedOutputs = await resolveExpectedOutputsForMode(selection.modeKey);
+
+    productFlowMode = selection.modeKey;
+    selectedFamilies = [...selection.families];
+    outputBundle = expectedOutputs.map((output) => ({
+      outputKey: output.outputKey,
+      outputLabel: output.outputLabel,
+      isRequired: output.isRequired,
+      sortOrder: output.sortOrder,
+      metadata: output.metadata,
+    }));
+  } else if (parsed.data.selectedFamilies?.length) {
+    const normalizedFamilies = normalizeSelectedFamilies(parsed.data.selectedFamilies);
+    selectedFamilies = normalizedFamilies.length > 0 ? [...normalizedFamilies] : null;
+  }
+
   const ownerId = await getOrCreateUserId(
     req.user.id,
     req.user.email,
@@ -193,6 +278,9 @@ export const createDocument = async (req: Request, res: Response) => {
     ownerId,
     documentType,
     jurisdiction,
+    productFlowMode,
+    selectedFamilies,
+    outputBundle,
     storagePath,
     fileName: parsed.data.fileName,
     fileSize: parsed.data.fileSize,
@@ -219,6 +307,9 @@ export const createDocument = async (req: Request, res: Response) => {
       file_name: parsed.data.fileName ?? null,
       file_size: parsed.data.fileSize ?? null,
       mime_type: parsed.data.mimeType ?? null,
+      product_flow_mode: productFlowMode,
+      selected_families: selectedFamilies,
+      output_bundle_count: outputBundle.length,
     },
   });
 
@@ -234,14 +325,7 @@ export const createDocument = async (req: Request, res: Response) => {
   });
 
   res.status(201).json({
-    document: {
-      id: document.id,
-      idn: document.idn,
-      status: document.status,
-      documentType: document.document_type,
-      jurisdiction: document.jurisdiction,
-      createdAt: document.created_at,
-    },
+    document: mapDocumentResponse(document),
     version: {
       id: version.id,
       version: version.version,
@@ -422,14 +506,7 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
   }
 
   res.status(200).json({
-    document: {
-      id: updatedDocument.id,
-      idn: updatedDocument.idn,
-      status: updatedDocument.status,
-      documentType: updatedDocument.document_type,
-      jurisdiction: updatedDocument.jurisdiction,
-      createdAt: updatedDocument.created_at,
-    },
+    document: mapDocumentResponse(updatedDocument),
     version: {
       id: updatedVersion.id,
       version: updatedVersion.version,
@@ -502,14 +579,7 @@ export const getDocument = async (req: Request, res: Response) => {
   }
 
   res.status(200).json({
-    document: {
-      id: document.id,
-      idn: document.idn,
-      status: document.status,
-      documentType: document.document_type,
-      jurisdiction: document.jurisdiction,
-      createdAt: document.created_at,
-    },
+    document: mapDocumentResponse(document),
   });
 };
 
@@ -537,14 +607,7 @@ export const listDocuments = async (req: Request, res: Response) => {
   const documents = await listDocumentsFromDb(ownerId);
 
   res.status(200).json({
-    documents: documents.map((document) => ({
-      id: document.id,
-      idn: document.idn,
-      status: document.status,
-      documentType: document.document_type,
-      jurisdiction: document.jurisdiction,
-      createdAt: document.created_at,
-    })),
+    documents: documents.map((document) => mapDocumentResponse(document)),
   });
 };
 
@@ -1121,6 +1184,9 @@ export const submitNotarization = async (req: Request, res: Response) => {
         documentId,
         code: codeRecord?.code ?? null,
         expiresAt,
+        productFlowMode: document.product_flow_mode,
+        selectedFamilies: document.selected_families,
+        outputBundle: document.output_bundle,
       },
     });
   }

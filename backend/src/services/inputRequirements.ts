@@ -1705,7 +1705,7 @@ const deriveTrustContract = (
       fields: [
         {
           key: "grantors",
-          label: "Grantors",
+          label: "Trustmakers",
           semantic_type: "person_list",
           required: documentType !== "other",
           data_type: "array",
@@ -1760,14 +1760,50 @@ const deriveTrustContract = (
           key: "trustee_signature_authority",
           label: "Trustee signature authority",
           semantic_type: "signature_authority_rule",
-          required: false,
+          required: documentType !== "other",
           data_type: "string",
           collect_from: "member",
           default_source: "none",
+          validation: {
+            allowed_values: [
+              "all_trustees",
+              "any_one_trustee",
+              "named_signing_trustee",
+              "custom",
+            ],
+            allowed_value_labels: {
+              all_trustees: "All trustees must sign",
+              any_one_trustee: "Any one trustee may sign",
+              named_signing_trustee: "A specific named trustee will sign",
+              custom: "Use custom signing instructions",
+            },
+          },
+        },
+        {
+          key: "trustee_signature_authority_custom_text",
+          label: "Custom signing authority instructions",
+          semantic_type: "text",
+          required: true,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+          when: {
+            all: [
+              {
+                fact: "trustee_signature_authority",
+                operator: "equals",
+                value: "custom",
+              },
+            ],
+          },
+          validation: {
+            min_length: 5,
+            max_length: 500,
+          },
         },
         {
           key: "tax_id_owner",
-          label: "Tax ID owner",
+          label: "Primary tax ID owner",
           semantic_type: "tax_id_owner",
           required: false,
           data_type: "string",
@@ -1775,6 +1811,9 @@ const deriveTrustContract = (
           default_source: "none",
           validation: {
             allowed_values: ["trust", "grantor", "trustee", "other_or_unknown"],
+            selection_source_field: "grantors",
+            enforce_source_selection_when_multiple: true,
+            selection_source_role_label: "trustmaker",
           },
         },
         {
@@ -1917,10 +1956,15 @@ const deriveTrustContract = (
                 type: "string",
                 allowed_values: [
                   "trust_agreement",
+                  "declaration_of_trust",
                   "amendment",
                   "restatement",
-                  "certification",
+                  "schedule_of_assets",
+                  "affidavit",
+                  "incapacity_letter",
+                  "trust_certification",
                   "change_of_trustee",
+                  "power_of_attorney",
                   "other",
                 ],
               },
@@ -1937,7 +1981,11 @@ const deriveTrustContract = (
               },
               recording_reference: {
                 type: "string",
-                max_length: 120,
+                max_length: 180,
+              },
+              chronology_order: {
+                type: "integer",
+                min: 1,
               },
             },
           },

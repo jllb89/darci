@@ -14,7 +14,9 @@ import {
 import {
   getMemberFormDocumentExtractionByJurisdiction,
   getMemberFormRulesByJurisdiction,
+  listProductFlowModesForSelection,
   listMemberFormJurisdictionsForSelection,
+  validateMemberFormSubmissionByJurisdiction,
 } from "../controllers/memberFormRulesController";
 import { requireRole } from "../middleware/roles";
 
@@ -57,6 +59,12 @@ router.get(
 );
 
 router.get(
+  "/product-flow-modes",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  listProductFlowModesForSelection,
+);
+
+router.get(
   "/member-form",
   requireRole(["member", "notary", "admin", "service_role"]),
   listMemberFormJurisdictionsForSelection,
@@ -72,6 +80,12 @@ router.get(
   "/member-form/:jurisdiction/document-extraction",
   requireRole(["member", "notary", "admin", "service_role"]),
   getMemberFormDocumentExtractionByJurisdiction,
+);
+
+router.post(
+  "/member-form/:jurisdiction/validate",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  validateMemberFormSubmissionByJurisdiction,
 );
 
 export default router;

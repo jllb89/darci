@@ -365,6 +365,20 @@ paths:
                   type: string
                 jurisdiction:
                   type: string
+                productFlowMode:
+                  type: string
+                  enum:
+                    - poa_only
+                    - trust_bundle
+                    - notarize_document
+                selectedFamilies:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - poa
+                      - trust
+                      - idn
                 fileName:
                   type: string
                 fileSize:
@@ -1302,6 +1316,17 @@ paths:
         - notary
         - admin
         - service_role
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum:
+              - poa_only
+              - trust_bundle
+              - notarize_document
+          description: Optional product flow mode key used to resolve families, document types, and jurisdiction filtering.
       responses:
         "200":
           description: OK
@@ -1309,6 +1334,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MemberFormJurisdictionListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rules/product-flow-modes:
+    get:
+      summary: List available product flow modes
+      description: Returns active mode configuration that drives member-form family selection, outputs, and UI grouping.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFlowModeListResponse"
         "401":
           description: Unauthorized
           content:
@@ -1337,6 +1390,16 @@ paths:
           schema:
             type: string
           description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum:
+              - poa_only
+              - trust_bundle
+              - notarize_document
+          description: Optional product flow mode key used to resolve families and default document types.
       responses:
         "200":
           description: OK
@@ -1368,6 +1431,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Validate member-form submission payload
+      description: Validates member-form values against backend trust/POA/IDN parity rules for the selected jurisdiction and mode.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: jurisdiction
+          required: true
+          schema:
+            type: string
+          description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum:
+              - poa_only
+              - trust_bundle
+              - notarize_document
+          description: Optional product flow mode key used to resolve families and default document types.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberFormValidationRequest"
+      responses:
+        "200":
+          description: Validation passed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberFormValidationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberFormValidationResponse"
   /rules/member-form/{jurisdiction}/document-extraction:
     get:
       summary: Get canonical extraction payload for trust RRR and POA generation
@@ -1384,6 +1515,16 @@ paths:
           schema:
             type: string
           description: Jurisdiction code such as US-CA, two-letter code such as CA, or a full jurisdiction name.
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum:
+              - poa_only
+              - trust_bundle
+              - notarize_document
+          description: Optional product flow mode key used to resolve families and default document types.
       responses:
         "200":
           description: OK
@@ -1977,9 +2118,41 @@ components:
           type: string
         jurisdiction:
           type: string
+        productFlowMode:
+          type: string
+          enum:
+            - poa_only
+            - trust_bundle
+            - notarize_document
+        selectedFamilies:
+          type: array
+          items:
+            type: string
+            enum:
+              - poa
+              - trust
+              - idn
+        outputBundle:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentOutputBundleItem"
         createdAt:
           type: string
           format: date-time
+    DocumentOutputBundleItem:
+      type: object
+      properties:
+        outputKey:
+          type: string
+        outputLabel:
+          type: string
+        isRequired:
+          type: boolean
+        sortOrder:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
     DocumentVersion:
       type: object
       properties:
@@ -2759,6 +2932,94 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ProductFlowModeListResponse:
+      type: object
+      properties:
+        modes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFlowModeDefinition"
+    ProductFlowModeDefinition:
+      type: object
+      properties:
+        modeKey:
+          type: string
+          enum:
+            - poa_only
+            - trust_bundle
+            - notarize_document
+        displayName:
+          type: string
+        description:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        isDefault:
+          type: boolean
+        sortOrder:
+          type: integer
+        families:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFlowModeFamily"
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFlowModeOutput"
+        ui:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFlowModeUiEntry"
+    ProductFlowModeFamily:
+      type: object
+      properties:
+        family:
+          type: string
+          enum:
+            - poa
+            - trust
+            - idn
+        defaultDocumentType:
+          type: string
+        isRequired:
+          type: boolean
+        sortOrder:
+          type: integer
+    ProductFlowModeOutput:
+      type: object
+      properties:
+        outputKey:
+          type: string
+        outputLabel:
+          type: string
+        isRequired:
+          type: boolean
+        sortOrder:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+    ProductFlowModeUiEntry:
+      type: object
+      properties:
+        groupKey:
+          type: string
+        layoutMode:
+          type: string
+          enum:
+            - single-column
+            - two-column
+            - wizard-step
+        showUploadColumn:
+          type: boolean
+        uploadRequired:
+          type: boolean
+        sortOrder:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
     MemberFormSelection:
       type: object
       properties:
@@ -2781,6 +3042,8 @@ components:
       properties:
         selection:
           $ref: "#/components/schemas/MemberFormSelection"
+        mode:
+          $ref: "#/components/schemas/ProductFlowModeDefinition"
         jurisdictions:
           type: array
           items:
@@ -2790,9 +3053,48 @@ components:
       properties:
         memberForm:
           $ref: "#/components/schemas/MemberFormRulesContract"
+    MemberFormValidationRequest:
+      type: object
+      required:
+        - formValues
+      properties:
+        formValues:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: boolean
+              - type: array
+                items:
+                  type: string
+    MemberFormValidationResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberFormValidationError"
+    MemberFormValidationError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        field:
+          type: string
+        message:
+          type: string
     MemberFormDocumentExtractionResponse:
       type: object
       properties:
+        mode:
+          $ref: "#/components/schemas/ProductFlowModeDefinition"
         extraction:
           $ref: "#/components/schemas/MemberFormDocumentExtractionPayload"
     MemberFormDocumentExtractionPayload:
@@ -3059,6 +3361,8 @@ components:
           type: array
           items:
             type: string
+        productFlowMode:
+          $ref: "#/components/schemas/ProductFlowModeDefinition"
         aggregatedForm:
           $ref: "#/components/schemas/MemberFacingFormContract"
         familyContracts:

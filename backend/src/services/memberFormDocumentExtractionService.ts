@@ -174,17 +174,20 @@ const DOCUMENT_TEMPLATE_BINDINGS_CONFIG: Readonly<
     },
     {
       placeholder: "Trustmaker(s)",
-      description: "Trustmaker / grantor names.",
+      description: "Trustmaker names.",
       required: true,
       source: "member_form",
       canonicalKey: "grantors",
     },
     {
       placeholder: "Document#.Name / Document#.Date",
-      description: "Prior trust documents being republished/restated and attached.",
+      description:
+        "Prior trust documents listed in chronology order, including the originating trust document followed by amendments and supporting records.",
       required: true,
       source: "member_form",
       canonicalKey: "prior_document_items",
+      notes:
+        "Preserve member-entered document order and chronology_order when assembling trust output context.",
     },
     {
       placeholder: "Trustee(s)",
@@ -209,7 +212,7 @@ const DOCUMENT_TEMPLATE_BINDINGS_CONFIG: Readonly<
     },
     {
       placeholder: "TaxSettlor",
-      description: "Who provides/owns tax ID context for trust operations.",
+      description: "Primary Trustmaker tax ID owner for trust operations.",
       required: true,
       source: "member_form",
       canonicalKey: "tax_id_owner",
@@ -227,6 +230,13 @@ const DOCUMENT_TEMPLATE_BINDINGS_CONFIG: Readonly<
       required: true,
       source: "member_form",
       canonicalKey: "trustee_signature_authority",
+    },
+    {
+      placeholder: "SignatureAuthorityCustomText",
+      description: "Custom trustee signing instructions used when custom signature authority is selected.",
+      required: false,
+      source: "member_form",
+      canonicalKey: "trustee_signature_authority_custom_text",
     },
     {
       placeholder: "Trustee powers checkboxes",
@@ -492,6 +502,26 @@ const toExtractionField = (
       buildSourceKey(family, documentType, section.key, field.key),
     ) ?? field.key;
 
+  const validation =
+    canonicalKey === "prior_document_items"
+      ? {
+          ...(field.validation ?? {}),
+          chronology_ordering: "array_order_then_chronology_order",
+          originating_document_position: 1,
+          originating_document_allowed_types: [
+            "trust_agreement",
+            "declaration_of_trust",
+          ],
+          required_chain_context_fields: [
+            "document_type",
+            "title",
+            "date",
+            "recording_reference",
+            "chronology_order",
+          ],
+        }
+      : field.validation;
+
   return {
     canonicalKey,
     sourceFieldKey: field.key,
@@ -508,7 +538,7 @@ const toExtractionField = (
     collectFrom: field.collect_from,
     defaultSource: field.default_source,
     ...(field.help_text ? { helpText: field.help_text } : {}),
-    ...(field.validation ? { validation: field.validation } : {}),
+    ...(validation ? { validation } : {}),
     ...(field.when ? { when: field.when } : {}),
   };
 };

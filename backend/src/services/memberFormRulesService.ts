@@ -28,6 +28,11 @@ import {
   type TrustTrusteePowerRecord,
   type TrustDocumentType,
 } from "./trustService";
+import {
+  buildSelectionForMode,
+  getDefaultProductFlowModeSelection,
+  type ProductFlowModeDefinition,
+} from "./productFlowModeService";
 
 export const memberFormFamilies = ["poa", "trust", "idn"] as const;
 
@@ -41,7 +46,7 @@ export type MemberFormSelection = {
   idnType: IdnDocumentType;
 };
 
-const MEMBER_FORM_INTAKE_FAMILIES = ["poa", "trust"] as const;
+const MEMBER_FORM_FALLBACK_FAMILIES = ["poa", "trust"] as const;
 
 export type ConditionFactValue = string | string[] | boolean | null;
 
@@ -63,6 +68,7 @@ export type MemberFormRulesContract = {
   jurisdiction: string;
   families: MemberFormFamily[];
   documentTypes: string[];
+  productFlowMode?: ProductFlowModeDefinition;
   aggregatedForm: MemberFacingFormContract;
   familyContracts: Array<{
     family: MemberFormFamily;
@@ -81,6 +87,10 @@ export type MissingFamilyRequirement = {
 export type MemberFormRulesByJurisdictionResult = {
   contract: MemberFormRulesContract | null;
   missing: MissingFamilyRequirement[];
+};
+
+type MemberFormRulesContractOptions = {
+  productFlowMode?: ProductFlowModeDefinition;
 };
 
 const BASELINE_FACTS = [
@@ -115,14 +125,20 @@ const MEMBER_FORM_FALLBACK_HELP_TEXT_BY_FIELD_KEY: Readonly<Record<string, strin
     "Enter the legal trust name exactly as shown in the governing trust instrument.",
   trust_date:
     "Use the trust execution date from the governing trust instrument.",
+  grantors:
+    "Enter each Trustmaker who created the trust and owns trust assets. Trustmakers are distinct from Trustees.",
+  trustees:
+    "List the currently acting Trustee(s) who manage trust assets and can execute trust actions.",
   revocability_status:
     "Indicate whether the trust is revocable, irrevocable, or limited by specific conditions.",
   revocation_holders:
     "List any person(s) who hold authority to revoke or amend the trust under the governing instrument.",
   trustee_signature_authority:
-    "Describe who must sign when multiple trustees are serving (for example, all trustees or any one trustee).",
+    "Describe who must sign when multiple currently acting trustees are serving (for example, all trustees or any one trustee).",
+  trustee_signature_authority_custom_text:
+    "Enter custom signing language when the standard trustee signing options do not match your trust terms.",
   tax_id_owner:
-    "Identify whether the trust, grantor, or trustee reports the trust tax identification for transaction context.",
+    "When multiple Trustmakers exist, select the Trustmaker whose tax ID is primary for trust reporting.",
   asset_titling_format:
     "Describe how trust assets should be titled in transaction documents.",
   restatement_summary:
@@ -134,7 +150,7 @@ const MEMBER_FORM_FALLBACK_HELP_TEXT_BY_FIELD_KEY: Readonly<Record<string, strin
   trustee_power_matrix:
     "Summarize trustee powers relevant to third-party transactions and any limits that apply.",
   prior_document_items:
-      "Upload the trust documents to include in this filing.",
+    "List trust documents in chronological order, starting with the originating trust agreement or declaration.",
   uploaded_document_file:
     "Upload the source document so DARCi can extract and validate required trust details.",
 };
@@ -367,23 +383,31 @@ const normalizeFamilies = (families: MemberFormFamily[]) => {
   return [...unique.values()];
 };
 
-const getDefaultSelection = (): MemberFormSelection => {
+const getFallbackSelection = (): MemberFormSelection => {
   return {
-    families: [...MEMBER_FORM_INTAKE_FAMILIES],
+    families: [...MEMBER_FORM_FALLBACK_FAMILIES],
     poaType: "general",
     trustType: "rrr",
     idnType: "acknowledgment",
   };
 };
 
-export const buildMemberFormIntakeSelection = (): MemberFormSelection => {
-  return getDefaultSelection();
+export const buildMemberFormIntakeSelection = async (): Promise<MemberFormSelection> => {
+  const selection = await getDefaultProductFlowModeSelection();
+  return buildMemberFormSelection(selection);
+};
+
+export const buildMemberFormSelectionForMode = async (
+  modeKey: string,
+): Promise<MemberFormSelection> => {
+  const selection = await buildSelectionForMode(modeKey);
+  return buildMemberFormSelection(selection);
 };
 
 export const buildMemberFormSelection = (
   input: Partial<MemberFormSelection> = {},
 ): MemberFormSelection => {
-  const defaults = getDefaultSelection();
+  const defaults = getFallbackSelection();
   const normalizedFamilies = normalizeFamilies(input.families ?? defaults.families);
 
   return {
@@ -521,6 +545,7 @@ const buildSourceConditionContexts = (
 
 export const buildMemberFormRulesContract = (
   contracts: InputRequirementsContract[],
+  options: MemberFormRulesContractOptions = {},
 ): MemberFormRulesContract => {
   const aggregatedForm = deriveMemberFacingFormContract(contracts);
   const familyContracts = contracts
@@ -552,7 +577,7 @@ export const buildMemberFormRulesContract = (
     ]),
   );
 
-  return {
+  const contract: MemberFormRulesContract = {
     jurisdiction: aggregatedForm.jurisdiction,
     families: aggregatedForm.families,
     documentTypes: aggregatedForm.document_types,
@@ -563,6 +588,12 @@ export const buildMemberFormRulesContract = (
       familyFactContextByKey,
     ),
   };
+
+  if (options.productFlowMode) {
+    contract.productFlowMode = options.productFlowMode;
+  }
+
+  return contract;
 };
 
 type JurisdictionOption = {
@@ -708,6 +739,7 @@ const buildContractsBySelection = async (
 export const deriveMemberFormRulesByJurisdiction = async (
   jurisdiction: string,
   selection: MemberFormSelection,
+  options: MemberFormRulesContractOptions = {},
 ): Promise<MemberFormRulesByJurisdictionResult> => {
   const normalizedJurisdiction = normalizeJurisdiction(jurisdiction);
   const { contracts, missing } = await buildContractsBySelection(
@@ -723,7 +755,7 @@ export const deriveMemberFormRulesByJurisdiction = async (
   }
 
   return {
-    contract: buildMemberFormRulesContract(contracts),
+    contract: buildMemberFormRulesContract(contracts, options),
     missing: [],
   };
 };

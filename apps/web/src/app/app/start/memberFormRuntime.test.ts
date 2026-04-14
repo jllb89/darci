@@ -629,16 +629,27 @@ describe("memberFormRuntime - source_only behavior", () => {
       activeSources: [],
     });
     expect(runtime.get("trustee_signature_authority")).toEqual({
-      visible: false,
+      visible: true,
       required: false,
-      activeSources: [],
+      activeSources: [
+        {
+          family: "trust",
+          document_type: "rrr",
+          section_key: "authority",
+          field_key: "trustee_signature_authority",
+          original_label: "Trustee signature authority",
+        },
+      ],
     });
     expect(runtime.get("jurisdiction")).toEqual({
       visible: false,
       required: false,
       activeSources: [],
     });
-    expect(visibleSections).toHaveLength(0);
+    expect(visibleSections).toHaveLength(1);
+    expect(visibleSections[0]?.fields.map((field) => field.canonical_key)).toEqual([
+      "trustee_signature_authority",
+    ]);
   });
 
   it("makes prior document items required only for amendment/restatement flows", () => {

@@ -12,7 +12,7 @@ import {
   DEFAULT_PHONE_COUNTRY_ISO2,
   getMemberFieldControlKind,
   isTemporarilyHiddenCreateFlowField,
-  parsePersonListItems,
+  serializePriorDocumentItems,
   serializePersonContact,
   serializePersonListItems,
 } from "@/app/app/start/memberFormControls";
@@ -132,7 +132,7 @@ const getMockPersonListValue = (canonicalKey: string) => {
         phoneCountryIso2: DEFAULT_PHONE_COUNTRY_ISO2,
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "4155550111",
-        isSigningTrustee: true,
+        isSigningTrustee: false,
       },
     ]);
   }
@@ -279,7 +279,22 @@ const buildMockValueForField = (
   }
 
   if (controlKind === "repeatable-document-list") {
-    return ["mock-prior-document.pdf"];
+    return serializePriorDocumentItems([
+      {
+        chronologyOrder: 1,
+        documentType: "trust_agreement",
+        documentLabel: "Original trust agreement",
+        documentDate: "2021-04-05",
+        attachmentReference: "trust-agreement-2021.pdf",
+      },
+      {
+        chronologyOrder: 2,
+        documentType: "amendment",
+        documentLabel: "First amendment",
+        documentDate: "2023-02-11",
+        attachmentReference: "amendment-1-2023.pdf",
+      },
+    ]);
   }
 
   if (controlKind === "file-upload") {
@@ -299,10 +314,6 @@ const buildMockValueForField = (
   }
 
   return getMockTextValue(field.canonical_key, options);
-};
-
-const isTrusteeListField = (canonicalKey: string) => {
-  return normalizeCanonicalKey(canonicalKey) === "trustees";
 };
 
 export const buildMockFormValues = (
@@ -333,19 +344,6 @@ export const buildMockFormValues = (
         if (!areFormValuesEqual(nextValues[field.canonical_key], mockValue)) {
           nextValues[field.canonical_key] = mockValue;
           changed = true;
-        }
-
-        if (isTrusteeListField(field.canonical_key)) {
-          const trustees = parsePersonListItems(mockValue);
-          const signingTrustee = trustees.find(
-            (trustee) => trustee.isSigningTrustee && trustee.fullName.trim().length > 0,
-          );
-          const signerName = signingTrustee?.fullName.trim() ?? "";
-
-          if (!areFormValuesEqual(nextValues.trustee_signature_authority, signerName)) {
-            nextValues.trustee_signature_authority = signerName;
-            changed = true;
-          }
         }
       }
     }

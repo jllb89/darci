@@ -104,7 +104,6 @@ const excludedCanonicalKeys = new Set([
   "document_title",
   "document_type",
   "poa_type",
-  "trustee_signature_authority",
 ]);
 
 const excludedSourceKeys = new Set([
@@ -112,14 +111,12 @@ const excludedSourceKeys = new Set([
   "document_title",
   "document_type",
   "poa_type",
-  "trustee_signature_authority",
 ]);
 
 const excludedSemanticTypes = new Set([
   "document_title",
   "document_type",
   "poa_type",
-  "trustee_signature_authority",
 ]);
 
 const conditionalRequiredRules: Record<string, Condition> = {
@@ -149,11 +146,12 @@ const peopleFieldOrder = [
   "successor_agent_list",
   "grantors",
   "trustees",
-  "trustee_signature_authority",
   "successor_trustees",
 ] as const;
 
 const authorityFieldOrder = [
+  "trustee_signature_authority",
+  "trustee_signature_authority_custom_text",
   "revocability_status",
   "revocation_holders",
   "revocation_holders_custom_text",

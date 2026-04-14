@@ -61,6 +61,46 @@ const buildTrustInputRequirements = (): TrustInputRequirementsContract => ({
         },
       ],
     },
+    {
+      key: "prior_documents",
+      title: "Documents to Include",
+      presence: "required",
+      repeatable: true,
+      fields: [
+        {
+          key: "prior_document_items",
+          label: "Documents to Include",
+          semantic_type: "object",
+          required: true,
+          data_type: "array",
+          collect_from: "member",
+          default_source: "none",
+          validation: {
+            item_shape: {
+              document_type: {
+                type: "string",
+                allowed_values: ["trust_agreement", "declaration_of_trust", "amendment"],
+              },
+              title: {
+                type: "string",
+                max_length: 200,
+              },
+              date: {
+                type: "date",
+              },
+              recording_reference: {
+                type: "string",
+                max_length: 180,
+              },
+              chronology_order: {
+                type: "integer",
+                min: 1,
+              },
+            },
+          },
+        },
+      ],
+    },
   ],
   section_summaries: {},
   document_outputs: [
@@ -298,6 +338,30 @@ const buildMemberFormContract = (): MemberFormRulesContract => {
             },
           ],
         },
+        {
+          key: "documents",
+          title: "Documents",
+          fields: [
+            {
+              canonical_key: "prior_document_items",
+              label: "Documents to Include",
+              semantic_type: "object",
+              data_type: "array",
+              required: true,
+              repeatable: true,
+              sources: [
+                {
+                  family: "trust",
+                  document_type: "rrr",
+                  section_key: "prior_documents",
+                  field_key: "prior_document_items",
+                  original_label: "Documents to Include",
+                },
+              ],
+              ui_group: "documents",
+            },
+          ],
+        },
       ],
       source_trace: [],
     },
@@ -338,6 +402,14 @@ describe("memberFormDocumentExtractionService", () => {
         expect.objectContaining({
           sourceFieldKey: "trustee_power_matrix",
           canonicalKey: "trustee_powers",
+        }),
+        expect.objectContaining({
+          sourceFieldKey: "prior_document_items",
+          canonicalKey: "prior_document_items",
+          validation: expect.objectContaining({
+            chronology_ordering: "array_order_then_chronology_order",
+            originating_document_position: 1,
+          }),
         }),
       ]),
     );

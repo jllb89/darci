@@ -3,6 +3,20 @@
 DARCi can register all revocable Trusts, which can be amended or revoked by the individual or individuals who created them. Most Trusts are revocable, and the legal presumption is that a Trust is revocable unless it specifies otherwise. However, if the individual(s) who created the Trust has/have lost capacity, the Trust may become irrevocable due to the lack  
 of capacity of the persons who made it.
 
+**Implementation Status Snapshot (2026-04-13)**
+
+- [x] Step 1 - Trust Name
+- [x] Step 2 - Trustmaker(s)
+- [x] Step 3 - Trustee
+- [x] Step 4 - Successor Trustee
+- [x] Step 5 - Trustee Powers & Signing Authority
+- [x] Step 6 - Trust Revocation & Trustee Incapacity Standard
+- [x] Step 7 - Upload Documents
+- [ ] Step 8 - illuminotarize to Finalize the Registration
+
+Missing to fully sign off this quickguide:
+- Step 8 post-submit registration guidance and DARCi number handoff in the member journey (outside the contract form page).
+
 **Step 1 – Trust Name**
 
 DARCi can register all revocable Trusts, which can be amended or revoked by the individual or individuals who created them. Most Trusts are revocable, and the legal presumption is that a Trust is revocable unless it specifies otherwise. However, if the individual(s) who created the Trust has/have lost capacity, the Trust may become irrevocable due to the lack of capacity of the persons who made it.

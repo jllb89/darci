@@ -58,14 +58,14 @@ describe("memberFormControls", () => {
     );
   });
 
-  it("maps prior document items to file-upload control", () => {
+  it("maps prior document items to repeatable-document-list control", () => {
     const field = buildField({
       canonical_key: "prior_document_items",
       data_type: "array",
       semantic_type: "uploaded_document_list",
     });
 
-    expect(getMemberFieldControlKind(field, [])).toBe("file-upload");
+    expect(getMemberFieldControlKind(field, [])).toBe("repeatable-document-list");
   });
 
   it("maps upload artifact fields to file-upload control", () => {
@@ -91,6 +91,7 @@ describe("memberFormControls", () => {
   it("serializes and parses structured prior document items", () => {
     const serialized = serializePriorDocumentItems([
       {
+        chronologyOrder: 1,
         documentType: "trust_agreement",
         documentLabel: "Original trust agreement",
         documentDate: "2021-04-05",
@@ -103,10 +104,47 @@ describe("memberFormControls", () => {
     const parsed = parsePriorDocumentItems(serialized);
     expect(parsed).toEqual([
       {
+        chronologyOrder: 1,
         documentType: "trust_agreement",
         documentLabel: "Original trust agreement",
         documentDate: "2021-04-05",
         attachmentReference: "agreement.pdf",
+      },
+    ]);
+  });
+
+  it("parses snake_case prior document payloads and keeps chronology order", () => {
+    const parsed = parsePriorDocumentItems([
+      JSON.stringify({
+        chronology_order: 2,
+        document_type: "amendment",
+        title: "First amendment",
+        date: "2022-03-10",
+        recording_reference: "amendment.pdf",
+      }),
+      JSON.stringify({
+        chronology_order: 1,
+        document_type: "declaration_of_trust",
+        title: "Original declaration",
+        date: "2021-01-02",
+        recording_reference: "declaration.pdf",
+      }),
+    ]);
+
+    expect(parsed).toEqual([
+      {
+        chronologyOrder: 1,
+        documentType: "declaration_of_trust",
+        documentLabel: "Original declaration",
+        documentDate: "2021-01-02",
+        attachmentReference: "declaration.pdf",
+      },
+      {
+        chronologyOrder: 2,
+        documentType: "amendment",
+        documentLabel: "First amendment",
+        documentDate: "2022-03-10",
+        attachmentReference: "amendment.pdf",
       },
     ]);
   });

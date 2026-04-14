@@ -40,10 +40,19 @@ type FixedGeometry = {
   width: number;
 };
 
+const COMPACT_TRANSITION_DURATION_MS = 500;
+
 export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const bandRef = useRef<HTMLDivElement | null>(null);
+  const isCompactRef = useRef(false);
+  const isReversingToExpandedRef = useRef(false);
+  const reverseSpacerAnimationFrameRef = useRef<number | null>(null);
+  const reverseSpacerTimeoutRef = useRef<number | null>(null);
+  const expandedBandHeightRef = useRef(0);
   const [isCompact, setIsCompact] = useState(false);
+  const [isReversingToExpanded, setIsReversingToExpanded] = useState(false);
+  const [reverseSpacerHeight, setReverseSpacerHeight] = useState(0);
   const [fixedGeometry, setFixedGeometry] = useState<FixedGeometry | null>(null);
   const [bandHeight, setBandHeight] = useState(0);
   const [expandedBandHeight, setExpandedBandHeight] = useState(0);
@@ -55,12 +64,104 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
   const progressLineWidth = (safeCurrentStep / PROCESS_STEPS.length) * 100;
 
   useEffect(() => {
+    isCompactRef.current = isCompact;
+  }, [isCompact]);
+
+  useEffect(() => {
+    isReversingToExpandedRef.current = isReversingToExpanded;
+  }, [isReversingToExpanded]);
+
+  useEffect(() => {
+    expandedBandHeightRef.current = expandedBandHeight;
+  }, [expandedBandHeight]);
+
+  useEffect(() => {
+    return () => {
+      if (reverseSpacerAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(reverseSpacerAnimationFrameRef.current);
+      }
+
+      if (reverseSpacerTimeoutRef.current !== null) {
+        window.clearTimeout(reverseSpacerTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) {
       return;
     }
 
     const nearestScrollRoot = sentinel.closest("main");
+    const compactActivationOffset = 8;
+    const compactReleaseOffset = 14;
+
+    const stopReverseExpansionTransition = () => {
+      if (reverseSpacerAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(reverseSpacerAnimationFrameRef.current);
+        reverseSpacerAnimationFrameRef.current = null;
+      }
+
+      if (reverseSpacerTimeoutRef.current !== null) {
+        window.clearTimeout(reverseSpacerTimeoutRef.current);
+        reverseSpacerTimeoutRef.current = null;
+      }
+
+      if (isReversingToExpandedRef.current) {
+        isReversingToExpandedRef.current = false;
+        setIsReversingToExpanded(false);
+      }
+
+      setReverseSpacerHeight(0);
+    };
+
+    const startReverseExpansionTransition = () => {
+      if (isReversingToExpandedRef.current) {
+        return;
+      }
+
+      const compactBandHeight = bandRef.current?.getBoundingClientRect().height ?? 0;
+      const expandedBandHeightValue =
+        expandedBandHeightRef.current > 0
+          ? expandedBandHeightRef.current
+          : compactBandHeight;
+      const spacerStartHeight = Math.max(
+        expandedBandHeightValue - compactBandHeight,
+        0,
+      );
+
+      isReversingToExpandedRef.current = spacerStartHeight > 0;
+      setIsReversingToExpanded(spacerStartHeight > 0);
+      setReverseSpacerHeight(spacerStartHeight);
+
+      setIsCompact(false);
+      isCompactRef.current = false;
+
+      if (spacerStartHeight <= 0) {
+        return;
+      }
+
+      if (reverseSpacerAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(reverseSpacerAnimationFrameRef.current);
+      }
+
+      reverseSpacerAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        setReverseSpacerHeight(0);
+        reverseSpacerAnimationFrameRef.current = null;
+      });
+
+      if (reverseSpacerTimeoutRef.current !== null) {
+        window.clearTimeout(reverseSpacerTimeoutRef.current);
+      }
+
+      reverseSpacerTimeoutRef.current = window.setTimeout(() => {
+        isReversingToExpandedRef.current = false;
+        setIsReversingToExpanded(false);
+        setReverseSpacerHeight(0);
+        reverseSpacerTimeoutRef.current = null;
+      }, COMPACT_TRANSITION_DURATION_MS + 40);
+    };
 
     const updateCompactState = () => {
       const rootTop =
@@ -68,18 +169,27 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
           ? nearestScrollRoot.getBoundingClientRect().top
           : 0;
       const sentinelTop = sentinel.getBoundingClientRect().top;
+      const shouldBeCompact =
+        sentinelTop <= rootTop + compactActivationOffset
+          ? true
+          : sentinelTop >= rootTop + compactReleaseOffset
+            ? false
+            : isCompactRef.current;
 
-      setIsCompact((current) => {
-        if (sentinelTop <= rootTop + 0.5) {
-          return true;
+      if (shouldBeCompact) {
+        stopReverseExpansionTransition();
+
+        if (!isCompactRef.current) {
+          setIsCompact(true);
+          isCompactRef.current = true;
         }
 
-        if (sentinelTop >= rootTop + 2) {
-          return false;
-        }
+        return;
+      }
 
-        return current;
-      });
+      if (isCompactRef.current) {
+        startReverseExpansionTransition();
+      }
     };
 
     updateCompactState();
@@ -93,14 +203,18 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
     return () => {
       scrollTarget.removeEventListener("scroll", updateCompactState);
       window.removeEventListener("resize", updateCompactState);
+      stopReverseExpansionTransition();
     };
   }, []);
 
   useEffect(() => {
-    const host = sentinelRef.current?.parentElement;
+    const sentinel = sentinelRef.current;
+    const host = sentinel?.parentElement;
     if (!host) {
       return;
     }
+
+    const nearestScrollRoot = sentinel?.closest("main");
 
     const updateGeometry = () => {
       const rect = host.getBoundingClientRect();
@@ -123,9 +237,14 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
       return;
     }
 
+    const scrollTarget =
+      nearestScrollRoot instanceof HTMLElement ? nearestScrollRoot : window;
+
+    scrollTarget.addEventListener("scroll", updateGeometry, { passive: true });
     window.addEventListener("resize", updateGeometry);
 
     return () => {
+      scrollTarget.removeEventListener("scroll", updateGeometry);
       window.removeEventListener("resize", updateGeometry);
     };
   }, [isCompact]);
@@ -158,28 +277,30 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
     };
   }, [isCompact]);
 
-  const isFixed = isCompact && fixedGeometry !== null;
   const reservedExpandedHeight = expandedBandHeight > 0 ? expandedBandHeight : bandHeight;
+  const isPinned = isCompact && fixedGeometry !== null;
+  const pinnedSpacerHeight = isPinned ? reservedExpandedHeight : 0;
+  const reverseCompensationHeight = isReversingToExpanded ? reverseSpacerHeight : 0;
 
   return (
-    <div>
+    <div className="relative z-[900]">
       <div ref={sentinelRef} aria-hidden className="h-px w-full" />
-      <div aria-hidden style={{ height: isFixed ? reservedExpandedHeight : 0 }} />
+      <div aria-hidden style={{ height: pinnedSpacerHeight }} />
       <div
         ref={bandRef}
-          className={`z-20 transition-all duration-500 ease-in-out ${
+          className={`relative isolate z-[910] transition-all duration-500 ease-in-out ${
           isCompact
-            ? "border-b border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest/95 backdrop-blur-sm"
+            ? "bg-Color-Neutral-Lightest shadow-[0_8px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm"
             : ""
         }`}
         style={
-          isFixed
+          isPinned
             ? {
                 left: fixedGeometry.left,
                 position: "fixed",
                 top: fixedGeometry.top,
                 width: fixedGeometry.width,
-                zIndex: 40,
+                zIndex: 1200,
               }
             : undefined
         }
@@ -211,6 +332,10 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
                     ? "border-t-2 border-t-Color-Scheme-1-Text bg-Color-Neutral-Lightest"
                     : "border-t-2 border-t-transparent"
                 }`}
+                style={{
+                  animation: "darciProcessStepFadeIn 320ms ease-out both",
+                  animationDelay: `${index * 110}ms`,
+                }}
               >
                 <div
                   className="flex h-full flex-col gap-2"
@@ -258,6 +383,15 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
           })}
         </div>
       </div>
+      <div
+        aria-hidden
+        style={{
+          height: reverseCompensationHeight,
+          transition: isReversingToExpanded
+            ? `height ${COMPACT_TRANSITION_DURATION_MS}ms ease-in-out`
+            : undefined,
+        }}
+      />
     </div>
   );
 }

@@ -10,6 +10,7 @@ export type MemberFieldLike = {
 export type FormValue = string | boolean | string[];
 
 export type PriorDocumentItem = {
+  chronologyOrder: number;
   documentType: string;
   documentLabel: string;
   documentDate: string;
@@ -298,7 +299,7 @@ export const getMemberFieldControlKind = (
   }
 
   if (isPriorDocumentItemsField(field)) {
-    return "file-upload";
+    return "repeatable-document-list";
   }
 
   if (field.data_type === "array") {
@@ -495,15 +496,50 @@ const toPriorDocumentItem = (value: unknown): PriorDocumentItem | null => {
     return null;
   }
 
+  const rawChronologyOrder =
+    typeof value.chronologyOrder === "number"
+      ? value.chronologyOrder
+      : typeof value.chronology_order === "number"
+        ? value.chronology_order
+        : typeof value.chronologyOrder === "string"
+          ? Number.parseInt(value.chronologyOrder, 10)
+          : typeof value.chronology_order === "string"
+            ? Number.parseInt(value.chronology_order, 10)
+            : Number.NaN;
+
+  const chronologyOrder =
+    Number.isFinite(rawChronologyOrder) && rawChronologyOrder > 0
+      ? Math.floor(rawChronologyOrder)
+      : 0;
+
   return {
+    chronologyOrder,
     documentType:
-      typeof value.documentType === "string" ? value.documentType : "",
+      typeof value.documentType === "string"
+        ? value.documentType
+        : typeof value.document_type === "string"
+          ? value.document_type
+          : "",
     documentLabel:
-      typeof value.documentLabel === "string" ? value.documentLabel : "",
+      typeof value.documentLabel === "string"
+        ? value.documentLabel
+        : typeof value.title === "string"
+          ? value.title
+          : "",
     documentDate:
-      typeof value.documentDate === "string" ? value.documentDate : "",
+      typeof value.documentDate === "string"
+        ? value.documentDate
+        : typeof value.date === "string"
+          ? value.date
+          : "",
     attachmentReference:
-      typeof value.attachmentReference === "string" ? value.attachmentReference : "",
+      typeof value.attachmentReference === "string"
+        ? value.attachmentReference
+        : typeof value.attachment_reference === "string"
+          ? value.attachment_reference
+          : typeof value.recording_reference === "string"
+            ? value.recording_reference
+            : "",
   };
 };
 
@@ -527,7 +563,10 @@ export const parsePriorDocumentItems = (value: FormValue | undefined): PriorDocu
       const parsed = JSON.parse(entry) as unknown;
       const item = toPriorDocumentItem(parsed);
       if (item) {
-        items.push(item);
+        items.push({
+          ...item,
+          chronologyOrder: item.chronologyOrder > 0 ? item.chronologyOrder : items.length + 1,
+        });
         continue;
       }
     } catch {
@@ -535,6 +574,7 @@ export const parsePriorDocumentItems = (value: FormValue | undefined): PriorDocu
     }
 
     items.push({
+      chronologyOrder: items.length + 1,
       documentType: "",
       documentLabel: entry,
       documentDate: "",
@@ -542,23 +582,40 @@ export const parsePriorDocumentItems = (value: FormValue | undefined): PriorDocu
     });
   }
 
-  return items;
+  return items
+    .sort((left, right) => left.chronologyOrder - right.chronologyOrder)
+    .map((item, index) => ({
+      ...item,
+      chronologyOrder: index + 1,
+    }));
 };
 
 export const serializePriorDocumentItems = (items: PriorDocumentItem[]): string[] => {
   return items
-    .map((item) => ({
-      documentType: item.documentType.trim(),
-      documentLabel: item.documentLabel.trim(),
-      documentDate: item.documentDate,
-      attachmentReference: item.attachmentReference.trim(),
-    }))
+    .map((item, index) => {
+      const documentType = item.documentType.trim();
+      const documentLabel = item.documentLabel.trim();
+      const documentDate = item.documentDate;
+      const attachmentReference = item.attachmentReference.trim();
+
+      return {
+        chronology_order: index + 1,
+        document_type: documentType,
+        title: documentLabel,
+        date: documentDate,
+        recording_reference: attachmentReference,
+        documentType,
+        documentLabel,
+        documentDate,
+        attachmentReference,
+      };
+    })
     .filter((item) => {
       return (
-        item.documentType.length > 0 ||
-        item.documentLabel.length > 0 ||
-        item.documentDate.length > 0 ||
-        item.attachmentReference.length > 0
+        item.document_type.length > 0 ||
+        item.title.length > 0 ||
+        item.date.length > 0 ||
+        item.recording_reference.length > 0
       );
     })
     .map((item) => JSON.stringify(item));
