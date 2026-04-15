@@ -1,4 +1,4 @@
-import { hashingQueue, ledgerQueue, webhookQueue } from "./queues";
+import { generationQueue, hashingQueue, ledgerQueue, webhookQueue } from "./queues";
 
 type HashingJobInput = {
   documentId: string;
@@ -14,6 +14,10 @@ type LedgerJobInput = {
 type WebhookJobInput = {
   url: string;
   payload: Record<string, unknown>;
+};
+
+type GenerationRunJobInput = {
+  runId: string;
 };
 
 export const enqueueHashing = async (input: HashingJobInput) => {
@@ -37,5 +41,17 @@ export const enqueueWebhook = async (input: WebhookJobInput) => {
     throw new Error("Webhook queue is not configured. Set REDIS_URL.");
   }
   const job = await webhookQueue.add("deliver-webhook", input);
+  return job.id;
+};
+
+export const enqueueDocumentGenerationRun = async (input: GenerationRunJobInput) => {
+  if (!generationQueue) {
+    return null;
+  }
+
+  const job = await generationQueue.add("render-generation-run", input, {
+    jobId: input.runId,
+  });
+
   return job.id;
 };

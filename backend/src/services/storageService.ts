@@ -84,6 +84,32 @@ export const getDocumentObjectMetadata = async (storagePath: string) => {
   };
 };
 
+export const uploadGeneratedDocument = async (input: {
+  storagePath: string;
+  content: Buffer;
+  contentType: string;
+}) => {
+  const { error } = await supabaseStorage.storage.from(documentsBucket).upload(
+    input.storagePath,
+    input.content,
+    {
+      contentType: input.contentType,
+      upsert: true,
+    },
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    bucket: documentsBucket,
+    path: input.storagePath,
+    sizeBytes: input.content.byteLength,
+    mimeType: input.contentType,
+  };
+};
+
 export const getSignatureObjectMetadata = async (storagePath: string) => {
   const segments = storagePath.split("/");
   const fileName = segments.pop();

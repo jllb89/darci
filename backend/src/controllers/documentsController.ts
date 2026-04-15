@@ -1,16 +1,23 @@
 import { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { enqueueWebhook } from "../worker/jobs";
+import { enqueueDocumentGenerationRun, enqueueWebhook } from "../worker/jobs";
 import { sendValidationError } from "../utils/validation";
 import { recordAuditEvent } from "../services/auditService";
 import {
   bootstrapDocumentIntakeDraft as bootstrapDocumentIntakeDraftFromDb,
+  claimNextQueuedDocumentGenerationRun,
   createDocumentGenerationRun,
   type DocumentGenerationRunRecord,
+  type GenerationRunStatus,
+  getActiveTemplateArtifact,
   isDocumentIntakeLocked,
   getActiveTemplateRegistryForOutput,
+  getDocumentGenerationRunById,
   type SaveDocumentIntakeDraftInput,
+  getTemplateArtifactById,
+  type TemplateArtifactRecord,
+  type DocumentOutputSignerRecord,
   createDocumentWithVersion,
   type DocumentIntakeDraftRecord,
   type DocumentPartyRecord,
@@ -28,12 +35,20 @@ import {
   getUserIdBySupabaseId,
   listDocumentParties as listDocumentPartiesFromDb,
   listDocuments as listDocumentsFromDb,
+  listDocumentOutputSigners,
   listDocumentVersions as listDocumentVersionsFromDb,
+  replaceDocumentOutputSigners,
   replaceDocumentParties,
   saveDocumentIntakeDraft as saveDocumentIntakeDraftToDb,
+  updateDocumentGenerationRun,
   updateDocument,
   updateDocumentVersion,
 } from "../services/documentService";
+import {
+  mapDocumentOutputSignerResponse,
+  prepareGenerationRun,
+  syncDocumentPartiesFromCanonicalAnswers,
+} from "../services/documentGenerationService";
 import {
   deriveMemberFormRulesByJurisdiction,
   type MemberFormRulesContract,
@@ -289,6 +304,40 @@ const createDocumentGenerationRunsSchema = z
   })
   .passthrough();
 
+const generationRunCancelSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(500).optional(),
+  })
+  .passthrough();
+
+const generationRunClaimSchema = z
+  .object({
+    workerId: z.string().trim().min(1).max(200),
+  })
+  .passthrough();
+
+const generationRunCompleteSchema = z
+  .object({
+    documentVersionId: z.string().trim().min(1),
+  })
+  .passthrough();
+
+const generationRunFailSchema = z
+  .object({
+    failureCode: z.string().trim().min(1).max(200).optional(),
+    message: z.string().trim().min(1).max(1000).optional(),
+    failureDetails: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine(
+    (data) =>
+      typeof data.failureCode === "string" || typeof data.message === "string",
+    {
+      message: "Either failureCode or message is required",
+      path: ["failureCode"],
+    },
+  )
+  .passthrough();
+
 const mapDocumentPartyResponse = (party: DocumentPartyRecord) => {
   return {
     id: party.id,
@@ -333,34 +382,103 @@ const mapDocumentGenerationRunResponse = (run: DocumentGenerationRunRecord) => {
     templateHash: run.template_hash,
     payload: run.payload_json,
     coverage: run.coverage_json,
+    documentVersionId: run.document_version_id,
+    blockedCount: Array.isArray(run.blocking_requirements_json)
+      ? run.blocking_requirements_json.length
+      : 0,
     status: run.status,
     errorMessage: run.error_message,
+    blockedAt: run.blocked_at,
+    startedAt: run.started_at,
+    renderedAt: run.rendered_at,
+    failedAt: run.failed_at,
+    canceledAt: run.canceled_at,
     createdAt: run.created_at,
   };
 };
 
-const outputDocumentKeyFallbacks: Record<string, string> = {
-  poa_document: "poa_general",
-  trust_rrr: "trust_rrr",
-  trust_certificate: "trust_certificate",
-  uploaded_document_with_seal: "uploaded_document_with_seal",
+const mapTemplateArtifactResponse = (artifact: TemplateArtifactRecord) => {
+  return {
+    id: artifact.id,
+    storagePath: artifact.artifact_storage_path,
+    mimeType: artifact.artifact_mime_type,
+    renderEngine: artifact.render_engine,
+  };
 };
 
-const resolveOutputDocumentKey = (input: {
-  outputKey: string;
-  metadata: Record<string, unknown>;
-  templateDocumentKey?: string;
-}) => {
-  if (input.templateDocumentKey?.trim()) {
-    return input.templateDocumentKey.trim();
+const mapDocumentGenerationRunDetailResponse = (
+  run: DocumentGenerationRunRecord,
+  templateArtifact: TemplateArtifactRecord | null,
+  signerObligations: DocumentOutputSignerRecord[],
+  includeDebug: boolean,
+) => {
+  return {
+    run: {
+      id: run.id,
+      documentId: run.document_id,
+      intakeRevision: run.intake_revision,
+      outputKey: run.output_key,
+      documentKey: run.document_key,
+      templateKey: run.template_key,
+      templateVersion: run.template_version,
+      templateHash: run.template_hash,
+      templateArtifact: templateArtifact
+        ? mapTemplateArtifactResponse(templateArtifact)
+        : null,
+      status: run.status,
+      payload: run.payload_json,
+      coverage: run.coverage_json,
+      blockingRequirements: run.blocking_requirements_json ?? [],
+      signerObligations: signerObligations.map(mapDocumentOutputSignerResponse),
+      rendererJobId: run.renderer_job_id,
+      documentVersionId: run.document_version_id,
+      failureCode: run.failure_code,
+      failureDetails: run.failure_details_json ?? {},
+      cancellationReason: run.cancellation_reason,
+      errorMessage: run.error_message,
+      createdAt: run.created_at,
+      blockedAt: run.blocked_at,
+      startedAt: run.started_at,
+      renderedAt: run.rendered_at,
+      failedAt: run.failed_at,
+      canceledAt: run.canceled_at,
+      ...(includeDebug
+        ? {
+            renderContext: run.render_context_json,
+            resolvedSources: run.resolved_sources_json,
+          }
+        : {}),
+    },
+  };
+};
+
+const transitionAllowed = (
+  currentStatus: GenerationRunStatus,
+  nextStatus: GenerationRunStatus,
+) => {
+  const allowedTransitions: Record<GenerationRunStatus, GenerationRunStatus[]> = {
+    queued: ["blocked", "rendering", "canceled"],
+    blocked: ["queued", "canceled"],
+    rendering: ["rendered", "failed", "canceled"],
+    rendered: [],
+    failed: [],
+    canceled: [],
+  };
+
+  return allowedTransitions[currentStatus].includes(nextStatus);
+};
+
+const buildAuditActorContext = (req: Request) => {
+  const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
+
+  if (req.user?.id) {
+    actorContext.actorSupabaseId = req.user.id;
+  }
+  if (req.user?.role) {
+    actorContext.actorRole = req.user.role;
   }
 
-  const metadataDocumentKey = input.metadata.documentKey;
-  if (typeof metadataDocumentKey === "string" && metadataDocumentKey.trim()) {
-    return metadataDocumentKey.trim();
-  }
-
-  return outputDocumentKeyFallbacks[input.outputKey] ?? input.outputKey;
+  return actorContext;
 };
 
 const parseOutputBundle = (value: unknown) => {
@@ -525,7 +643,7 @@ export const createDocument = async (req: Request, res: Response) => {
   const ownerId = await getOrCreateUserId(
     req.user.id,
     req.user.email,
-    req.user.role
+    req.user.role,
   );
   const documentId = randomUUID();
   const storagePath = `${ownerId}/${documentId}/v1/source.pdf`;
@@ -543,13 +661,7 @@ export const createDocument = async (req: Request, res: Response) => {
     mimeType: parsed.data.mimeType,
   });
   const upload = await createDocumentUploadUrl(storagePath);
-  const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
-  if (req.user?.id) {
-    actorContext.actorSupabaseId = req.user.id;
-  }
-  if (req.user?.role) {
-    actorContext.actorRole = req.user.role;
-  }
+  const actorContext = buildAuditActorContext(req);
 
   await recordAuditEvent({
     ...actorContext,
@@ -1099,6 +1211,11 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     });
   }
 
+  await syncDocumentPartiesFromCanonicalAnswers({
+    documentId: document.id,
+    canonicalAnswers: canonicalPayload,
+  });
+
   return res.status(200).json({
     draft: mapDocumentIntakeDraftResponse(result.draft),
     canonicalPayload,
@@ -1223,6 +1340,7 @@ export const createDocumentGenerationRuns = async (req: Request, res: Response) 
   );
 
   const runs: ReturnType<typeof mapDocumentGenerationRunResponse>[] = [];
+  const actorContext = buildAuditActorContext(req);
 
   for (const output of selectedOutputBundle) {
     const template = await getActiveTemplateRegistryForOutput({
@@ -1230,57 +1348,54 @@ export const createDocumentGenerationRuns = async (req: Request, res: Response) 
       outputKey: output.outputKey,
     });
 
-    const documentKey = resolveOutputDocumentKey({
+    const templateArtifact = template
+      ? await getActiveTemplateArtifact({
+          templateKey: template.template_key,
+          templateVersion: template.template_version,
+          templateHash: template.template_hash,
+        })
+      : null;
+
+    const preparedRun = await prepareGenerationRun({
+      document,
+      draft,
       outputKey: output.outputKey,
-      metadata: output.metadata,
+      outputMetadata: output.metadata,
       ...(template?.document_key
         ? { templateDocumentKey: template.document_key }
         : {}),
-    });
-
-    const extractionDocument = extractionPayload.documents.find(
-      (entry) => entry.documentKey === documentKey,
-    );
-
-    const coverageSnapshot: Record<string, unknown> = extractionDocument
-      ? {
-          generatedAt: extractionPayload.generatedAt,
-          documentKey,
-          templateCoverage: extractionDocument.templateCoverage,
-        }
-      : {
-          generatedAt: extractionPayload.generatedAt,
-          documentKey,
-          error: "document_extraction_contract_not_found",
-        };
-
-    let status: "queued" | "failed" = "queued";
-    let errorMessage: string | null = null;
-
-    if (!template) {
-      status = "failed";
-      errorMessage = `No active template registry entry for ${draft.jurisdiction}/${output.outputKey}`;
-    } else if (
-      extractionDocument &&
-      extractionDocument.templateCoverage.missingBindings > 0
-    ) {
-      status = "failed";
-      errorMessage = `Template coverage gate failed for ${documentKey}`;
-    } else if (!extractionDocument) {
-      status = "failed";
-      errorMessage = `No extraction contract found for ${documentKey}`;
-    }
-
-    const run = await createDocumentGenerationRun({
-      documentId: document.id,
-      intakeRevision: draft.revision,
-      outputKey: output.outputKey,
-      documentKey,
+      templateResolved: Boolean(template),
+      templateArtifact,
       templateKey: template?.template_key ?? "unresolved_template",
       templateVersion: template?.template_version ?? "unresolved",
       templateHash: template?.template_hash ?? "unresolved",
+      extractionPayload,
+    });
+
+    const coverageSnapshot: Record<string, unknown> = preparedRun.extractionDocument
+      ? {
+          generatedAt: extractionPayload.generatedAt,
+          documentKey: preparedRun.documentKey,
+          templateCoverage: preparedRun.extractionDocument.templateCoverage,
+          templateBindings: preparedRun.extractionDocument.templateBindings,
+        }
+      : {
+          generatedAt: extractionPayload.generatedAt,
+          documentKey: preparedRun.documentKey,
+          error: "document_extraction_contract_not_found",
+        };
+
+    const run = await createDocumentGenerationRun({
+      documentId: preparedRun.document.id,
+      intakeRevision: draft.revision,
+      outputKey: output.outputKey,
+      documentKey: preparedRun.documentKey,
+      templateKey: template?.template_key ?? "unresolved_template",
+      templateVersion: template?.template_version ?? "unresolved",
+      templateHash: template?.template_hash ?? "unresolved",
+      templateArtifactId: templateArtifact?.id ?? null,
       payload: {
-        documentId: document.id,
+        documentId: preparedRun.document.id,
         jurisdiction: draft.jurisdiction,
         productFlowMode: draft.product_flow_mode,
         rulesSnapshotVersion: draft.rules_snapshot_version,
@@ -1288,8 +1403,45 @@ export const createDocumentGenerationRuns = async (req: Request, res: Response) 
         canonicalAnswers: draft.canonical_answers_json,
       },
       coverage: coverageSnapshot,
-      status,
-      errorMessage,
+      renderContext: preparedRun.renderContext,
+      blockingRequirements: preparedRun.blockingRequirements,
+      resolvedSources: preparedRun.resolvedSources,
+      status: preparedRun.status,
+      blockedAt:
+        preparedRun.status === "blocked" ? new Date().toISOString() : null,
+      errorMessage: preparedRun.errorMessage,
+    });
+
+    await replaceDocumentOutputSigners({
+      documentId: preparedRun.document.id,
+      generationRunId: run.id,
+      signers: preparedRun.signerObligations,
+    });
+
+    if (preparedRun.status === "queued") {
+      await enqueueDocumentGenerationRun({
+        runId: run.id,
+      });
+    }
+
+    await recordAuditEvent({
+      ...actorContext,
+      entityType: "generation_run",
+      entityId: run.id,
+      action:
+        preparedRun.status === "blocked"
+          ? "system.generation_run_blocked"
+          : "system.generation_run_created",
+      metadata: {
+        document_id: run.document_id,
+        generation_run_id: run.id,
+        output_key: run.output_key,
+        document_key: run.document_key,
+        template_key: run.template_key,
+        template_version: run.template_version,
+        template_hash: run.template_hash,
+        blocker_count: preparedRun.blockingRequirements.length,
+      },
     });
 
     runs.push(mapDocumentGenerationRunResponse(run));
@@ -1311,6 +1463,523 @@ export const listDocumentGenerationRuns = async (req: Request, res: Response) =>
   return res.status(200).json({
     runs: runs.map(mapDocumentGenerationRunResponse),
   });
+};
+
+export const getDocumentGenerationRun = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  if (typeof req.params.runId !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Generation run id is required",
+    });
+  }
+
+  const run = await getDocumentGenerationRunById({
+    runId: req.params.runId,
+    documentId: document.id,
+  });
+
+  if (!run) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Generation run not found",
+    });
+  }
+
+  const includeDebug =
+    req.query.includeDebug === "true" &&
+    (req.user?.role === "admin" || req.user?.role === "service_role");
+  const templateArtifact = run.template_artifact_id
+    ? await getTemplateArtifactById(run.template_artifact_id)
+    : null;
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: document.id,
+    generationRunId: run.id,
+  });
+
+  return res.status(200).json(
+    mapDocumentGenerationRunDetailResponse(
+      run,
+      templateArtifact,
+      signerObligations,
+      includeDebug,
+    ),
+  );
+};
+
+export const cancelDocumentGenerationRun = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const parsed = generationRunCancelSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (typeof req.params.runId !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Generation run id is required",
+    });
+  }
+
+  const run = await getDocumentGenerationRunById({
+    runId: req.params.runId,
+    documentId: document.id,
+  });
+
+  if (!run) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Generation run not found",
+    });
+  }
+
+  if (!transitionAllowed(run.status, "canceled")) {
+    return res.status(409).json({
+      error: "conflict",
+      message: `Generation run in status ${run.status} cannot be canceled.`,
+    });
+  }
+
+  if (run.status === "rendering") {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Rendering generation runs must be canceled through the internal service workflow.",
+    });
+  }
+
+  const canceledRun = await updateDocumentGenerationRun(run.id, {
+    status: "canceled",
+    canceled_at: new Date().toISOString(),
+    cancellation_reason: parsed.data.reason ?? null,
+  });
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "generation_run",
+    entityId: canceledRun.id,
+    action: "system.generation_run_canceled",
+    metadata: {
+      document_id: canceledRun.document_id,
+      generation_run_id: canceledRun.id,
+      cancellation_reason: canceledRun.cancellation_reason,
+    },
+  });
+
+  const templateArtifact = canceledRun.template_artifact_id
+    ? await getTemplateArtifactById(canceledRun.template_artifact_id)
+    : null;
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: document.id,
+    generationRunId: canceledRun.id,
+  });
+
+  return res.status(200).json(
+    mapDocumentGenerationRunDetailResponse(
+      canceledRun,
+      templateArtifact,
+      signerObligations,
+      false,
+    ),
+  );
+};
+
+export const claimNextDocumentGenerationRun = async (req: Request, res: Response) => {
+  const parsed = generationRunClaimSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const rendererJobId = `${parsed.data.workerId}:${Date.now()}`;
+  const run = await claimNextQueuedDocumentGenerationRun({ rendererJobId });
+  if (!run) {
+    return res.status(204).send();
+  }
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "generation_run",
+    entityId: run.id,
+    action: "system.generation_run_render_started",
+    metadata: {
+      document_id: run.document_id,
+      generation_run_id: run.id,
+      renderer_job_id: run.renderer_job_id,
+    },
+  });
+
+  return res.status(200).json({
+    run: {
+      id: run.id,
+      status: run.status,
+      rendererJobId: run.renderer_job_id,
+      startedAt: run.started_at,
+    },
+  });
+};
+
+export const recheckDocumentGenerationRun = async (req: Request, res: Response) => {
+  if (typeof req.params.runId !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Generation run id is required",
+    });
+  }
+
+  const run = await getDocumentGenerationRunById({ runId: req.params.runId });
+  if (!run) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Generation run not found",
+    });
+  }
+
+  if (run.status !== "blocked") {
+    return res.status(409).json({
+      error: "conflict",
+      message: `Generation run in status ${run.status} cannot be rechecked.`,
+    });
+  }
+
+  const document = await getDocumentById(run.document_id);
+  const draft = await getDocumentIntakeDraftFromDb(run.document_id);
+
+  if (!document || !draft) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document or intake draft not found for generation run",
+    });
+  }
+
+  const selection = await buildMemberFormSelectionForDocument(draft.product_flow_mode);
+  const rulesResult = await deriveMemberFormRulesByJurisdiction(
+    draft.jurisdiction,
+    selection,
+  );
+
+  if (rulesResult.availabilityConflict) {
+    return sendJurisdictionAvailabilityConflict(res, rulesResult.availabilityConflict);
+  }
+
+  if (!rulesResult.contract || rulesResult.missing.length > 0) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Member form requirements not found for one or more selected families",
+      details: rulesResult.missing,
+    });
+  }
+
+  const extractionPayload = await buildMemberFormDocumentExtractionPayload(
+    rulesResult.contract,
+  );
+  const templateArtifact =
+    run.template_key !== "unresolved_template"
+      ? await getActiveTemplateArtifact({
+          templateKey: run.template_key,
+          templateVersion: run.template_version,
+          templateHash: run.template_hash,
+        })
+      : null;
+
+  const outputMetadata =
+    parseOutputBundle(document.output_bundle).find(
+      (entry) => entry.outputKey === run.output_key,
+    )?.metadata ?? {};
+
+  const preparedRun = await prepareGenerationRun({
+    document,
+    draft,
+    outputKey: run.output_key,
+    outputMetadata,
+    ...(run.document_key ? { templateDocumentKey: run.document_key } : {}),
+    templateResolved: run.template_key !== "unresolved_template",
+    templateArtifact,
+    templateKey: run.template_key,
+    templateVersion: run.template_version,
+    templateHash: run.template_hash,
+    extractionPayload,
+  });
+
+  const updatedRun = await updateDocumentGenerationRun(run.id, {
+    template_artifact_id: templateArtifact?.id ?? null,
+    render_context_json: preparedRun.renderContext,
+    blocking_requirements_json: preparedRun.blockingRequirements,
+    resolved_sources_json: preparedRun.resolvedSources,
+    status: preparedRun.status,
+    blocked_at:
+      preparedRun.status === "blocked"
+        ? run.blocked_at ?? new Date().toISOString()
+        : null,
+    error_message: preparedRun.errorMessage,
+  });
+
+  await replaceDocumentOutputSigners({
+    documentId: document.id,
+    generationRunId: run.id,
+    signers: preparedRun.signerObligations,
+  });
+
+  if (preparedRun.status === "queued") {
+    await enqueueDocumentGenerationRun({
+      runId: run.id,
+    });
+  }
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "generation_run",
+    entityId: updatedRun.id,
+    action:
+      updatedRun.status === "blocked"
+        ? "system.generation_run_blocked"
+        : "system.generation_run_queued",
+    metadata: {
+      document_id: updatedRun.document_id,
+      generation_run_id: updatedRun.id,
+      blocker_count: preparedRun.blockingRequirements.length,
+    },
+  });
+
+  const artifactForResponse = updatedRun.template_artifact_id
+    ? await getTemplateArtifactById(updatedRun.template_artifact_id)
+    : null;
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: document.id,
+    generationRunId: updatedRun.id,
+  });
+
+  return res.status(200).json(
+    mapDocumentGenerationRunDetailResponse(
+      updatedRun,
+      artifactForResponse,
+      signerObligations,
+      true,
+    ),
+  );
+};
+
+export const completeDocumentGenerationRun = async (req: Request, res: Response) => {
+  const parsed = generationRunCompleteSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (typeof req.params.runId !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Generation run id is required",
+    });
+  }
+
+  const run = await getDocumentGenerationRunById({ runId: req.params.runId });
+  if (!run) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Generation run not found",
+    });
+  }
+
+  if (!transitionAllowed(run.status, "rendered")) {
+    return res.status(409).json({
+      error: "conflict",
+      message: `Generation run in status ${run.status} cannot be marked rendered.`,
+    });
+  }
+
+  const version = await getDocumentVersionById(
+    parsed.data.documentVersionId,
+    run.document_id,
+  );
+  if (!version) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document version not found",
+    });
+  }
+
+  if (version.generation_run_id !== run.id) {
+    await updateDocumentVersion(version.id, {
+      generation_run_id: run.id,
+    });
+  }
+
+  const updatedRun = await updateDocumentGenerationRun(run.id, {
+    status: "rendered",
+    document_version_id: version.id,
+    rendered_at: new Date().toISOString(),
+    error_message: null,
+    failure_code: null,
+    failure_details_json: {},
+  });
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "generation_run",
+    entityId: updatedRun.id,
+    action: "system.generation_run_render_completed",
+    metadata: {
+      document_id: updatedRun.document_id,
+      generation_run_id: updatedRun.id,
+      document_version_id: version.id,
+    },
+  });
+
+  const templateArtifact = updatedRun.template_artifact_id
+    ? await getTemplateArtifactById(updatedRun.template_artifact_id)
+    : null;
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: updatedRun.document_id,
+    generationRunId: updatedRun.id,
+  });
+
+  return res.status(200).json(
+    mapDocumentGenerationRunDetailResponse(
+      updatedRun,
+      templateArtifact,
+      signerObligations,
+      true,
+    ),
+  );
+};
+
+export const failDocumentGenerationRun = async (req: Request, res: Response) => {
+  const parsed = generationRunFailSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (typeof req.params.runId !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Generation run id is required",
+    });
+  }
+
+  const run = await getDocumentGenerationRunById({ runId: req.params.runId });
+  if (!run) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Generation run not found",
+    });
+  }
+
+  if (!transitionAllowed(run.status, "failed")) {
+    return res.status(409).json({
+      error: "conflict",
+      message: `Generation run in status ${run.status} cannot be marked failed.`,
+    });
+  }
+
+  const updatedRun = await updateDocumentGenerationRun(run.id, {
+    status: "failed",
+    failed_at: new Date().toISOString(),
+    failure_code: parsed.data.failureCode ?? null,
+    failure_details_json: parsed.data.failureDetails ?? {},
+    error_message: parsed.data.message ?? run.error_message,
+  });
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "generation_run",
+    entityId: updatedRun.id,
+    action: "system.generation_run_failed",
+    metadata: {
+      document_id: updatedRun.document_id,
+      generation_run_id: updatedRun.id,
+      failure_code: updatedRun.failure_code,
+    },
+  });
+
+  const templateArtifact = updatedRun.template_artifact_id
+    ? await getTemplateArtifactById(updatedRun.template_artifact_id)
+    : null;
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: updatedRun.document_id,
+    generationRunId: updatedRun.id,
+  });
+
+  return res.status(200).json(
+    mapDocumentGenerationRunDetailResponse(
+      updatedRun,
+      templateArtifact,
+      signerObligations,
+      true,
+    ),
+  );
+};
+
+export const cancelDocumentGenerationRunInternal = async (
+  req: Request,
+  res: Response,
+) => {
+  const parsed = generationRunCancelSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (typeof req.params.runId !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Generation run id is required",
+    });
+  }
+
+  const run = await getDocumentGenerationRunById({ runId: req.params.runId });
+  if (!run) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Generation run not found",
+    });
+  }
+
+  if (!transitionAllowed(run.status, "canceled")) {
+    return res.status(409).json({
+      error: "conflict",
+      message: `Generation run in status ${run.status} cannot be canceled.`,
+    });
+  }
+
+  const updatedRun = await updateDocumentGenerationRun(run.id, {
+    status: "canceled",
+    canceled_at: new Date().toISOString(),
+    cancellation_reason: parsed.data.reason ?? null,
+  });
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "generation_run",
+    entityId: updatedRun.id,
+    action: "system.generation_run_canceled",
+    metadata: {
+      document_id: updatedRun.document_id,
+      generation_run_id: updatedRun.id,
+      cancellation_reason: updatedRun.cancellation_reason,
+    },
+  });
+
+  const templateArtifact = updatedRun.template_artifact_id
+    ? await getTemplateArtifactById(updatedRun.template_artifact_id)
+    : null;
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: updatedRun.document_id,
+    generationRunId: updatedRun.id,
+  });
+
+  return res.status(200).json(
+    mapDocumentGenerationRunDetailResponse(
+      updatedRun,
+      templateArtifact,
+      signerObligations,
+      true,
+    ),
+  );
 };
 
 export const listDocuments = async (req: Request, res: Response) => {
@@ -1431,19 +2100,71 @@ export const getDocumentTimeline = async (req: Request, res: Response) => {
   });
 };
 
-export const getSignatureFields = async (req: Request, res: Response) => {
+export const getDocumentSignerObligations = async (
+  req: Request,
+  res: Response,
+) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const generationRunId =
+    typeof req.query.runId === "string" && req.query.runId.trim().length > 0
+      ? req.query.runId.trim()
+      : undefined;
+
+  const signerObligations = await listDocumentOutputSigners({
+    documentId: document.id,
+    ...(generationRunId ? { generationRunId } : {}),
+  });
+
   res.status(200).json({
-    fields: [
-      {
-        id: "TODO_FIELD_ID",
-        pageNumber: 1,
-        x: 100,
-        y: 200,
-        width: 150,
-        height: 40,
-        required: true,
-      },
-    ],
+    signerObligations: signerObligations.map(mapDocumentOutputSignerResponse),
+  });
+};
+
+export const getSignatureFields = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const explicitRunId =
+    typeof req.query.runId === "string" && req.query.runId.trim().length > 0
+      ? req.query.runId.trim()
+      : null;
+
+  const latestRunId = explicitRunId
+    ? explicitRunId
+    : (await listDocumentGenerationRunsFromDb(document.id))[0]?.id ?? null;
+
+  const signerObligations = latestRunId
+    ? await listDocumentOutputSigners({
+        documentId: document.id,
+        generationRunId: latestRunId,
+      })
+    : [];
+
+  const fields = signerObligations
+    .filter((signer) => signer.obligation_type === "signer")
+    .map((signer, index) => ({
+      id: `signature-field-${signer.id}`,
+      generationRunId: signer.generation_run_id,
+      partyName: signer.party_name,
+      partyRole: signer.party_role,
+      signingGroup: signer.signing_group,
+      pageNumber: 1,
+      x: 72,
+      y: 160 + index * 56,
+      width: 240,
+      height: 36,
+      required: signer.is_required,
+    }));
+
+  res.status(200).json({
+    generationRunId: latestRunId,
+    fields,
   });
 };
 

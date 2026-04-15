@@ -2,13 +2,16 @@ import { Router } from "express";
 import {
   appendAcknowledgment,
   bootstrapDocumentIntakeDraft,
+  cancelDocumentGenerationRun,
   createDocumentGenerationRuns,
   createDocument,
+  getDocumentGenerationRun,
   getDocumentIntakeDraft,
   listDocumentGenerationRuns,
   finalizeDocumentUpload,
   getDocument,
   getDocumentParties,
+  getDocumentSignerObligations,
   getDocumentTimeline,
   getSignatureFields,
   listDocumentVersions,
@@ -67,9 +70,24 @@ router.get(
   listDocumentGenerationRuns,
 );
 router.get(
+  "/:id/generation-runs/:runId",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentGenerationRun,
+);
+router.post(
+  "/:id/generation-runs/:runId/cancel",
+  requireRole(["member", "admin", "service_role"]),
+  cancelDocumentGenerationRun,
+);
+router.get(
   "/:id/parties",
   requireRole(["member", "admin", "service_role"]),
   getDocumentParties
+);
+router.get(
+  "/:id/signer-obligations",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentSignerObligations,
 );
 router.put(
   "/:id/parties",

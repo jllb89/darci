@@ -14,3 +14,6 @@ export const ledgerQueue = connection
 export const webhookQueue = connection
   ? new Queue("webhooks", { connection })
   : null;
+export const generationQueue = connection
+  ? new Queue("generation-runs", { connection })
+  : null;

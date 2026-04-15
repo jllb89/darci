@@ -2,6 +2,7 @@
 
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
 import ProductSelectionBand from "@/app/app/start/ProductSelectionBand";
@@ -154,6 +155,36 @@ const buildDraftSignature = (
   });
 };
 
+const formatDraftUpdatedAtLabel = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toLocaleString();
+};
+
+const formatDraftSavedMessage = (
+  updatedAt: string | null | undefined,
+  revision: number | null | undefined,
+) => {
+  const updatedAtLabel = formatDraftUpdatedAtLabel(updatedAt);
+
+  if (!updatedAtLabel) {
+    return typeof revision === "number"
+      ? `Draft saved (revision ${revision}).`
+      : "Draft saved.";
+  }
+
+  return typeof revision === "number"
+    ? `Draft saved ${updatedAtLabel} (revision ${revision}).`
+    : `Draft saved ${updatedAtLabel}.`;
+};
+
 type LeaveAction =
   | { type: "href"; href: string }
   | { type: "history-back" }
@@ -164,6 +195,7 @@ type LeaveAction =
 export default function StartDocumentPage() {
   const router = useRouter();
   const { accessToken } = useStoredAuth();
+  const { showToast } = useAppToast();
   const [productFlowModes, setProductFlowModes] = useState<ProductFlowModeDefinition[]>([]);
   const [selectedProductFlowMode, setSelectedProductFlowMode] = useState<
     ProductFlowModeKey | ""
@@ -883,6 +915,11 @@ export default function StartDocumentPage() {
             setDraftSaveNotice(
               "Draft changed in another session. Loaded the latest saved version.",
             );
+            showToast({
+              tone: "warning",
+              message: "Draft changed in another session. Loaded the latest saved version.",
+              durationMs: 5000,
+            });
 
             return;
           }
@@ -895,10 +932,26 @@ export default function StartDocumentPage() {
           setDraftUpdatedAt(payload.draft.updatedAt);
           setDraftSaveNotice(null);
           lastServerDraftSignatureRef.current = signature;
+          showToast({
+            tone: "success",
+            message: formatDraftSavedMessage(
+              payload.draft.updatedAt,
+              payload.draft.revision,
+            ),
+            durationMs: 2500,
+          });
         } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Failed to save draft";
+
           setDraftSaveNotice(
-            error instanceof Error ? error.message : "Failed to save draft",
+            message,
           );
+          showToast({
+            tone: "error",
+            message,
+            durationMs: 5000,
+          });
         } finally {
           setIsSavingDraft(false);
         }
@@ -924,16 +977,7 @@ export default function StartDocumentPage() {
   ]);
 
   const draftUpdatedAtLabel = useMemo(() => {
-    if (!draftUpdatedAt) {
-      return null;
-    }
-
-    const parsed = new Date(draftUpdatedAt);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-
-    return parsed.toLocaleString();
+    return formatDraftUpdatedAtLabel(draftUpdatedAt);
   }, [draftUpdatedAt]);
 
   const draftStatusLabel = useMemo(() => {
@@ -1501,6 +1545,10 @@ export default function StartDocumentPage() {
       setDraftRevision(payload.draft.revision);
       setDraftUpdatedAt(payload.draft.updatedAt);
       setDraftSaveNotice("Intake submitted and locked for generation.");
+      showToast({
+        tone: "success",
+        message: "Intake submitted and locked for generation.",
+      });
       setSubmissionErrorMessage(null);
       allowLeavingRef.current = true;
       router.push(`/app/documents/${draftDocumentId}`);

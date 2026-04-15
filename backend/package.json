@@ -9,7 +9,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "worker": "ts-node --preferTsExts src/worker/index.ts",
+    "worker:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/worker/index.ts",
     "test:smoke:upload": "OTEL_SDK_DISABLED=1 ts-node --preferTsExts scripts/smoke-document-upload.ts",
+    "test:integration:staging": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
     "test": "vitest run",
     "test:watch": "vitest"
   },

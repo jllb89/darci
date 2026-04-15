@@ -25,17 +25,27 @@ const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   listDocumentPartiesMock: vi.fn(),
+  listDocumentOutputSignersMock: vi.fn(),
   replaceDocumentPartiesMock: vi.fn(),
+  replaceDocumentOutputSignersMock: vi.fn(),
   getDocumentIntakeDraftMock: vi.fn(),
   saveDocumentIntakeDraftMock: vi.fn(),
   getActiveTemplateRegistryForOutputMock: vi.fn(),
+  getActiveTemplateArtifactMock: vi.fn(),
   createDocumentGenerationRunMock: vi.fn(),
   listDocumentGenerationRunsMock: vi.fn(),
+  getDocumentGenerationRunByIdMock: vi.fn(),
+  getTemplateArtifactByIdMock: vi.fn(),
+  updateDocumentGenerationRunMock: vi.fn(),
+  claimNextQueuedDocumentGenerationRunMock: vi.fn(),
   isDocumentIntakeLockedMock: vi.fn(),
   deriveMemberFormRulesByJurisdictionMock: vi.fn(),
   validateMemberFormSubmissionMock: vi.fn(),
   buildSelectionForModeMock: vi.fn(),
   buildMemberFormDocumentExtractionPayloadMock: vi.fn(),
+  syncDocumentPartiesFromCanonicalAnswersMock: vi.fn(),
+  prepareGenerationRunMock: vi.fn(),
+  recordAuditEventMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -43,14 +53,26 @@ vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentParties: mocks.listDocumentPartiesMock,
+  listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
   replaceDocumentParties: mocks.replaceDocumentPartiesMock,
+  replaceDocumentOutputSigners: mocks.replaceDocumentOutputSignersMock,
   getDocumentIntakeDraft: mocks.getDocumentIntakeDraftMock,
   saveDocumentIntakeDraft: mocks.saveDocumentIntakeDraftMock,
   getActiveTemplateRegistryForOutput:
     mocks.getActiveTemplateRegistryForOutputMock,
+  getActiveTemplateArtifact: mocks.getActiveTemplateArtifactMock,
   createDocumentGenerationRun: mocks.createDocumentGenerationRunMock,
   listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
+  getDocumentGenerationRunById: mocks.getDocumentGenerationRunByIdMock,
+  getTemplateArtifactById: mocks.getTemplateArtifactByIdMock,
+  updateDocumentGenerationRun: mocks.updateDocumentGenerationRunMock,
+  claimNextQueuedDocumentGenerationRun:
+    mocks.claimNextQueuedDocumentGenerationRunMock,
   isDocumentIntakeLocked: mocks.isDocumentIntakeLockedMock,
+}));
+
+vi.mock("../../src/services/auditService", () => ({
+  recordAuditEvent: mocks.recordAuditEventMock,
 }));
 
 vi.mock("../../src/services/memberFormRulesService", async () => {
@@ -64,6 +86,29 @@ vi.mock("../../src/services/memberFormRulesService", async () => {
       mocks.deriveMemberFormRulesByJurisdictionMock,
   };
 });
+
+vi.mock("../../src/services/documentGenerationService", () => ({
+  syncDocumentPartiesFromCanonicalAnswers:
+    mocks.syncDocumentPartiesFromCanonicalAnswersMock,
+  prepareGenerationRun: mocks.prepareGenerationRunMock,
+  mapDocumentOutputSignerResponse: (signer: Record<string, unknown>) => ({
+    id: signer.id,
+    documentId: signer.document_id,
+    generationRunId: signer.generation_run_id,
+    documentPartyId: signer.document_party_id,
+    outputKey: signer.output_key,
+    documentKey: signer.document_key,
+    partyRole: signer.party_role,
+    partyName: signer.party_name,
+    obligationType: signer.obligation_type,
+    signingGroup: signer.signing_group,
+    isRequired: signer.is_required,
+    resolutionSource: signer.resolution_source,
+    sortOrder: signer.sort_order,
+    metadata: signer.metadata ?? {},
+    createdAt: signer.created_at,
+  }),
+}));
 
 vi.mock("../../src/services/memberFormValidationService", async () => {
   const actual = await vi.importActual<typeof import("../../src/services/memberFormValidationService")>(
@@ -92,6 +137,7 @@ vi.mock("../../src/services/memberFormDocumentExtractionService", async () => {
     typeof import("../../src/services/memberFormDocumentExtractionService")
   >("../../src/services/memberFormDocumentExtractionService");
 
+    mocks.recordAuditEventMock.mockReset();
   return {
     ...actual,
     buildMemberFormDocumentExtractionPayload:
@@ -170,17 +216,26 @@ describe("GET documents endpoints", () => {
     mocks.getDocumentByIdMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentPartiesMock.mockReset();
+    mocks.listDocumentOutputSignersMock.mockReset();
     mocks.replaceDocumentPartiesMock.mockReset();
+    mocks.replaceDocumentOutputSignersMock.mockReset();
     mocks.getDocumentIntakeDraftMock.mockReset();
     mocks.saveDocumentIntakeDraftMock.mockReset();
     mocks.getActiveTemplateRegistryForOutputMock.mockReset();
+    mocks.getActiveTemplateArtifactMock.mockReset();
     mocks.createDocumentGenerationRunMock.mockReset();
     mocks.listDocumentGenerationRunsMock.mockReset();
+    mocks.getDocumentGenerationRunByIdMock.mockReset();
+    mocks.getTemplateArtifactByIdMock.mockReset();
+    mocks.updateDocumentGenerationRunMock.mockReset();
+    mocks.claimNextQueuedDocumentGenerationRunMock.mockReset();
     mocks.isDocumentIntakeLockedMock.mockReset();
     mocks.deriveMemberFormRulesByJurisdictionMock.mockReset();
     mocks.validateMemberFormSubmissionMock.mockReset();
     mocks.buildSelectionForModeMock.mockReset();
     mocks.buildMemberFormDocumentExtractionPayloadMock.mockReset();
+    mocks.syncDocumentPartiesFromCanonicalAnswersMock.mockReset();
+    mocks.prepareGenerationRunMock.mockReset();
 
     mocks.isDocumentIntakeLockedMock.mockImplementation(() => false);
     mocks.buildSelectionForModeMock.mockResolvedValue({
@@ -194,6 +249,42 @@ describe("GET documents endpoints", () => {
     mocks.buildMemberFormDocumentExtractionPayloadMock.mockResolvedValue({
       generatedAt: "2026-03-05T00:15:00.000Z",
       documents: [],
+    });
+    mocks.getActiveTemplateArtifactMock.mockResolvedValue(null);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([]);
+    mocks.replaceDocumentOutputSignersMock.mockResolvedValue([]);
+    mocks.syncDocumentPartiesFromCanonicalAnswersMock.mockResolvedValue([]);
+    mocks.prepareGenerationRunMock.mockResolvedValue({
+      document: {
+        id: "doc-1",
+        owner_id: "owner-1",
+        idn: "IDN-1234",
+        status: "draft",
+        document_type: "intake",
+        jurisdiction: "US-CA",
+        product_flow_mode: "trust_bundle",
+        output_bundle: [],
+        intake_status: "submitted",
+        intake_submitted_at: "2026-03-05T00:15:00.000Z",
+        created_at: "2026-03-05T00:00:00.000Z",
+      },
+      documentKey: "poa_general",
+      extractionDocument: {
+        documentKey: "poa_general",
+        templateCoverage: {
+          totalBindings: 10,
+          mappedBindings: 10,
+          missingBindings: 0,
+          systemBindings: 2,
+        },
+        templateBindings: [],
+      },
+      signerObligations: [],
+      renderContext: {},
+      blockingRequirements: [],
+      resolvedSources: {},
+      status: "queued",
+      errorMessage: null,
     });
   });
 
@@ -818,6 +909,12 @@ describe("GET documents endpoints", () => {
         },
       }),
     );
+    expect(mocks.syncDocumentPartiesFromCanonicalAnswersMock).toHaveBeenCalledWith({
+      documentId: "doc-1",
+      canonicalAnswers: {
+        trust_name: "Family Trust",
+      },
+    });
     expect(response.body).toEqual({
       draft: {
         documentId: "doc-1",
@@ -1136,6 +1233,7 @@ describe("GET documents endpoints", () => {
       template_key: "ca_poa_general",
       template_version: "2026.04.14.v1",
       template_hash: "sha256:ca-poadoc-v1",
+      template_artifact_id: "artifact-1",
       payload_json: {
         revision: 7,
         canonicalAnswers: {
@@ -1145,9 +1243,35 @@ describe("GET documents endpoints", () => {
       coverage_json: {
         documentKey: "poa_general",
       },
+      render_context_json: {},
+      blocking_requirements_json: [],
+      resolved_sources_json: {},
       status: "queued",
+      renderer_job_id: null,
+      document_version_id: null,
+      blocked_at: null,
+      started_at: null,
+      rendered_at: null,
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
       error_message: null,
       created_at: "2026-03-05T00:20:00.000Z",
+    });
+    mocks.getActiveTemplateArtifactMock.mockResolvedValue({
+      id: "artifact-1",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      artifact_storage_path: "templates/ca_poa_general.docx",
+      artifact_mime_type:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      render_engine: "docx_template",
+      artifact_metadata: {},
+      is_active: true,
+      created_at: "2026-04-14T00:00:00.000Z",
     });
 
     const token = signToken({
@@ -1203,13 +1327,27 @@ describe("GET documents endpoints", () => {
         template_key: "ca_poa_general",
         template_version: "2026.04.14.v1",
         template_hash: "sha256:ca-poadoc-v1",
+        template_artifact_id: "artifact-1",
         payload_json: {
           revision: 7,
         },
         coverage_json: {
           documentKey: "poa_general",
         },
+        render_context_json: {},
+        blocking_requirements_json: [],
+        resolved_sources_json: {},
         status: "queued",
+        renderer_job_id: null,
+        document_version_id: null,
+        blocked_at: null,
+        started_at: null,
+        rendered_at: null,
+        failed_at: null,
+        canceled_at: null,
+        failure_code: null,
+        failure_details_json: {},
+        cancellation_reason: null,
         error_message: null,
         created_at: "2026-03-05T00:20:00.000Z",
       },
@@ -1244,11 +1382,372 @@ describe("GET documents endpoints", () => {
           coverage: {
             documentKey: "poa_general",
           },
+          documentVersionId: null,
+          blockedCount: 0,
           status: "queued",
           errorMessage: null,
+          blockedAt: null,
+          startedAt: null,
+          renderedAt: null,
+          failedAt: null,
+          canceledAt: null,
           createdAt: "2026-03-05T00:20:00.000Z",
         },
       ],
+    });
+  });
+
+  it("gets generation run detail", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getDocumentGenerationRunByIdMock.mockResolvedValue({
+      id: "run-1",
+      document_id: "doc-1",
+      intake_revision: 7,
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      template_artifact_id: "artifact-1",
+      payload_json: { revision: 7 },
+      coverage_json: { documentKey: "poa_general" },
+      render_context_json: { placeholders: {} },
+      blocking_requirements_json: [],
+      resolved_sources_json: { member_form: 3 },
+      status: "queued",
+      renderer_job_id: null,
+      document_version_id: null,
+      blocked_at: null,
+      started_at: null,
+      rendered_at: null,
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+      error_message: null,
+      created_at: "2026-03-05T00:20:00.000Z",
+    });
+    mocks.getTemplateArtifactByIdMock.mockResolvedValue({
+      id: "artifact-1",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      artifact_storage_path: "templates/ca_poa_general.docx",
+      artifact_mime_type:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      render_engine: "docx_template",
+      artifact_metadata: {},
+      is_active: true,
+      created_at: "2026-04-14T00:00:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/generation-runs/run-1?includeDebug=true",
+      "gets generation run detail",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.run).toMatchObject({
+      id: "run-1",
+      documentId: "doc-1",
+      templateArtifact: {
+        id: "artifact-1",
+        renderEngine: "docx_template",
+      },
+      signerObligations: [],
+      renderContext: { placeholders: {} },
+      resolvedSources: { member_form: 3 },
+    });
+  });
+
+  it("lists signer obligations for a document", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      {
+        id: "obligation-1",
+        document_id: "doc-1",
+        generation_run_id: "run-1",
+        document_party_id: "party-1",
+        output_key: "poa_document",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Pat Principal",
+        obligation_type: "signer",
+        signing_group: "principal_only",
+        is_required: true,
+        resolution_source: "template",
+        sort_order: 0,
+        metadata: {},
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/signer-obligations",
+      "lists signer obligations",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      signerObligations: [
+        {
+          id: "obligation-1",
+          documentId: "doc-1",
+          generationRunId: "run-1",
+          documentPartyId: "party-1",
+          outputKey: "poa_document",
+          documentKey: "poa_general",
+          partyRole: "principal",
+          partyName: "Pat Principal",
+          obligationType: "signer",
+          signingGroup: "principal_only",
+          isRequired: true,
+          resolutionSource: "template",
+          sortOrder: 0,
+          metadata: {},
+          createdAt: "2026-03-05T00:20:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("derives signature fields from signer obligations", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-1",
+        document_id: "doc-1",
+        intake_revision: 7,
+        output_key: "poa_document",
+        document_key: "poa_general",
+        template_key: "ca_poa_general",
+        template_version: "2026.04.14.v1",
+        template_hash: "sha256:ca-poadoc-v1",
+        template_artifact_id: "artifact-1",
+        payload_json: {},
+        coverage_json: {},
+        render_context_json: {},
+        blocking_requirements_json: [],
+        resolved_sources_json: {},
+        status: "queued",
+        renderer_job_id: null,
+        document_version_id: null,
+        blocked_at: null,
+        started_at: null,
+        rendered_at: null,
+        failed_at: null,
+        canceled_at: null,
+        failure_code: null,
+        failure_details_json: {},
+        cancellation_reason: null,
+        error_message: null,
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      {
+        id: "obligation-1",
+        document_id: "doc-1",
+        generation_run_id: "run-1",
+        document_party_id: "party-1",
+        output_key: "poa_document",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Pat Principal",
+        obligation_type: "signer",
+        signing_group: "principal_only",
+        is_required: true,
+        resolution_source: "template",
+        sort_order: 0,
+        metadata: {},
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+      {
+        id: "obligation-2",
+        document_id: "doc-1",
+        generation_run_id: "run-1",
+        document_party_id: "party-1",
+        output_key: "poa_document",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Pat Principal",
+        obligation_type: "acknowledger",
+        signing_group: "principal_only",
+        is_required: true,
+        resolution_source: "template",
+        sort_order: 1,
+        metadata: {},
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/signature-fields",
+      "derives signature fields",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      generationRunId: "run-1",
+      fields: [
+        {
+          id: "signature-field-obligation-1",
+          generationRunId: "run-1",
+          partyName: "Pat Principal",
+          partyRole: "principal",
+          signingGroup: "principal_only",
+          pageNumber: 1,
+          x: 72,
+          y: 160,
+          width: 240,
+          height: 36,
+          required: true,
+        },
+      ],
+    });
+  });
+
+  it("cancels a queued generation run", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getDocumentGenerationRunByIdMock.mockResolvedValue({
+      id: "run-1",
+      document_id: "doc-1",
+      intake_revision: 7,
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      template_artifact_id: null,
+      payload_json: {},
+      coverage_json: {},
+      render_context_json: {},
+      blocking_requirements_json: [],
+      resolved_sources_json: {},
+      status: "queued",
+      renderer_job_id: null,
+      document_version_id: null,
+      blocked_at: null,
+      started_at: null,
+      rendered_at: null,
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+      error_message: null,
+      created_at: "2026-03-05T00:20:00.000Z",
+    });
+    mocks.updateDocumentGenerationRunMock.mockResolvedValue({
+      id: "run-1",
+      document_id: "doc-1",
+      intake_revision: 7,
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      template_artifact_id: null,
+      payload_json: {},
+      coverage_json: {},
+      render_context_json: {},
+      blocking_requirements_json: [],
+      resolved_sources_json: {},
+      status: "canceled",
+      renderer_job_id: null,
+      document_version_id: null,
+      blocked_at: null,
+      started_at: null,
+      rendered_at: null,
+      failed_at: null,
+      canceled_at: "2026-03-05T00:30:00.000Z",
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: "Superseded by newer run",
+      error_message: null,
+      created_at: "2026-03-05T00:20:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/generation-runs/run-1/cancel",
+      { reason: "Superseded by newer run" },
+      "cancels generation run",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.run).toMatchObject({
+      id: "run-1",
+      status: "canceled",
+      cancellationReason: "Superseded by newer run",
     });
   });
 });

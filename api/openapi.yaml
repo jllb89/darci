@@ -966,6 +966,285 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/generation-runs/{runId}:
+    get:
+      summary: Get document generation run detail
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: includeDebug
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/generation-runs/{runId}/cancel:
+    post:
+      summary: Cancel document generation run
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentGenerationRunCancelRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/generation-runs/claim-next:
+    post:
+      summary: Claim next queued generation run
+      x-roles:
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimGenerationRunRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimGenerationRunResponse"
+        "204":
+          description: No queued generation run available
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/generation-runs/{runId}/recheck:
+    post:
+      summary: Recheck blocked generation run
+      x-roles:
+        - service_role
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/generation-runs/{runId}/complete:
+    post:
+      summary: Mark generation run rendered
+      x-roles:
+        - service_role
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteGenerationRunRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/generation-runs/{runId}/fail:
+    post:
+      summary: Mark generation run failed
+      x-roles:
+        - service_role
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FailGenerationRunRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/generation-runs/{runId}/cancel:
+    post:
+      summary: Cancel generation run internally
+      x-roles:
+        - service_role
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentGenerationRunCancelRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/parties:
     get:
       summary: List document parties
@@ -3083,18 +3362,170 @@ components:
         coverage:
           type: object
           additionalProperties: true
+        documentVersionId:
+          type: string
+          nullable: true
+        blockedCount:
+          type: integer
+          minimum: 0
         status:
           type: string
           enum:
             - queued
+            - blocked
+            - rendering
             - rendered
             - failed
+            - canceled
+        errorMessage:
+          type: string
+          nullable: true
+        blockedAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        renderedAt:
+          type: string
+          format: date-time
+          nullable: true
+        failedAt:
+          type: string
+          format: date-time
+          nullable: true
+        canceledAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    TemplateArtifact:
+      type: object
+      properties:
+        id:
+          type: string
+        storagePath:
+          type: string
+        mimeType:
+          type: string
+        renderEngine:
+          type: string
+          enum:
+            - pdf_form
+            - docx_template
+            - html_pdf
+            - other
+    GenerationRunBlocker:
+      type: object
+      properties:
+        code:
+          type: string
+        source:
+          type: string
+          nullable: true
+        field:
+          type: string
+          nullable: true
+        message:
+          type: string
+        blocking:
+          type: boolean
+    DocumentGenerationRunDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        intakeRevision:
+          type: integer
+          minimum: 1
+        outputKey:
+          type: string
+        documentKey:
+          type: string
+        templateKey:
+          type: string
+        templateVersion:
+          type: string
+        templateHash:
+          type: string
+        templateArtifact:
+          allOf:
+            - $ref: "#/components/schemas/TemplateArtifact"
+          nullable: true
+        status:
+          type: string
+          enum:
+            - queued
+            - blocked
+            - rendering
+            - rendered
+            - failed
+            - canceled
+        payload:
+          type: object
+          additionalProperties: true
+        coverage:
+          type: object
+          additionalProperties: true
+        blockingRequirements:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenerationRunBlocker"
+        rendererJobId:
+          type: string
+          nullable: true
+        documentVersionId:
+          type: string
+          nullable: true
+        failureCode:
+          type: string
+          nullable: true
+        failureDetails:
+          type: object
+          additionalProperties: true
+        cancellationReason:
+          type: string
+          nullable: true
         errorMessage:
           type: string
           nullable: true
         createdAt:
           type: string
           format: date-time
+        blockedAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        renderedAt:
+          type: string
+          format: date-time
+          nullable: true
+        failedAt:
+          type: string
+          format: date-time
+          nullable: true
+        canceledAt:
+          type: string
+          format: date-time
+          nullable: true
+        renderContext:
+          type: object
+          additionalProperties: true
+        resolvedSources:
+          type: object
+          additionalProperties: true
     DocumentGenerationRunCreateRequest:
       type: object
       properties:
@@ -3111,6 +3542,59 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DocumentGenerationRun"
+    DocumentGenerationRunDetailResponse:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/DocumentGenerationRunDetail"
+    DocumentGenerationRunCancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    ClaimGenerationRunRequest:
+      type: object
+      required:
+        - workerId
+      properties:
+        workerId:
+          type: string
+    ClaimGenerationRunResponse:
+      type: object
+      properties:
+        run:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum:
+                - rendering
+            rendererJobId:
+              type: string
+            startedAt:
+              type: string
+              format: date-time
+    CompleteGenerationRunRequest:
+      type: object
+      required:
+        - documentVersionId
+      properties:
+        documentVersionId:
+          type: string
+          format: uuid
+    FailGenerationRunRequest:
+      type: object
+      properties:
+        failureCode:
+          type: string
+        message:
+          type: string
+        failureDetails:
+          type: object
+          additionalProperties: true
     DocumentPartyRole:
       type: string
       enum:

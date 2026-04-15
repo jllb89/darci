@@ -6,6 +6,8 @@ Related:
 - docs/product-mode-and-trust-roadmap.md
 - docs/template-binding-rules-admin-api-contract.md
 - docs/admin-dashboard-template-binding-rules-guide.md
+- docs/pdf-generation-prerequisites-roadmap.md
+- docs/pdf-generation-phase-1-schema-and-api-contract.md
 
 ## Delivery Status Snapshot (2026-04-14)
 
@@ -62,6 +64,8 @@ At submit time, each document has:
 - immutable revision history for autosave/submit events,
 - one finalized intake payload snapshot used for generation,
 - output generation runs linked to specific template version/hash,
+- output-scoped signer obligations resolved from the selected templates and jurisdiction rules,
+- render-ready context or explicit blockers for system/notary/signing-stage values,
 - traceable coverage status for required placeholders.
 
 At runtime:
@@ -145,6 +149,59 @@ Link generated files in `document_versions` by adding nullable `generation_run_i
 
 Use this as source-of-truth for deterministic generation.
 
+## 4.6 Add output-scoped signer obligations
+Keep `document_parties` as the document-wide contact roster, but add a signer-obligation snapshot keyed to the generated output.
+
+Suggested table: `document_output_signers`
+- `id uuid primary key default gen_random_uuid()`
+- `document_id uuid not null references documents(id) on delete cascade`
+- `generation_run_id uuid not null references document_generation_runs(id) on delete cascade`
+- `document_party_id uuid references document_parties(id) on delete set null`
+- `output_key text not null`
+- `document_key text not null`
+- `party_role text not null`
+- `party_name text not null`
+- `obligation_type text not null` (`signer|acknowledger|witness|notary`)
+- `signing_group text` (ex: `trustees_all`, `trustmakers_all`, `principal_only`)
+- `is_required boolean not null default true`
+- `resolution_source text not null` (`template|jurisdiction_rule|manual_override`)
+- `sort_order integer not null default 0`
+- `created_at timestamptz not null default now()`
+
+Notes:
+- Store both `document_party_id` and a party snapshot (`party_name`, `party_role`) so generation remains deterministic even if the contact roster later changes.
+- This lets future signing/notification systems know exactly who must sign each generated output.
+
+## 4.7 Extend generation-run render state
+Current `document_generation_runs` rows pin template version/hash and coverage, but they do not yet persist enough state for real PDF rendering.
+
+Add or persist equivalent fields for:
+- `render_context_json jsonb not null default '{}'::jsonb`
+- `blocking_requirements_json jsonb not null default '{}'::jsonb`
+- `renderer_job_id text`
+- `started_at timestamptz`
+- `rendered_at timestamptz`
+- `failed_at timestamptz`
+- `document_version_id uuid references document_versions(id) on delete set null`
+
+Status should likely expand to at least:
+- `queued|blocked|rendering|rendered|failed`
+
+Notes:
+- `payload_json` currently stores canonical answers, not the fully resolved placeholder/value context the renderer will consume.
+- `blocking_requirements_json` should capture unresolved system/notary/signing-stage values that coverage alone does not detect.
+
+## 4.8 Add template artifact locator metadata
+`template_registry` currently pins `template_key + template_version + template_hash`, but it does not identify where the real renderable artifact lives or which renderer should be used.
+
+Add either columns on `template_registry` or a companion table keyed by (`template_key`, `template_version`) for:
+- `artifact_storage_path text` or `artifact_url text`
+- `artifact_mime_type text`
+- `render_engine text` (`pdf_form|docx_template|html_pdf|other`)
+- `artifact_metadata jsonb not null default '{}'::jsonb`
+
+Without this, a worker can verify the template version but still cannot fetch the actual source template.
+
 ## 5) API Roadmap
 
 Phase 1 APIs (draft persistence):
@@ -166,6 +223,15 @@ Phase 3 APIs (generation orchestration):
   - one run per required output
   - stores template version/hash and coverage snapshot
 - `GET /documents/:id/generation-runs`
+
+Phase 4 APIs (render preparation + signer obligations):
+- `GET /documents/:id/signer-obligations`
+  - lists output-scoped signer obligations derived at submit/generation time
+- `GET /documents/:id/generation-runs/:runId`
+  - returns render context, blockers, signer obligations, and linked rendered version when available
+- internal/service endpoint or worker contract to move a generation run through `blocked|rendering|rendered|failed`
+- `GET /documents/:id/signature-fields`
+  - should become version-aware and signer-aware, not a generic stub
 
 ## 6) CA/OH Launch Strategy for Jurisdiction + Versioning
 
@@ -210,11 +276,48 @@ Phase 3 APIs (generation orchestration):
 
 ## 7.3 Coverage gaps for trust certificate output
 1. Trust bundle outputs include `trust_certificate` but extraction bindings are not currently defined as a dedicated `trust_certificate` document key contract.
+- Clarification: `trust_rrr` already covers the Trust Registration Amendment template. The remaining gap is the separate Trust Certification template, which uses different placeholder names (`Trust.No`, `Trust.RegDate`, `NotaryState`, lowercase `illuminotary`, and `Trust.Name`/`TrustName` variants).
 - Action: add explicit binding config for trust certificate placeholders and coverage assertions.
 
 2. Certification placeholders needing explicit source decision
 - `Trust.RegDate`, `Trust.No`, and notary block values should be tagged as `system` or `notary` with clear source pipeline.
 - Action: add placeholder-level source mapping and gate generation if unresolved.
+
+## 7.4 Signer obligation gap
+1. Signer identity is not currently persisted per output.
+- `document_parties.is_signing_party` exists only at the document level, but trust bundles can produce outputs with different signer sets.
+- Action: resolve signer obligations per generated output/document_key and persist them as part of submit/generation metadata.
+
+2. California template review shows output-specific signer rules.
+- `trust_rrr` / Trust Registration Amendment includes signature blocks for trustmakers and trustees, while the acknowledgment block currently names trustmakers.
+- `trust_certificate` states that all currently acting trustees sign and its acknowledgment block names trustees, but the template also includes a trustmaker signature block that should be clarified before trustmakers are treated as required signers for notification/routing purposes.
+- `poa_general` / CA DDPOA includes only the principal execution signature block; agents are appointed parties, not document signers in the current California template.
+
+3. Recommended persistence shape
+- Keep `document_parties` as the contact roster.
+- Add output-scoped signer metadata so later PDF-signing and notification workflows know exactly which parties must sign which generated output.
+
+4. Related gap: notarial appearance parties are not always the same as signers.
+- In California trust templates, the signature section and acknowledgment section do not always name the same party set.
+- Action: persist notarial appearance/acknowledgment participants separately from signer obligations when template text requires it.
+
+## 7.5 Backend/API prerequisites before PDF generation roadmap
+1. Auto-sync `document_parties` from submit.
+- The roster API exists, but member-form submit/generation does not currently populate it from canonical intake answers.
+
+2. Persist resolved render context, not only canonical answers.
+- `document_generation_runs.payload_json` currently stores canonical answers, while the renderer will need resolved placeholder/value pairs.
+
+3. Add a renderability gate beyond template coverage.
+- Current coverage treats `system`, `notary`, and `signing` placeholders as covered even if no runtime value provider exists.
+- PDF generation needs explicit blocker reporting for missing values such as registry numbers, registration dates, notary venue fields, or signing-stage dates.
+
+4. Make generation runs version-aware and worker-aware.
+- There is currently no backend/API path that turns a queued generation run into a rendered `document_version` and records lifecycle timestamps.
+
+5. Make signature APIs signer-aware.
+- `GET /documents/:id/signature-fields` is currently a stub and does not identify which signer obligation or party each field belongs to.
+- Signature records currently link to the document owner rather than an output-scoped signer obligation.
 
 ## 8) Implementation Phases
 

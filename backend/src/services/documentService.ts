@@ -12,7 +12,7 @@ type UserRecord = {
   role: string | null;
 };
 
-type DocumentRecord = {
+export type DocumentRecord = {
   id: string;
   owner_id: string;
   idn: string | null;
@@ -30,7 +30,7 @@ type DocumentRecord = {
   updated_at: string | null;
 };
 
-type DocumentVersionRecord = {
+export type DocumentVersionRecord = {
   id: string;
   document_id: string;
   version: number;
@@ -58,6 +58,41 @@ export type TemplateRegistryRecord = {
   created_at: string;
 };
 
+export type TemplateArtifactRenderEngine =
+  | "pdf_form"
+  | "docx_template"
+  | "html_pdf"
+  | "other";
+
+export type TemplateArtifactRecord = {
+  id: string;
+  template_key: string;
+  template_version: string;
+  template_hash: string;
+  artifact_storage_path: string;
+  artifact_mime_type: string;
+  render_engine: TemplateArtifactRenderEngine;
+  artifact_metadata: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type GenerationRunStatus =
+  | "queued"
+  | "blocked"
+  | "rendering"
+  | "rendered"
+  | "failed"
+  | "canceled";
+
+export type GenerationRunBlockingRequirement = {
+  code: string;
+  source?: string;
+  field?: string;
+  message: string;
+  blocking: boolean;
+};
+
 export type DocumentGenerationRunRecord = {
   id: string;
   document_id: string;
@@ -67,9 +102,23 @@ export type DocumentGenerationRunRecord = {
   template_key: string;
   template_version: string;
   template_hash: string;
+  template_artifact_id: string | null;
   payload_json: Record<string, unknown>;
   coverage_json: Record<string, unknown>;
-  status: "queued" | "rendered" | "failed";
+  render_context_json: Record<string, unknown>;
+  blocking_requirements_json: GenerationRunBlockingRequirement[];
+  resolved_sources_json: Record<string, unknown>;
+  status: GenerationRunStatus;
+  renderer_job_id: string | null;
+  document_version_id: string | null;
+  blocked_at: string | null;
+  started_at: string | null;
+  rendered_at: string | null;
+  failed_at: string | null;
+  canceled_at: string | null;
+  failure_code: string | null;
+  failure_details_json: Record<string, unknown>;
+  cancellation_reason: string | null;
   error_message: string | null;
   created_at: string;
 };
@@ -152,8 +201,82 @@ export type DocumentPartyUpsertInput = {
   metadata: Record<string, unknown>;
 };
 
+export type DocumentOutputObligationType =
+  | "signer"
+  | "acknowledger"
+  | "witness"
+  | "notary";
+
+export type DocumentOutputResolutionSource =
+  | "template"
+  | "jurisdiction_rule"
+  | "manual_override";
+
+export type DocumentOutputSignerRecord = {
+  id: string;
+  document_id: string;
+  generation_run_id: string;
+  document_party_id: string | null;
+  output_key: string;
+  document_key: string;
+  party_role: string;
+  party_name: string;
+  obligation_type: DocumentOutputObligationType;
+  signing_group: string | null;
+  is_required: boolean;
+  resolution_source: DocumentOutputResolutionSource;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type DocumentOutputSignerUpsertInput = {
+  document_party_id?: string | null;
+  output_key: string;
+  document_key: string;
+  party_role: string;
+  party_name: string;
+  obligation_type: DocumentOutputObligationType;
+  signing_group?: string | null;
+  is_required: boolean;
+  resolution_source: DocumentOutputResolutionSource;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+};
+
+export type DocumentSystemValueSource =
+  | "document_idn"
+  | "submission_timestamp"
+  | "derived_url"
+  | "static_template_text"
+  | "template_profile";
+
+export type DocumentSystemValueRecord = {
+  id: string;
+  document_id: string;
+  system_key: string;
+  value_json: unknown;
+  source: DocumentSystemValueSource;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DocumentSystemValueUpsertInput = {
+  systemKey: string;
+  value: unknown;
+  source: DocumentSystemValueSource;
+  metadata?: Record<string, unknown>;
+};
+
 const documentPartySelectColumns =
   "id, document_id, party_role, full_name, email, phone_country_code, phone, is_signing_party, sort_order, metadata, created_at, updated_at";
+
+const documentOutputSignerSelectColumns =
+  "id, document_id, generation_run_id, document_party_id, output_key, document_key, party_role, party_name, obligation_type, signing_group, is_required, resolution_source, sort_order, metadata, created_at";
+
+const documentSystemValueSelectColumns =
+  "id, document_id, system_key, value_json, source, metadata, created_at, updated_at";
 
 const documentSelectColumns =
   "id, owner_id, idn, status, document_type, jurisdiction, product_flow_mode, selected_families, output_bundle, intake_status, intake_schema_version, intake_last_saved_at, intake_submitted_at, created_at, updated_at";
@@ -164,8 +287,11 @@ const documentIntakeDraftSelectColumns =
 const templateRegistrySelectColumns =
   "id, jurisdiction, output_key, document_key, template_key, template_version, template_hash, effective_from, effective_to, is_active, created_at";
 
+const templateArtifactSelectColumns =
+  "id, template_key, template_version, template_hash, artifact_storage_path, artifact_mime_type, render_engine, artifact_metadata, is_active, created_at";
+
 const documentGenerationRunSelectColumns =
-  "id, document_id, intake_revision, output_key, document_key, template_key, template_version, template_hash, payload_json, coverage_json, status, error_message, created_at";
+  "id, document_id, intake_revision, output_key, document_key, template_key, template_version, template_hash, template_artifact_id, payload_json, coverage_json, render_context_json, blocking_requirements_json, resolved_sources_json, status, renderer_job_id, document_version_id, blocked_at, started_at, rendered_at, failed_at, canceled_at, failure_code, failure_details_json, cancellation_reason, error_message, created_at";
 
 export type SaveDocumentIntakeDraftInput = {
   documentId: string;
@@ -216,11 +342,49 @@ export type CreateDocumentGenerationRunInput = {
   templateKey: string;
   templateVersion: string;
   templateHash: string;
+  templateArtifactId?: string | null;
   payload: Record<string, unknown>;
   coverage: Record<string, unknown>;
-  status: "queued" | "rendered" | "failed";
+  renderContext?: Record<string, unknown>;
+  blockingRequirements?: GenerationRunBlockingRequirement[];
+  resolvedSources?: Record<string, unknown>;
+  status: GenerationRunStatus;
+  rendererJobId?: string | null;
+  documentVersionId?: string | null;
+  blockedAt?: string | null;
+  startedAt?: string | null;
+  renderedAt?: string | null;
+  failedAt?: string | null;
+  canceledAt?: string | null;
+  failureCode?: string | null;
+  failureDetails?: Record<string, unknown>;
+  cancellationReason?: string | null;
   errorMessage?: string | null;
 };
+
+export type UpdateDocumentGenerationRunInput = Partial<
+  Pick<
+    DocumentGenerationRunRecord,
+    | "template_artifact_id"
+    | "payload_json"
+    | "coverage_json"
+    | "render_context_json"
+    | "blocking_requirements_json"
+    | "resolved_sources_json"
+    | "status"
+    | "renderer_job_id"
+    | "document_version_id"
+    | "blocked_at"
+    | "started_at"
+    | "rendered_at"
+    | "failed_at"
+    | "canceled_at"
+    | "failure_code"
+    | "failure_details_json"
+    | "cancellation_reason"
+    | "error_message"
+  >
+>;
 
 export const isDocumentIntakeLocked = (document: {
   intake_status?: string | null;
@@ -412,6 +576,55 @@ export const listDocumentVersions = async (documentId: string) => {
   return (data ?? []) as DocumentVersionRecord[];
 };
 
+export const createGeneratedDocumentVersion = async (input: {
+  documentId: string;
+  generationRunId: string;
+  storagePath: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdBy?: string | null;
+  isFinal?: boolean;
+}) => {
+  const { data: latestVersion, error: latestVersionError } = await supabaseAdmin
+    .from("document_versions")
+    .select("version")
+    .eq("document_id", input.documentId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestVersionError) {
+    throw new Error(latestVersionError.message);
+  }
+
+  const nextVersion = ((latestVersion as { version: number } | null)?.version ?? 0) + 1;
+
+  const { data, error } = await supabaseAdmin
+    .from("document_versions")
+    .insert({
+      document_id: input.documentId,
+      version: nextVersion,
+      storage_path: input.storagePath,
+      file_name: input.fileName,
+      mime_type: input.mimeType,
+      size_bytes: input.sizeBytes,
+      is_final: input.isFinal ?? false,
+      generation_run_id: input.generationRunId,
+      created_by: input.createdBy ?? null,
+    })
+    .select(
+      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, generation_run_id, created_by, created_at"
+    )
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create generated document version");
+  }
+
+  return data as DocumentVersionRecord;
+};
+
 export const updateDocumentVersion = async (
   documentVersionId: string,
   updates: Partial<
@@ -539,6 +752,43 @@ export const getActiveTemplateRegistryForOutput = async (input: {
   return resolved ?? null;
 };
 
+export const getActiveTemplateArtifact = async (input: {
+  templateKey: string;
+  templateVersion: string;
+  templateHash: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("template_artifacts")
+    .select(templateArtifactSelectColumns)
+    .eq("template_key", input.templateKey)
+    .eq("template_version", input.templateVersion)
+    .eq("template_hash", input.templateHash)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as TemplateArtifactRecord | null;
+};
+
+export const getTemplateArtifactById = async (artifactId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("template_artifacts")
+    .select(templateArtifactSelectColumns)
+    .eq("id", artifactId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as TemplateArtifactRecord | null;
+};
+
 export const listDocumentGenerationRuns = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("document_generation_runs")
@@ -551,6 +801,29 @@ export const listDocumentGenerationRuns = async (documentId: string) => {
   }
 
   return (data ?? []) as DocumentGenerationRunRecord[];
+};
+
+export const getDocumentGenerationRunById = async (input: {
+  runId: string;
+  documentId?: string;
+}) => {
+  let query = supabaseAdmin
+    .from("document_generation_runs")
+    .select(documentGenerationRunSelectColumns)
+    .eq("id", input.runId)
+    .limit(1);
+
+  if (input.documentId) {
+    query = query.eq("document_id", input.documentId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as DocumentGenerationRunRecord | null;
 };
 
 export const createDocumentGenerationRun = async (
@@ -566,9 +839,23 @@ export const createDocumentGenerationRun = async (
       template_key: input.templateKey,
       template_version: input.templateVersion,
       template_hash: input.templateHash,
+      template_artifact_id: input.templateArtifactId ?? null,
       payload_json: input.payload,
       coverage_json: input.coverage,
+      render_context_json: input.renderContext ?? {},
+      blocking_requirements_json: input.blockingRequirements ?? [],
+      resolved_sources_json: input.resolvedSources ?? {},
       status: input.status,
+      renderer_job_id: input.rendererJobId ?? null,
+      document_version_id: input.documentVersionId ?? null,
+      blocked_at: input.blockedAt ?? null,
+      started_at: input.startedAt ?? null,
+      rendered_at: input.renderedAt ?? null,
+      failed_at: input.failedAt ?? null,
+      canceled_at: input.canceledAt ?? null,
+      failure_code: input.failureCode ?? null,
+      failure_details_json: input.failureDetails ?? {},
+      cancellation_reason: input.cancellationReason ?? null,
       error_message: input.errorMessage ?? null,
     })
     .select(documentGenerationRunSelectColumns)
@@ -579,6 +866,156 @@ export const createDocumentGenerationRun = async (
   }
 
   return data as DocumentGenerationRunRecord;
+};
+
+export const updateDocumentGenerationRun = async (
+  runId: string,
+  updates: UpdateDocumentGenerationRunInput,
+) => {
+  const mappedUpdates: Record<string, unknown> = {};
+
+  if ("template_artifact_id" in updates) {
+    mappedUpdates.template_artifact_id = updates.template_artifact_id ?? null;
+  }
+  if ("payload_json" in updates) {
+    mappedUpdates.payload_json = updates.payload_json ?? {};
+  }
+  if ("coverage_json" in updates) {
+    mappedUpdates.coverage_json = updates.coverage_json ?? {};
+  }
+  if ("render_context_json" in updates) {
+    mappedUpdates.render_context_json = updates.render_context_json ?? {};
+  }
+  if ("blocking_requirements_json" in updates) {
+    mappedUpdates.blocking_requirements_json = updates.blocking_requirements_json ?? [];
+  }
+  if ("resolved_sources_json" in updates) {
+    mappedUpdates.resolved_sources_json = updates.resolved_sources_json ?? {};
+  }
+  if ("status" in updates) {
+    mappedUpdates.status = updates.status ?? null;
+  }
+  if ("renderer_job_id" in updates) {
+    mappedUpdates.renderer_job_id = updates.renderer_job_id ?? null;
+  }
+  if ("document_version_id" in updates) {
+    mappedUpdates.document_version_id = updates.document_version_id ?? null;
+  }
+  if ("blocked_at" in updates) {
+    mappedUpdates.blocked_at = updates.blocked_at ?? null;
+  }
+  if ("started_at" in updates) {
+    mappedUpdates.started_at = updates.started_at ?? null;
+  }
+  if ("rendered_at" in updates) {
+    mappedUpdates.rendered_at = updates.rendered_at ?? null;
+  }
+  if ("failed_at" in updates) {
+    mappedUpdates.failed_at = updates.failed_at ?? null;
+  }
+  if ("canceled_at" in updates) {
+    mappedUpdates.canceled_at = updates.canceled_at ?? null;
+  }
+  if ("failure_code" in updates) {
+    mappedUpdates.failure_code = updates.failure_code ?? null;
+  }
+  if ("failure_details_json" in updates) {
+    mappedUpdates.failure_details_json = updates.failure_details_json ?? {};
+  }
+  if ("cancellation_reason" in updates) {
+    mappedUpdates.cancellation_reason = updates.cancellation_reason ?? null;
+  }
+  if ("error_message" in updates) {
+    mappedUpdates.error_message = updates.error_message ?? null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("document_generation_runs")
+    .update(mappedUpdates)
+    .eq("id", runId)
+    .select(documentGenerationRunSelectColumns)
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to update generation run");
+  }
+
+  return data as DocumentGenerationRunRecord;
+};
+
+export const claimNextQueuedDocumentGenerationRun = async (input: {
+  rendererJobId: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_generation_runs")
+    .select(documentGenerationRunSelectColumns)
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const nextRun = ((data ?? []) as DocumentGenerationRunRecord[])[0] ?? null;
+  if (!nextRun) {
+    return null;
+  }
+
+  const startedAt = new Date().toISOString();
+  const { data: claimed, error: claimError } = await supabaseAdmin
+    .from("document_generation_runs")
+    .update({
+      status: "rendering",
+      renderer_job_id: input.rendererJobId,
+      started_at: startedAt,
+      failed_at: null,
+      canceled_at: null,
+      error_message: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+    })
+    .eq("id", nextRun.id)
+    .eq("status", "queued")
+    .select(documentGenerationRunSelectColumns)
+    .maybeSingle();
+
+  if (claimError) {
+    throw new Error(claimError.message);
+  }
+
+  return (claimed as DocumentGenerationRunRecord | null) ?? null;
+};
+
+export const claimDocumentGenerationRunById = async (input: {
+  runId: string;
+  rendererJobId: string;
+}) => {
+  const startedAt = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("document_generation_runs")
+    .update({
+      status: "rendering",
+      renderer_job_id: input.rendererJobId,
+      started_at: startedAt,
+      failed_at: null,
+      canceled_at: null,
+      error_message: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+    })
+    .eq("id", input.runId)
+    .eq("status", "queued")
+    .select(documentGenerationRunSelectColumns)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data as DocumentGenerationRunRecord | null) ?? null;
 };
 
 const getLatestDocumentIntakeDraftByContext = async (input: {
@@ -843,6 +1280,123 @@ export const replaceDocumentParties = async (input: {
   }
 
   return listDocumentParties(input.documentId);
+};
+
+export const listDocumentOutputSigners = async (input: {
+  documentId: string;
+  generationRunId?: string;
+}) => {
+  let query = supabaseAdmin
+    .from("document_output_signers")
+    .select(documentOutputSignerSelectColumns)
+    .eq("document_id", input.documentId)
+    .order("generation_run_id", { ascending: false })
+    .order("obligation_type", { ascending: true })
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (input.generationRunId) {
+    query = query.eq("generation_run_id", input.generationRunId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as unknown as DocumentOutputSignerRecord[];
+};
+
+export const replaceDocumentOutputSigners = async (input: {
+  documentId: string;
+  generationRunId: string;
+  signers: DocumentOutputSignerUpsertInput[];
+}) => {
+  const { error: deleteError } = await supabaseAdmin
+    .from("document_output_signers")
+    .delete()
+    .eq("document_id", input.documentId)
+    .eq("generation_run_id", input.generationRunId);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  if (input.signers.length > 0) {
+    const { error: insertError } = await supabaseAdmin
+      .from("document_output_signers")
+      .insert(
+        input.signers.map((signer) => ({
+          document_id: input.documentId,
+          generation_run_id: input.generationRunId,
+          document_party_id: signer.document_party_id ?? null,
+          output_key: signer.output_key,
+          document_key: signer.document_key,
+          party_role: signer.party_role,
+          party_name: signer.party_name,
+          obligation_type: signer.obligation_type,
+          signing_group: signer.signing_group ?? null,
+          is_required: signer.is_required,
+          resolution_source: signer.resolution_source,
+          sort_order: signer.sort_order,
+          metadata: signer.metadata,
+        }))
+      );
+
+    if (insertError) {
+      throw new Error(insertError.message);
+    }
+  }
+
+  return listDocumentOutputSigners({
+    documentId: input.documentId,
+    generationRunId: input.generationRunId,
+  });
+};
+
+export const listDocumentSystemValues = async (documentId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_system_values")
+    .select(documentSystemValueSelectColumns)
+    .eq("document_id", documentId)
+    .order("system_key", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as unknown as DocumentSystemValueRecord[];
+};
+
+export const upsertDocumentSystemValues = async (input: {
+  documentId: string;
+  values: DocumentSystemValueUpsertInput[];
+}) => {
+  if (input.values.length === 0) {
+    return listDocumentSystemValues(input.documentId);
+  }
+
+  const { error } = await supabaseAdmin
+    .from("document_system_values")
+    .upsert(
+      input.values.map((value) => ({
+        document_id: input.documentId,
+        system_key: value.systemKey,
+        value_json: value.value ?? null,
+        source: value.source,
+        metadata: value.metadata ?? {},
+      })),
+      {
+        onConflict: "document_id,system_key",
+      },
+    );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return listDocumentSystemValues(input.documentId);
 };
 
 export const getActiveNotarizationRequest = async (documentId: string) => {
