@@ -48,6 +48,15 @@ const agentSignatureAuthorityLabels: Record<string, string> = {
   any_agent_separately: "Any agent may act separately",
 };
 
+const revocationHolderLabels: Record<string, string> = {
+  trustmaker_only: "The trustmaker only",
+  all_trustmakers_jointly: "All trustmakers acting jointly",
+  each_trustmaker_as_to_own_property: "Each trustmaker as to their own property",
+  trustee_controlled: "The acting trustee or trustees",
+  custom: "Custom revocation rule",
+  unsure: "Needs manual review",
+};
+
 const supportedSignerDocumentKeys = new Set(["poa_general", "trust_rrr", "trust_certificate"]);
 
 type CanonicalAnswers = Record<string, unknown>;
@@ -68,6 +77,24 @@ type ParsedPerson = ParsedContact & {
 type EnsureDocumentSystemValuesResult = {
   document: DocumentRecord;
   systemValues: Record<string, unknown>;
+};
+
+const normalizeCanonicalAnswersForGeneration = (
+  canonicalAnswers: CanonicalAnswers,
+  draft: Pick<DocumentIntakeDraftRecord, "jurisdiction">,
+) => {
+  const normalizedAnswers: CanonicalAnswers = {
+    ...canonicalAnswers,
+  };
+
+  if (
+    typeof normalizedAnswers.jurisdiction !== "string" ||
+    normalizedAnswers.jurisdiction.trim().length === 0
+  ) {
+    normalizedAnswers.jurisdiction = draft.jurisdiction;
+  }
+
+  return normalizedAnswers;
 };
 
 export type PreparedGenerationRun = {
@@ -484,6 +511,23 @@ const formatAgentSignatureAuthority = (value: unknown) => {
   return agentSignatureAuthorityLabels[mode] ?? mode;
 };
 
+const formatRevocationHolders = (canonicalAnswers: CanonicalAnswers) => {
+  const mode = asTrimmedString(canonicalAnswers.revocation_holders);
+  if (!mode) {
+    return null;
+  }
+
+  if (mode === "custom") {
+    return (
+      asTrimmedString(canonicalAnswers.revocation_holders_custom_text) ||
+      revocationHolderLabels[mode] ||
+      mode
+    );
+  }
+
+  return revocationHolderLabels[mode] ?? mode;
+};
+
 const toRenderableMemberValue = (canonicalKey: string, canonicalAnswers: CanonicalAnswers) => {
   const rawValue = canonicalAnswers[canonicalKey];
 
@@ -497,7 +541,6 @@ const toRenderableMemberValue = (canonicalKey: string, canonicalAnswers: Canonic
     case "trustees":
     case "successor_trustees":
     case "successor_agent_list":
-    case "revocation_holders":
       return formatPersonListDisplay(rawValue);
     case "prior_document_items":
       return formatPriorDocumentItemsDisplay(rawValue);
@@ -505,6 +548,8 @@ const toRenderableMemberValue = (canonicalKey: string, canonicalAnswers: Canonic
       return formatTrusteeSignatureAuthority(canonicalAnswers);
     case "agent_signature_authority":
       return formatAgentSignatureAuthority(rawValue);
+    case "revocation_holders":
+      return formatRevocationHolders(canonicalAnswers);
     case "trust_date":
     case "execution_date":
       return formatLongDate(rawValue) ?? asTrimmedString(rawValue);
@@ -829,13 +874,10 @@ export const ensureDocumentSystemValues = async (input: {
   if (!registryNumber) {
     registryNumber = asTrimmedString(document.idn);
   }
-  if (!registryNumber) {
-    registryNumber = `IDN-${randomUUID().slice(0, 8).toUpperCase()}`;
-    document = await updateDocument(document.id, {
-      idn: registryNumber,
-    });
-  }
-  if (existingByKey.get("registry_number")?.value_json !== registryNumber) {
+  if (
+    registryNumber.length > 0 &&
+    existingByKey.get("registry_number")?.value_json !== registryNumber
+  ) {
     valuesToUpsert.push({
       systemKey: "registry_number",
       value: registryNumber,
@@ -867,9 +909,14 @@ export const ensureDocumentSystemValues = async (input: {
   }
 
   const verificationUrl =
-    asTrimmedString(existingByKey.get("verification_url")?.value_json) ||
-    `https://www.darciregistry.com/verify/${encodeURIComponent(registryNumber)}`;
-  if (existingByKey.get("verification_url")?.value_json !== verificationUrl) {
+    registryNumber.length > 0
+      ? asTrimmedString(existingByKey.get("verification_url")?.value_json) ||
+        `https://www.darciregistry.com/verify/${encodeURIComponent(registryNumber)}`
+      : "";
+  if (
+    verificationUrl.length > 0 &&
+    existingByKey.get("verification_url")?.value_json !== verificationUrl
+  ) {
     valuesToUpsert.push({
       systemKey: "verification_url",
       value: verificationUrl,
@@ -1128,6 +1175,7 @@ export const buildGenerationRunBlockers = (input: {
   extractionDocument?: DocumentExtractionContract;
   signerObligations: DocumentOutputSignerUpsertInput[];
   placeholderValues: Record<string, unknown>;
+  allowReviewDeferredSystemValues?: boolean;
 }): GenerationRunBlockingRequirement[] => {
   const requirements: GenerationRunBlockingRequirement[] = [];
 
@@ -1182,7 +1230,26 @@ export const buildGenerationRunBlockers = (input: {
       continue;
     }
 
+    const resolvedValue = input.placeholderValues[binding.placeholder];
+    const hasCanonicalKey =
+      typeof binding.canonicalKey === "string" && binding.canonicalKey.trim().length > 0;
+
     if (binding.status === "missing_canonical_field") {
+      if (hasCanonicalKey && !isMissingRenderableValue(resolvedValue)) {
+        continue;
+      }
+
+      if (hasCanonicalKey) {
+        requirements.push({
+          code: "missing_render_context_value",
+          source: binding.source,
+          field: binding.placeholder,
+          message: `Required placeholder ${binding.placeholder} does not have a member-form value in the submitted intake.`,
+          blocking: true,
+        });
+        continue;
+      }
+
       requirements.push({
         code: "unresolved_placeholder_mapping",
         source: binding.source,
@@ -1193,7 +1260,6 @@ export const buildGenerationRunBlockers = (input: {
       continue;
     }
 
-    const resolvedValue = input.placeholderValues[binding.placeholder];
     if (binding.source === "member_form" && isMissingRenderableValue(resolvedValue)) {
       requirements.push({
         code: "missing_render_context_value",
@@ -1206,6 +1272,22 @@ export const buildGenerationRunBlockers = (input: {
     }
 
     if (binding.source === "system" && isMissingRenderableValue(resolvedValue)) {
+      const systemKey = getSystemPlaceholderKey(binding.placeholder);
+      const canDeferForReview =
+        input.allowReviewDeferredSystemValues === true &&
+        (systemKey === "registry_number" || systemKey === "verification_url");
+
+      if (canDeferForReview) {
+        requirements.push({
+          code: "deferred_system_value",
+          source: binding.source,
+          field: binding.placeholder,
+          message: `Required placeholder ${binding.placeholder} will be resolved after review approval.`,
+          blocking: false,
+        });
+        continue;
+      }
+
       requirements.push({
         code: "missing_system_value",
         source: binding.source,
@@ -1261,7 +1343,10 @@ export const prepareGenerationRun = async (input: {
   templateHash: string;
   extractionPayload: MemberFormDocumentExtractionPayload;
 }) => {
-  const canonicalAnswers = input.draft.canonical_answers_json;
+  const canonicalAnswers = normalizeCanonicalAnswersForGeneration(
+    input.draft.canonical_answers_json,
+    input.draft,
+  );
   let parties = await listDocumentParties(input.document.id);
   if (parties.length === 0 && Object.keys(canonicalAnswers).length > 0) {
     parties = await syncDocumentPartiesFromCanonicalAnswers({
@@ -1314,6 +1399,7 @@ export const prepareGenerationRun = async (input: {
     templateArtifact: input.templateArtifact,
     signerObligations,
     placeholderValues: placeholders,
+    allowReviewDeferredSystemValues: input.document.status !== "pending_signature",
     ...(extractionDocument ? { extractionDocument } : {}),
   });
   const status = summarizeGenerationRunStatus(blockingRequirements);

@@ -168,23 +168,6 @@ const formatDraftUpdatedAtLabel = (value: string | null | undefined) => {
   return parsed.toLocaleString();
 };
 
-const formatDraftSavedMessage = (
-  updatedAt: string | null | undefined,
-  revision: number | null | undefined,
-) => {
-  const updatedAtLabel = formatDraftUpdatedAtLabel(updatedAt);
-
-  if (!updatedAtLabel) {
-    return typeof revision === "number"
-      ? `Draft saved (revision ${revision}).`
-      : "Draft saved.";
-  }
-
-  return typeof revision === "number"
-    ? `Draft saved ${updatedAtLabel} (revision ${revision}).`
-    : `Draft saved ${updatedAtLabel}.`;
-};
-
 type LeaveAction =
   | { type: "href"; href: string }
   | { type: "history-back" }
@@ -227,7 +210,7 @@ export default function StartDocumentPage() {
   const [draftRevision, setDraftRevision] = useState<number | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
-  const [draftSaveNotice, setDraftSaveNotice] = useState<string | null>(null);
+  const [, setDraftSaveNotice] = useState<string | null>(null);
   const allowLeavingRef = useRef(false);
   const hasPushedHistoryGuardRef = useRef(false);
   const lastServerDraftSignatureRef = useRef<string | null>(null);
@@ -579,6 +562,9 @@ export default function StartDocumentPage() {
             nextFormValues,
           );
         } else {
+          const fallbackNotice = bootstrapErrorMessage
+            ? `Using local draft fallback: ${bootstrapErrorMessage}`
+            : "Using local draft fallback";
           const nextFormValues = {
             ...initialValues,
             ...(localDraft?.formValues ?? {}),
@@ -594,12 +580,13 @@ export default function StartDocumentPage() {
           setDraftRevision(null);
           setDraftUpdatedAt(null);
           setIsSavingDraft(false);
-          setDraftSaveNotice(
-            bootstrapErrorMessage
-              ? `Using local draft fallback: ${bootstrapErrorMessage}`
-              : "Using local draft fallback",
-          );
+          setDraftSaveNotice(fallbackNotice);
           lastServerDraftSignatureRef.current = null;
+          showToast({
+            tone: "warning",
+            message: fallbackNotice,
+            durationMs: 5000,
+          });
         }
       } catch (error) {
         if (!cancelled) {
@@ -932,14 +919,6 @@ export default function StartDocumentPage() {
           setDraftUpdatedAt(payload.draft.updatedAt);
           setDraftSaveNotice(null);
           lastServerDraftSignatureRef.current = signature;
-          showToast({
-            tone: "success",
-            message: formatDraftSavedMessage(
-              payload.draft.updatedAt,
-              payload.draft.revision,
-            ),
-            durationMs: 2500,
-          });
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "Failed to save draft";
@@ -974,40 +953,7 @@ export default function StartDocumentPage() {
     memberForm,
     selectedJurisdiction,
     selectedProductFlowMode,
-  ]);
-
-  const draftUpdatedAtLabel = useMemo(() => {
-    return formatDraftUpdatedAtLabel(draftUpdatedAt);
-  }, [draftUpdatedAt]);
-
-  const draftStatusLabel = useMemo(() => {
-    if (!selectedProductFlowMode || !selectedJurisdiction || !memberForm) {
-      return null;
-    }
-
-    if (!draftDocumentId) {
-      return "Saving draft locally in this browser.";
-    }
-
-    if (isSavingDraft) {
-      return "Saving draft...";
-    }
-
-    if (draftUpdatedAtLabel) {
-      return typeof draftRevision === "number"
-        ? `Draft saved ${draftUpdatedAtLabel} (revision ${draftRevision}).`
-        : `Draft saved ${draftUpdatedAtLabel}.`;
-    }
-
-    return "Draft sync is active.";
-  }, [
-    draftDocumentId,
-    draftRevision,
-    draftUpdatedAtLabel,
-    isSavingDraft,
-    memberForm,
-    selectedJurisdiction,
-    selectedProductFlowMode,
+    showToast,
   ]);
 
   const sourceOnlyVisibleCount = useMemo(() => {
@@ -1551,7 +1497,7 @@ export default function StartDocumentPage() {
       });
       setSubmissionErrorMessage(null);
       allowLeavingRef.current = true;
-      router.push(`/app/documents/${draftDocumentId}`);
+      router.push(`/app/review?documentId=${draftDocumentId}&submitted=1`);
 
       return true;
     } catch (error) {
@@ -2991,6 +2937,7 @@ export default function StartDocumentPage() {
                 id="contract-container"
                 ref={contractContainerRef}
                 className="relative z-0 space-y-4 bg-white p-4"
+                aria-busy={isSavingDraft || isLoadingMemberForm}
               >
                 <div className="space-y-4 p-4">
                   <div>
@@ -3021,19 +2968,6 @@ export default function StartDocumentPage() {
                     <div className="mt-1 text-xs text-Color-Neutral">
                       Answer each question in plain terms. If you&apos;re unsure, choose the closest option and continue.
                     </div>
-                    {draftStatusLabel || draftSaveNotice ? (
-                      <div
-                        className={`mt-2 rounded-md border px-3 py-2 text-xs ${
-                          draftSaveNotice
-                            ? "border-amber-200 bg-amber-50 text-amber-800"
-                            : isSavingDraft
-                              ? "border-sky-200 bg-sky-50 text-sky-800"
-                              : "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        }`}
-                      >
-                        {draftSaveNotice ?? draftStatusLabel}
-                      </div>
-                    ) : null}
                   </div>
 
                   <div className="space-y-2 rounded-md bg-white p-3">

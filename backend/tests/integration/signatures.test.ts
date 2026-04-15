@@ -81,7 +81,7 @@ describe("member signature capture", () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
-      idn: null,
+      idn: "AB12CD34EF56",
       status: "pending_signature",
       document_type: "generic",
       jurisdiction: "US-OH",
@@ -121,6 +121,40 @@ describe("member signature capture", () => {
 
     expect(response.status).toBe(201);
     expect(response.body.signature.id).toBe("sig-1");
+  });
+
+  it("rejects signature upload before review approval", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: null,
+      status: "pending_review",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/signatures/request",
+      {
+        fileName: "sig.png",
+        fileSize: 1024,
+        mimeType: "image/png",
+      },
+      "rejects signature upload before review approval",
+      token
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe(
+      "Document review approval is required before signing"
+    );
   });
 
   it("rejects invalid signature mime type", async () => {
@@ -167,7 +201,7 @@ describe("member signature capture", () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
-      idn: null,
+      idn: "AB12CD34EF56",
       status: "pending_signature",
       document_type: "generic",
       jurisdiction: "US-OH",
@@ -209,7 +243,7 @@ describe("member signature capture", () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
-      idn: null,
+      idn: "AB12CD34EF56",
       status: "pending_signature",
       document_type: "generic",
       jurisdiction: "US-OH",
@@ -247,7 +281,7 @@ describe("member signature capture", () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
-      idn: null,
+      idn: "AB12CD34EF56",
       status: "pending_signature",
       document_type: "generic",
       jurisdiction: "US-OH",
@@ -288,7 +322,7 @@ describe("member signature capture", () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
-      idn: null,
+      idn: "AB12CD34EF56",
       status: "pending_signature",
       document_type: "generic",
       jurisdiction: "US-OH",

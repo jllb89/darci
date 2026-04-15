@@ -1,12 +1,24 @@
 # PDF Generation Phase 1 Schema And API Contract
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
 
 Related:
 - docs/pdf-generation-prerequisites-roadmap.md
+- docs/pdf-generation-next-roadmap.md
+- docs/product-selection-to-generation-workflow-guide.md
 - docs/member-form-persistence-and-generation-roadmap.md
 - docs/audit-events.md
 - docs/admin-launch-controls-api-roadmap.md
+
+## Status Note
+
+Most of this Phase 1 contract is now implemented.
+
+Use `docs/pdf-generation-next-roadmap.md` for the active planning view of what is already done and what is still missing.
+
+Use `docs/product-selection-to-generation-workflow-guide.md` for the plain-English end-to-end guide of how the current system works in code.
+
+This document remains useful as the original design contract for the Phase 1 schema and API decisions.
 
 ## Scope
 

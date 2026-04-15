@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { getOrCreateUserId, listDocuments } from "../services/documentService";
 import { listRecentAuditEventsForDocumentIds } from "../services/auditService";
+import { getVisibleDocumentIdn } from "../services/documentVisibilityService";
 
 const ACTIVITY_LIMIT = 20;
 
@@ -60,6 +61,7 @@ export const getMemberDashboard = async (req: Request, res: Response) => {
 
   const counts = {
     draft: 0,
+    pendingReview: 0,
     pendingSignature: 0,
     pendingNotary: 0,
     completed: 0,
@@ -69,6 +71,8 @@ export const getMemberDashboard = async (req: Request, res: Response) => {
   for (const doc of documents) {
     if (doc.status === "draft") {
       counts.draft += 1;
+    } else if (doc.status === "pending_review") {
+      counts.pendingReview += 1;
     } else if (doc.status === "pending_signature") {
       counts.pendingSignature += 1;
     } else if (doc.status === "pending_notary") {
@@ -97,7 +101,11 @@ export const getMemberDashboard = async (req: Request, res: Response) => {
   res.status(200).json({
     documents: documents.map((doc) => ({
       id: doc.id,
-      idn: doc.idn,
+      idn: getVisibleDocumentIdn({
+        idn: doc.idn,
+        status: doc.status,
+        viewerRole: req.user?.role ?? "member",
+      }),
       status: doc.status,
       documentType: doc.document_type,
       jurisdiction: doc.jurisdiction,

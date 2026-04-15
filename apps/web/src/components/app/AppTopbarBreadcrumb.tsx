@@ -13,6 +13,7 @@ const BREADCRUMB_RULES: BreadcrumbRule[] = [
   { kind: "exact", path: "/app", breadcrumb: { current: "Start" } },
   { kind: "exact", path: "/app/notary", breadcrumb: { current: "Start" } },
   { kind: "prefix", path: "/app/start", breadcrumb: { current: "New Document" } },
+  { kind: "prefix", path: "/app/review", breadcrumb: { current: "Review" } },
   {
     kind: "prefix",
     path: "/app/documents/",

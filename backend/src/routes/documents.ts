@@ -1,12 +1,14 @@
 import { Router } from "express";
 import {
   appendAcknowledgment,
+  approveDocumentReview,
   bootstrapDocumentIntakeDraft,
   cancelDocumentGenerationRun,
   createDocumentGenerationRuns,
   createDocument,
   getDocumentGenerationRun,
   getDocumentIntakeDraft,
+  getDocumentReview,
   listDocumentGenerationRuns,
   finalizeDocumentUpload,
   getDocument,
@@ -39,6 +41,11 @@ router.post(
 router.post("/:id/upload-finalize", finalizeDocumentUpload);
 router.get("/", listDocuments);
 router.get("/:id", getDocument);
+router.get(
+  "/:id/review",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentReview,
+);
 router.get(
   "/:id/intake-draft",
   requireRole(["member", "admin", "service_role"]),
@@ -106,6 +113,11 @@ router.post(
   "/:id/signatures/finalize",
   requireRole(["member", "admin", "service_role"]),
   finalizeSignatureUpload
+);
+router.post(
+  "/:id/review-approval",
+  requireRole(["member", "admin", "service_role"]),
+  approveDocumentReview
 );
 router.post("/:id/sign", signDocument);
 router.post("/:id/submit-notarization", submitNotarization);

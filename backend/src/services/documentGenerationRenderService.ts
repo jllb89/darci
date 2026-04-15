@@ -1,5 +1,6 @@
 import { readFile } from "fs/promises";
 import path from "path";
+import PDFDocument from "pdfkit";
 import { recordAuditEvent } from "./auditService";
 import {
   claimDocumentGenerationRunById,
@@ -7,6 +8,7 @@ import {
   getDocumentById,
   getTemplateArtifactById,
   listDocumentOutputSigners,
+  updateDocument,
   updateDocumentGenerationRun,
   type DocumentGenerationRunRecord,
   type DocumentOutputSignerRecord,
@@ -14,6 +16,11 @@ import {
   type TemplateArtifactRecord,
 } from "./documentService";
 import { uploadGeneratedDocument } from "./storageService";
+import { logDocumentTrace } from "../utils/documentTrace";
+
+const PDF_PAGE_MARGIN = 54;
+const PDF_SECTION_GAP = 18;
+type PdfDocument = InstanceType<typeof PDFDocument>;
 
 const asTrimmedString = (value: unknown) => {
   return typeof value === "string" ? value.trim() : "";
@@ -34,22 +41,22 @@ const escapeHtml = (value: string) => {
 
 const renderValue = (value: unknown): string => {
   if (value === null || value === undefined) {
-    return '<span class="missing">Pending</span>';
+    return "Pending";
   }
 
   if (typeof value === "string") {
     if (!value.trim()) {
-      return '<span class="missing">Pending</span>';
+      return "Pending";
     }
 
-    return escapeHtml(value).replaceAll("\n", "<br />");
+    return value;
   }
 
   if (typeof value === "number" || typeof value === "boolean") {
-    return escapeHtml(String(value));
+    return String(value);
   }
 
-  return escapeHtml(JSON.stringify(value, null, 2)).replaceAll("\n", "<br />");
+  return JSON.stringify(value, null, 2);
 };
 
 const getRenderContext = (run: DocumentGenerationRunRecord) => {
@@ -76,63 +83,72 @@ const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
   }
 };
 
-const renderSignerRows = (signers: DocumentOutputSignerRecord[]) => {
-  if (signers.length === 0) {
-    return '<tr><td colspan="6" class="empty">No signer obligations resolved for this run.</td></tr>';
-  }
-
-  return signers
-    .map((signer) => {
-      return [
-        "<tr>",
-        `<td>${escapeHtml(signer.party_name)}</td>`,
-        `<td>${escapeHtml(signer.party_role)}</td>`,
-        `<td>${escapeHtml(signer.obligation_type)}</td>`,
-        `<td>${escapeHtml(signer.signing_group ?? "")}</td>`,
-        `<td>${signer.is_required ? "Yes" : "No"}</td>`,
-        `<td>${escapeHtml(signer.resolution_source)}</td>`,
-        "</tr>",
-      ].join("");
-    })
-    .join("");
+const writeSectionTitle = (document: PdfDocument, title: string) => {
+  document.moveDown(0.4);
+  document.font("Helvetica-Bold").fontSize(14).fillColor("#1f1a17").text(title);
+  document.moveDown(0.35);
 };
 
-const renderPlaceholderRows = (placeholders: Record<string, unknown>) => {
-  const entries = Object.entries(placeholders).sort(([left], [right]) => left.localeCompare(right));
-  if (entries.length === 0) {
-    return '<tr><td colspan="2" class="empty">No placeholder data was captured.</td></tr>';
-  }
-
-  return entries
-    .map(([placeholder, value]) => {
-      return [
-        "<tr>",
-        `<td>${escapeHtml(placeholder)}</td>`,
-        `<td>${renderValue(value)}</td>`,
-        "</tr>",
-      ].join("");
-    })
-    .join("");
+const writeBodyText = (document: PdfDocument, text: string, options?: PDFKit.Mixins.TextOptions) => {
+  document.font("Helvetica").fontSize(10.5).fillColor("#2d241e").text(text, options);
 };
 
-const renderDeferredRequirements = (requirements: unknown) => {
-  if (!Array.isArray(requirements) || requirements.length === 0) {
-    return "<p class=\"empty\">No deferred requirements recorded.</p>";
+const ensurePageSpace = (document: PdfDocument, minHeight = 72) => {
+  const pageBottom = document.page.height - document.page.margins.bottom;
+  if (document.y + minHeight > pageBottom) {
+    document.addPage();
   }
-
-  const items = requirements
-    .filter((value): value is Record<string, unknown> => isRecord(value))
-    .map((requirement) => {
-      const code = asTrimmedString(requirement.code) || "requirement";
-      const message = asTrimmedString(requirement.message) || "Pending downstream resolution.";
-      return `<li><strong>${escapeHtml(code)}</strong>: ${escapeHtml(message)}</li>`;
-    })
-    .join("");
-
-  return items.length > 0 ? `<ul>${items}</ul>` : "<p class=\"empty\">No deferred requirements recorded.</p>";
 };
 
-const buildRenderedHtml = async (input: {
+const writeDivider = (document: PdfDocument) => {
+  const y = document.y;
+  document
+    .save()
+    .strokeColor("#d3c7b7")
+    .lineWidth(1)
+    .moveTo(document.page.margins.left, y)
+    .lineTo(document.page.width - document.page.margins.right, y)
+    .stroke()
+    .restore();
+  document.moveDown(0.8);
+};
+
+const writeLabelValuePairs = (
+  document: PdfDocument,
+  entries: Array<{ label: string; value: string }>,
+) => {
+  for (const entry of entries) {
+    ensurePageSpace(document, 32);
+    document.font("Helvetica-Bold").fontSize(10.5).fillColor("#1f1a17").text(entry.label);
+    writeBodyText(document, entry.value, {
+      indent: 14,
+    });
+    document.moveDown(0.45);
+  }
+};
+
+const writeBulletList = (
+  document: PdfDocument,
+  items: string[],
+  emptyState: string,
+) => {
+  if (items.length === 0) {
+    writeBodyText(document, emptyState);
+    document.moveDown(0.5);
+    return;
+  }
+
+  for (const item of items) {
+    ensurePageSpace(document, 24);
+    writeBodyText(document, `• ${item}`, {
+      indent: 12,
+    });
+  }
+
+  document.moveDown(0.5);
+};
+
+const buildRenderedPdf = async (input: {
   document: DocumentRecord;
   run: DocumentGenerationRunRecord;
   artifact: TemplateArtifactRecord;
@@ -147,80 +163,103 @@ const buildRenderedHtml = async (input: {
   const metadata = getArtifactMetadata(input.artifact);
   const templateLabel = asTrimmedString(metadata.templateLabel) || input.run.template_key;
 
-  return [
-    "<!doctype html>",
-    '<html lang="en">',
-    "<head>",
-    '  <meta charset="utf-8" />',
-    `  <title>${escapeHtml(templateLabel)} - ${escapeHtml(input.run.output_key)}</title>`,
-    "  <style>",
-    "    :root { color-scheme: light; }",
-    "    body { font-family: Georgia, 'Times New Roman', serif; margin: 0; background: #f6f1e8; color: #1f1a17; }",
-    "    main { max-width: 1080px; margin: 0 auto; padding: 40px 24px 64px; }",
-    "    header { padding: 24px 0 32px; border-bottom: 1px solid #d3c7b7; }",
-    "    h1, h2 { font-family: 'Iowan Old Style', 'Palatino Linotype', serif; margin: 0 0 12px; }",
-    "    h1 { font-size: 2.2rem; line-height: 1.1; }",
-    "    h2 { margin-top: 32px; font-size: 1.35rem; }",
-    "    p, li, td, th { font-size: 0.98rem; line-height: 1.5; }",
-    "    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 18px; }",
-    "    .card { background: rgba(255,255,255,0.65); border: 1px solid #d3c7b7; border-radius: 14px; padding: 14px 16px; }",
-    "    table { width: 100%; border-collapse: collapse; background: rgba(255,255,255,0.8); border: 1px solid #d3c7b7; }",
-    "    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid #e4d8c6; padding: 10px 12px; }",
-    "    th { background: #efe6da; font-weight: 600; }",
-    "    pre { white-space: pre-wrap; background: #1f1a17; color: #f8f3eb; padding: 18px; border-radius: 14px; overflow: auto; }",
-    "    .missing { color: #8c3d1b; font-style: italic; }",
-    "    .empty { color: #6c6258; font-style: italic; }",
-    "    details { margin-top: 18px; }",
-    "    summary { cursor: pointer; font-weight: 600; }",
-    "  </style>",
-    "</head>",
-    "<body>",
-    "  <main>",
-    "    <header>",
-    `      <h1>${escapeHtml(templateLabel)}</h1>`,
-    "      <p>Stored generation artifact rendered from the pinned template metadata and the generation run context snapshot.</p>",
-    '      <div class="meta">',
-    `        <div class="card"><strong>Document ID</strong><br />${escapeHtml(input.document.id)}</div>`,
-    `        <div class="card"><strong>Run ID</strong><br />${escapeHtml(input.run.id)}</div>`,
-    `        <div class="card"><strong>Output</strong><br />${escapeHtml(input.run.output_key)}</div>`,
-    `        <div class="card"><strong>Document Key</strong><br />${escapeHtml(input.run.document_key)}</div>`,
-    `        <div class="card"><strong>Template</strong><br />${escapeHtml(input.run.template_key)} ${escapeHtml(input.run.template_version)}</div>`,
-    `        <div class="card"><strong>Rendered At</strong><br />${escapeHtml(new Date().toISOString())}</div>`,
-    "      </div>",
-    "    </header>",
-    "    <section>",
-    "      <h2>Resolved Placeholders</h2>",
-    "      <table>",
-    "        <thead><tr><th>Placeholder</th><th>Value</th></tr></thead>",
-    `        <tbody>${renderPlaceholderRows(placeholders)}</tbody>`,
-    "      </table>",
-    "    </section>",
-    "    <section>",
-    "      <h2>Signer Obligations</h2>",
-    "      <table>",
-    "        <thead><tr><th>Party</th><th>Role</th><th>Obligation</th><th>Signing Group</th><th>Required</th><th>Resolution Source</th></tr></thead>",
-    `        <tbody>${renderSignerRows(input.signers)}</tbody>`,
-    "      </table>",
-    "    </section>",
-    "    <section>",
-    "      <h2>Deferred Requirements</h2>",
-    `      ${renderDeferredRequirements(deferredRequirements)}`,
-    "    </section>",
-    templateSource
-      ? [
-          "    <section>",
-          "      <h2>Template Source Reference</h2>",
-          "      <details open>",
-          "        <summary>View source template snapshot</summary>",
-          `        <pre>${escapeHtml(templateSource)}</pre>`,
-          "      </details>",
-          "    </section>",
-        ].join("")
-      : "",
-    "  </main>",
-    "</body>",
-    "</html>",
-  ].join("\n");
+  const pdf = new PDFDocument({
+    size: "LETTER",
+    margin: PDF_PAGE_MARGIN,
+    info: {
+      Title: `${templateLabel} - ${input.run.output_key}`,
+      Author: "DARCi",
+      Subject: "Document generation review artifact",
+    },
+  });
+
+  const chunks: Buffer[] = [];
+  const completed = new Promise<Buffer>((resolve, reject) => {
+    pdf.on("data", (chunk: Buffer) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    pdf.on("end", () => {
+      resolve(Buffer.concat(chunks));
+    });
+    pdf.on("error", reject);
+  });
+
+  pdf.font("Helvetica-Bold").fontSize(22).fillColor("#1f1a17").text(templateLabel);
+  pdf.moveDown(0.35);
+  writeBodyText(
+    pdf,
+    "Stored generation artifact rendered from the pinned template metadata and the generation run context snapshot.",
+  );
+  pdf.moveDown(0.8);
+
+  writeLabelValuePairs(pdf, [
+    { label: "Document ID", value: input.document.id },
+    { label: "Run ID", value: input.run.id },
+    { label: "Output", value: input.run.output_key },
+    { label: "Document Key", value: input.run.document_key },
+    {
+      label: "Template",
+      value: `${input.run.template_key} ${input.run.template_version}`,
+    },
+    { label: "Rendered At", value: new Date().toISOString() },
+  ]);
+
+  writeDivider(pdf);
+
+  ensurePageSpace(pdf, 120);
+  writeSectionTitle(pdf, "Resolved Placeholders");
+  const placeholderEntries = Object.entries(placeholders).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  writeLabelValuePairs(
+    pdf,
+    placeholderEntries.length > 0
+      ? placeholderEntries.map(([placeholder, value]) => ({
+          label: placeholder,
+          value: renderValue(value),
+        }))
+      : [{ label: "Status", value: "No placeholder data was captured." }],
+  );
+
+  pdf.moveDown(PDF_SECTION_GAP / 12);
+  ensurePageSpace(pdf, 120);
+  writeSectionTitle(pdf, "Signer Obligations");
+  writeBulletList(
+    pdf,
+    input.signers.map((signer) => {
+      const signingGroup = signer.signing_group ? ` | Group: ${signer.signing_group}` : "";
+      const required = signer.is_required ? "Required" : "Optional";
+      return `${signer.party_name} (${signer.party_role}) - ${signer.obligation_type} | ${required}${signingGroup} | Source: ${signer.resolution_source}`;
+    }),
+    "No signer obligations resolved for this run.",
+  );
+
+  ensurePageSpace(pdf, 120);
+  writeSectionTitle(pdf, "Deferred Requirements");
+  const requirementItems = Array.isArray(deferredRequirements)
+    ? deferredRequirements
+        .filter((value): value is Record<string, unknown> => isRecord(value))
+        .map((requirement) => {
+          const code = asTrimmedString(requirement.code) || "requirement";
+          const message =
+            asTrimmedString(requirement.message) || "Pending downstream resolution.";
+          return `${code}: ${message}`;
+        })
+    : [];
+  writeBulletList(pdf, requirementItems, "No deferred requirements recorded.");
+
+  if (templateSource) {
+    ensurePageSpace(pdf, 160);
+    writeSectionTitle(pdf, "Template Source Reference");
+    pdf.font("Courier").fontSize(8.75).fillColor("#2d241e").text(templateSource, {
+      width: pdf.page.width - pdf.page.margins.left - pdf.page.margins.right,
+      lineGap: 1,
+    });
+    pdf.moveDown(0.5);
+  }
+
+  pdf.end();
+  return completed;
 };
 
 export const processDocumentGenerationRun = async (input: {
@@ -256,20 +295,31 @@ export const processDocumentGenerationRun = async (input: {
       generationRunId: claimedRun.id,
     });
 
-    const html = await buildRenderedHtml({
+    logDocumentTrace("generation.render_started", {
+      documentId: document.id,
+      generationRunId: claimedRun.id,
+      rendererJobId: input.rendererJobId,
+      outputKey: claimedRun.output_key,
+      documentKey: claimedRun.document_key,
+      templateKey: claimedRun.template_key,
+      templateVersion: claimedRun.template_version,
+      signerCount: signers.length,
+    });
+
+    const pdf = await buildRenderedPdf({
       document,
       run: claimedRun,
       artifact,
       signers,
     });
-    const content = Buffer.from(html, "utf8");
-    const fileName = `${claimedRun.output_key}-${claimedRun.id.slice(0, 8)}.html`;
+    const content = pdf;
+    const fileName = `${claimedRun.output_key}-${claimedRun.id.slice(0, 8)}.pdf`;
     const storagePath = `${document.owner_id}/${document.id}/generated/${claimedRun.id}/${fileName}`;
 
     await uploadGeneratedDocument({
       storagePath,
       content,
-      contentType: "text/html; charset=utf-8",
+      contentType: "application/pdf",
     });
 
     const version = await createGeneratedDocumentVersion({
@@ -277,7 +327,7 @@ export const processDocumentGenerationRun = async (input: {
       generationRunId: claimedRun.id,
       storagePath,
       fileName,
-      mimeType: "text/html",
+      mimeType: "application/pdf",
       sizeBytes: content.byteLength,
       createdBy: document.owner_id,
     });
@@ -292,6 +342,24 @@ export const processDocumentGenerationRun = async (input: {
       cancellation_reason: null,
     });
 
+    if (document.status === "draft") {
+      await updateDocument(document.id, {
+        status: "pending_review",
+      });
+
+      await recordAuditEvent({
+        entityType: "document",
+        entityId: document.id,
+        action: "system.document_ready_for_review",
+        metadata: {
+          document_id: document.id,
+          generation_run_id: renderedRun.id,
+          document_version_id: version.id,
+          review_source: "generated_output",
+        },
+      });
+    }
+
     await recordAuditEvent({
       entityType: "generation_run",
       entityId: renderedRun.id,
@@ -303,6 +371,18 @@ export const processDocumentGenerationRun = async (input: {
         document_version_id: version.id,
         storage_path: storagePath,
       },
+    });
+
+    logDocumentTrace("generation.render_completed", {
+      documentId: renderedRun.document_id,
+      generationRunId: renderedRun.id,
+      rendererJobId: renderedRun.renderer_job_id,
+      outputKey: renderedRun.output_key,
+      documentVersionId: version.id,
+      fileName,
+      storagePath,
+      sizeBytes: content.byteLength,
+      mimeType: "application/pdf",
     });
 
     return {
@@ -331,6 +411,14 @@ export const processDocumentGenerationRun = async (input: {
         failure_code: failedRun.failure_code,
         error_message: failedRun.error_message,
       },
+    });
+
+    logDocumentTrace("generation.render_failed", {
+      documentId: failedRun.document_id,
+      generationRunId: failedRun.id,
+      rendererJobId: input.rendererJobId,
+      outputKey: failedRun.output_key,
+      errorMessage: message,
     });
 
     throw error;

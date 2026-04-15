@@ -47,15 +47,14 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
   const bandRef = useRef<HTMLDivElement | null>(null);
   const isCompactRef = useRef(false);
   const isReversingToExpandedRef = useRef(false);
-  const reverseSpacerAnimationFrameRef = useRef<number | null>(null);
   const reverseSpacerTimeoutRef = useRef<number | null>(null);
   const expandedBandHeightRef = useRef(0);
   const [isCompact, setIsCompact] = useState(false);
   const [isReversingToExpanded, setIsReversingToExpanded] = useState(false);
-  const [reverseSpacerHeight, setReverseSpacerHeight] = useState(0);
   const [fixedGeometry, setFixedGeometry] = useState<FixedGeometry | null>(null);
   const [bandHeight, setBandHeight] = useState(0);
   const [expandedBandHeight, setExpandedBandHeight] = useState(0);
+  const [expandedAnimationCycle, setExpandedAnimationCycle] = useState(0);
 
   const safeCurrentStep = Math.min(
     Math.max(Math.round(currentStep), 1),
@@ -77,10 +76,6 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
 
   useEffect(() => {
     return () => {
-      if (reverseSpacerAnimationFrameRef.current !== null) {
-        window.cancelAnimationFrame(reverseSpacerAnimationFrameRef.current);
-      }
-
       if (reverseSpacerTimeoutRef.current !== null) {
         window.clearTimeout(reverseSpacerTimeoutRef.current);
       }
@@ -98,11 +93,6 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
     const compactReleaseOffset = 14;
 
     const stopReverseExpansionTransition = () => {
-      if (reverseSpacerAnimationFrameRef.current !== null) {
-        window.cancelAnimationFrame(reverseSpacerAnimationFrameRef.current);
-        reverseSpacerAnimationFrameRef.current = null;
-      }
-
       if (reverseSpacerTimeoutRef.current !== null) {
         window.clearTimeout(reverseSpacerTimeoutRef.current);
         reverseSpacerTimeoutRef.current = null;
@@ -112,8 +102,6 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
         isReversingToExpandedRef.current = false;
         setIsReversingToExpanded(false);
       }
-
-      setReverseSpacerHeight(0);
     };
 
     const startReverseExpansionTransition = () => {
@@ -121,35 +109,23 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
         return;
       }
 
-      const compactBandHeight = bandRef.current?.getBoundingClientRect().height ?? 0;
       const expandedBandHeightValue =
         expandedBandHeightRef.current > 0
           ? expandedBandHeightRef.current
-          : compactBandHeight;
-      const spacerStartHeight = Math.max(
-        expandedBandHeightValue - compactBandHeight,
-        0,
-      );
+          : bandRef.current?.getBoundingClientRect().height ?? 0;
 
-      isReversingToExpandedRef.current = spacerStartHeight > 0;
-      setIsReversingToExpanded(spacerStartHeight > 0);
-      setReverseSpacerHeight(spacerStartHeight);
-
-      setIsCompact(false);
-      isCompactRef.current = false;
-
-      if (spacerStartHeight <= 0) {
+      if (expandedBandHeightValue <= 0) {
+        setIsCompact(false);
+        isCompactRef.current = false;
         return;
       }
 
-      if (reverseSpacerAnimationFrameRef.current !== null) {
-        window.cancelAnimationFrame(reverseSpacerAnimationFrameRef.current);
-      }
+      isReversingToExpandedRef.current = true;
+      setIsReversingToExpanded(true);
+      setExpandedAnimationCycle((currentValue) => currentValue + 1);
 
-      reverseSpacerAnimationFrameRef.current = window.requestAnimationFrame(() => {
-        setReverseSpacerHeight(0);
-        reverseSpacerAnimationFrameRef.current = null;
-      });
+      setIsCompact(false);
+      isCompactRef.current = false;
 
       if (reverseSpacerTimeoutRef.current !== null) {
         window.clearTimeout(reverseSpacerTimeoutRef.current);
@@ -158,7 +134,6 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
       reverseSpacerTimeoutRef.current = window.setTimeout(() => {
         isReversingToExpandedRef.current = false;
         setIsReversingToExpanded(false);
-        setReverseSpacerHeight(0);
         reverseSpacerTimeoutRef.current = null;
       }, COMPACT_TRANSITION_DURATION_MS + 40);
     };
@@ -280,7 +255,7 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
   const reservedExpandedHeight = expandedBandHeight > 0 ? expandedBandHeight : bandHeight;
   const isPinned = isCompact && fixedGeometry !== null;
   const pinnedSpacerHeight = isPinned ? reservedExpandedHeight : 0;
-  const reverseCompensationHeight = isReversingToExpanded ? reverseSpacerHeight : 0;
+  const shouldFreezeExpandedHeight = isReversingToExpanded && !isCompact;
 
   return (
     <div className="relative z-[900]">
@@ -288,7 +263,7 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
       <div aria-hidden style={{ height: pinnedSpacerHeight }} />
       <div
         ref={bandRef}
-          className={`relative isolate z-[910] transition-all duration-500 ease-in-out ${
+        className={`relative isolate z-[910] transition-[background-color,box-shadow] duration-500 ease-in-out ${
           isCompact
             ? "bg-Color-Neutral-Lightest shadow-[0_8px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm"
             : ""
@@ -302,6 +277,10 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
                 width: fixedGeometry.width,
                 zIndex: 1200,
               }
+            : shouldFreezeExpandedHeight
+              ? {
+                  minHeight: reservedExpandedHeight,
+                }
             : undefined
         }
       >
@@ -319,11 +298,16 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
           {PROCESS_STEPS.map((item, index) => {
             const stepNumber = index + 1;
             const isActive = stepNumber === safeCurrentStep;
+            const disableExpandedRestoreMotion = isReversingToExpanded && !isCompact;
 
             return (
               <div
-                key={item.title}
-                  className={`flex-1 border-Color-Scheme-1-Border transition-all duration-500 ease-in-out ${
+                key={`${item.title}-${isCompact ? "compact" : `expanded-${expandedAnimationCycle}`}`}
+                className={`flex-1 border-Color-Scheme-1-Border ${
+                  disableExpandedRestoreMotion
+                    ? "transition-[border-color,background-color] duration-0"
+                    : "transition-all duration-500 ease-in-out"
+                } ${
                   isCompact ? "px-3 py-3" : "px-4 py-8"
                 } ${
                   index < PROCESS_STEPS.length - 1 ? "border-b lg:border-b-0 lg:border-r" : ""
@@ -332,16 +316,22 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
                     ? "border-t-2 border-t-Color-Scheme-1-Text bg-Color-Neutral-Lightest"
                     : "border-t-2 border-t-transparent"
                 }`}
-                style={{
-                  animation: "darciProcessStepFadeIn 320ms ease-out both",
-                  animationDelay: `${index * 110}ms`,
-                }}
+                style={
+                  isCompact
+                    ? undefined
+                    : {
+                        animation: "darciProcessStepFadeIn 320ms ease-out both",
+                        animationDelay: `${index * 110}ms`,
+                      }
+                }
               >
-                <div
-                  className="flex h-full flex-col gap-2"
-                >
+                <div className="flex h-full flex-col gap-2">
                   <div
-                    className={`relative h-12 w-12 shrink-0 origin-top overflow-hidden transition-[opacity,max-height,transform] duration-500 ease-in-out ${
+                    className={`relative h-12 w-12 shrink-0 origin-top overflow-hidden ${
+                      disableExpandedRestoreMotion
+                        ? ""
+                        : "transition-[opacity,max-height,transform] duration-500 ease-in-out"
+                    } ${
                       isCompact
                         ? "max-h-0 -translate-y-1 opacity-0 pointer-events-none"
                         : "max-h-12 translate-y-0 opacity-100"
@@ -353,11 +343,13 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
                       }`}
                     />
                   </div>
-                  <div
-                    className="flex flex-col overflow-hidden"
-                  >
+                  <div className="flex flex-col overflow-hidden">
                     <div
-                      className={`font-display font-medium leading-tight tracking-tight transition-all duration-500 ease-in-out ${
+                      className={`font-display font-medium leading-tight tracking-tight ${
+                        disableExpandedRestoreMotion
+                          ? "transition-none"
+                          : "transition-all duration-500 ease-in-out"
+                      } ${
                         isCompact ? "text-sm md:text-[15px]" : "text-base md:text-lg"
                       } ${
                         isActive ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"
@@ -366,7 +358,11 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
                       {item.title}
                     </div>
                     <div
-                      className={`overflow-hidden font-roboto font-normal leading-5 transition-[max-height,opacity,margin-top,font-size] duration-500 ease-in-out ${
+                      className={`overflow-hidden font-roboto font-normal leading-5 ${
+                        disableExpandedRestoreMotion
+                          ? "transition-none"
+                          : "transition-[max-height,opacity,margin-top,font-size] duration-500 ease-in-out"
+                      } ${
                         isCompact
                           ? "mt-0 max-h-0 text-xs opacity-0"
                           : "mt-3 max-h-24 text-sm opacity-100"
@@ -383,15 +379,6 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
           })}
         </div>
       </div>
-      <div
-        aria-hidden
-        style={{
-          height: reverseCompensationHeight,
-          transition: isReversingToExpanded
-            ? `height ${COMPACT_TRANSITION_DURATION_MS}ms ease-in-out`
-            : undefined,
-        }}
-      />
     </div>
   );
 }

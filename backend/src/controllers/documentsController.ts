@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { z } from "zod";
 import { enqueueDocumentGenerationRun, enqueueWebhook } from "../worker/jobs";
 import { sendValidationError } from "../utils/validation";
@@ -8,7 +8,10 @@ import {
   bootstrapDocumentIntakeDraft as bootstrapDocumentIntakeDraftFromDb,
   claimNextQueuedDocumentGenerationRun,
   createDocumentGenerationRun,
+  type DocumentRecord,
   type DocumentGenerationRunRecord,
+  type DocumentVersionRecord,
+  type GenerationRunBlockingRequirement,
   type GenerationRunStatus,
   getActiveTemplateArtifact,
   isDocumentIntakeLocked,
@@ -30,6 +33,7 @@ import {
   getDocumentVersionById,
   getActiveNotarizationRequest,
   listDocumentGenerationRuns as listDocumentGenerationRunsFromDb,
+  listDocumentSystemValues,
   getSignatureById,
   getOrCreateUserId,
   getUserIdBySupabaseId,
@@ -40,6 +44,7 @@ import {
   replaceDocumentOutputSigners,
   replaceDocumentParties,
   saveDocumentIntakeDraft as saveDocumentIntakeDraftToDb,
+  upsertDocumentSystemValues,
   updateDocumentGenerationRun,
   updateDocument,
   updateDocumentVersion,
@@ -49,6 +54,7 @@ import {
   prepareGenerationRun,
   syncDocumentPartiesFromCanonicalAnswers,
 } from "../services/documentGenerationService";
+import { processDocumentGenerationRun } from "../services/documentGenerationRenderService";
 import {
   deriveMemberFormRulesByJurisdiction,
   type MemberFormRulesContract,
@@ -60,6 +66,7 @@ import {
   type MemberFormSubmissionValue,
 } from "../services/memberFormValidationService";
 import {
+  createDocumentDownloadUrl,
   createDocumentUploadUrl,
   createSignatureUploadUrl,
   getDocumentObjectMetadata,
@@ -70,6 +77,11 @@ import {
   productFlowModeKeys,
   resolveExpectedOutputsForMode,
 } from "../services/productFlowModeService";
+import {
+  getVisibleDocumentIdn,
+  shouldExposeDocumentReviewOutput,
+} from "../services/documentVisibilityService";
+import { logDocumentTrace } from "../utils/documentTrace";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 5 * 1024 * 1024;
@@ -86,6 +98,8 @@ const SIGNATURE_EXTENSION_MAP: Record<string, string> = {
 const DEFAULT_PHONE_COUNTRY_CODE = "+1";
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneCountryCodePattern = /^\+\d{1,4}$/;
+const FINAL_IDN_LENGTH = 12;
+const FINAL_IDN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 const documentPartyRoles = [
   "principal",
@@ -97,6 +111,64 @@ const documentPartyRoles = [
 ] as const;
 
 const documentFlowFamilies = ["poa", "trust", "idn"] as const;
+
+type ParsedOutputBundleEntry = {
+  outputKey: string;
+  outputLabel: string;
+  isRequired: boolean;
+  sortOrder: number;
+  metadata: Record<string, unknown>;
+};
+
+type ReviewApprovalValue = {
+  approvedAt: string | null;
+  reviewSource: string | null;
+  latestVersionId: string | null;
+  latestRenderedRunId: string | null;
+  approvedOutputKeys: string[];
+  approvedVersionIds: string[];
+};
+
+type ReviewOutputResponse = {
+  outputKey: string;
+  outputLabel: string;
+  versionId: string;
+  generationRunId: string | null;
+  version: number;
+  fileName: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  createdAt: string;
+  downloadUrl: string;
+  isFinal: boolean;
+};
+
+type PendingReviewOutputResponse = {
+  outputKey: string;
+  outputLabel: string;
+  status: string;
+  errorMessage: string | null;
+  versionId: string | null;
+  mimeType: string | null;
+  blockers: Array<{
+    code: string;
+    source: string | null;
+    field: string | null;
+    message: string;
+    blocking: boolean;
+  }>;
+};
+
+type DocumentReviewState = {
+  reviewApproval: ReviewApprovalValue | null;
+  outputs: ReviewOutputResponse[];
+  pendingOutputs: PendingReviewOutputResponse[];
+  missingOutputKeys: string[];
+  requiresGeneration: boolean;
+  allVisibleOutputsReady: boolean;
+  canApprove: boolean;
+  state: "approved" | "ready" | "generating" | "empty";
+};
 
 const normalizePhoneDigits = (value: string) => value.replace(/\D/g, "");
 
@@ -118,7 +190,7 @@ const mapDocumentResponse = (document: {
   selected_families?: string[] | null;
   output_bundle?: Array<Record<string, unknown>> | null;
   created_at: string;
-}) => {
+}, viewerRole?: string | null) => {
   const response: {
     id: string;
     idn: string | null;
@@ -131,7 +203,11 @@ const mapDocumentResponse = (document: {
     outputBundle?: Array<Record<string, unknown>>;
   } = {
     id: document.id,
-    idn: document.idn,
+    idn: getVisibleDocumentIdn({
+      idn: document.idn,
+      status: document.status,
+      viewerRole,
+    }),
     status: document.status,
     documentType: document.document_type,
     jurisdiction: document.jurisdiction,
@@ -212,6 +288,12 @@ const finalizeUploadSchema = z
 const submitNotarizationSchema = z.object({
   webhookUrl: z.string().url().optional(),
 }).passthrough();
+
+const reviewApprovalSchema = z
+  .object({
+    agreed: z.literal(true),
+  })
+  .passthrough();
 
 const signatureRequestSchema = z
   .object({
@@ -481,15 +563,446 @@ const buildAuditActorContext = (req: Request) => {
   return actorContext;
 };
 
+const isFinalIdn = (value: string | null) => {
+  return typeof value === "string" && /^[A-Z0-9]{12}$/.test(value.trim());
+};
+
+const generateFinalIdn = () => {
+  let value = "";
+
+  while (value.length < FINAL_IDN_LENGTH) {
+    const bytes = randomBytes(FINAL_IDN_LENGTH);
+    for (const byte of bytes) {
+      value += FINAL_IDN_ALPHABET[byte % FINAL_IDN_ALPHABET.length] ?? "";
+      if (value.length === FINAL_IDN_LENGTH) {
+        break;
+      }
+    }
+  }
+
+  return value;
+};
+
+const resolveReviewApprovalIdn = (document: { idn: string | null; status: string | null }) => {
+  if (document.status === "pending_signature" && isFinalIdn(document.idn)) {
+    return document.idn!.trim();
+  }
+
+  return generateFinalIdn();
+};
+
+const buildVerificationUrl = (idn: string) => {
+  return `https://www.darciregistry.com/verify/${encodeURIComponent(idn)}`;
+};
+
+const resolveIdnTitle = (
+  document: {
+    document_type: string | null;
+    product_flow_mode?: string | null;
+    output_bundle?: Array<Record<string, unknown>> | null;
+  },
+  latestRenderedOutputKey: string | null,
+) => {
+  const outputBundle = parseOutputBundle(document.output_bundle);
+  const matchedOutput = latestRenderedOutputKey
+    ? outputBundle.find((output) => output.outputKey === latestRenderedOutputKey)
+    : null;
+
+  if (matchedOutput?.outputLabel) {
+    return matchedOutput.outputLabel;
+  }
+
+  if (outputBundle.length === 1) {
+    return outputBundle[0]?.outputLabel ?? "Document";
+  }
+
+  if (typeof document.document_type === "string" && document.document_type.trim()) {
+    return document.document_type.trim();
+  }
+
+  if (typeof document.product_flow_mode === "string" && document.product_flow_mode.trim()) {
+    return document.product_flow_mode.trim();
+  }
+
+  return "Document";
+};
+
+const parseReviewApprovalValue = (value: unknown): ReviewApprovalValue | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const asRecord = value as Record<string, unknown>;
+  const approvedOutputKeys = Array.isArray(asRecord.approvedOutputKeys)
+    ? asRecord.approvedOutputKeys.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+      )
+    : [];
+  const approvedVersionIds = Array.isArray(asRecord.approvedVersionIds)
+    ? asRecord.approvedVersionIds.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+      )
+    : [];
+
+  return {
+    approvedAt: typeof asRecord.approvedAt === "string" ? asRecord.approvedAt : null,
+    reviewSource: typeof asRecord.reviewSource === "string" ? asRecord.reviewSource : null,
+    latestVersionId:
+      typeof asRecord.latestVersionId === "string" ? asRecord.latestVersionId : null,
+    latestRenderedRunId:
+      typeof asRecord.latestRenderedRunId === "string"
+        ? asRecord.latestRenderedRunId
+        : null,
+    approvedOutputKeys,
+    approvedVersionIds,
+  };
+};
+
+const getLatestVersionForRun = (
+  versions: DocumentVersionRecord[],
+  generationRunId: string,
+) => {
+  let latestVersion: DocumentVersionRecord | null = null;
+
+  for (const version of versions) {
+    if (version.generation_run_id !== generationRunId) {
+      continue;
+    }
+
+    latestVersion = version;
+  }
+
+  return latestVersion;
+};
+
+const getLatestPdfVersion = (versions: DocumentVersionRecord[]) => {
+  for (let index = versions.length - 1; index >= 0; index -= 1) {
+    const version = versions[index];
+    if (version?.mime_type === "application/pdf") {
+      return version;
+    }
+  }
+
+  return versions.length > 0 ? (versions[versions.length - 1] ?? null) : null;
+};
+
+const toTimestamp = (value: string) => {
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
+const mapBlockingRequirementResponse = (
+  requirement: GenerationRunBlockingRequirement,
+) => {
+  return {
+    code: requirement.code,
+    source: requirement.source ?? null,
+    field: requirement.field ?? null,
+    message: requirement.message,
+    blocking: requirement.blocking,
+  };
+};
+
+const mapBlockingRequirementsResponse = (
+  requirements: GenerationRunBlockingRequirement[] | null | undefined,
+) => {
+  return Array.isArray(requirements)
+    ? requirements.map(mapBlockingRequirementResponse)
+    : [];
+};
+
+const resolveVisibleReviewOutputs = (
+  document: Pick<DocumentRecord, "output_bundle">,
+  viewerRole?: string | null,
+) => {
+  return parseOutputBundle(document.output_bundle).filter((output) =>
+    shouldExposeDocumentReviewOutput({
+      outputKey: output.outputKey,
+      viewerRole,
+    }),
+  );
+};
+
+const shouldUseInlineReviewGenerationFallback = () => {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NODE_ENV !== "test"
+  );
+};
+
+const processQueuedReviewOutputsInline = async (input: {
+  document: DocumentRecord;
+  viewerRole?: string | null;
+}) => {
+  if (!shouldUseInlineReviewGenerationFallback()) {
+    return false;
+  }
+
+  const visibleOutputKeys = new Set(
+    resolveVisibleReviewOutputs(input.document, input.viewerRole).map(
+      (output) => output.outputKey,
+    ),
+  );
+
+  if (visibleOutputKeys.size === 0) {
+    return false;
+  }
+
+  const generationRuns = await listDocumentGenerationRunsFromDb(input.document.id);
+  const queuedVisibleRuns = generationRuns.filter(
+    (run) => run.status === "queued" && visibleOutputKeys.has(run.output_key),
+  );
+
+  if (queuedVisibleRuns.length === 0) {
+    return false;
+  }
+
+  let processedAny = false;
+
+  for (const run of queuedVisibleRuns) {
+    const processed = await processDocumentGenerationRun({
+      runId: run.id,
+      rendererJobId: `review-inline:${run.id}`,
+    }).catch(() => null);
+
+    if (processed) {
+      processedAny = true;
+    }
+  }
+
+  return processedAny;
+};
+
+const isRetryableReviewRunStatus = (status: DocumentGenerationRunRecord["status"]) => {
+  return status === "blocked" || status === "failed" || status === "canceled";
+};
+
+const isSatisfiedReviewRunStatus = (status: DocumentGenerationRunRecord["status"]) => {
+  return status === "queued" || status === "rendering" || status === "rendered";
+};
+
+const buildDocumentReviewState = async (input: {
+  document: DocumentRecord;
+  viewerRole?: string | null;
+}): Promise<DocumentReviewState> => {
+  const [rawSystemValues, rawVersions, rawGenerationRuns] = await Promise.all([
+    listDocumentSystemValues(input.document.id),
+    listDocumentVersionsFromDb(input.document.id),
+    listDocumentGenerationRunsFromDb(input.document.id),
+  ]);
+
+  const systemValues = Array.isArray(rawSystemValues) ? rawSystemValues : [];
+  const versions = Array.isArray(rawVersions) ? rawVersions : [];
+  const generationRuns = Array.isArray(rawGenerationRuns) ? rawGenerationRuns : [];
+
+  const reviewApproval = parseReviewApprovalValue(
+    systemValues.find((value) => value.system_key === "review_approval")?.value_json,
+  );
+  const visibleOutputs = resolveVisibleReviewOutputs(input.document, input.viewerRole);
+  const readyOutputs: Array<Omit<ReviewOutputResponse, "downloadUrl"> & { storagePath: string }> = [];
+  const pendingOutputs: PendingReviewOutputResponse[] = [];
+
+  if (visibleOutputs.length === 0) {
+    const latestVersion = getLatestPdfVersion(versions);
+    if (latestVersion?.storage_path) {
+      const latestRenderedRun = generationRuns.find((run) => run.status === "rendered") ?? null;
+      readyOutputs.push({
+        outputKey: latestRenderedRun?.output_key ?? "uploaded_document",
+        outputLabel: resolveIdnTitle(input.document, latestRenderedRun?.output_key ?? null),
+        versionId: latestVersion.id,
+        generationRunId: latestVersion.generation_run_id,
+        version: latestVersion.version,
+        fileName: latestVersion.file_name,
+        mimeType: latestVersion.mime_type,
+        sizeBytes: latestVersion.size_bytes,
+        createdAt: latestVersion.created_at,
+        isFinal: latestVersion.is_final === true,
+        storagePath: latestVersion.storage_path,
+      });
+    }
+  } else {
+    for (const output of visibleOutputs) {
+      const runsForOutput = generationRuns.filter((run) => run.output_key === output.outputKey);
+      const latestRun = runsForOutput[0] ?? null;
+      const latestRenderedRun = runsForOutput.find((run) => run.status === "rendered") ?? null;
+      const latestVersion = latestRenderedRun
+        ? getLatestVersionForRun(versions, latestRenderedRun.id)
+        : null;
+
+      if (
+        latestVersion?.storage_path &&
+        latestVersion.mime_type === "application/pdf"
+      ) {
+        readyOutputs.push({
+          outputKey: output.outputKey,
+          outputLabel: output.outputLabel,
+          versionId: latestVersion.id,
+          generationRunId: latestVersion.generation_run_id,
+          version: latestVersion.version,
+          fileName: latestVersion.file_name,
+          mimeType: latestVersion.mime_type,
+          sizeBytes: latestVersion.size_bytes,
+          createdAt: latestVersion.created_at,
+          isFinal: latestVersion.is_final === true,
+          storagePath: latestVersion.storage_path,
+        });
+        continue;
+      }
+
+      const unsupportedFormatMessage =
+        latestVersion?.storage_path && latestVersion.mime_type
+          ? `Latest rendered output is ${latestVersion.mime_type}, but review requires PDF artifacts.`
+          : null;
+      const blockers = mapBlockingRequirementsResponse(
+        latestRun?.blocking_requirements_json,
+      );
+
+      pendingOutputs.push({
+        outputKey: output.outputKey,
+        outputLabel: output.outputLabel,
+        status: unsupportedFormatMessage ? "unsupported_format" : latestRun?.status ?? "not_started",
+        errorMessage:
+          unsupportedFormatMessage ??
+          latestRun?.error_message ??
+          blockers.find((blocker) => blocker.blocking)?.message ??
+          null,
+        versionId: latestVersion?.id ?? latestRun?.document_version_id ?? null,
+        mimeType: latestVersion?.mime_type ?? null,
+        blockers,
+      });
+    }
+  }
+
+  const outputs = await Promise.all(
+    readyOutputs.map(async (output) => {
+      const download = await createDocumentDownloadUrl(output.storagePath);
+      return {
+        outputKey: output.outputKey,
+        outputLabel: output.outputLabel,
+        versionId: output.versionId,
+        generationRunId: output.generationRunId,
+        version: output.version,
+        fileName: output.fileName,
+        mimeType: output.mimeType,
+        sizeBytes: output.sizeBytes,
+        createdAt: output.createdAt,
+        isFinal: output.isFinal,
+        downloadUrl: download.signedUrl,
+      } satisfies ReviewOutputResponse;
+    }),
+  );
+
+  outputs.sort((left, right) => {
+    const visibleLeft = visibleOutputs.find((output) => output.outputKey === left.outputKey);
+    const visibleRight = visibleOutputs.find((output) => output.outputKey === right.outputKey);
+    const leftOrder = visibleLeft?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = visibleRight?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
+    return toTimestamp(right.createdAt) - toTimestamp(left.createdAt);
+  });
+
+  const missingOutputKeys = visibleOutputs
+    .filter((output) => {
+      const latestRun = generationRuns.find((run) => run.output_key === output.outputKey) ?? null;
+      const latestRenderedRun = generationRuns.find(
+        (run) => run.output_key === output.outputKey && run.status === "rendered",
+      ) ?? null;
+      const latestVersion = latestRenderedRun
+        ? getLatestVersionForRun(versions, latestRenderedRun.id)
+        : null;
+
+      if (
+        latestVersion?.storage_path &&
+        latestVersion.mime_type === "application/pdf"
+      ) {
+        return false;
+      }
+
+      if (!latestRun) {
+        return true;
+      }
+
+      return isRetryableReviewRunStatus(latestRun.status);
+    })
+    .map((output) => output.outputKey);
+  const requiresGeneration =
+    input.document.intake_status === "submitted" && missingOutputKeys.length > 0;
+  const allVisibleOutputsReady =
+    visibleOutputs.length > 0 ? outputs.length === visibleOutputs.length : outputs.length > 0;
+  const canApprove =
+    (input.document.status === "pending_review" || input.document.status === "draft") &&
+    allVisibleOutputsReady &&
+    outputs.length > 0;
+
+  return {
+    reviewApproval,
+    outputs,
+    pendingOutputs,
+    missingOutputKeys,
+    requiresGeneration,
+    allVisibleOutputsReady,
+    canApprove,
+    state: reviewApproval
+      ? "approved"
+      : canApprove
+        ? "ready"
+        : requiresGeneration || pendingOutputs.length > 0
+          ? "generating"
+          : outputs.length > 0
+            ? "ready"
+            : "empty",
+  };
+};
+
+const ensureDocumentReadyForSignature = (res: Response, document: {
+  status: string | null;
+  idn: string | null;
+}) => {
+  if (document.status !== "pending_signature") {
+    const message =
+      document.status === "pending_review" || document.status === "draft"
+        ? "Document review approval is required before signing"
+        : "Document is not ready for signing";
+
+    res.status(400).json({
+      error: "validation_error",
+      message,
+      details: [
+        {
+          path: "status",
+          message,
+        },
+      ],
+    });
+
+    return false;
+  }
+
+  if (!isFinalIdn(document.idn)) {
+    res.status(409).json({
+      error: "conflict",
+      message: "Document IDN is not prepared for signing",
+      details: [
+        {
+          path: "idn",
+          message: "Document IDN is not prepared for signing",
+        },
+      ],
+    });
+
+    return false;
+  }
+
+  return true;
+};
+
 const parseOutputBundle = (value: unknown) => {
   if (!Array.isArray(value)) {
-    return [] as Array<{
-      outputKey: string;
-      outputLabel: string;
-      isRequired: boolean;
-      sortOrder: number;
-      metadata: Record<string, unknown>;
-    }>;
+    return [] as ParsedOutputBundleEntry[];
   }
 
   const parsed = value
@@ -577,6 +1090,14 @@ const buildCanonicalPayload = (
         canonicalPayload.set(normalizedCanonicalKey, answers[fieldKey]);
       }
     }
+  }
+
+  if (
+    !canonicalPayload.has("jurisdiction") &&
+    typeof contract.jurisdiction === "string" &&
+    contract.jurisdiction.trim().length > 0
+  ) {
+    canonicalPayload.set("jurisdiction", contract.jurisdiction.trim());
   }
 
   return Object.fromEntries(
@@ -693,7 +1214,7 @@ export const createDocument = async (req: Request, res: Response) => {
   });
 
   res.status(201).json({
-    document: mapDocumentResponse(document),
+    document: mapDocumentResponse(document, req.user?.role ?? "member"),
     version: {
       id: version.id,
       version: version.version,
@@ -755,7 +1276,10 @@ export const bootstrapDocumentIntakeDraft = async (req: Request, res: Response) 
 
   return res.status(200).json({
     created: bootstrapResult.created,
-    document: mapDocumentResponse(bootstrapResult.document),
+    document: mapDocumentResponse(
+      bootstrapResult.document,
+      req.user?.role ?? "member",
+    ),
     draft: mapDocumentIntakeDraftResponse(bootstrapResult.draft),
   });
 };
@@ -871,15 +1395,9 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
   });
 
   let updatedDocument = document;
-  if (!document.idn) {
-    const idn = `IDN-${randomUUID().slice(0, 8).toUpperCase()}`;
+  if (document.status !== "pending_review") {
     updatedDocument = await updateDocument(document.id, {
-      idn,
-      status: "pending_signature",
-    });
-  } else if (document.status !== "pending_signature") {
-    updatedDocument = await updateDocument(document.id, {
-      status: "pending_signature",
+      status: "pending_review",
     });
   }
 
@@ -906,22 +1424,22 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
     },
   });
 
-  if (!document.idn && updatedDocument.idn) {
+  if (document.status !== "pending_review") {
     await recordAuditEvent({
       ...actorContext,
       entityType: "document",
       entityId: updatedDocument.id,
-      action: "system.document_idn_assigned",
+      action: "system.document_ready_for_review",
       metadata: {
         document_id: updatedDocument.id,
-        idn: updatedDocument.idn,
-        idn_algorithm_version: "v1",
+        document_version_id: updatedVersion.id,
+        review_source: "uploaded_pdf",
       },
     });
   }
 
   res.status(200).json({
-    document: mapDocumentResponse(updatedDocument),
+    document: mapDocumentResponse(updatedDocument, req.user?.role ?? "member"),
     version: {
       id: updatedVersion.id,
       version: updatedVersion.version,
@@ -994,7 +1512,288 @@ export const getDocument = async (req: Request, res: Response) => {
   }
 
   res.status(200).json({
-    document: mapDocumentResponse(document),
+    document: mapDocumentResponse(document, req.user?.role ?? "member"),
+  });
+};
+
+export const getDocumentReview = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  let review = await buildDocumentReviewState({
+    document,
+    viewerRole: req.user?.role ?? "member",
+  });
+
+  if (
+    review.pendingOutputs.some((output) => output.status === "queued") &&
+    (await processQueuedReviewOutputsInline({
+      document,
+      viewerRole: req.user?.role ?? "member",
+    }))
+  ) {
+    review = await buildDocumentReviewState({
+      document,
+      viewerRole: req.user?.role ?? "member",
+    });
+  }
+
+  return res.status(200).json({
+    document: mapDocumentResponse(document, req.user?.role ?? "member"),
+    review: {
+      state: review.state,
+      requiresGeneration: review.requiresGeneration,
+      missingOutputKeys: review.missingOutputKeys,
+      allVisibleOutputsReady: review.allVisibleOutputsReady,
+      canApprove: review.canApprove,
+      reviewApproval: review.reviewApproval,
+      outputs: review.outputs,
+      pendingOutputs: review.pendingOutputs,
+    },
+  });
+};
+
+export const approveDocumentReview = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const parsed = reviewApprovalSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (
+    document.status !== "draft" &&
+    document.status !== "pending_review" &&
+    document.status !== "pending_signature"
+  ) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Document is not in a reviewable state",
+      status: document.status,
+    });
+  }
+
+  const review = await buildDocumentReviewState({
+    document,
+    viewerRole: req.user?.role ?? "member",
+  });
+
+  if (document.status === "pending_signature" && isFinalIdn(document.idn) && review.reviewApproval) {
+    return res.status(200).json({
+      document: mapDocumentResponse(document, req.user?.role ?? "member"),
+      reviewApproval: {
+        approvedAt: review.reviewApproval.approvedAt,
+        signingReady: true,
+        reviewSource: review.reviewApproval.reviewSource,
+        latestVersionId: review.reviewApproval.latestVersionId,
+        latestRenderedRunId: review.reviewApproval.latestRenderedRunId,
+        approvedOutputKeys: review.reviewApproval.approvedOutputKeys,
+        approvedVersionIds: review.reviewApproval.approvedVersionIds,
+      },
+    });
+  }
+
+  if (!review.canApprove) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Document is not ready for review approval yet",
+    });
+  }
+
+  const approvedAt = new Date().toISOString();
+  const assignedIdn = resolveReviewApprovalIdn(document);
+  const reviewedRunIds = Array.from(
+    new Set(
+      review.outputs
+        .map((output) => output.generationRunId)
+        .filter((generationRunId): generationRunId is string => typeof generationRunId === "string"),
+    ),
+  );
+  const signerObligations = (
+    await Promise.all(
+      reviewedRunIds.map((generationRunId) =>
+        listDocumentOutputSigners({
+          documentId: document.id,
+          generationRunId,
+        }),
+      ),
+    )
+  ).flat();
+  const signerNamesFromObligations = signerObligations
+    .filter((signer) => signer.obligation_type === "signer")
+    .map((signer) => signer.party_name.trim())
+    .filter((name) => name.length > 0);
+  const parties = signerNamesFromObligations.length === 0
+    ? await listDocumentPartiesFromDb(document.id)
+    : [];
+  const signerNames = Array.from(
+    new Set(
+      (signerNamesFromObligations.length > 0
+        ? signerNamesFromObligations
+        : parties
+            .filter((party) => party.is_signing_party)
+            .map((party) => party.full_name.trim())
+      ).filter((name) => name.length > 0),
+    ),
+  );
+
+  const latestReviewedOutput = review.outputs.reduce((latest, current) => {
+    return toTimestamp(current.createdAt) > toTimestamp(latest.createdAt)
+      ? current
+      : latest;
+  });
+  const reviewSource = reviewedRunIds.length > 0 ? "generated_output" : "uploaded_pdf";
+  const title =
+    review.outputs.length === 1
+      ? review.outputs[0]?.outputLabel ?? "Document"
+      : resolveIdnTitle(document, null);
+  const idnRecord = {
+    idn: assignedIdn,
+    signers: signerNames,
+    notary: null,
+    date: approvedAt,
+    title,
+    pages: null,
+    latestVersionId: latestReviewedOutput.versionId,
+    latestVersionNumber: latestReviewedOutput.version,
+    latestRenderedRunId: latestReviewedOutput.generationRunId,
+    approvedOutputKeys: review.outputs.map((output) => output.outputKey),
+    approvedVersionIds: review.outputs.map((output) => output.versionId),
+    reviewSource,
+  };
+
+  const verificationUrl = buildVerificationUrl(assignedIdn);
+  const updatedDocument = await updateDocument(document.id, {
+    idn: assignedIdn,
+    status: "pending_signature",
+  });
+
+  await upsertDocumentSystemValues({
+    documentId: document.id,
+    values: [
+      {
+        systemKey: "review_approval",
+        value: {
+          agreed: true,
+          approvedAt,
+          reviewSource,
+          latestVersionId: latestReviewedOutput.versionId,
+          latestRenderedRunId: latestReviewedOutput.generationRunId,
+          approvedOutputKeys: review.outputs.map((output) => output.outputKey),
+          approvedVersionIds: review.outputs.map((output) => output.versionId),
+          actorSupabaseId: req.user?.id ?? null,
+          actorRole: req.user?.role ?? null,
+        },
+        source: "review_approval",
+        metadata: {
+          documentStatusBeforeApproval: document.status,
+        },
+      },
+      {
+        systemKey: "registry_number",
+        value: assignedIdn,
+        source: "review_approval",
+        metadata: {
+          aliases: ["DarciNo", "Trust.No", "DdpoaNo"],
+        },
+      },
+      {
+        systemKey: "verification_url",
+        value: verificationUrl,
+        source: "review_approval",
+        metadata: {
+          registryNumber: assignedIdn,
+        },
+      },
+      {
+        systemKey: "idn_record",
+        value: idnRecord,
+        source: "review_approval",
+        metadata: {
+          reviewSource,
+        },
+      },
+    ],
+  });
+
+  logDocumentTrace("review.approved", {
+    documentId: updatedDocument.id,
+    approvedAt,
+    assignedIdn,
+    reviewSource,
+    verificationUrl,
+    latestVersionId: latestReviewedOutput.versionId,
+    latestRenderedRunId: latestReviewedOutput.generationRunId,
+    approvedOutputKeys: review.outputs.map((output) => output.outputKey),
+    approvedVersionIds: review.outputs.map((output) => output.versionId),
+    signerNames,
+    idnRecord,
+  });
+
+  const actorContext = buildAuditActorContext(req);
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "document",
+    entityId: updatedDocument.id,
+    action: "member.document_review_approved",
+    metadata: {
+      document_id: updatedDocument.id,
+      approved_at: approvedAt,
+      latest_version_id: latestReviewedOutput.versionId,
+      latest_rendered_run_id: latestReviewedOutput.generationRunId,
+      approved_output_keys: review.outputs.map((output) => output.outputKey),
+      approved_version_ids: review.outputs.map((output) => output.versionId),
+      review_source: reviewSource,
+    },
+  });
+
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "document",
+    entityId: updatedDocument.id,
+    action: "system.document_idn_assigned",
+    metadata: {
+      document_id: updatedDocument.id,
+      idn: assignedIdn,
+      idn_algorithm_version: "phase_c_v1",
+      latest_version_id: latestReviewedOutput.versionId,
+      latest_rendered_run_id: latestReviewedOutput.generationRunId,
+      approved_output_keys: review.outputs.map((output) => output.outputKey),
+      approved_version_ids: review.outputs.map((output) => output.versionId),
+      review_source: reviewSource,
+    },
+  });
+
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "document",
+    entityId: updatedDocument.id,
+    action: "system.document_signing_prepared",
+    metadata: {
+      document_id: updatedDocument.id,
+      approved_at: approvedAt,
+      idn: assignedIdn,
+      signer_count: signerNames.length,
+      review_source: reviewSource,
+    },
+  });
+
+  return res.status(200).json({
+    document: mapDocumentResponse(updatedDocument, req.user?.role ?? "member"),
+    reviewApproval: {
+      approvedAt,
+      signingReady: true,
+      reviewSource,
+      latestVersionId: latestReviewedOutput.versionId,
+      latestRenderedRunId: latestReviewedOutput.generationRunId,
+      approvedOutputKeys: review.outputs.map((output) => output.outputKey),
+      approvedVersionIds: review.outputs.map((output) => output.versionId),
+    },
   });
 };
 
@@ -1211,9 +2010,23 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     });
   }
 
-  await syncDocumentPartiesFromCanonicalAnswers({
+  const syncedParties = await syncDocumentPartiesFromCanonicalAnswers({
     documentId: document.id,
     canonicalAnswers: canonicalPayload,
+  });
+
+  logDocumentTrace("intake.submit", {
+    documentId: document.id,
+    intakeRevision: result.draft.revision,
+    productFlowMode: documentProductFlowMode,
+    jurisdiction: documentJurisdiction,
+    currentStep: parsed.data.currentStep ?? result.draft.current_step ?? null,
+    canonicalPayload,
+    parties: syncedParties.map((party) => ({
+      partyRole: party.party_role,
+      fullName: party.full_name,
+      isSigningParty: party.is_signing_party,
+    })),
   });
 
   return res.status(200).json({
@@ -1338,11 +2151,30 @@ export const createDocumentGenerationRuns = async (req: Request, res: Response) 
   const extractionPayload = await buildMemberFormDocumentExtractionPayload(
     rulesResult.contract,
   );
+  const existingRuns = await listDocumentGenerationRunsFromDb(document.id);
+  const latestRunByOutputKey = new Map<string, DocumentGenerationRunRecord>();
+
+  for (const run of existingRuns) {
+    if (!latestRunByOutputKey.has(run.output_key)) {
+      latestRunByOutputKey.set(run.output_key, run);
+    }
+  }
 
   const runs: ReturnType<typeof mapDocumentGenerationRunResponse>[] = [];
   const actorContext = buildAuditActorContext(req);
 
   for (const output of selectedOutputBundle) {
+    const existingRun = latestRunByOutputKey.get(output.outputKey) ?? null;
+
+    if (
+      existingRun &&
+      existingRun.intake_revision === draft.revision &&
+      isSatisfiedReviewRunStatus(existingRun.status)
+    ) {
+      runs.push(mapDocumentGenerationRunResponse(existingRun));
+      continue;
+    }
+
     const template = await getActiveTemplateRegistryForOutput({
       jurisdiction: draft.jurisdiction,
       outputKey: output.outputKey,
@@ -1385,38 +2217,91 @@ export const createDocumentGenerationRuns = async (req: Request, res: Response) 
           error: "document_extraction_contract_not_found",
         };
 
-    const run = await createDocumentGenerationRun({
+    const runPayload = {
       documentId: preparedRun.document.id,
-      intakeRevision: draft.revision,
-      outputKey: output.outputKey,
-      documentKey: preparedRun.documentKey,
-      templateKey: template?.template_key ?? "unresolved_template",
-      templateVersion: template?.template_version ?? "unresolved",
-      templateHash: template?.template_hash ?? "unresolved",
-      templateArtifactId: templateArtifact?.id ?? null,
-      payload: {
-        documentId: preparedRun.document.id,
-        jurisdiction: draft.jurisdiction,
-        productFlowMode: draft.product_flow_mode,
-        rulesSnapshotVersion: draft.rules_snapshot_version,
-        revision: draft.revision,
-        canonicalAnswers: draft.canonical_answers_json,
-      },
-      coverage: coverageSnapshot,
-      renderContext: preparedRun.renderContext,
-      blockingRequirements: preparedRun.blockingRequirements,
-      resolvedSources: preparedRun.resolvedSources,
-      status: preparedRun.status,
-      blockedAt:
-        preparedRun.status === "blocked" ? new Date().toISOString() : null,
-      errorMessage: preparedRun.errorMessage,
-    });
+      jurisdiction: draft.jurisdiction,
+      productFlowMode: draft.product_flow_mode,
+      rulesSnapshotVersion: draft.rules_snapshot_version,
+      revision: draft.revision,
+      canonicalAnswers: draft.canonical_answers_json,
+    };
+
+    const run = existingRun && existingRun.intake_revision === draft.revision
+      ? await updateDocumentGenerationRun(existingRun.id, {
+          template_artifact_id: templateArtifact?.id ?? null,
+          payload_json: runPayload,
+          coverage_json: coverageSnapshot,
+          render_context_json: preparedRun.renderContext,
+          blocking_requirements_json: preparedRun.blockingRequirements,
+          resolved_sources_json: preparedRun.resolvedSources,
+          status: preparedRun.status,
+          renderer_job_id: null,
+          document_version_id: null,
+          blocked_at:
+            preparedRun.status === "blocked"
+              ? existingRun.blocked_at ?? new Date().toISOString()
+              : null,
+          started_at: null,
+          rendered_at: null,
+          failed_at: null,
+          canceled_at: null,
+          failure_code: null,
+          failure_details_json: {},
+          cancellation_reason: null,
+          error_message: preparedRun.errorMessage,
+        })
+      : await createDocumentGenerationRun({
+          documentId: preparedRun.document.id,
+          intakeRevision: draft.revision,
+          outputKey: output.outputKey,
+          documentKey: preparedRun.documentKey,
+          templateKey: template?.template_key ?? "unresolved_template",
+          templateVersion: template?.template_version ?? "unresolved",
+          templateHash: template?.template_hash ?? "unresolved",
+          templateArtifactId: templateArtifact?.id ?? null,
+          payload: runPayload,
+          coverage: coverageSnapshot,
+          renderContext: preparedRun.renderContext,
+          blockingRequirements: preparedRun.blockingRequirements,
+          resolvedSources: preparedRun.resolvedSources,
+          status: preparedRun.status,
+          blockedAt:
+            preparedRun.status === "blocked" ? new Date().toISOString() : null,
+          errorMessage: preparedRun.errorMessage,
+        });
+
+    latestRunByOutputKey.set(output.outputKey, run);
 
     await replaceDocumentOutputSigners({
       documentId: preparedRun.document.id,
       generationRunId: run.id,
       signers: preparedRun.signerObligations,
     });
+
+    logDocumentTrace(
+      preparedRun.status === "blocked"
+        ? "generation.run_blocked"
+        : "generation.run_created",
+      {
+        documentId: run.document_id,
+        generationRunId: run.id,
+        outputKey: run.output_key,
+        documentKey: run.document_key,
+        templateKey: run.template_key,
+        templateVersion: run.template_version,
+        status: run.status,
+        blockerCount: preparedRun.blockingRequirements.length,
+        blockers: preparedRun.blockingRequirements,
+        placeholders: preparedRun.renderContext.placeholders ?? {},
+        signerObligations: preparedRun.signerObligations.map((signer) => ({
+          partyRole: signer.party_role,
+          partyName: signer.party_name,
+          obligationType: signer.obligation_type,
+          isRequired: signer.is_required,
+          resolutionSource: signer.resolution_source,
+        })),
+      },
+    );
 
     if (preparedRun.status === "queued") {
       await enqueueDocumentGenerationRun({
@@ -2006,7 +2891,9 @@ export const listDocuments = async (req: Request, res: Response) => {
   const documents = await listDocumentsFromDb(ownerId);
 
   res.status(200).json({
-    documents: documents.map((document) => mapDocumentResponse(document)),
+    documents: documents.map((document) =>
+      mapDocumentResponse(document, req.user?.role ?? "member"),
+    ),
   });
 };
 
@@ -2169,6 +3056,15 @@ export const getSignatureFields = async (req: Request, res: Response) => {
 };
 
 export const signDocument = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  if (!ensureDocumentReadyForSignature(res, document)) {
+    return;
+  }
+
   const signatureId = randomUUID();
   const signatureMethod =
     typeof req.body?.signatureMethod === "string"
@@ -2273,6 +3169,10 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
     }
   }
 
+  if (!ensureDocumentReadyForSignature(res, document)) {
+    return;
+  }
+
   const signatureId = randomUUID();
   const extension =
     SIGNATURE_EXTENSION_MAP[parsed.data.mimeType] ?? "png";
@@ -2369,6 +3269,10 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
         message: "Document not found",
       });
     }
+  }
+
+  if (!ensureDocumentReadyForSignature(res, document)) {
+    return;
   }
 
   const signature = await getSignatureById(parsed.data.signatureId, documentId);

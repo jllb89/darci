@@ -30,6 +30,27 @@ export const createDocumentUploadUrl = async (storagePath: string) => {
   };
 };
 
+export const createDocumentDownloadUrl = async (
+  storagePath: string,
+  expiresInSeconds = 60 * 60,
+) => {
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(documentsBucket)
+    .createSignedUrl(storagePath, expiresInSeconds);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message ?? "Failed to create signed download URL");
+  }
+
+  return {
+    bucket: documentsBucket,
+    path: storagePath,
+    signedUrl: data.signedUrl,
+    expiresInSeconds,
+  };
+};
+
 export const createSignatureUploadUrl = async (storagePath: string) => {
   const { data, error } = await supabaseStorage
     .storage

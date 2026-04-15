@@ -249,7 +249,8 @@ export type DocumentSystemValueSource =
   | "submission_timestamp"
   | "derived_url"
   | "static_template_text"
-  | "template_profile";
+  | "template_profile"
+  | "review_approval";
 
 export type DocumentSystemValueRecord = {
   id: string;

@@ -23,6 +23,8 @@ type ToastState = {
   id: number;
 };
 
+const TOAST_EXIT_DURATION_MS = 240;
+
 const isStoredUserRole = (value: unknown): value is StoredUserRole => {
   return value === "member" || value === "notary" || value === "admin";
 };
@@ -66,9 +68,10 @@ export default function AppLayout({
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [toastPhase, setToastPhase] = useState<"hidden" | "visible" | "closing">("hidden");
 
   const clearToast = useCallback(() => {
-    setToast(null);
+    setToastPhase("closing");
   }, []);
 
   const showToast = useCallback((nextToast: AppToastInput) => {
@@ -78,6 +81,7 @@ export default function AppLayout({
       durationMs: nextToast.durationMs ?? 4000,
       id: Date.now(),
     });
+    setToastPhase("visible");
   }, []);
 
   const toastContextValue = useMemo(
@@ -100,6 +104,27 @@ export default function AppLayout({
 
   useEffect(() => {
     if (!toast) {
+      setToastPhase("hidden");
+      return;
+    }
+
+    if (toastPhase !== "visible") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setToastPhase((currentPhase) => {
+        return currentPhase === "visible" ? "closing" : currentPhase;
+      });
+    }, toast.durationMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [toast, toastPhase]);
+
+  useEffect(() => {
+    if (!toast || toastPhase !== "closing") {
       return;
     }
 
@@ -111,12 +136,13 @@ export default function AppLayout({
 
         return null;
       });
-    }, toast.durationMs);
+      setToastPhase("hidden");
+    }, TOAST_EXIT_DURATION_MS);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [toast]);
+  }, [toast, toastPhase]);
 
   const handleLogout = async () => {
     if (!accessToken || isLoggingOut) {
@@ -154,18 +180,20 @@ export default function AppLayout({
     <AppToastProvider value={toastContextValue}>
       <div className="flex h-screen bg-Color-Neutral-Lightest text-Color-Scheme-1-Text">
         {toast ? (
-          <div className="pointer-events-none fixed right-6 top-20 z-50">
+          <div className="pointer-events-none fixed inset-x-0 top-0 z-[80]">
             <div
-              className={`min-w-[240px] rounded-lg border px-4 py-3 text-sm shadow-lg ${
-                toast.tone === "success"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                  : toast.tone === "warning"
-                    ? "border-amber-200 bg-amber-50 text-amber-800"
-                    : "border-red-200 bg-red-50 text-red-700"
-              }`}
+              className="w-full border-b border-white/10 bg-black px-6 py-2 text-white shadow-[0_16px_36px_rgba(0,0,0,0.24)] md:px-10"
               role="status"
+              style={{
+                animation:
+                  toastPhase === "closing"
+                    ? `darciToastSlideOut ${TOAST_EXIT_DURATION_MS}ms cubic-bezier(0.2,0.8,0.2,1) forwards`
+                    : `darciToastSlideIn 260ms cubic-bezier(0.16,1,0.3,1) both`,
+              }}
             >
-              {toast.message}
+              <div className="flex items-center justify-center text-xs font-medium text-white">
+                <span>{toast.message}</span>
+              </div>
             </div>
           </div>
         ) : null}

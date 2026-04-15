@@ -12,8 +12,8 @@
     "worker:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/worker/index.ts",
     "test:smoke:upload": "OTEL_SDK_DISABLED=1 ts-node --preferTsExts scripts/smoke-document-upload.ts",
     "test:integration:staging": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +27,7 @@
     "@opentelemetry/sdk-node": "^0.52.1",
     "@sentry/node": "^8.55.0",
     "@supabase/supabase-js": "^2.50.0",
+    "@types/pdfkit": "^0.17.5",
     "bullmq": "^5.59.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
@@ -34,6 +35,7 @@
     "ioredis": "^5.6.1",
     "jose": "^5.4.0",
     "jsonwebtoken": "^9.0.2",
+    "pdfkit": "^0.18.0",
     "pg": "^8.18.0",
     "swagger-ui-express": "^5.0.1",
     "yamljs": "^0.3.0",
