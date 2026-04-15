@@ -267,6 +267,62 @@ describe("GET /rules/member-form/:jurisdiction/document-extraction", () => {
     expect(response.body.memberForm.productFlowMode.modeKey).toBe("trust_bundle");
   });
 
+  it("returns 409 when jurisdiction is outside the launch gate", async () => {
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: null,
+      missing: [],
+      availabilityConflict: {
+        available: false,
+        jurisdiction: "US-NY",
+        reason: "Launch limited to California and Ohio during current rollout.",
+        message:
+          "Jurisdiction US-NY is unavailable for the selected product flow. Launch limited to California and Ohio during current rollout.",
+        unavailableRequirements: [
+          {
+            family: "poa",
+            documentType: "general",
+            reason: "Launch limited to California and Ohio during current rollout.",
+          },
+          {
+            family: "trust",
+            documentType: "rrr",
+            reason: "Launch limited to California and Ohio during current rollout.",
+          },
+        ],
+      },
+    });
+
+    const token = signToken({
+      sub: "member-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/rules/member-form/ny?mode=trust_bundle")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: "conflict",
+      message:
+        "Jurisdiction US-NY is unavailable for the selected product flow. Launch limited to California and Ohio during current rollout.",
+      jurisdiction: "US-NY",
+      reason: "Launch limited to California and Ohio during current rollout.",
+      unavailableRequirements: [
+        {
+          family: "poa",
+          documentType: "general",
+          reason: "Launch limited to California and Ohio during current rollout.",
+        },
+        {
+          family: "trust",
+          documentType: "rrr",
+          reason: "Launch limited to California and Ohio during current rollout.",
+        },
+      ],
+    });
+  });
+
   it("returns extraction payload for trust RRR and POA", async () => {
     const stubContract = {
       jurisdiction: "US-CA",
@@ -422,6 +478,46 @@ describe("GET /rules/member-form/:jurisdiction/document-extraction", () => {
     );
     expect(response.body.valid).toBe(true);
     expect(response.body.errors).toEqual([]);
+  });
+
+  it("returns 409 when validation is blocked by the launch gate", async () => {
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: null,
+      missing: [],
+      availabilityConflict: {
+        available: false,
+        jurisdiction: "US-FL",
+        reason: "Launch limited to California and Ohio during current rollout.",
+        message:
+          "Jurisdiction US-FL is unavailable for the selected product flow. Launch limited to California and Ohio during current rollout.",
+        unavailableRequirements: [
+          {
+            family: "poa",
+            documentType: "general",
+            reason: "Launch limited to California and Ohio during current rollout.",
+          },
+        ],
+      },
+    });
+
+    const token = signToken({
+      sub: "member-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .post("/rules/member-form/fl/validate?mode=poa_only")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        formValues: {
+          principal_full_name: "Alice Principal",
+        },
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.reason).toBe(
+      "Launch limited to California and Ohio during current rollout.",
+    );
   });
 
   it("returns 422 when member-form validation fails", async () => {

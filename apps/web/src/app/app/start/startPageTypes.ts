@@ -168,6 +168,73 @@ export type MemberFormValidationResponse = {
     message?: string;
   }>;
 };
+ 
+export type DocumentSummary = {
+  id: string;
+  idn: string | null;
+  status: string | null;
+  documentType: string | null;
+  jurisdiction: string | null;
+  productFlowMode?: ProductFlowModeKey;
+  selectedFamilies?: string[];
+  outputBundle?: Array<Record<string, unknown>>;
+  createdAt: string;
+};
+
+export type DocumentIntakeDraft = {
+  documentId: string;
+  ownerId: string;
+  productFlowMode: ProductFlowModeKey | string;
+  jurisdiction: string;
+  currentStep: string | null;
+  rulesSnapshotVersion: string;
+  answers: Record<string, unknown>;
+  canonicalAnswers: Record<string, unknown>;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DocumentIntakeDraftResponsePayload = {
+  draft?: DocumentIntakeDraft | null;
+  message?: string;
+  currentRevision?: number;
+};
+
+export type DocumentIntakeBootstrapResponsePayload = {
+  created?: boolean;
+  document?: DocumentSummary;
+  draft?: DocumentIntakeDraft;
+  message?: string;
+};
+
+export type DocumentIntakeSubmitResponsePayload = {
+  draft?: DocumentIntakeDraft;
+  canonicalPayload?: Record<string, unknown>;
+  valid?: boolean;
+  message?: string;
+  errors?: Array<{
+    code?: string;
+    field?: string;
+    message?: string;
+  }>;
+  currentRevision?: number;
+  intakeStatus?: string;
+};
+
+export type DocumentIntakePayloadResponsePayload = {
+  documentId?: string;
+  intakeStatus?: string;
+  submittedAt?: string | null;
+  payload?: {
+    jurisdiction?: string;
+    productFlowMode?: string;
+    rulesSnapshotVersion?: string;
+    revision?: number;
+    canonicalAnswers?: Record<string, unknown>;
+  };
+  message?: string;
+};
 
 export type MissingRequirement = {
   family: string;

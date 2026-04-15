@@ -4,6 +4,7 @@ import {
   buildMemberFormSelection,
   deriveMemberFormRulesByJurisdiction,
   listMemberFormJurisdictions,
+  type MissingFamilyRequirement,
 } from "../services/memberFormRulesService";
 import {
   validateMemberFormSubmission,
@@ -16,11 +17,60 @@ import {
   listProductFlowModes,
   productFlowModeKeys,
   type ProductFlowModeDefinition,
+  type ProductFlowModeKey,
   type ProductFlowModeSelection,
 } from "../services/productFlowModeService";
 import { sendValidationError } from "../utils/validation";
 
-const productFlowModeKeySet = new Set<string>(productFlowModeKeys);
+const productFlowModeKeySet = new Set<ProductFlowModeKey>(productFlowModeKeys);
+
+const MEMBER_FORM_REQUIREMENTS_NOT_FOUND_MESSAGE =
+  "Member form requirements not found for one or more selected families";
+
+const sendJurisdictionRequiredError = (res: Response) => {
+  return res.status(400).json({
+    error: "validation_error",
+    message: "jurisdiction is required",
+    details: [
+      {
+        path: "jurisdiction",
+        message: "jurisdiction is required",
+      },
+    ],
+  });
+};
+
+const sendMissingMemberFormRequirements = (
+  res: Response,
+  missing: MissingFamilyRequirement[],
+) => {
+  return res.status(404).json({
+    error: "not_found",
+    message: MEMBER_FORM_REQUIREMENTS_NOT_FOUND_MESSAGE,
+    details: missing,
+  });
+};
+
+const sendJurisdictionAvailabilityConflict = (
+  res: Response,
+  conflict: NonNullable<
+    Awaited<ReturnType<typeof deriveMemberFormRulesByJurisdiction>>["availabilityConflict"]
+  >,
+) => {
+  return res.status(409).json({
+    error: "conflict",
+    message:
+      conflict.message ??
+      `Jurisdiction ${conflict.jurisdiction} is unavailable for the selected product flow.`,
+    jurisdiction: conflict.jurisdiction,
+    reason: conflict.reason,
+    unavailableRequirements: conflict.unavailableRequirements.map((requirement) => ({
+      family: requirement.family,
+      documentType: requirement.documentType,
+      reason: requirement.reason,
+    })),
+  });
+};
 
 const memberFormValueSchema = z.union([
   z.string(),
@@ -47,7 +97,10 @@ const ensureAuthenticatedUser = (req: Request, res: Response) => {
   return false;
 };
 
-const parseRequestedMode = (req: Request, res: Response): string | null | undefined => {
+const parseRequestedMode = (
+  req: Request,
+  res: Response,
+): ProductFlowModeKey | null | undefined => {
   const rawMode = req.query.mode;
 
   if (typeof rawMode === "undefined") {
@@ -85,7 +138,7 @@ const parseRequestedMode = (req: Request, res: Response): string | null | undefi
     return null;
   }
 
-  if (!productFlowModeKeySet.has(mode)) {
+  if (!productFlowModeKeySet.has(mode as ProductFlowModeKey)) {
     res.status(400).json({
       error: "validation_error",
       message: "mode is not supported",
@@ -100,7 +153,7 @@ const parseRequestedMode = (req: Request, res: Response): string | null | undefi
     return null;
   }
 
-  return mode;
+  return mode as ProductFlowModeKey;
 };
 
 const defaultTypeByFamily = (
@@ -118,12 +171,20 @@ const defaultTypeByFamily = (
   return selection.idnType;
 };
 
+const formatFallbackModeDisplayName = (modeKey: string) => {
+  return modeKey
+    .split("_")
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+};
+
 const buildFallbackModeDefinition = (
   selection: ProductFlowModeSelection,
 ): ProductFlowModeDefinition => {
   return {
     modeKey: selection.modeKey,
-    displayName: selection.modeKey,
+    displayName: formatFallbackModeDisplayName(selection.modeKey),
     description: null,
     isActive: true,
     isDefault: false,
@@ -219,16 +280,7 @@ export const getMemberFormRulesByJurisdiction = async (
   }
 
   if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
-    return res.status(400).json({
-      error: "validation_error",
-      message: "jurisdiction is required",
-      details: [
-        {
-          path: "jurisdiction",
-          message: "jurisdiction is required",
-        },
-      ],
-    });
+    return sendJurisdictionRequiredError(res);
   }
 
   try {
@@ -246,12 +298,12 @@ export const getMemberFormRulesByJurisdiction = async (
       },
     );
 
+    if (result.availabilityConflict) {
+      return sendJurisdictionAvailabilityConflict(res, result.availabilityConflict);
+    }
+
     if (!result.contract || result.missing.length > 0) {
-      return res.status(404).json({
-        error: "not_found",
-        message: "Member form requirements not found for one or more selected families",
-        details: result.missing,
-      });
+      return sendMissingMemberFormRequirements(res, result.missing);
     }
 
     return res.status(200).json({
@@ -277,16 +329,7 @@ export const getMemberFormDocumentExtractionByJurisdiction = async (
   }
 
   if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
-    return res.status(400).json({
-      error: "validation_error",
-      message: "jurisdiction is required",
-      details: [
-        {
-          path: "jurisdiction",
-          message: "jurisdiction is required",
-        },
-      ],
-    });
+    return sendJurisdictionRequiredError(res);
   }
 
   try {
@@ -304,17 +347,17 @@ export const getMemberFormDocumentExtractionByJurisdiction = async (
       },
     );
 
+    if (result.availabilityConflict) {
+      return sendJurisdictionAvailabilityConflict(res, result.availabilityConflict);
+    }
+
     if (!result.contract || result.missing.length > 0) {
-      return res.status(404).json({
-        error: "not_found",
-        message: "Member form requirements not found for one or more selected families",
-        details: result.missing,
-      });
+      return sendMissingMemberFormRequirements(res, result.missing);
     }
 
     return res.status(200).json({
       mode: productFlowMode,
-      extraction: buildMemberFormDocumentExtractionPayload(result.contract),
+      extraction: await buildMemberFormDocumentExtractionPayload(result.contract),
     });
   } catch (error) {
     return res.status(500).json({
@@ -336,16 +379,7 @@ export const validateMemberFormSubmissionByJurisdiction = async (
   }
 
   if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
-    return res.status(400).json({
-      error: "validation_error",
-      message: "jurisdiction is required",
-      details: [
-        {
-          path: "jurisdiction",
-          message: "jurisdiction is required",
-        },
-      ],
-    });
+    return sendJurisdictionRequiredError(res);
   }
 
   const parsedBody = memberFormValidationSchema.safeParse(req.body ?? {});
@@ -368,12 +402,12 @@ export const validateMemberFormSubmissionByJurisdiction = async (
       },
     );
 
+    if (result.availabilityConflict) {
+      return sendJurisdictionAvailabilityConflict(res, result.availabilityConflict);
+    }
+
     if (!result.contract || result.missing.length > 0) {
-      return res.status(404).json({
-        error: "not_found",
-        message: "Member form requirements not found for one or more selected families",
-        details: result.missing,
-      });
+      return sendMissingMemberFormRequirements(res, result.missing);
     }
 
     const validation = validateMemberFormSubmission(

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import { getJurisdictionLabel, normalizeJurisdiction } from "./poaService";
+import { getJurisdictionLabel, normalizeJurisdiction } from "./jurisdictionUtils";
+import { listAvailableJurisdictionsForRequirement } from "./jurisdictionAvailabilityService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -289,34 +290,10 @@ export const getTrustRequirementDetails = async (
 };
 
 export const listTrustJurisdictions = async (documentType: TrustDocumentType) => {
-  const { data, error } = await supabaseAdmin
-    .from("trust_requirements")
-    .select("jurisdiction")
-    .eq("document_type", documentType)
-    .order("jurisdiction", { ascending: true });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const exactRows = (data ?? []) as TrustJurisdictionRow[];
-  if (exactRows.length > 0 || documentType === "rrr") {
-    return mapJurisdictionRows(exactRows);
-  }
-
-  warnTrustFallbackUsed("*", documentType);
-
-  const { data: rrrData, error: rrrError } = await supabaseAdmin
-    .from("trust_requirements")
-    .select("jurisdiction")
-    .eq("document_type", "rrr")
-    .order("jurisdiction", { ascending: true });
-
-  if (rrrError) {
-    throw new Error(rrrError.message);
-  }
-
-  return mapJurisdictionRows((rrrData ?? []) as TrustJurisdictionRow[]);
+  return listAvailableJurisdictionsForRequirement({
+    family: "trust",
+    documentType,
+  });
 };
 
 export const normalizeTrustJurisdiction = normalizeJurisdiction;

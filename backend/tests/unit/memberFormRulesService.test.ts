@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getRequiredMemberFormFieldKeysForDocumentKeyMock: vi.fn(),
+}));
+
+vi.mock("../../src/services/templateBindingRulesService", () => ({
+  getRequiredMemberFormFieldKeysForDocumentKey:
+    mocks.getRequiredMemberFormFieldKeysForDocumentKeyMock,
+}));
+
 import {
   applyMemberFormFallbackHelpText,
   applyPoaGlossaryHelpText,
   applyPoaSpecialAuthorityOptions,
+  applyTemplateDrivenRequiredness,
   applyTrusteePowersOptions,
   buildContractFactContext,
   buildMemberFormRulesContract,
@@ -215,6 +226,11 @@ const buildTrusteePowerOption = (
 });
 
 describe("memberFormRulesService", () => {
+  beforeEach(() => {
+    mocks.getRequiredMemberFormFieldKeysForDocumentKeyMock.mockReset();
+    mocks.getRequiredMemberFormFieldKeysForDocumentKeyMock.mockResolvedValue([]);
+  });
+
   it("builds a condition fact context from canonical contracts", () => {
     const contract = buildPoaContract({
       sections: [
@@ -528,5 +544,127 @@ describe("memberFormRulesService", () => {
     expect(keyTrustTermsField?.help_text).toContain("key trust terms");
     expect(uploadedDocumentField?.help_text).toContain("Upload");
     expect(trustNameField?.help_text).toBe("Existing help text");
+  });
+
+  it("enforces POA required fields from template metadata", async () => {
+    mocks.getRequiredMemberFormFieldKeysForDocumentKeyMock.mockResolvedValue([
+      "principal_contact",
+      "agent_contact",
+      "agent_signature_authority",
+    ]);
+
+    const poaContract = buildPoaContract({
+      sections: [
+        buildSection({
+          key: "principal",
+          title: "Principal",
+          fields: [
+            buildMemberField({
+              key: "principal_contact",
+              label: "Principal contact",
+              required: false,
+            }),
+            buildMemberField({
+              key: "agent_contact",
+              label: "Agent contact",
+              required: false,
+            }),
+            buildMemberField({
+              key: "agent_signature_authority",
+              label: "Multiple-agent signing rule",
+              required: false,
+            }),
+            buildMemberField({
+              key: "execution_model",
+              label: "Execution model",
+              required: false,
+              collect_from: "system",
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const enforced = await applyTemplateDrivenRequiredness(poaContract);
+
+    const principalContact = enforced.sections[0]?.fields.find(
+      (field) => field.key === "principal_contact",
+    );
+    const agentContact = enforced.sections[0]?.fields.find(
+      (field) => field.key === "agent_contact",
+    );
+    const agentSignatureAuthority = enforced.sections[0]?.fields.find(
+      (field) => field.key === "agent_signature_authority",
+    );
+    const executionModel = enforced.sections[0]?.fields.find(
+      (field) => field.key === "execution_model",
+    );
+
+    expect(principalContact?.required).toBe(true);
+    expect(agentContact?.required).toBe(true);
+    expect(agentSignatureAuthority?.required).toBe(true);
+    expect(executionModel?.required).toBe(false);
+  });
+
+  it("enforces trust required fields from template metadata", async () => {
+    mocks.getRequiredMemberFormFieldKeysForDocumentKeyMock.mockResolvedValue([
+      "revocation_holders",
+      "tax_id_owner",
+      "trustee_incapacity_standard",
+      "trustee_power_matrix",
+    ]);
+
+    const trustContract = buildTrustContract({
+      sections: [
+        buildSection({
+          key: "trust_terms",
+          title: "Trust Terms",
+          fields: [
+            buildMemberField({
+              key: "revocation_holders",
+              label: "Revocation holders",
+              required: false,
+              data_type: "array",
+            }),
+            buildMemberField({
+              key: "tax_id_owner",
+              label: "Primary tax ID owner",
+              required: false,
+            }),
+            buildMemberField({
+              key: "trustee_incapacity_standard",
+              label: "Trustee incapacity standard",
+              required: false,
+            }),
+            buildMemberField({
+              key: "trustee_power_matrix",
+              label: "Trustee powers",
+              required: false,
+              data_type: "array",
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const enforced = await applyTemplateDrivenRequiredness(trustContract);
+
+    const revocationHolders = enforced.sections[0]?.fields.find(
+      (field) => field.key === "revocation_holders",
+    );
+    const taxIdOwner = enforced.sections[0]?.fields.find(
+      (field) => field.key === "tax_id_owner",
+    );
+    const trusteeIncapacity = enforced.sections[0]?.fields.find(
+      (field) => field.key === "trustee_incapacity_standard",
+    );
+    const trusteePowerMatrix = enforced.sections[0]?.fields.find(
+      (field) => field.key === "trustee_power_matrix",
+    );
+
+    expect(revocationHolders?.required).toBe(true);
+    expect(taxIdOwner?.required).toBe(true);
+    expect(trusteeIncapacity?.required).toBe(true);
+    expect(trusteePowerMatrix?.required).toBe(true);
   });
 });

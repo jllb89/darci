@@ -50,7 +50,9 @@ import type {
   MemberFormJurisdictionsPayload,
   MemberFormPayload,
   MemberFormRulesContract,
-  MemberFormValidationResponse,
+  DocumentIntakeBootstrapResponsePayload,
+  DocumentIntakeDraftResponsePayload,
+  DocumentIntakeSubmitResponsePayload,
   MissingRequirement,
   ProductFlowModeDefinition,
   ProductFlowModesPayload,
@@ -83,6 +85,7 @@ import {
   normalizeNameForComparison,
   normalizeSignatureAuthorityMode,
   readStartFormDraft,
+  sanitizeFormValuesRecord,
   toStringArrayValue,
   validatePersonContact,
   writeStartFormDraft,
@@ -124,6 +127,33 @@ const fetchWithTokenRefresh = async (
   }
 };
 
+const coerceDraftFormStep = (value: unknown): FormStep => {
+  if (typeof value !== "string") {
+    return "general_information";
+  }
+
+  const normalized = value.trim();
+  if (isProductFlowStepKey(normalized)) {
+    return normalized;
+  }
+
+  if (normalized === "authority") {
+    return "trust_requirements";
+  }
+
+  return "general_information";
+};
+
+const buildDraftSignature = (
+  currentFormStep: FormStep,
+  formValues: Record<string, FormValue>,
+) => {
+  return JSON.stringify({
+    currentFormStep,
+    formValues,
+  });
+};
+
 type LeaveAction =
   | { type: "href"; href: string }
   | { type: "history-back" }
@@ -144,6 +174,7 @@ export default function StartDocumentPage() {
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
   const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
   const [isMockDataEnabled, setIsMockDataEnabled] = useState(true);
+  const [isActiveSourceVisible, setIsActiveSourceVisible] = useState(false);
 
   const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
@@ -160,8 +191,14 @@ export default function StartDocumentPage() {
   const [pendingLeaveAction, setPendingLeaveAction] = useState<LeaveAction | null>(null);
   const [currentFormStep, setCurrentFormStep] = useState<FormStep>("general_information");
   const [activeDropzoneFieldKey, setActiveDropzoneFieldKey] = useState<string | null>(null);
+  const [draftDocumentId, setDraftDocumentId] = useState<string | null>(null);
+  const [draftRevision, setDraftRevision] = useState<number | null>(null);
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftSaveNotice, setDraftSaveNotice] = useState<string | null>(null);
   const allowLeavingRef = useRef(false);
   const hasPushedHistoryGuardRef = useRef(false);
+  const lastServerDraftSignatureRef = useRef<string | null>(null);
   const contractContainerRef = useRef<HTMLDivElement | null>(null);
 
   const selectedJurisdictionLabel = useMemo(() => {
@@ -199,6 +236,7 @@ export default function StartDocumentPage() {
     !selectedJurisdiction ||
     isLoadingMemberForm ||
     !memberForm;
+  const isActiveSourceToggleDisabled = isLoadingMemberForm || !memberForm;
 
   useEffect(() => {
     if (!accessToken) {
@@ -259,6 +297,12 @@ export default function StartDocumentPage() {
           setSelectedJurisdiction("");
           setMemberForm(null);
           setFormValues({});
+          setDraftDocumentId(null);
+          setDraftRevision(null);
+          setDraftUpdatedAt(null);
+          setDraftSaveNotice(null);
+          setIsSavingDraft(false);
+          lastServerDraftSignatureRef.current = null;
           setErrorMessage(
             error instanceof Error ? error.message : "Failed to load product modes",
           );
@@ -329,6 +373,12 @@ export default function StartDocumentPage() {
         if (nextJurisdictions.length === 0) {
           setMemberForm(null);
           setFormValues({});
+          setDraftDocumentId(null);
+          setDraftRevision(null);
+          setDraftUpdatedAt(null);
+          setDraftSaveNotice(null);
+          setIsSavingDraft(false);
+          lastServerDraftSignatureRef.current = null;
         }
       } catch (error) {
         if (!cancelled) {
@@ -336,6 +386,12 @@ export default function StartDocumentPage() {
           setSelectedJurisdiction("");
           setMemberForm(null);
           setFormValues({});
+          setDraftDocumentId(null);
+          setDraftRevision(null);
+          setDraftUpdatedAt(null);
+          setDraftSaveNotice(null);
+          setIsSavingDraft(false);
+          lastServerDraftSignatureRef.current = null;
           setResolvedProductFlowMode(
             productFlowModes.find((mode) => mode.modeKey === selectedProductFlowMode) ??
               null,
@@ -410,26 +466,119 @@ export default function StartDocumentPage() {
           setResolvedProductFlowMode(payload.memberForm.productFlowMode);
         }
 
-        setMemberForm(payload.memberForm);
         const initialValues = buildInitialMemberFormValues(payload.memberForm, {
           jurisdictionCode: selectedJurisdiction,
           jurisdictionLabel: selectedJurisdictionLabel,
         });
-        const draft = readStartFormDraft(selectedProductFlowMode, selectedJurisdiction);
 
-        setFormValues({
-          ...initialValues,
-          ...(draft?.formValues ?? {}),
-        });
-        setCurrentFormStep(
-          selectedProductFlowMode === "trust_bundle"
-            ? "general_information"
-            : (draft?.currentFormStep ?? "general_information"),
+        const localDraft = readStartFormDraft(
+          selectedProductFlowMode,
+          selectedJurisdiction,
         );
+
+        let bootstrapPayload: DocumentIntakeBootstrapResponsePayload | null = null;
+        let bootstrapErrorMessage: string | null = null;
+
+        try {
+          const bootstrapResponse = await fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/intake/bootstrap`,
+            accessToken,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                productFlowMode: selectedProductFlowMode,
+                jurisdiction: selectedJurisdiction,
+                rulesSnapshotVersion: "member_form_rules_contract_v1",
+              }),
+            },
+          );
+
+          bootstrapPayload = (await bootstrapResponse.json().catch(() => null)) as
+            | DocumentIntakeBootstrapResponsePayload
+            | null;
+
+          if (!bootstrapResponse.ok || !bootstrapPayload?.document?.id) {
+            throw new Error(
+              bootstrapPayload?.message ||
+                "Failed to initialize intake draft persistence",
+            );
+          }
+        } catch (error) {
+          bootstrapErrorMessage =
+            error instanceof Error
+              ? error.message
+              : "Failed to initialize intake draft persistence";
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setMemberForm(payload.memberForm);
+
+        if (bootstrapPayload?.document?.id) {
+          const remoteDraft = bootstrapPayload.draft;
+          const remoteValues = sanitizeFormValuesRecord(remoteDraft?.answers ?? {});
+          const nextFormValues = {
+            ...initialValues,
+            ...remoteValues,
+          };
+          const nextCurrentFormStep =
+            selectedProductFlowMode === "trust_bundle"
+              ? "general_information"
+              : coerceDraftFormStep(remoteDraft?.currentStep);
+
+          setFormValues(nextFormValues);
+          setCurrentFormStep(nextCurrentFormStep);
+          setDraftDocumentId(bootstrapPayload.document.id);
+          setDraftRevision(
+            typeof remoteDraft?.revision === "number" ? remoteDraft.revision : null,
+          );
+          setDraftUpdatedAt(
+            typeof remoteDraft?.updatedAt === "string" ? remoteDraft.updatedAt : null,
+          );
+          setDraftSaveNotice(null);
+          setIsSavingDraft(false);
+          lastServerDraftSignatureRef.current = buildDraftSignature(
+            nextCurrentFormStep,
+            nextFormValues,
+          );
+        } else {
+          const nextFormValues = {
+            ...initialValues,
+            ...(localDraft?.formValues ?? {}),
+          };
+          const nextCurrentFormStep =
+            selectedProductFlowMode === "trust_bundle"
+              ? "general_information"
+              : (localDraft?.currentFormStep ?? "general_information");
+
+          setFormValues(nextFormValues);
+          setCurrentFormStep(nextCurrentFormStep);
+          setDraftDocumentId(null);
+          setDraftRevision(null);
+          setDraftUpdatedAt(null);
+          setIsSavingDraft(false);
+          setDraftSaveNotice(
+            bootstrapErrorMessage
+              ? `Using local draft fallback: ${bootstrapErrorMessage}`
+              : "Using local draft fallback",
+          );
+          lastServerDraftSignatureRef.current = null;
+        }
       } catch (error) {
         if (!cancelled) {
           setMemberForm(null);
           setFormValues({});
+          setDraftDocumentId(null);
+          setDraftRevision(null);
+          setDraftUpdatedAt(null);
+          setDraftSaveNotice(null);
+          setIsSavingDraft(false);
+          lastServerDraftSignatureRef.current = null;
           setErrorMessage(
             error instanceof Error
               ? error.message
@@ -639,6 +788,179 @@ export default function StartDocumentPage() {
   }, [
     currentFormStep,
     formValues,
+    memberForm,
+    selectedJurisdiction,
+    selectedProductFlowMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      !accessToken ||
+      !draftDocumentId ||
+      !selectedProductFlowMode ||
+      !selectedJurisdiction ||
+      !memberForm ||
+      isLoadingMemberForm ||
+      isValidatingMemberFormSubmission
+    ) {
+      return;
+    }
+
+    const signature = buildDraftSignature(currentFormStep, formValues);
+    if (lastServerDraftSignatureRef.current === signature) {
+      return;
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      const persistDraft = async () => {
+        setIsSavingDraft(true);
+
+        try {
+          const requestPayload: Record<string, unknown> = {
+            currentStep: currentFormStep,
+            rulesSnapshotVersion: "member_form_rules_contract_v1",
+            answers: formValues,
+          };
+
+          if (typeof draftRevision === "number") {
+            requestPayload.expectedRevision = draftRevision;
+          }
+
+          const response = await fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${draftDocumentId}/intake-draft`,
+            accessToken,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(requestPayload),
+            },
+          );
+
+          const payload = (await response.json().catch(() => null)) as
+            | DocumentIntakeDraftResponsePayload
+            | null;
+
+          if (response.status === 409) {
+            const currentRevision =
+              typeof payload?.currentRevision === "number"
+                ? payload.currentRevision
+                : null;
+
+            if (currentRevision !== null) {
+              setDraftRevision(currentRevision);
+            }
+
+            const latestResponse = await fetchWithTokenRefresh(
+              `${apiBaseUrl}/documents/${draftDocumentId}/intake-draft`,
+              accessToken,
+            );
+            const latestPayload = (await latestResponse
+              .json()
+              .catch(() => null)) as DocumentIntakeDraftResponsePayload | null;
+
+            if (latestResponse.ok && latestPayload?.draft) {
+              const mergedFormValues = {
+                ...formValues,
+                ...sanitizeFormValuesRecord(latestPayload.draft.answers),
+              };
+              const syncedCurrentStep =
+                selectedProductFlowMode === "trust_bundle"
+                  ? "general_information"
+                  : coerceDraftFormStep(latestPayload.draft.currentStep);
+
+              setFormValues(mergedFormValues);
+              setCurrentFormStep(syncedCurrentStep);
+              setDraftRevision(latestPayload.draft.revision);
+              setDraftUpdatedAt(latestPayload.draft.updatedAt);
+              lastServerDraftSignatureRef.current = buildDraftSignature(
+                syncedCurrentStep,
+                mergedFormValues,
+              );
+            }
+
+            setDraftSaveNotice(
+              "Draft changed in another session. Loaded the latest saved version.",
+            );
+
+            return;
+          }
+
+          if (!response.ok || !payload?.draft) {
+            throw new Error(payload?.message ?? "Failed to save draft");
+          }
+
+          setDraftRevision(payload.draft.revision);
+          setDraftUpdatedAt(payload.draft.updatedAt);
+          setDraftSaveNotice(null);
+          lastServerDraftSignatureRef.current = signature;
+        } catch (error) {
+          setDraftSaveNotice(
+            error instanceof Error ? error.message : "Failed to save draft",
+          );
+        } finally {
+          setIsSavingDraft(false);
+        }
+      };
+
+      void persistDraft();
+    }, 750);
+
+    return () => {
+      window.clearTimeout(saveTimer);
+    };
+  }, [
+    accessToken,
+    currentFormStep,
+    draftDocumentId,
+    draftRevision,
+    formValues,
+    isLoadingMemberForm,
+    isValidatingMemberFormSubmission,
+    memberForm,
+    selectedJurisdiction,
+    selectedProductFlowMode,
+  ]);
+
+  const draftUpdatedAtLabel = useMemo(() => {
+    if (!draftUpdatedAt) {
+      return null;
+    }
+
+    const parsed = new Date(draftUpdatedAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+
+    return parsed.toLocaleString();
+  }, [draftUpdatedAt]);
+
+  const draftStatusLabel = useMemo(() => {
+    if (!selectedProductFlowMode || !selectedJurisdiction || !memberForm) {
+      return null;
+    }
+
+    if (!draftDocumentId) {
+      return "Saving draft locally in this browser.";
+    }
+
+    if (isSavingDraft) {
+      return "Saving draft...";
+    }
+
+    if (draftUpdatedAtLabel) {
+      return typeof draftRevision === "number"
+        ? `Draft saved ${draftUpdatedAtLabel} (revision ${draftRevision}).`
+        : `Draft saved ${draftUpdatedAtLabel}.`;
+    }
+
+    return "Draft sync is active.";
+  }, [
+    draftDocumentId,
+    draftRevision,
+    draftUpdatedAtLabel,
+    isSavingDraft,
     memberForm,
     selectedJurisdiction,
     selectedProductFlowMode,
@@ -1105,9 +1427,15 @@ export default function StartDocumentPage() {
     setCurrentFormStep(previousFormStep.stepKey);
   };
 
-  const validateMemberFormSubmissionOnServer = useCallback(async () => {
-    if (!accessToken || !selectedProductFlowMode || !selectedJurisdiction || !memberForm) {
-      setSubmissionErrorMessage("Missing context to validate member form submission.");
+  const submitMemberFormOnServer = useCallback(async () => {
+    if (
+      !accessToken ||
+      !selectedProductFlowMode ||
+      !selectedJurisdiction ||
+      !memberForm ||
+      !draftDocumentId
+    ) {
+      setSubmissionErrorMessage("Missing context to submit member form.");
       return false;
     }
 
@@ -1115,12 +1443,8 @@ export default function StartDocumentPage() {
     setSubmissionErrorMessage(null);
 
     try {
-      const query = new URLSearchParams({
-        mode: selectedProductFlowMode,
-      }).toString();
-
       const response = await fetchWithTokenRefresh(
-        `${apiBaseUrl}/rules/member-form/${selectedJurisdiction}/validate?${query}`,
+        `${apiBaseUrl}/documents/${draftDocumentId}/intake-submit`,
         accessToken,
         {
           method: "POST",
@@ -1128,16 +1452,21 @@ export default function StartDocumentPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            formValues,
+            currentStep: currentFormStep,
+            rulesSnapshotVersion: "member_form_rules_contract_v1",
+            answers: formValues,
+            ...(typeof draftRevision === "number"
+              ? { expectedRevision: draftRevision }
+              : {}),
           }),
         },
       );
 
       const payload = (await response.json().catch(() => null)) as
-        | MemberFormValidationResponse
+        | DocumentIntakeSubmitResponsePayload
         | null;
 
-      if (!response.ok || payload?.valid !== true) {
+      if (response.status === 422 || payload?.valid === false) {
         const firstErrorMessage = payload?.errors?.find(
           (item) => typeof item.message === "string" && item.message.trim().length > 0,
         )?.message;
@@ -1150,13 +1479,38 @@ export default function StartDocumentPage() {
         return false;
       }
 
+      if (response.status === 409) {
+        if (typeof payload?.currentRevision === "number") {
+          setDraftRevision(payload.currentRevision);
+        }
+
+        setSubmissionErrorMessage(
+          payload?.message ??
+            "Your draft changed before submission. Please review and submit again.",
+        );
+        return false;
+      }
+
+      if (!response.ok || !payload?.draft) {
+        setSubmissionErrorMessage(
+          payload?.message ?? "Failed to submit member form.",
+        );
+        return false;
+      }
+
+      setDraftRevision(payload.draft.revision);
+      setDraftUpdatedAt(payload.draft.updatedAt);
+      setDraftSaveNotice("Intake submitted and locked for generation.");
       setSubmissionErrorMessage(null);
+      allowLeavingRef.current = true;
+      router.push(`/app/documents/${draftDocumentId}`);
+
       return true;
     } catch (error) {
       setSubmissionErrorMessage(
         error instanceof Error
           ? error.message
-          : "Failed to validate member form submission.",
+          : "Failed to submit member form.",
       );
       return false;
     } finally {
@@ -1164,8 +1518,12 @@ export default function StartDocumentPage() {
     }
   }, [
     accessToken,
+    currentFormStep,
+    draftDocumentId,
+    draftRevision,
     formValues,
     memberForm,
+    router,
     selectedJurisdiction,
     selectedProductFlowMode,
   ]);
@@ -1175,7 +1533,7 @@ export default function StartDocumentPage() {
       return;
     }
 
-    await validateMemberFormSubmissionOnServer();
+    await submitMemberFormOnServer();
   };
 
   useEffect(() => {
@@ -2034,12 +2392,12 @@ export default function StartDocumentPage() {
       };
 
       return (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {items.length > 0 ? (
             items.map((item, index) => (
               <div
                 key={`${field.canonical_key}-document-${index}`}
-                className="space-y-2 rounded-md bg-Color-Neutral-Lightest/35 p-3"
+                className="space-y-4 rounded-md bg-Color-Neutral-Lightest/35 p-4"
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[11px] uppercase tracking-[0.08em] text-Color-Neutral">
@@ -2051,7 +2409,7 @@ export default function StartDocumentPage() {
                     <div className="text-[11px] text-Color-Neutral">Amendment/supporting</div>
                   )}
                 </div>
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-3">
                     <label className={fieldLabelClassName}>
                       Type
@@ -2426,7 +2784,7 @@ export default function StartDocumentPage() {
                     {fieldMicrocopy ? (
                       <div className="text-xs text-Color-Neutral">{fieldMicrocopy}</div>
                     ) : null}
-                    {activeSourceSummary ? (
+                    {isActiveSourceVisible && activeSourceSummary ? (
                       <div className="text-[11px] text-Color-Neutral">
                         Active source: {activeSourceSummary}
                       </div>
@@ -2590,17 +2948,44 @@ export default function StartDocumentPage() {
                   <div>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="text-sm font-medium">New document details</div>
-                      {isMockDataToggleVisible ? (
-                        <MockDataToggle
-                          checked={isMockDataEnabled}
-                          disabled={isMockDataToggleDisabled}
-                          onChange={handleMockDataToggleChange}
-                        />
-                      ) : null}
+                      <div className="flex flex-col items-start gap-1 sm:items-end">
+                        {isMockDataToggleVisible ? (
+                          <MockDataToggle
+                            checked={isMockDataEnabled}
+                            disabled={isMockDataToggleDisabled}
+                            onChange={handleMockDataToggleChange}
+                          />
+                        ) : null}
+                        <label className="inline-flex items-center gap-2 text-xs font-medium text-Color-Neutral">
+                          <span>Show active sources</span>
+                          <input
+                            checked={isActiveSourceVisible}
+                            className="h-4 w-4 accent-Color-Scheme-1-Text"
+                            disabled={isActiveSourceToggleDisabled}
+                            onChange={(event) => {
+                              setIsActiveSourceVisible(event.target.checked);
+                            }}
+                            type="checkbox"
+                          />
+                        </label>
+                      </div>
                     </div>
                     <div className="mt-1 text-xs text-Color-Neutral">
                       Answer each question in plain terms. If you&apos;re unsure, choose the closest option and continue.
                     </div>
+                    {draftStatusLabel || draftSaveNotice ? (
+                      <div
+                        className={`mt-2 rounded-md border px-3 py-2 text-xs ${
+                          draftSaveNotice
+                            ? "border-amber-200 bg-amber-50 text-amber-800"
+                            : isSavingDraft
+                              ? "border-sky-200 bg-sky-50 text-sky-800"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        }`}
+                      >
+                        {draftSaveNotice ?? draftStatusLabel}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="space-y-2 rounded-md bg-white p-3">
@@ -2773,11 +3158,12 @@ export default function StartDocumentPage() {
                       const fieldMicrocopy = getFieldMicrocopy(field.canonical_key);
 
                       return (
-                        <div key={`documents-column-${field.canonical_key}`} className="space-y-2">
+                        <div key={`documents-column-${field.canonical_key}`} className="space-y-3">
                           {field.data_type === "boolean" ? null : renderFieldLabel(field)}
                           {renderFieldControl(field)}
                           {field.data_type === "boolean" ? <div>{renderFieldLabel(field)}</div> : null}
-                          {fieldMicrocopy ? (
+                          {fieldMicrocopy &&
+                          normalizeCanonicalKey(field.canonical_key) !== "prior_document_items" ? (
                             <div className="text-xs text-Color-Neutral">{fieldMicrocopy}</div>
                           ) : null}
                         </div>

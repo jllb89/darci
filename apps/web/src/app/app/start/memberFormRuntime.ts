@@ -152,6 +152,7 @@ const peopleFieldOrder = [
 const authorityFieldOrder = [
   "trustee_signature_authority",
   "trustee_signature_authority_custom_text",
+  "agent_signature_authority",
   "revocability_status",
   "revocation_holders",
   "revocation_holders_custom_text",

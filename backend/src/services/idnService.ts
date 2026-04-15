@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import { getJurisdictionLabel, normalizeJurisdiction } from "./poaService";
+import { getJurisdictionLabel, normalizeJurisdiction } from "./jurisdictionUtils";
+import { listAvailableJurisdictionsForRequirement } from "./jurisdictionAvailabilityService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -178,30 +179,10 @@ export const getIdnRequirementDetails = async (
 };
 
 export const listIdnJurisdictions = async (documentType: IdnDocumentType) => {
-  const { data, error } = await supabaseAdmin
-    .from("idn_requirements")
-    .select("jurisdiction")
-    .eq("document_type", documentType)
-    .order("jurisdiction", { ascending: true });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const unique = new Map<string, { code: string; label: string }>();
-
-  for (const row of (data ?? []) as IdnJurisdictionRow[]) {
-    if (!unique.has(row.jurisdiction)) {
-      unique.set(row.jurisdiction, {
-        code: row.jurisdiction,
-        label: getJurisdictionLabel(row.jurisdiction),
-      });
-    }
-  }
-
-  return [...unique.values()].sort((left, right) =>
-    left.label.localeCompare(right.label),
-  );
+  return listAvailableJurisdictionsForRequirement({
+    family: "idn",
+    documentType,
+  });
 };
 
 export const normalizeIdnJurisdiction = normalizeJurisdiction;

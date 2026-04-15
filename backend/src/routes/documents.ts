@@ -1,7 +1,11 @@
 import { Router } from "express";
 import {
   appendAcknowledgment,
+  bootstrapDocumentIntakeDraft,
+  createDocumentGenerationRuns,
   createDocument,
+  getDocumentIntakeDraft,
+  listDocumentGenerationRuns,
   finalizeDocumentUpload,
   getDocument,
   getDocumentParties,
@@ -11,19 +15,57 @@ import {
   listDocuments,
   finalizeSignatureUpload,
   requestSignatureUpload,
+  submitDocumentIntakeDraft,
+  getDocumentIntakePayload,
   signDocument,
   submitNotarization,
   updateDocumentParties,
   watermarkDocument,
+  saveDocumentIntakeDraft,
 } from "../controllers/documentsController";
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
 
 router.post("/", createDocument);
+router.post(
+  "/intake/bootstrap",
+  requireRole(["member", "admin", "service_role"]),
+  bootstrapDocumentIntakeDraft,
+);
 router.post("/:id/upload-finalize", finalizeDocumentUpload);
 router.get("/", listDocuments);
 router.get("/:id", getDocument);
+router.get(
+  "/:id/intake-draft",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentIntakeDraft,
+);
+router.put(
+  "/:id/intake-draft",
+  requireRole(["member", "admin", "service_role"]),
+  saveDocumentIntakeDraft,
+);
+router.post(
+  "/:id/intake-submit",
+  requireRole(["member", "admin", "service_role"]),
+  submitDocumentIntakeDraft,
+);
+router.get(
+  "/:id/intake-payload",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentIntakePayload,
+);
+router.post(
+  "/:id/generation-runs",
+  requireRole(["member", "admin", "service_role"]),
+  createDocumentGenerationRuns,
+);
+router.get(
+  "/:id/generation-runs",
+  requireRole(["member", "admin", "service_role"]),
+  listDocumentGenerationRuns,
+);
 router.get(
   "/:id/parties",
   requireRole(["member", "admin", "service_role"]),

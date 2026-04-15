@@ -768,6 +768,19 @@ const derivePoaContract = (
     ],
   };
 
+  const poaAgentSignatureAuthorityModes = [
+    "all_agents_jointly",
+    "any_agent_separately",
+  ] as const;
+
+  const poaAgentSignatureAuthorityLabels: Record<
+    (typeof poaAgentSignatureAuthorityModes)[number],
+    string
+  > = {
+    all_agents_jointly: "All designated agents must act jointly",
+    any_agent_separately: "Any designated agent may act separately",
+  };
+
   const notaryStatus = alternativeExecutionPathAllowed
     ? "alternative_path"
     : notaryRequired
@@ -908,6 +921,19 @@ const derivePoaContract = (
           data_type: "string",
           collect_from: "member",
           default_source: "none",
+        },
+        {
+          key: "agent_signature_authority",
+          label: "Multiple-agent signing rule",
+          semantic_type: "signature_authority_rule",
+          required: true,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+          validation: {
+            allowed_values: poaAgentSignatureAuthorityModes,
+            allowed_value_labels: poaAgentSignatureAuthorityLabels,
+          },
         },
       ],
     },

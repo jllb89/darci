@@ -87,6 +87,8 @@ export const fieldMicrocopyByCanonicalKey: Record<string, string> = {
     "Select whether all trustees must sign, any one trustee may sign, a named trustee will sign, or custom signing language applies.",
   trustee_signature_authority_custom_text:
     "Provide exact custom signing language when the standard trustee signing options do not apply.",
+  agent_signature_authority:
+    "If multiple agents are designated, choose whether they must act jointly or if any one agent may act separately.",
   tax_id_owner:
     "If more than one Trustmaker is listed, choose which Trustmaker's tax ID is primary.",
   restatement_context_type:

@@ -335,6 +335,221 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /admin/template-binding-rules:
+    get:
+      summary: List template binding rules
+      description: Lists template binding rules, optionally filtered by document key and inactive rows.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: documentKey
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z0-9_]+$"
+          description: Optional document key filter (for example `poa_general`, `trust_rrr`).
+        - in: query
+          name: includeInactive
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Include inactive rules when true.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateBindingRuleListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create template binding rule
+      description: Creates a template binding rule row used by extraction coverage and intake requiredness.
+      x-roles:
+        - admin
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateBindingRuleCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateBindingRuleResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/template-binding-rules/{id}:
+    patch:
+      summary: Update template binding rule
+      description: Partially updates a template binding rule.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateBindingRuleUpdateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateBindingRuleResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Deactivate template binding rule
+      description: Soft deactivates a template binding rule by setting isActive to false.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateBindingRuleResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents:
     post:
       summary: Create document
@@ -446,6 +661,299 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DocumentDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/intake/bootstrap:
+    post:
+      summary: Create or resume intake draft document
+      x-roles:
+        - member
+        - admin
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentIntakeBootstrapRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeBootstrapResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/intake-draft:
+    get:
+      summary: Get document intake draft
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeDraftResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      summary: Save document intake draft
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentIntakeDraftUpsertRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeDraftResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeDraftConflictResponse"
+  /documents/{id}/intake-submit:
+    post:
+      summary: Submit document intake draft
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentIntakeSubmitRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeSubmitResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DocumentIntakeDraftConflictResponse"
+                  - $ref: "#/components/schemas/DocumentIntakeStatusConflictResponse"
+                  - $ref: "#/components/schemas/JurisdictionAvailabilityConflictResponse"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberFormValidationResponse"
+  /documents/{id}/intake-payload:
+    get:
+      summary: Get canonical intake payload
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakePayloadResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DocumentIntakeStatusConflictResponse"
+                  - $ref: "#/components/schemas/JurisdictionAvailabilityConflictResponse"
+  /documents/{id}/generation-runs:
+    post:
+      summary: Create document generation runs
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentGenerationRunCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunsResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeStatusConflictResponse"
+    get:
+      summary: List document generation runs
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentGenerationRunsResponse"
         "401":
           description: Unauthorized
           content:
@@ -1431,6 +1939,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JurisdictionAvailabilityConflictResponse"
+  /rules/member-form/{jurisdiction}/validate:
     post:
       summary: Validate member-form submission payload
       description: Validates member-form values against backend trust/POA/IDN parity rules for the selected jurisdiction and mode.
@@ -1493,6 +2008,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JurisdictionAvailabilityConflictResponse"
         "422":
           description: Validation failed
           content:
@@ -1556,6 +2077,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JurisdictionAvailabilityConflictResponse"
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
@@ -2341,6 +2868,249 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DocumentVersion"
+    DocumentIntakeDraft:
+      type: object
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        productFlowMode:
+          type: string
+          enum:
+            - poa_only
+            - trust_bundle
+            - notarize_document
+        jurisdiction:
+          type: string
+        currentStep:
+          type: string
+          nullable: true
+        rulesSnapshotVersion:
+          type: string
+        answers:
+          type: object
+          additionalProperties: true
+        canonicalAnswers:
+          type: object
+          additionalProperties: true
+        revision:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    DocumentIntakeDraftResponse:
+      type: object
+      properties:
+        draft:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/DocumentIntakeDraft"
+    DocumentIntakeBootstrapRequest:
+      type: object
+      required:
+        - productFlowMode
+        - jurisdiction
+      properties:
+        productFlowMode:
+          type: string
+          enum:
+            - poa_only
+            - trust_bundle
+            - notarize_document
+        jurisdiction:
+          type: string
+        rulesSnapshotVersion:
+          type: string
+    DocumentIntakeBootstrapResponse:
+      type: object
+      properties:
+        created:
+          type: boolean
+        document:
+          $ref: "#/components/schemas/Document"
+        draft:
+          $ref: "#/components/schemas/DocumentIntakeDraft"
+    DocumentIntakeDraftUpsertRequest:
+      type: object
+      required:
+        - answers
+      properties:
+        currentStep:
+          type: string
+          nullable: true
+        rulesSnapshotVersion:
+          type: string
+        answers:
+          type: object
+          additionalProperties: true
+        canonicalAnswers:
+          type: object
+          additionalProperties: true
+        expectedRevision:
+          type: integer
+          minimum: 0
+    DocumentIntakeSubmitRequest:
+      type: object
+      required:
+        - answers
+      properties:
+        currentStep:
+          type: string
+          nullable: true
+        rulesSnapshotVersion:
+          type: string
+        answers:
+          type: object
+          additionalProperties: true
+        expectedRevision:
+          type: integer
+          minimum: 0
+    DocumentIntakeSubmitResponse:
+      type: object
+      properties:
+        draft:
+          $ref: "#/components/schemas/DocumentIntakeDraft"
+        canonicalPayload:
+          type: object
+          additionalProperties: true
+    DocumentIntakeCanonicalPayload:
+      type: object
+      properties:
+        jurisdiction:
+          type: string
+        productFlowMode:
+          type: string
+        rulesSnapshotVersion:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        canonicalAnswers:
+          type: object
+          additionalProperties: true
+    DocumentIntakePayloadResponse:
+      type: object
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        intakeStatus:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        payload:
+          $ref: "#/components/schemas/DocumentIntakeCanonicalPayload"
+    DocumentIntakeDraftConflictResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        currentRevision:
+          type: integer
+          minimum: 0
+    DocumentIntakeStatusConflictResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        intakeStatus:
+          type: string
+    JurisdictionAvailabilityConflictResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        jurisdiction:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        unavailableRequirements:
+          type: array
+          items:
+            type: object
+            properties:
+              family:
+                type: string
+                enum:
+                  - poa
+                  - trust
+                  - idn
+              documentType:
+                type: string
+              reason:
+                type: string
+    DocumentGenerationRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        intakeRevision:
+          type: integer
+          minimum: 1
+        outputKey:
+          type: string
+        documentKey:
+          type: string
+        templateKey:
+          type: string
+        templateVersion:
+          type: string
+        templateHash:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        coverage:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum:
+            - queued
+            - rendered
+            - failed
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    DocumentGenerationRunCreateRequest:
+      type: object
+      properties:
+        outputKeys:
+          type: array
+          items:
+            type: string
+            pattern: "^[a-z0-9_]+$"
+          minItems: 1
+    DocumentGenerationRunsResponse:
+      type: object
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentGenerationRun"
     DocumentPartyRole:
       type: string
       enum:
@@ -2785,6 +3555,141 @@ components:
       properties:
         user:
           $ref: "#/components/schemas/User"
+    TemplateBindingRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentKey:
+          type: string
+        placeholder:
+          type: string
+        description:
+          type: string
+        required:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - member_form
+            - system
+            - notary
+            - signing
+        canonicalKey:
+          type: string
+          nullable: true
+        sourceFieldKey:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+          minimum: 0
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TemplateBindingRuleResponse:
+      type: object
+      properties:
+        rule:
+          $ref: "#/components/schemas/TemplateBindingRule"
+    TemplateBindingRuleListResponse:
+      type: object
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateBindingRule"
+    TemplateBindingRuleCreateRequest:
+      type: object
+      required:
+        - documentKey
+        - placeholder
+        - description
+        - required
+        - source
+      properties:
+        documentKey:
+          type: string
+          pattern: "^[a-z0-9_]+$"
+        placeholder:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          minLength: 1
+        required:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - member_form
+            - system
+            - notary
+            - signing
+        canonicalKey:
+          type: string
+          nullable: true
+          pattern: "^[a-z0-9_]+$"
+        sourceFieldKey:
+          type: string
+          nullable: true
+          pattern: "^[a-z0-9_]+$"
+        notes:
+          type: string
+          nullable: true
+          minLength: 1
+        sortOrder:
+          type: integer
+          minimum: 0
+        isActive:
+          type: boolean
+    TemplateBindingRuleUpdateRequest:
+      type: object
+      properties:
+        documentKey:
+          type: string
+          pattern: "^[a-z0-9_]+$"
+        placeholder:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          minLength: 1
+        required:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - member_form
+            - system
+            - notary
+            - signing
+        canonicalKey:
+          type: string
+          nullable: true
+          pattern: "^[a-z0-9_]+$"
+        sourceFieldKey:
+          type: string
+          nullable: true
+          pattern: "^[a-z0-9_]+$"
+        notes:
+          type: string
+          nullable: true
+          minLength: 1
+        sortOrder:
+          type: integer
+          minimum: 0
+        isActive:
+          type: boolean
     PoaRequirementResponse:
       type: object
       properties:

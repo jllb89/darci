@@ -7,8 +7,8 @@
 
     // Environment Settings
     // See also https://aka.ms/tsconfig/module
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "Node16",
+    "moduleResolution": "node16",
     "target": "esnext",
     "types": ["node", "express"],
     "typeRoots": ["./src/types", "./node_modules/@types"],

@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getTemplateBindingRulesByDocumentKeyMock: vi.fn(),
+}));
+
+vi.mock("../../src/services/templateBindingRulesService", () => ({
+  getTemplateBindingRulesByDocumentKey:
+    mocks.getTemplateBindingRulesByDocumentKeyMock,
+}));
+
 import type {
   PoaInputRequirementsContract,
   TrustInputRequirementsContract,
@@ -186,6 +196,18 @@ const buildPoaInputRequirements = (): PoaInputRequirementsContract => ({
           data_type: "string",
           collect_from: "member",
           default_source: "user_profile",
+        },
+        {
+          key: "agent_signature_authority",
+          label: "Multiple-agent signing rule",
+          semantic_type: "signature_authority_rule",
+          required: true,
+          data_type: "string",
+          collect_from: "member",
+          default_source: "none",
+          validation: {
+            allowed_values: ["all_agents_jointly", "any_agent_separately"],
+          },
         },
       ],
     },
@@ -384,10 +406,74 @@ const buildMemberFormContract = (): MemberFormRulesContract => {
 };
 
 describe("memberFormDocumentExtractionService", () => {
-  it("builds canonical extraction payload for trust RRR and POA", () => {
+  beforeEach(() => {
+    mocks.getTemplateBindingRulesByDocumentKeyMock.mockReset();
+    mocks.getTemplateBindingRulesByDocumentKeyMock.mockImplementation(
+      async (documentKey: string) => {
+        if (documentKey === "trust_rrr") {
+          return [
+            {
+              placeholder: "TrustName",
+              description: "Registered trust name shown in title and confirmation section.",
+              required: true,
+              source: "member_form",
+              canonicalKey: "trust_name",
+              sourceFieldKey: null,
+              notes: null,
+            },
+            {
+              placeholder: "DarciNo",
+              description: "Registry number assigned to this DARCi trust registration.",
+              required: true,
+              source: "system",
+              canonicalKey: null,
+              sourceFieldKey: null,
+              notes: "Issued by platform during registration.",
+            },
+          ];
+        }
+
+        if (documentKey === "poa_general") {
+          return [
+            {
+              placeholder: "Principal.FullName",
+              description: "Principal full legal name.",
+              required: true,
+              source: "member_form",
+              canonicalKey: "principal_full_name",
+              sourceFieldKey: null,
+              notes: null,
+            },
+            {
+              placeholder: "Multiple Agents joint/separate rule",
+              description: "How multiple agents act (jointly or independently).",
+              required: true,
+              source: "member_form",
+              canonicalKey: "agent_signature_authority",
+              sourceFieldKey: null,
+              notes: "Expected by DDPOA template language.",
+            },
+            {
+              placeholder: "Execution day / month / year",
+              description: "POA execution date.",
+              required: true,
+              source: "signing",
+              canonicalKey: "execution_date",
+              sourceFieldKey: null,
+              notes: "Captured from the member signing event, not the intake form.",
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+  });
+
+  it("builds canonical extraction payload for trust RRR and POA", async () => {
     const memberForm = buildMemberFormContract();
 
-    const payload = buildMemberFormDocumentExtractionPayload(memberForm);
+    const payload = await buildMemberFormDocumentExtractionPayload(memberForm);
 
     expect(payload.jurisdiction).toBe("US-CA");
     expect(payload.documents.map((document) => document.documentKey)).toEqual([
@@ -436,10 +522,10 @@ describe("memberFormDocumentExtractionService", () => {
     expect(payload.sharedCanonicalKeys).toContain("jurisdiction");
   });
 
-  it("omits fields from hidden sections", () => {
+  it("omits fields from hidden sections", async () => {
     const memberForm = buildMemberFormContract();
 
-    const payload = buildMemberFormDocumentExtractionPayload(memberForm);
+    const payload = await buildMemberFormDocumentExtractionPayload(memberForm);
     const poaDocument = payload.documents.find((document) => document.documentKey === "poa_general");
 
     expect(poaDocument).toBeDefined();
@@ -456,10 +542,15 @@ describe("memberFormDocumentExtractionService", () => {
         expect.objectContaining({
           placeholder: "Multiple Agents joint/separate rule",
           canonicalKey: "agent_signature_authority",
-          status: "missing_canonical_field",
+          status: "mapped",
+        }),
+        expect.objectContaining({
+          placeholder: "Execution day / month / year",
+          source: "signing",
+          status: "system_value",
         }),
       ]),
     );
-    expect((poaDocument?.templateCoverage.missingBindings ?? 0) > 0).toBe(true);
+    expect(poaDocument?.templateCoverage.missingBindings).toBe(0);
   });
 });

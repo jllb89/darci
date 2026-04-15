@@ -13,6 +13,7 @@ import {
   deriveMemberFacingFormContract,
   type MemberFacingFormContract,
 } from "./memberInputAggregator";
+import { getRequiredMemberFormFieldKeysForDocumentKey } from "./templateBindingRulesService";
 import {
   getPoaRequirementDetails,
   listPoaJurisdictions,
@@ -33,6 +34,10 @@ import {
   getDefaultProductFlowModeSelection,
   type ProductFlowModeDefinition,
 } from "./productFlowModeService";
+import {
+  checkJurisdictionAvailabilityForSelection,
+  type JurisdictionAvailabilityCheckResult,
+} from "./jurisdictionAvailabilityService";
 
 export const memberFormFamilies = ["poa", "trust", "idn"] as const;
 
@@ -87,6 +92,7 @@ export type MissingFamilyRequirement = {
 export type MemberFormRulesByJurisdictionResult = {
   contract: MemberFormRulesContract | null;
   missing: MissingFamilyRequirement[];
+  availabilityConflict?: JurisdictionAvailabilityCheckResult;
 };
 
 type MemberFormRulesContractOptions = {
@@ -133,6 +139,8 @@ const MEMBER_FORM_FALLBACK_HELP_TEXT_BY_FIELD_KEY: Readonly<Record<string, strin
     "Indicate whether the trust is revocable, irrevocable, or limited by specific conditions.",
   revocation_holders:
     "List any person(s) who hold authority to revoke or amend the trust under the governing instrument.",
+  agent_signature_authority:
+    "If more than one agent is designated, choose whether all agents must act jointly or any one agent may act separately.",
   trustee_signature_authority:
     "Describe who must sign when multiple currently acting trustees are serving (for example, all trustees or any one trustee).",
   trustee_signature_authority_custom_text:
@@ -368,6 +376,56 @@ const getFamilyAndDocumentType = (
   return {
     family: "idn",
     documentType: contract.document_type,
+  };
+};
+
+const toDocumentKey = (family: MemberFormFamily, documentType: string) => {
+  return `${family}_${documentType}`;
+};
+
+export const applyTemplateDrivenRequiredness = async (
+  contract: InputRequirementsContract,
+): Promise<InputRequirementsContract> => {
+  const { family, documentType } = getFamilyAndDocumentType(contract);
+  const documentKey = toDocumentKey(family, documentType);
+  const requiredFieldKeys = await getRequiredMemberFormFieldKeysForDocumentKey(
+    documentKey,
+  );
+
+  if (requiredFieldKeys.length === 0) {
+    return contract;
+  }
+
+  const requiredFieldSet = new Set(requiredFieldKeys);
+  let changed = false;
+
+  const sections = contract.sections.map((section) => ({
+    ...section,
+    fields: section.fields.map((field) => {
+      if (
+        !requiredFieldSet.has(field.key) ||
+        field.collect_from !== "member" ||
+        field.required
+      ) {
+        return field;
+      }
+
+      changed = true;
+
+      return {
+        ...field,
+        required: true,
+      };
+    }),
+  }));
+
+  if (!changed) {
+    return contract;
+  }
+
+  return {
+    ...contract,
+    sections,
   };
 };
 
@@ -672,10 +730,12 @@ const buildContractsBySelection = async (
       });
 
       contracts.push(
-        applyMemberFormFallbackHelpText(
-          applyPoaSpecialAuthorityOptions(
-            applyPoaGlossaryHelpText(poaContract, poaDetails.glossary),
-            poaDetails.specialAuthorities,
+        await applyTemplateDrivenRequiredness(
+          applyMemberFormFallbackHelpText(
+            applyPoaSpecialAuthorityOptions(
+              applyPoaGlossaryHelpText(poaContract, poaDetails.glossary),
+              poaDetails.specialAuthorities,
+            ),
           ),
         ),
       );
@@ -695,14 +755,16 @@ const buildContractsBySelection = async (
       });
     } else {
       contracts.push(
-        applyMemberFormFallbackHelpText(
-          applyTrusteePowersOptions(
-            deriveInputRequirements({
-              family: "trust",
-              documentType: selection.trustType,
-              record: trustRequirementDetails.requirement,
-            }),
-            trustRequirementDetails.trusteePowers,
+        await applyTemplateDrivenRequiredness(
+          applyMemberFormFallbackHelpText(
+            applyTrusteePowersOptions(
+              deriveInputRequirements({
+                family: "trust",
+                documentType: selection.trustType,
+                record: trustRequirementDetails.requirement,
+              }),
+              trustRequirementDetails.trusteePowers,
+            ),
           ),
         ),
       );
@@ -719,12 +781,14 @@ const buildContractsBySelection = async (
       });
     } else {
       contracts.push(
-        applyMemberFormFallbackHelpText(
-          deriveInputRequirements({
-            family: "idn",
-            documentType: selection.idnType,
-            record: idnRequirement,
-          }),
+        await applyTemplateDrivenRequiredness(
+          applyMemberFormFallbackHelpText(
+            deriveInputRequirements({
+              family: "idn",
+              documentType: selection.idnType,
+              record: idnRequirement,
+            }),
+          ),
         ),
       );
     }
@@ -742,6 +806,19 @@ export const deriveMemberFormRulesByJurisdiction = async (
   options: MemberFormRulesContractOptions = {},
 ): Promise<MemberFormRulesByJurisdictionResult> => {
   const normalizedJurisdiction = normalizeJurisdiction(jurisdiction);
+  const availability = await checkJurisdictionAvailabilityForSelection(
+    normalizedJurisdiction,
+    selection,
+  );
+
+  if (!availability.available) {
+    return {
+      contract: null,
+      missing: [],
+      availabilityConflict: availability,
+    };
+  }
+
   const { contracts, missing } = await buildContractsBySelection(
     normalizedJurisdiction,
     selection,

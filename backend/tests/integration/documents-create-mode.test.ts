@@ -23,6 +23,7 @@ vi.hoisted(() => {
 const mocks = vi.hoisted(() => ({
   getOrCreateUserIdMock: vi.fn(),
   createDocumentWithVersionMock: vi.fn(),
+  bootstrapDocumentIntakeDraftMock: vi.fn(),
   createDocumentUploadUrlMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   buildSelectionForModeMock: vi.fn(),
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../src/services/documentService", () => ({
   getOrCreateUserId: mocks.getOrCreateUserIdMock,
   createDocumentWithVersion: mocks.createDocumentWithVersionMock,
+  bootstrapDocumentIntakeDraft: mocks.bootstrapDocumentIntakeDraftMock,
 }));
 
 vi.mock("../../src/services/storageService", () => ({
@@ -68,6 +70,7 @@ describe("POST /documents with product flow mode", () => {
 
     mocks.getOrCreateUserIdMock.mockReset();
     mocks.createDocumentWithVersionMock.mockReset();
+    mocks.bootstrapDocumentIntakeDraftMock.mockReset();
     mocks.createDocumentUploadUrlMock.mockReset();
     mocks.recordAuditEventMock.mockReset();
     mocks.buildSelectionForModeMock.mockReset();
@@ -142,6 +145,107 @@ describe("POST /documents with product flow mode", () => {
     });
 
     mocks.recordAuditEventMock.mockResolvedValue(undefined);
+
+    mocks.bootstrapDocumentIntakeDraftMock.mockResolvedValue({
+      created: false,
+      document: {
+        id: "doc-intake-1",
+        owner_id: "owner-1",
+        idn: null,
+        status: "draft",
+        document_type: "intake",
+        jurisdiction: "US-CA",
+        product_flow_mode: "trust_bundle",
+        selected_families: ["poa", "trust"],
+        output_bundle: [
+          {
+            outputKey: "trust_certificate",
+            outputLabel: "Certificate of Trust",
+            isRequired: true,
+            sortOrder: 10,
+            metadata: {},
+          },
+        ],
+        created_at: "2026-04-13T00:00:00.000Z",
+        updated_at: "2026-04-13T00:00:00.000Z",
+      },
+      draft: {
+        document_id: "doc-intake-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: "general_information",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: { trust_name: "Acme Trust" },
+        canonical_answers_json: { trust_name: "Acme Trust" },
+        revision: 3,
+        created_at: "2026-04-13T00:00:00.000Z",
+        updated_at: "2026-04-13T00:10:00.000Z",
+      },
+    });
+  });
+
+  it("creates or resumes intake draft document", async () => {
+    const token = signToken({
+      sub: "member-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .post("/documents/intake/bootstrap")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+      });
+
+    expect(response.status).toBe(200);
+    expect(mocks.getOrCreateUserIdMock).toHaveBeenCalled();
+    expect(mocks.buildSelectionForModeMock).toHaveBeenCalledWith("trust_bundle");
+    expect(mocks.resolveExpectedOutputsForModeMock).toHaveBeenCalledWith("trust_bundle");
+    expect(mocks.bootstrapDocumentIntakeDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+      }),
+    );
+
+    expect(response.body).toEqual({
+      created: false,
+      document: {
+        id: "doc-intake-1",
+        idn: null,
+        status: "draft",
+        documentType: "intake",
+        jurisdiction: "US-CA",
+        productFlowMode: "trust_bundle",
+        selectedFamilies: ["poa", "trust"],
+        outputBundle: [
+          {
+            outputKey: "trust_certificate",
+            outputLabel: "Certificate of Trust",
+            isRequired: true,
+            sortOrder: 10,
+            metadata: {},
+          },
+        ],
+        createdAt: "2026-04-13T00:00:00.000Z",
+      },
+      draft: {
+        documentId: "doc-intake-1",
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        currentStep: "general_information",
+        rulesSnapshotVersion: "member_form_rules_contract_v1",
+        answers: { trust_name: "Acme Trust" },
+        canonicalAnswers: { trust_name: "Acme Trust" },
+        revision: 3,
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:10:00.000Z",
+      },
+    });
   });
 
   it("persists mode families and output bundle on create", async () => {

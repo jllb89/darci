@@ -22,6 +22,10 @@ type DocumentRecord = {
   product_flow_mode: string | null;
   selected_families: string[] | null;
   output_bundle: Array<Record<string, unknown>>;
+  intake_status: string | null;
+  intake_schema_version: string | null;
+  intake_last_saved_at: string | null;
+  intake_submitted_at: string | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -35,9 +39,56 @@ type DocumentVersionRecord = {
   mime_type: string | null;
   size_bytes: number | null;
   is_final: boolean | null;
+  generation_run_id: string | null;
   created_by: string | null;
   created_at: string;
 };
+
+export type TemplateRegistryRecord = {
+  id: string;
+  jurisdiction: string;
+  output_key: string;
+  document_key: string;
+  template_key: string;
+  template_version: string;
+  template_hash: string;
+  effective_from: string;
+  effective_to: string | null;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type DocumentGenerationRunRecord = {
+  id: string;
+  document_id: string;
+  intake_revision: number;
+  output_key: string;
+  document_key: string;
+  template_key: string;
+  template_version: string;
+  template_hash: string;
+  payload_json: Record<string, unknown>;
+  coverage_json: Record<string, unknown>;
+  status: "queued" | "rendered" | "failed";
+  error_message: string | null;
+  created_at: string;
+};
+
+export type DocumentIntakeDraftRecord = {
+  document_id: string;
+  owner_id: string;
+  product_flow_mode: string;
+  jurisdiction: string;
+  current_step: string | null;
+  rules_snapshot_version: string;
+  answers_json: Record<string, unknown>;
+  canonical_answers_json: Record<string, unknown>;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type DocumentIntakeRevisionEvent = "autosave" | "submit" | "system_migration";
 
 type SignatureRecord = {
   id: string;
@@ -105,7 +156,79 @@ const documentPartySelectColumns =
   "id, document_id, party_role, full_name, email, phone_country_code, phone, is_signing_party, sort_order, metadata, created_at, updated_at";
 
 const documentSelectColumns =
-  "id, owner_id, idn, status, document_type, jurisdiction, product_flow_mode, selected_families, output_bundle, created_at, updated_at";
+  "id, owner_id, idn, status, document_type, jurisdiction, product_flow_mode, selected_families, output_bundle, intake_status, intake_schema_version, intake_last_saved_at, intake_submitted_at, created_at, updated_at";
+
+const documentIntakeDraftSelectColumns =
+  "document_id, owner_id, product_flow_mode, jurisdiction, current_step, rules_snapshot_version, answers_json, canonical_answers_json, revision, created_at, updated_at";
+
+const templateRegistrySelectColumns =
+  "id, jurisdiction, output_key, document_key, template_key, template_version, template_hash, effective_from, effective_to, is_active, created_at";
+
+const documentGenerationRunSelectColumns =
+  "id, document_id, intake_revision, output_key, document_key, template_key, template_version, template_hash, payload_json, coverage_json, status, error_message, created_at";
+
+export type SaveDocumentIntakeDraftInput = {
+  documentId: string;
+  ownerId: string;
+  productFlowMode: string;
+  jurisdiction: string;
+  currentStep?: string | null;
+  rulesSnapshotVersion: string;
+  answers: Record<string, unknown>;
+  canonicalAnswers?: Record<string, unknown>;
+  expectedRevision?: number;
+  createdBy?: string | null;
+  eventType?: DocumentIntakeRevisionEvent;
+  validationResult?: Record<string, unknown>;
+};
+
+export type BootstrapDocumentIntakeDraftInput = {
+  ownerId: string;
+  productFlowMode: string;
+  jurisdiction: string;
+  rulesSnapshotVersion: string;
+  selectedFamilies?: string[] | null;
+  outputBundle?: Array<Record<string, unknown>>;
+  createdBy?: string | null;
+};
+
+export type BootstrapDocumentIntakeDraftResult = {
+  created: boolean;
+  document: DocumentRecord;
+  draft: DocumentIntakeDraftRecord;
+};
+
+export type SaveDocumentIntakeDraftResult =
+  | {
+      conflict: true;
+      currentRevision: number;
+    }
+  | {
+      conflict: false;
+      draft: DocumentIntakeDraftRecord;
+    };
+
+export type CreateDocumentGenerationRunInput = {
+  documentId: string;
+  intakeRevision: number;
+  outputKey: string;
+  documentKey: string;
+  templateKey: string;
+  templateVersion: string;
+  templateHash: string;
+  payload: Record<string, unknown>;
+  coverage: Record<string, unknown>;
+  status: "queued" | "rendered" | "failed";
+  errorMessage?: string | null;
+};
+
+export const isDocumentIntakeLocked = (document: {
+  intake_status?: string | null;
+}) => {
+  const intakeStatus = document.intake_status?.trim().toLowerCase();
+
+  return intakeStatus === "submitted" || intakeStatus === "locked";
+};
 
 const fetchUserBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await supabaseAdmin
@@ -259,7 +382,7 @@ export const getDocumentVersionById = async (
   const { data, error } = await supabaseAdmin
     .from("document_versions")
     .select(
-      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, created_by, created_at"
+      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, generation_run_id, created_by, created_at"
     )
     .eq("id", documentVersionId)
     .eq("document_id", documentId)
@@ -277,7 +400,7 @@ export const listDocumentVersions = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("document_versions")
     .select(
-      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, created_by, created_at"
+      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, generation_run_id, created_by, created_at"
     )
     .eq("document_id", documentId)
     .order("version", { ascending: true });
@@ -294,7 +417,12 @@ export const updateDocumentVersion = async (
   updates: Partial<
     Pick<
       DocumentVersionRecord,
-      "storage_path" | "file_name" | "mime_type" | "size_bytes" | "is_final"
+      | "storage_path"
+      | "file_name"
+      | "mime_type"
+      | "size_bytes"
+      | "is_final"
+      | "generation_run_id"
     >
   >
 ) => {
@@ -303,7 +431,7 @@ export const updateDocumentVersion = async (
     .update(updates)
     .eq("id", documentVersionId)
     .select(
-      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, created_by, created_at"
+      "id, document_id, version, storage_path, file_name, mime_type, size_bytes, is_final, generation_run_id, created_by, created_at"
     )
     .single();
 
@@ -361,6 +489,329 @@ export const listDocumentParties = async (documentId: string) => {
   }
 
   return (data ?? []) as DocumentPartyRecord[];
+};
+
+export const getDocumentIntakeDraft = async (documentId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_intake_drafts")
+    .select(documentIntakeDraftSelectColumns)
+    .eq("document_id", documentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as DocumentIntakeDraftRecord | null;
+};
+
+export const getActiveTemplateRegistryForOutput = async (input: {
+  jurisdiction: string;
+  outputKey: string;
+  asOf?: string;
+}) => {
+  const asOf = input.asOf ?? new Date().toISOString();
+
+  const { data, error } = await supabaseAdmin
+    .from("template_registry")
+    .select(templateRegistrySelectColumns)
+    .eq("jurisdiction", input.jurisdiction)
+    .eq("output_key", input.outputKey)
+    .eq("is_active", true)
+    .lte("effective_from", asOf)
+    .order("effective_from", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as TemplateRegistryRecord[];
+  const resolved = rows.find((row) => {
+    if (!row.effective_to) {
+      return true;
+    }
+
+    return row.effective_to > asOf;
+  });
+
+  return resolved ?? null;
+};
+
+export const listDocumentGenerationRuns = async (documentId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_generation_runs")
+    .select(documentGenerationRunSelectColumns)
+    .eq("document_id", documentId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as DocumentGenerationRunRecord[];
+};
+
+export const createDocumentGenerationRun = async (
+  input: CreateDocumentGenerationRunInput,
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_generation_runs")
+    .insert({
+      document_id: input.documentId,
+      intake_revision: input.intakeRevision,
+      output_key: input.outputKey,
+      document_key: input.documentKey,
+      template_key: input.templateKey,
+      template_version: input.templateVersion,
+      template_hash: input.templateHash,
+      payload_json: input.payload,
+      coverage_json: input.coverage,
+      status: input.status,
+      error_message: input.errorMessage ?? null,
+    })
+    .select(documentGenerationRunSelectColumns)
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to create generation run");
+  }
+
+  return data as DocumentGenerationRunRecord;
+};
+
+const getLatestDocumentIntakeDraftByContext = async (input: {
+  ownerId: string;
+  productFlowMode: string;
+  jurisdiction: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_intake_drafts")
+    .select(documentIntakeDraftSelectColumns)
+    .eq("owner_id", input.ownerId)
+    .eq("product_flow_mode", input.productFlowMode)
+    .eq("jurisdiction", input.jurisdiction)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as DocumentIntakeDraftRecord | null;
+};
+
+const createDocumentIntakeDraft = async (input: BootstrapDocumentIntakeDraftInput) => {
+  const nowIso = new Date().toISOString();
+
+  const { data: document, error: documentError } = await supabaseAdmin
+    .from("documents")
+    .insert({
+      owner_id: input.ownerId,
+      idn: null,
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: input.jurisdiction,
+      product_flow_mode: input.productFlowMode,
+      selected_families:
+        input.selectedFamilies && input.selectedFamilies.length > 0
+          ? input.selectedFamilies
+          : null,
+      output_bundle: input.outputBundle ?? [],
+      intake_status: "draft",
+      intake_schema_version: input.rulesSnapshotVersion,
+      intake_last_saved_at: nowIso,
+      intake_submitted_at: null,
+    })
+    .select(documentSelectColumns)
+    .single();
+
+  if (documentError || !document) {
+    throw new Error(documentError?.message ?? "Failed to create intake document");
+  }
+
+  const { data: draft, error: draftError } = await supabaseAdmin
+    .from("document_intake_drafts")
+    .insert({
+      document_id: document.id,
+      owner_id: input.ownerId,
+      product_flow_mode: input.productFlowMode,
+      jurisdiction: input.jurisdiction,
+      current_step: null,
+      rules_snapshot_version: input.rulesSnapshotVersion,
+      answers_json: {},
+      canonical_answers_json: {},
+      revision: 1,
+    })
+    .select(documentIntakeDraftSelectColumns)
+    .single();
+
+  if (draftError || !draft) {
+    throw new Error(draftError?.message ?? "Failed to create intake draft");
+  }
+
+  const { error: revisionError } = await supabaseAdmin
+    .from("document_intake_revisions")
+    .insert({
+      document_id: document.id,
+      revision: 1,
+      event_type: "autosave",
+      payload_json: {
+        currentStep: null,
+        answers: {},
+        canonicalAnswers: {},
+      },
+      validation_result: {},
+      created_by: input.createdBy ?? null,
+    });
+
+  if (revisionError) {
+    throw new Error(revisionError.message);
+  }
+
+  return {
+    document: document as DocumentRecord,
+    draft: draft as DocumentIntakeDraftRecord,
+  };
+};
+
+export const bootstrapDocumentIntakeDraft = async (
+  input: BootstrapDocumentIntakeDraftInput,
+): Promise<BootstrapDocumentIntakeDraftResult> => {
+  const existingDraft = await getLatestDocumentIntakeDraftByContext({
+    ownerId: input.ownerId,
+    productFlowMode: input.productFlowMode,
+    jurisdiction: input.jurisdiction,
+  });
+
+  if (existingDraft) {
+    const existingDocument = await getDocumentById(existingDraft.document_id);
+
+    if (
+      existingDocument &&
+      existingDocument.owner_id === input.ownerId &&
+      !isDocumentIntakeLocked(existingDocument)
+    ) {
+      return {
+        created: false,
+        document: existingDocument,
+        draft: existingDraft,
+      };
+    }
+  }
+
+  const created = await createDocumentIntakeDraft(input);
+
+  return {
+    created: true,
+    document: created.document,
+    draft: created.draft,
+  };
+};
+
+export const saveDocumentIntakeDraft = async (
+  input: SaveDocumentIntakeDraftInput,
+): Promise<SaveDocumentIntakeDraftResult> => {
+  const eventType = input.eventType ?? "autosave";
+
+  const existing = await getDocumentIntakeDraft(input.documentId);
+  if (existing && typeof input.expectedRevision === "number") {
+    if (input.expectedRevision !== existing.revision) {
+      return {
+        conflict: true,
+        currentRevision: existing.revision,
+      };
+    }
+  }
+
+  if (!existing && typeof input.expectedRevision === "number" && input.expectedRevision > 0) {
+    return {
+      conflict: true,
+      currentRevision: 0,
+    };
+  }
+
+  const nextRevision = existing ? existing.revision + 1 : 1;
+  const nowIso = new Date().toISOString();
+  const nextCurrentStep =
+    input.currentStep === undefined ? (existing?.current_step ?? null) : input.currentStep;
+  const nextCanonicalAnswers =
+    input.canonicalAnswers ?? existing?.canonical_answers_json ?? {};
+
+  const { data: draft, error: draftError } = await supabaseAdmin
+    .from("document_intake_drafts")
+    .upsert(
+      {
+        document_id: input.documentId,
+        owner_id: input.ownerId,
+        product_flow_mode: input.productFlowMode,
+        jurisdiction: input.jurisdiction,
+        current_step: nextCurrentStep,
+        rules_snapshot_version: input.rulesSnapshotVersion,
+        answers_json: input.answers,
+        canonical_answers_json: nextCanonicalAnswers,
+        revision: nextRevision,
+      },
+      {
+        onConflict: "document_id",
+      },
+    )
+    .select(documentIntakeDraftSelectColumns)
+    .single();
+
+  if (draftError || !draft) {
+    throw new Error(draftError?.message ?? "Failed to persist intake draft");
+  }
+
+  const { error: revisionError } = await supabaseAdmin
+    .from("document_intake_revisions")
+    .insert({
+      document_id: input.documentId,
+      revision: nextRevision,
+      event_type: eventType,
+      payload_json: {
+        currentStep: nextCurrentStep,
+        answers: input.answers,
+        canonicalAnswers: nextCanonicalAnswers,
+      },
+      validation_result: input.validationResult ?? {},
+      created_by: input.createdBy ?? null,
+    });
+
+  if (revisionError) {
+    throw new Error(revisionError.message);
+  }
+
+  const documentUpdatePayload: {
+    intake_status: string;
+    intake_schema_version: string;
+    intake_last_saved_at: string;
+    intake_submitted_at?: string;
+  } = {
+    intake_status: eventType === "submit" ? "submitted" : "draft",
+    intake_schema_version: input.rulesSnapshotVersion,
+    intake_last_saved_at: nowIso,
+  };
+
+  if (eventType === "submit") {
+    documentUpdatePayload.intake_submitted_at = nowIso;
+  }
+
+  const { error: documentUpdateError } = await supabaseAdmin
+    .from("documents")
+    .update(documentUpdatePayload)
+    .eq("id", input.documentId);
+
+  if (documentUpdateError) {
+    throw new Error(documentUpdateError.message);
+  }
+
+  return {
+    conflict: false,
+    draft: draft as DocumentIntakeDraftRecord,
+  };
 };
 
 export const replaceDocumentParties = async (input: {

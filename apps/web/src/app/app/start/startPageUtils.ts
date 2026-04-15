@@ -49,7 +49,7 @@ const isFormValue = (value: unknown): value is FormValue => {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 };
 
-const sanitizeStoredFormValues = (value: unknown): Record<string, FormValue> => {
+export const sanitizeFormValuesRecord = (value: unknown): Record<string, FormValue> => {
   if (!isRecord(value)) {
     return {};
   }
@@ -105,7 +105,7 @@ export const readStartFormDraft = (
 
     return {
       currentFormStep,
-      formValues: sanitizeStoredFormValues(parsed.formValues),
+      formValues: sanitizeFormValuesRecord(parsed.formValues),
     };
   } catch {
     return null;

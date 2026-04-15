@@ -2,12 +2,40 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.hoisted(() => {
+  if (!process.env.SUPABASE_URL) {
+    process.env.SUPABASE_URL = "http://localhost";
+  }
+
+  if (!process.env.SUPABASE_ANON_KEY) {
+    process.env.SUPABASE_ANON_KEY = "test-anon-key";
+  }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+  }
+
+  if (!process.env.SUPABASE_JWT_SECRET) {
+    process.env.SUPABASE_JWT_SECRET = "test-secret";
+  }
+});
+
 const mocks = vi.hoisted(() => ({
   listDocumentsMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   listDocumentPartiesMock: vi.fn(),
   replaceDocumentPartiesMock: vi.fn(),
+  getDocumentIntakeDraftMock: vi.fn(),
+  saveDocumentIntakeDraftMock: vi.fn(),
+  getActiveTemplateRegistryForOutputMock: vi.fn(),
+  createDocumentGenerationRunMock: vi.fn(),
+  listDocumentGenerationRunsMock: vi.fn(),
+  isDocumentIntakeLockedMock: vi.fn(),
+  deriveMemberFormRulesByJurisdictionMock: vi.fn(),
+  validateMemberFormSubmissionMock: vi.fn(),
+  buildSelectionForModeMock: vi.fn(),
+  buildMemberFormDocumentExtractionPayloadMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -16,7 +44,60 @@ vi.mock("../../src/services/documentService", () => ({
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentParties: mocks.listDocumentPartiesMock,
   replaceDocumentParties: mocks.replaceDocumentPartiesMock,
+  getDocumentIntakeDraft: mocks.getDocumentIntakeDraftMock,
+  saveDocumentIntakeDraft: mocks.saveDocumentIntakeDraftMock,
+  getActiveTemplateRegistryForOutput:
+    mocks.getActiveTemplateRegistryForOutputMock,
+  createDocumentGenerationRun: mocks.createDocumentGenerationRunMock,
+  listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
+  isDocumentIntakeLocked: mocks.isDocumentIntakeLockedMock,
 }));
+
+vi.mock("../../src/services/memberFormRulesService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/memberFormRulesService")>(
+    "../../src/services/memberFormRulesService",
+  );
+
+  return {
+    ...actual,
+    deriveMemberFormRulesByJurisdiction:
+      mocks.deriveMemberFormRulesByJurisdictionMock,
+  };
+});
+
+vi.mock("../../src/services/memberFormValidationService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/memberFormValidationService")>(
+    "../../src/services/memberFormValidationService",
+  );
+
+  return {
+    ...actual,
+    validateMemberFormSubmission: mocks.validateMemberFormSubmissionMock,
+  };
+});
+
+vi.mock("../../src/services/productFlowModeService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/productFlowModeService")>(
+    "../../src/services/productFlowModeService",
+  );
+
+  return {
+    ...actual,
+    buildSelectionForMode: mocks.buildSelectionForModeMock,
+  };
+});
+
+vi.mock("../../src/services/memberFormDocumentExtractionService", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/services/memberFormDocumentExtractionService")
+  >("../../src/services/memberFormDocumentExtractionService");
+
+  return {
+    ...actual,
+    buildMemberFormDocumentExtractionPayload:
+      mocks.buildMemberFormDocumentExtractionPayloadMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -66,6 +147,22 @@ const putWithLog = async (
   return response;
 };
 
+const postWithLog = async (
+  path: string,
+  payload: Record<string, unknown>,
+  label: string,
+  token?: string,
+) => {
+  console.log("request", { method: "POST", path, payload });
+  let req = request(app).post(path).send(payload);
+  if (token) {
+    req = req.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await req;
+  logResponse(label, response);
+  return response;
+};
+
 describe("GET documents endpoints", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
@@ -74,6 +171,30 @@ describe("GET documents endpoints", () => {
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentPartiesMock.mockReset();
     mocks.replaceDocumentPartiesMock.mockReset();
+    mocks.getDocumentIntakeDraftMock.mockReset();
+    mocks.saveDocumentIntakeDraftMock.mockReset();
+    mocks.getActiveTemplateRegistryForOutputMock.mockReset();
+    mocks.createDocumentGenerationRunMock.mockReset();
+    mocks.listDocumentGenerationRunsMock.mockReset();
+    mocks.isDocumentIntakeLockedMock.mockReset();
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockReset();
+    mocks.validateMemberFormSubmissionMock.mockReset();
+    mocks.buildSelectionForModeMock.mockReset();
+    mocks.buildMemberFormDocumentExtractionPayloadMock.mockReset();
+
+    mocks.isDocumentIntakeLockedMock.mockImplementation(() => false);
+    mocks.buildSelectionForModeMock.mockResolvedValue({
+      modeKey: "trust_bundle",
+      families: ["poa", "trust"],
+      poaType: "general",
+      trustType: "rrr",
+      idnType: "acknowledgment",
+    });
+
+    mocks.buildMemberFormDocumentExtractionPayloadMock.mockResolvedValue({
+      generatedAt: "2026-03-05T00:15:00.000Z",
+      documents: [],
+    });
   });
 
   it("lists documents for admin", async () => {
@@ -414,5 +535,720 @@ describe("GET documents endpoints", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.replaceDocumentPartiesMock).not.toHaveBeenCalled();
+  });
+
+  it("gets intake draft for admin", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      document_id: "doc-1",
+      owner_id: "owner-1",
+      product_flow_mode: "trust_bundle",
+      jurisdiction: "US-CA",
+      current_step: "authority",
+      rules_snapshot_version: "member_form_rules_contract_v1",
+      answers_json: {
+        trust_name: "Family Trust",
+      },
+      canonical_answers_json: {
+        trust_name: "Family Trust",
+      },
+      revision: 2,
+      created_at: "2026-03-05T00:05:00.000Z",
+      updated_at: "2026-03-05T00:10:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/intake-draft",
+      "gets intake draft for admin",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      draft: {
+        documentId: "doc-1",
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        currentStep: "authority",
+        rulesSnapshotVersion: "member_form_rules_contract_v1",
+        answers: {
+          trust_name: "Family Trust",
+        },
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+        revision: 2,
+        createdAt: "2026-03-05T00:05:00.000Z",
+        updatedAt: "2026-03-05T00:10:00.000Z",
+      },
+    });
+  });
+
+  it("saves intake draft for admin", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: false,
+      draft: {
+        document_id: "doc-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: "authority",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {
+          trust_name: "Family Trust",
+        },
+        canonical_answers_json: {
+          trust_name: "Family Trust",
+        },
+        revision: 2,
+        created_at: "2026-03-05T00:05:00.000Z",
+        updated_at: "2026-03-05T00:10:00.000Z",
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await putWithLog(
+      "/documents/doc-1/intake-draft",
+      {
+        currentStep: "authority",
+        answers: {
+          trust_name: "Family Trust",
+        },
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+        expectedRevision: 1,
+      },
+      "saves intake draft for admin",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveDocumentIntakeDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        currentStep: "authority",
+        expectedRevision: 1,
+        eventType: "autosave",
+      }),
+    );
+
+    expect(response.body).toEqual({
+      draft: {
+        documentId: "doc-1",
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        currentStep: "authority",
+        rulesSnapshotVersion: "member_form_rules_contract_v1",
+        answers: {
+          trust_name: "Family Trust",
+        },
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+        revision: 2,
+        createdAt: "2026-03-05T00:05:00.000Z",
+        updatedAt: "2026-03-05T00:10:00.000Z",
+      },
+    });
+  });
+
+  it("returns 409 on intake draft revision conflict", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: true,
+      currentRevision: 4,
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await putWithLog(
+      "/documents/doc-1/intake-draft",
+      {
+        currentStep: "authority",
+        answers: {
+          trust_name: "Family Trust",
+        },
+        expectedRevision: 1,
+      },
+      "returns 409 on intake draft revision conflict",
+      token,
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: "conflict",
+      message: "Draft revision mismatch",
+      currentRevision: 4,
+    });
+  });
+
+  it("submits intake draft and persists canonical payload", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "draft",
+      intake_submitted_at: null,
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [
+            {
+              fields: [
+                {
+                  canonical_key: "trust_name",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      missing: [],
+    });
+
+    mocks.validateMemberFormSubmissionMock.mockReturnValue({
+      valid: true,
+      errors: [],
+    });
+
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: false,
+      draft: {
+        document_id: "doc-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: "trust_requirements",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {
+          trust_name: "Family Trust",
+        },
+        canonical_answers_json: {
+          trust_name: "Family Trust",
+        },
+        revision: 7,
+        created_at: "2026-03-05T00:05:00.000Z",
+        updated_at: "2026-03-05T00:10:00.000Z",
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-submit",
+      {
+        currentStep: "trust_requirements",
+        answers: {
+          trust_name: "Family Trust",
+          ignored_object: { nope: true },
+        },
+        expectedRevision: 6,
+      },
+      "submits intake draft and persists canonical payload",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveDocumentIntakeDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        eventType: "submit",
+        expectedRevision: 6,
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+      }),
+    );
+    expect(response.body).toEqual({
+      draft: {
+        documentId: "doc-1",
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        currentStep: "trust_requirements",
+        rulesSnapshotVersion: "member_form_rules_contract_v1",
+        answers: {
+          trust_name: "Family Trust",
+        },
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+        revision: 7,
+        createdAt: "2026-03-05T00:05:00.000Z",
+        updatedAt: "2026-03-05T00:10:00.000Z",
+      },
+      canonicalPayload: {
+        trust_name: "Family Trust",
+      },
+    });
+  });
+
+  it("returns 409 when intake submit is blocked by the launch gate", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-FL",
+      product_flow_mode: "trust_bundle",
+      intake_status: "draft",
+      intake_submitted_at: null,
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: null,
+      missing: [],
+      availabilityConflict: {
+        available: false,
+        jurisdiction: "US-FL",
+        reason: "Launch limited to California and Ohio during current rollout.",
+        message:
+          "Jurisdiction US-FL is unavailable for the selected product flow. Launch limited to California and Ohio during current rollout.",
+        unavailableRequirements: [
+          {
+            family: "poa",
+            documentType: "general",
+            reason: "Launch limited to California and Ohio during current rollout.",
+          },
+          {
+            family: "trust",
+            documentType: "rrr",
+            reason: "Launch limited to California and Ohio during current rollout.",
+          },
+        ],
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-submit",
+      {
+        answers: {
+          trust_name: "Family Trust",
+        },
+      },
+      "returns 409 when intake submit is blocked by the launch gate",
+      token,
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: "conflict",
+      message:
+        "Jurisdiction US-FL is unavailable for the selected product flow. Launch limited to California and Ohio during current rollout.",
+      jurisdiction: "US-FL",
+      reason: "Launch limited to California and Ohio during current rollout.",
+      unavailableRequirements: [
+        {
+          family: "poa",
+          documentType: "general",
+          reason: "Launch limited to California and Ohio during current rollout.",
+        },
+        {
+          family: "trust",
+          documentType: "rrr",
+          reason: "Launch limited to California and Ohio during current rollout.",
+        },
+      ],
+    });
+    expect(mocks.saveDocumentIntakeDraftMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 when intake submit validation fails", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "draft",
+      intake_submitted_at: null,
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [],
+        },
+      },
+      missing: [],
+    });
+
+    mocks.validateMemberFormSubmissionMock.mockReturnValue({
+      valid: false,
+      errors: [
+        {
+          code: "trust_named_signing_trustee_required",
+          field: "trustees",
+          message: "Select one trustee as the named signing trustee.",
+        },
+      ],
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-submit",
+      {
+        answers: {
+          trust_name: "Family Trust",
+        },
+      },
+      "returns 422 when intake submit validation fails",
+      token,
+    );
+
+    expect(response.status).toBe(422);
+    expect(response.body).toEqual({
+      valid: false,
+      message: "Member form validation failed",
+      errors: [
+        {
+          code: "trust_named_signing_trustee_required",
+          field: "trustees",
+          message: "Select one trustee as the named signing trustee.",
+        },
+      ],
+    });
+    expect(mocks.saveDocumentIntakeDraftMock).not.toHaveBeenCalled();
+  });
+
+  it("gets canonical intake payload after submit", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.isDocumentIntakeLockedMock.mockReturnValue(true);
+
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      document_id: "doc-1",
+      owner_id: "owner-1",
+      product_flow_mode: "trust_bundle",
+      jurisdiction: "US-CA",
+      current_step: "trust_requirements",
+      rules_snapshot_version: "member_form_rules_contract_v1",
+      answers_json: {
+        trust_name: "Family Trust",
+      },
+      canonical_answers_json: {
+        trust_name: "Family Trust",
+      },
+      revision: 7,
+      created_at: "2026-03-05T00:05:00.000Z",
+      updated_at: "2026-03-05T00:15:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/intake-payload",
+      "gets canonical intake payload after submit",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      documentId: "doc-1",
+      intakeStatus: "submitted",
+      submittedAt: "2026-03-05T00:15:00.000Z",
+      payload: {
+        jurisdiction: "US-CA",
+        productFlowMode: "trust_bundle",
+        rulesSnapshotVersion: "member_form_rules_contract_v1",
+        revision: 7,
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+      },
+    });
+  });
+
+  it("creates generation runs for submitted intake", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "poa_document",
+          outputLabel: "Power of Attorney",
+          isRequired: true,
+          sortOrder: 10,
+          metadata: {},
+        },
+      ],
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.isDocumentIntakeLockedMock.mockReturnValue(true);
+
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      document_id: "doc-1",
+      owner_id: "owner-1",
+      product_flow_mode: "trust_bundle",
+      jurisdiction: "US-CA",
+      current_step: "trust_requirements",
+      rules_snapshot_version: "member_form_rules_contract_v1",
+      answers_json: {
+        trust_name: "Family Trust",
+      },
+      canonical_answers_json: {
+        trust_name: "Family Trust",
+      },
+      revision: 7,
+      created_at: "2026-03-05T00:05:00.000Z",
+      updated_at: "2026-03-05T00:15:00.000Z",
+    });
+
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [],
+        },
+      },
+      missing: [],
+    });
+
+    mocks.buildMemberFormDocumentExtractionPayloadMock.mockResolvedValue({
+      generatedAt: "2026-03-05T00:15:00.000Z",
+      documents: [
+        {
+          documentKey: "poa_general",
+          templateCoverage: {
+            totalBindings: 10,
+            mappedBindings: 10,
+            missingBindings: 0,
+            systemBindings: 2,
+          },
+        },
+      ],
+    });
+
+    mocks.getActiveTemplateRegistryForOutputMock.mockResolvedValue({
+      id: "tmpl-1",
+      jurisdiction: "US-CA",
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      effective_from: "2026-04-14T00:00:00.000Z",
+      effective_to: null,
+      is_active: true,
+      created_at: "2026-04-14T00:00:00.000Z",
+    });
+
+    mocks.createDocumentGenerationRunMock.mockResolvedValue({
+      id: "run-1",
+      document_id: "doc-1",
+      intake_revision: 7,
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      payload_json: {
+        revision: 7,
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+      },
+      coverage_json: {
+        documentKey: "poa_general",
+      },
+      status: "queued",
+      error_message: null,
+      created_at: "2026-03-05T00:20:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/generation-runs",
+      {
+        outputKeys: ["poa_document"],
+      },
+      "creates generation runs for submitted intake",
+      token,
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.createDocumentGenerationRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        intakeRevision: 7,
+        outputKey: "poa_document",
+        documentKey: "poa_general",
+        templateKey: "ca_poa_general",
+        templateVersion: "2026.04.14.v1",
+        templateHash: "sha256:ca-poadoc-v1",
+        status: "queued",
+      }),
+    );
+  });
+
+  it("lists generation runs", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-1",
+        document_id: "doc-1",
+        intake_revision: 7,
+        output_key: "poa_document",
+        document_key: "poa_general",
+        template_key: "ca_poa_general",
+        template_version: "2026.04.14.v1",
+        template_hash: "sha256:ca-poadoc-v1",
+        payload_json: {
+          revision: 7,
+        },
+        coverage_json: {
+          documentKey: "poa_general",
+        },
+        status: "queued",
+        error_message: null,
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/generation-runs",
+      "lists generation runs",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      runs: [
+        {
+          id: "run-1",
+          documentId: "doc-1",
+          intakeRevision: 7,
+          outputKey: "poa_document",
+          documentKey: "poa_general",
+          templateKey: "ca_poa_general",
+          templateVersion: "2026.04.14.v1",
+          templateHash: "sha256:ca-poadoc-v1",
+          payload: {
+            revision: 7,
+          },
+          coverage: {
+            documentKey: "poa_general",
+          },
+          status: "queued",
+          errorMessage: null,
+          createdAt: "2026-03-05T00:20:00.000Z",
+        },
+      ],
+    });
   });
 });

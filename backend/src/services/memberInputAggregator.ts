@@ -62,6 +62,7 @@ const CANONICAL_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
   successor_agent_name: "people",
   signing_authority: "authority",
   signature_authority: "authority",
+  agent_signature_authority: "authority",
   trustee_signature_authority: "authority",
   revocation_authority: "authority",
   revocability_status: "authority",

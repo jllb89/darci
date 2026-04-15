@@ -6,6 +6,11 @@ import type {
   NoticeSeverity,
 } from "./inputRequirements";
 import type { MemberFormRulesContract } from "./memberFormRulesService";
+import {
+  getTemplateBindingRulesByDocumentKey,
+  type TemplateBindingRuleRecord,
+  type TemplateBindingRuleSource,
+} from "./templateBindingRulesService";
 
 const DOCUMENT_FAMILIES = ["trust", "poa"] as const;
 
@@ -56,7 +61,7 @@ export type DocumentTemplateBindingStatus =
   | "missing_canonical_field"
   | "system_value";
 
-export type DocumentTemplateBindingSource = "member_form" | "system" | "notary";
+export type DocumentTemplateBindingSource = TemplateBindingRuleSource;
 
 export type DocumentTemplateBinding = {
   placeholder: string;
@@ -145,235 +150,24 @@ const isDocumentFamily = (family: string): family is DocumentFamily => {
   return DOCUMENT_FAMILIES.includes(family as DocumentFamily);
 };
 
-type TemplateBindingConfig = {
-  placeholder: string;
-  description: string;
-  required: boolean;
-  source: DocumentTemplateBindingSource;
-  canonicalKey?: string;
-  notes?: string;
-};
-
-const DOCUMENT_TEMPLATE_BINDINGS_CONFIG: Readonly<
-  Record<string, ReadonlyArray<TemplateBindingConfig>>
-> = {
-  trust_rrr: [
-    {
-      placeholder: "TrustName",
-      description: "Registered trust name shown in title and confirmation section.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trust_name",
-    },
-    {
-      placeholder: "DarciNo",
-      description: "Registry number assigned to this DARCi trust registration.",
-      required: true,
-      source: "system",
-      notes: "Issued by platform during registration.",
-    },
-    {
-      placeholder: "Trustmaker(s)",
-      description: "Trustmaker names.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "grantors",
-    },
-    {
-      placeholder: "Document#.Name / Document#.Date",
-      description:
-        "Prior trust documents listed in chronology order, including the originating trust document followed by amendments and supporting records.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "prior_document_items",
-      notes:
-        "Preserve member-entered document order and chronology_order when assembling trust output context.",
-    },
-    {
-      placeholder: "Trustee(s)",
-      description: "Current trustees listed in title and signature blocks.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trustees",
-    },
-    {
-      placeholder: "TrustDate",
-      description: "Trust creation date.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trust_date",
-    },
-    {
-      placeholder: "RevokePower",
-      description: "Who may revoke the trust.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "revocation_holders",
-    },
-    {
-      placeholder: "TaxSettlor",
-      description: "Primary Trustmaker tax ID owner for trust operations.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "tax_id_owner",
-    },
-    {
-      placeholder: "TrustState",
-      description: "Governing state law.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "jurisdiction",
-    },
-    {
-      placeholder: "SignatureAuthority",
-      description: "Signature rule for trustees exercising powers.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trustee_signature_authority",
-    },
-    {
-      placeholder: "SignatureAuthorityCustomText",
-      description: "Custom trustee signing instructions used when custom signature authority is selected.",
-      required: false,
-      source: "member_form",
-      canonicalKey: "trustee_signature_authority_custom_text",
-    },
-    {
-      placeholder: "Trustee powers checkboxes",
-      description: "Transaction authority grid for trustee powers.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trustee_powers",
-    },
-    {
-      placeholder: "TrusteeIncapacityStandard",
-      description: "Standard required to evidence trustee incapacity.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trustee_incapacity_standard",
-    },
-    {
-      placeholder: "TM1/TM2 signatures",
-      description: "Trustmaker signature participants.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "grantors",
-    },
-    {
-      placeholder: "Trustee1/Trustee2 signatures",
-      description: "Trustee signature participants.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "trustees",
-    },
-    {
-      placeholder: "County / Day / Month / Year",
-      description: "Notarial acknowledgment date and venue details.",
-      required: true,
-      source: "notary",
-      notes: "Collected in notary/execution phase.",
-    },
-    {
-      placeholder: "Illuminotary",
-      description: "Notary identity in acknowledgment block.",
-      required: true,
-      source: "notary",
-    },
-  ],
-  poa_general: [
-    {
-      placeholder: "DdpoaNo",
-      description: "DARCi DDPOA identifier.",
-      required: true,
-      source: "system",
-      notes: "Issued by platform during POA creation.",
-    },
-    {
-      placeholder: "Principal.FullName",
-      description: "Principal full legal name.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "principal_full_name",
-    },
-    {
-      placeholder: "Principal.Phone / Principal.Email",
-      description: "Principal contact details.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "principal_contact",
-    },
-    {
-      placeholder: "Agent[0].FullName",
-      description: "Primary agent full legal name.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "agent_full_name",
-    },
-    {
-      placeholder: "Agent[0].Phone / Agent[0].Email",
-      description: "Primary agent contact details.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "agent_contact",
-    },
-    {
-      placeholder: "Powers A-M / N",
-      description: "Selected statutory authority scope checkboxes.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "authority_scope_selection",
-    },
-    {
-      placeholder: "SpecialInstructions[text 6400]",
-      description: "Special instructions clause content.",
-      required: false,
-      source: "member_form",
-      canonicalKey: "special_instructions_text",
-    },
-    {
-      placeholder: "Multiple Agents joint/separate rule",
-      description: "How multiple agents act (jointly or independently).",
-      required: true,
-      source: "member_form",
-      canonicalKey: "agent_signature_authority",
-      notes: "Expected by DDPOA template language.",
-    },
-    {
-      placeholder: "Execution day / month / year",
-      description: "POA execution date.",
-      required: true,
-      source: "member_form",
-      canonicalKey: "execution_date",
-      notes: "May be captured at signing stage if not intake stage.",
-    },
-    {
-      placeholder: "QR Code",
-      description: "Rendered verification QR tied to DDPOA number.",
-      required: true,
-      source: "system",
-    },
-    {
-      placeholder: "CA_Notarial_Acknowledgment_Block",
-      description: "California acknowledgment text block.",
-      required: true,
-      source: "system",
-      notes: "Selected from template resolution / execution profile.",
-    },
-  ],
-};
-
-const buildTemplateBindings = (
+const buildTemplateBindings = async (
   documentKey: string,
   fields: DocumentExtractionField[],
-): {
+): Promise<{
   templateBindings: DocumentTemplateBinding[];
   templateCoverage: DocumentTemplateCoverage;
-} => {
-  const configured = DOCUMENT_TEMPLATE_BINDINGS_CONFIG[documentKey] ?? [];
+}> => {
+  const configured = await getTemplateBindingRulesByDocumentKey(documentKey);
   const canonicalKeysInDocument = new Set(fields.map((field) => field.canonicalKey));
+  const sourceFieldKeysInDocument = new Set(fields.map((field) => field.sourceFieldKey));
 
-  const templateBindings = configured.map((binding): DocumentTemplateBinding => {
-    if (binding.source === "system" || binding.source === "notary") {
+  const templateBindings = configured.map(
+    (binding: TemplateBindingRuleRecord): DocumentTemplateBinding => {
+    if (
+      binding.source === "system" ||
+      binding.source === "notary" ||
+      binding.source === "signing"
+    ) {
       return {
         placeholder: binding.placeholder,
         description: binding.description,
@@ -386,8 +180,10 @@ const buildTemplateBindings = (
     }
 
     const canonicalKey = binding.canonicalKey;
+    const sourceFieldKey = binding.sourceFieldKey;
     const isMapped =
-      typeof canonicalKey === "string" && canonicalKeysInDocument.has(canonicalKey);
+      (typeof canonicalKey === "string" && canonicalKeysInDocument.has(canonicalKey)) ||
+      (typeof sourceFieldKey === "string" && sourceFieldKeysInDocument.has(sourceFieldKey));
 
     return {
       placeholder: binding.placeholder,
@@ -398,16 +194,21 @@ const buildTemplateBindings = (
       ...(canonicalKey ? { canonicalKey } : {}),
       ...(binding.notes ? { notes: binding.notes } : {}),
     };
-  });
+    },
+  );
 
   const templateCoverage: DocumentTemplateCoverage = {
     totalBindings: templateBindings.length,
-    mappedBindings: templateBindings.filter((binding) => binding.status === "mapped").length,
-    missingBindings: templateBindings.filter(
-      (binding) => binding.status === "missing_canonical_field",
+    mappedBindings: templateBindings.filter(
+      (binding: DocumentTemplateBinding) => binding.status === "mapped",
     ).length,
-    systemBindings: templateBindings.filter((binding) => binding.status === "system_value")
-      .length,
+    missingBindings: templateBindings.filter(
+      (binding: DocumentTemplateBinding) =>
+        binding.status === "missing_canonical_field",
+    ).length,
+    systemBindings: templateBindings.filter(
+      (binding: DocumentTemplateBinding) => binding.status === "system_value",
+    ).length,
   };
 
   return {
@@ -573,9 +374,9 @@ const buildCanonicalFieldIndex = (documents: DocumentExtractionContract[]) => {
     .sort((left, right) => left.canonicalKey.localeCompare(right.canonicalKey));
 };
 
-export const buildMemberFormDocumentExtractionPayload = (
+export const buildMemberFormDocumentExtractionPayload = async (
   memberForm: MemberFormRulesContract,
-): MemberFormDocumentExtractionPayload => {
+): Promise<MemberFormDocumentExtractionPayload> => {
   const canonicalKeyBySource = buildCanonicalKeyBySource(memberForm);
 
   const documents: DocumentExtractionContract[] = [];
@@ -611,7 +412,7 @@ export const buildMemberFormDocumentExtractionPayload = (
         return leftKey.localeCompare(rightKey);
       });
 
-    const { templateBindings, templateCoverage } = buildTemplateBindings(
+    const { templateBindings, templateCoverage } = await buildTemplateBindings(
       documentKey,
       fields,
     );
