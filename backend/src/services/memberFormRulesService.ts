@@ -212,14 +212,25 @@ export const applyPoaSpecialAuthorityOptions = (
   contract: InputRequirementsContract,
   specialAuthorities: Pick<
     PoaSpecialAuthorityRuleRecord,
-    "canonical_key" | "canonical_label" | "state_specific_label" | "sort_order"
+    | "canonical_key"
+    | "canonical_label"
+    | "state_specific_label"
+    | "sort_order"
+    | "renderer_metadata"
   >[],
 ): InputRequirementsContract => {
   if (!("poa_type" in contract) || specialAuthorities.length === 0) {
     return contract;
   }
 
-  const sortedAuthorities = [...specialAuthorities].sort((left, right) => {
+  const authorityScopeOverrides = specialAuthorities.filter((authority) => {
+    return authority.renderer_metadata?.authority_scope_surface === "core_authority";
+  });
+
+  const scopedAuthorities =
+    authorityScopeOverrides.length > 0 ? authorityScopeOverrides : specialAuthorities;
+
+  const sortedAuthorities = [...scopedAuthorities].sort((left, right) => {
     if (left.sort_order !== right.sort_order) {
       return left.sort_order - right.sort_order;
     }

@@ -88,6 +88,22 @@ describe("documentGenerationRenderService", () => {
     expect(rendered).not.toContain("\\<\\<");
   });
 
+  it("promotes bold-only legal labels into headings and drops the et cetera trust bullet", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "**Confirmation of Trust Data**",
+        "* Et c.…",
+        "**Effectiveness**",
+      ].join("\n"),
+      placeholders: {},
+      isPreview: true,
+    });
+
+    expect(rendered).toContain("## Confirmation of Trust Data");
+    expect(rendered).toContain("## Effectiveness");
+    expect(rendered).not.toContain("Et c");
+  });
+
   it("removes orphan POA bracket artifacts and uses blank preview fields", () => {
     const rendered = renderLegalTemplateText({
       templateSource: [
@@ -172,11 +188,44 @@ describe("documentGenerationRenderService", () => {
     expect(rendered).toContain("[[DARCI_CHECKED]] Tax matters");
   });
 
-  it("adds a selected authority summary when POA selections do not map to the statutory list", () => {
+  it("renders only the actual trustmaker and trustee signature slots", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "Trustmaker(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << TM1 >> |  | Date |  | << TM2 >> |  | Date |",
+        "",
+        "Trustee(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << Trustee1 >> |  | Date |  | << Trustee2 >> |  | Date |",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        grantors: [{ fullName: "Ava Grantor" }],
+        trustees: [{ fullName: "Taylor Trustee" }, { fullName: "Jordan Trustee" }],
+      },
+      isPreview: true,
+    });
+
+    expect(rendered.match(/\[\[DARCI_SIGNATURE_DATE\]\]/g)).toHaveLength(3);
+    expect(rendered).toContain("[[DARCI_SIGNATURE_DATE]] Ava Grantor");
+    expect(rendered).toContain("[[DARCI_SIGNATURE_DATE]] Taylor Trustee");
+    expect(rendered).toContain("[[DARCI_SIGNATURE_DATE]] Jordan Trustee");
+    expect(rendered).not.toContain("TM2");
+  });
+
+  it("keeps additional POA authorities inside the authority checklist", () => {
     const rendered = renderLegalTemplateText({
       templateSource: [
         "_____ (A) Real property transactions.",
+        "",
         "_____ (B) Tangible personal property transactions.",
+        "",
+        "_____ (C) Stock and bond transactions.",
+        "",
+        "_____ (N) ALL OF THE POWERS LISTED ABOVE",
       ].join("\n"),
       placeholders: {},
       canonicalAnswers: {
@@ -195,7 +244,7 @@ describe("documentGenerationRenderService", () => {
     });
 
     expect(rendered).toContain("[[DARCI_CHECKED]] (A) Real property transactions");
-    expect(rendered).toContain("### Selected Authority Scope");
+    expect(rendered).not.toContain("Additional Authority");
     expect(rendered).toContain("[[DARCI_CHECKED]] Make gifts");
   });
 

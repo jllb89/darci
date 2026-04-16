@@ -28,18 +28,22 @@ const PDF_PAGE_MARGINS = {
   bottom: 54,
   left: 54,
 } as const;
-const HEADER_RULE_Y = 68;
-const LOGO_TARGET_WIDTH = 92;
-const BODY_TEXT_COLOR = "#231c16";
-const HEADING_TEXT_COLOR = "#181411";
-const MUTED_TEXT_COLOR = "#817869";
-const ACCENT_TEXT_COLOR = "#42342a";
-const BORDER_COLOR = "#d7cec3";
-const CHECKBOX_FILL_COLOR = "#d3c2ad";
-const SIGNATURE_FILL_COLOR = "#faf7f2";
-const BODY_FONT_SIZE = 10.35;
-const TITLE_FONT_SIZE = 18;
-const HEADING_FONT_SIZE = 13.25;
+const LOGO_TARGET_WIDTH = 44;
+const BODY_TEXT_COLOR = "#1a1a1a";
+const HEADING_TEXT_COLOR = "#111111";
+const MUTED_TEXT_COLOR = "#6a6a6a";
+const ACCENT_TEXT_COLOR = "#1f1f1f";
+const BORDER_COLOR = "#d4d4d4";
+const CHECKBOX_FILL_COLOR = "#dddddd";
+const SIGNATURE_FILL_COLOR = "#f5f5f5";
+const BODY_FONT_SIZE = 10;
+const TITLE_FONT_SIZE = 15.4;
+const HEADING_FONT_SIZE = 11.8;
+const NOTICE_FONT_SIZE = 8.5;
+const BODY_LINE_GAP = 2.8;
+const HEADING_LINE_GAP = 3.1;
+const TITLE_LINE_GAP = 3.4;
+const NOTICE_LINE_GAP = 1.8;
 const INLINE_VALUE_OPEN = "[[DARCI_VALUE]]";
 const INLINE_VALUE_CLOSE = "[[/DARCI_VALUE]]";
 const INLINE_PENDING_OPEN = "[[DARCI_PENDING]]";
@@ -75,7 +79,7 @@ type PdfFontSet = {
 };
 type TemplateBlock =
   | { kind: "blank" }
-  | { kind: "title" | "heading" | "paragraph" | "bullet" | "table"; text: string }
+  | { kind: "title" | "heading" | "notice" | "paragraph" | "bullet" | "table"; text: string }
   | { kind: "checklist"; text: string; checked: boolean }
   | { kind: "signature"; text: string; includeDate: boolean };
 
@@ -675,13 +679,6 @@ const drawBrandHeader = (
         align: "right",
         lineBreak: false,
       });
-
-    document
-      .moveTo(left, HEADER_RULE_Y)
-      .lineTo(right, HEADER_RULE_Y)
-      .lineWidth(1)
-      .strokeColor(BORDER_COLOR)
-      .stroke();
   });
 };
 
@@ -732,11 +729,12 @@ const drawChecklistItem = (
       x: textX,
       y: startY - 1,
       width,
+      lineGap: BODY_LINE_GAP,
     },
   );
 
   document.x = startX;
-  document.moveDown(0.05);
+  document.moveDown(0.14);
 };
 
 const drawDashedRoundedRect = (
@@ -785,6 +783,7 @@ const drawDigitalSignatureField = (
       x: left,
       y: labelY,
       width: availableWidth,
+      lineGap: BODY_LINE_GAP,
     },
   );
 
@@ -826,15 +825,22 @@ const ensurePageSpace = (document: PdfDocument, minHeight = 72) => {
 };
 
 const normalizeTemplateLine = (value: string) => {
-  return value
+  const normalized = value
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
-    .replace(/\*\*/g, "")
     .replace(/\\([_[\]])/g, "$1")
     .replace(/\t+/g, " ")
     .replace(/_+\[X\]_+/g, "")
     .replace(/(?<!\[\[\/DARCI_VALUE)(?<!\[\[\/DARCI_PENDING)\]\](?=[,.;:])/g, "")
     .replace(/\u00a0/g, " ")
     .replace(/[ \t]+$/g, "");
+
+  const boldOnlyHeadingMatch = normalized.trim().match(/^\*\*(.+?)\*\*$/);
+  if (boldOnlyHeadingMatch) {
+    const headingText = boldOnlyHeadingMatch[1]?.trim() ?? "";
+    return headingText.length > 0 ? `## ${headingText}` : "";
+  }
+
+  return normalized.replace(/\*\*/g, "");
 };
 
 const parseContactValue = (value: unknown) => {
@@ -1205,6 +1211,7 @@ const transformPoaAuthorityLines = (
   const transformed: string[] = [];
   const matchedSelectedKeys = new Set<string>();
   let index = startIndex;
+  let sawAuthorityLine = false;
   const allPowersSelected = matchesSelectionKey(
     selectedKeys,
     selectedLabels,
@@ -1214,10 +1221,18 @@ const transformPoaAuthorityLines = (
   );
 
   while (index < lines.length) {
-    const parsed = parsePoaAuthorityLine(lines[index] ?? "");
+    const currentLine = lines[index] ?? "";
+    const parsed = parsePoaAuthorityLine(currentLine);
     if (!parsed) {
+      if (sawAuthorityLine && currentLine.trim().length === 0) {
+        index += 1;
+        continue;
+      }
+
       break;
     }
+
+    sawAuthorityLine = true;
 
     const key = poaAuthorityKeyByLetter[parsed.letter] ?? "";
     const aliases = poaAuthorityKeyAliases[key] ?? [];
@@ -1240,8 +1255,6 @@ const transformPoaAuthorityLines = (
 
   const unmatchedSelectedKeys = [...selectedKeys].filter((key) => !matchedSelectedKeys.has(key));
   if (unmatchedSelectedKeys.length > 0) {
-    transformed.push("");
-    transformed.push("### Selected Authority Scope");
     for (const key of unmatchedSelectedKeys) {
       transformed.push(`${BLOCK_CHECKED_PREFIX}${labelMap[key] ?? humanizeOptionKey(key)}`);
     }
@@ -1307,6 +1320,13 @@ const buildTemplateBlocks = (renderedTemplate: string) => {
       };
     }
 
+    if (trimmed.startsWith("Notice:")) {
+      return {
+        kind: "notice",
+        text: trimmed,
+      };
+    }
+
     if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
       const cells = trimmed
         .split("|")
@@ -1348,7 +1368,28 @@ const shouldOmitRenderedLine = (line: string) => {
     return true;
   }
 
+  if (/^[*-]?\s*Et c(?:\.|…)+\s*$/i.test(trimmed)) {
+    return true;
+  }
+
   return false;
+};
+
+const normalizeSectionLabel = (value: string) => {
+  return stripRenderControlTokens(value)
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s+/, "")
+    .replace(/[:\s]+$/g, "")
+    .trim()
+    .toLowerCase();
+};
+
+const isBlankSignatureLabel = (value: string) => {
+  const visibleValue = stripRenderControlTokens(value)
+    .replace(/[_\s.]+/g, "")
+    .trim();
+
+  return visibleValue.length === 0;
 };
 
 const parseTableCells = (line: string) => {
@@ -1363,7 +1404,28 @@ const isMarkdownAlignmentRow = (cells: string[]) => {
   return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell));
 };
 
-const transformTableLines = (lines: string[], context: RenderTransformContext) => {
+const getSignatureTableEntries = (
+  precedingLabel: string | null,
+  context: RenderTransformContext,
+) => {
+  const normalizedLabel = normalizeSectionLabel(precedingLabel ?? "");
+
+  if (normalizedLabel === "trustmaker(s)") {
+    return parsePersonNames(context.canonicalAnswers.grantors);
+  }
+
+  if (normalizedLabel === "trustee(s)") {
+    return parsePersonNames(context.canonicalAnswers.trustees);
+  }
+
+  return null;
+};
+
+const transformTableLines = (
+  lines: string[],
+  context: RenderTransformContext,
+  precedingLabel: string | null,
+) => {
   const rows = lines
     .map((line) => parseTableCells(line))
     .filter((cells) => !isMarkdownAlignmentRow(cells))
@@ -1402,9 +1464,20 @@ const transformTableLines = (lines: string[], context: RenderTransformContext) =
   );
 
   if (isSignatureTable || isSingleColumnTable) {
+    const derivedEntries = getSignatureTableEntries(precedingLabel, context);
+    if (derivedEntries && derivedEntries.length > 0) {
+      return derivedEntries.map((entry) => `${BLOCK_SIGNATURE_DATE_PREFIX}${entry}`);
+    }
+
+    if (derivedEntries && derivedEntries.length === 0) {
+      return [] as string[];
+    }
+
     return rows.flatMap((row) => {
       const hasDate = row.some((cell) => /^date$/i.test(cell));
-      const entries = row.filter((cell) => cell.length > 0 && !/^date$/i.test(cell));
+      const entries = row.filter(
+        (cell) => cell.length > 0 && !/^date$/i.test(cell) && !isBlankSignatureLabel(cell),
+      );
       return entries.map((entry) =>
         hasDate ? `${BLOCK_SIGNATURE_DATE_PREFIX}${entry}` : `${BLOCK_SIGNATURE_PREFIX}${entry}`,
       );
@@ -1416,6 +1489,7 @@ const transformTableLines = (lines: string[], context: RenderTransformContext) =
 
 const transformRenderedLines = (lines: string[], context: RenderTransformContext) => {
   const transformed: string[] = [];
+  let previousMeaningfulLine: string | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
@@ -1441,11 +1515,15 @@ const transformRenderedLines = (lines: string[], context: RenderTransformContext
         index += 1;
       }
 
-      transformed.push(...transformTableLines(tableLines, context));
+      transformed.push(...transformTableLines(tableLines, context, previousMeaningfulLine));
       continue;
     }
 
     transformed.push(line);
+
+    if (trimmed.length > 0) {
+      previousMeaningfulLine = line;
+    }
   }
 
   return transformed;
@@ -1489,7 +1567,7 @@ export const applyPreviewWatermarkOverlay = (document: PdfDocument) => {
 
   document.save();
   document.rotate(-28, { origin: [centerX, centerY] });
-  document.font("Helvetica-Bold").fontSize(24).fillColor("#d3c7b7").opacity(0.24);
+  document.font("Helvetica-Bold").fontSize(24).fillColor("#d5d5d5").opacity(0.22);
   document.text(PREVIEW_WATERMARK_TEXT, document.page.margins.left, centerY - 12, {
     width: contentWidth,
     align: "center",
@@ -1533,30 +1611,55 @@ const renderTemplateBlocks = (
     valueColor: HEADING_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
   };
+  const noticeProfile: TextRenderProfile = {
+    baseFont: fonts.regular,
+    valueFont: fonts.emphasis,
+    pendingFont: fonts.italic,
+    fontSize: NOTICE_FONT_SIZE,
+    color: MUTED_TEXT_COLOR,
+    valueColor: BODY_TEXT_COLOR,
+    pendingColor: MUTED_TEXT_COLOR,
+  };
 
   for (const block of blocks) {
     if (block.kind === "blank") {
-      document.moveDown(0.68);
+      document.moveDown(0.76);
       continue;
     }
 
     if (block.kind === "title") {
       ensurePageSpace(document, 72);
-      renderAnnotatedText(document, block.text, titleProfile);
-      document.moveDown(0.48);
+      renderAnnotatedText(document, block.text, titleProfile, {
+        lineGap: TITLE_LINE_GAP,
+      });
+      document.moveDown(0.34);
       continue;
     }
 
     if (block.kind === "heading") {
       ensurePageSpace(document, 56);
-      renderAnnotatedText(document, block.text, headingProfile);
-      document.moveDown(0.38);
+      renderAnnotatedText(document, block.text, headingProfile, {
+        lineGap: HEADING_LINE_GAP,
+      });
+      document.moveDown(0.28);
+      continue;
+    }
+
+    if (block.kind === "notice") {
+      ensurePageSpace(document, 48);
+      renderAnnotatedText(document, block.text, noticeProfile, {
+        lineGap: NOTICE_LINE_GAP,
+      });
+      document.moveDown(0.2);
       continue;
     }
 
     if (block.kind === "bullet") {
       ensurePageSpace(document, 30);
-      renderAnnotatedText(document, `• ${block.text}`, bodyProfile, { indent: 12 });
+      renderAnnotatedText(document, `• ${block.text}`, bodyProfile, {
+        indent: 12,
+        lineGap: BODY_LINE_GAP,
+      });
       continue;
     }
 
@@ -1574,12 +1677,17 @@ const renderTemplateBlocks = (
 
     if (block.kind === "table") {
       ensurePageSpace(document, 30);
-      renderAnnotatedText(document, block.text, bodyProfile, { indent: 8 });
+      renderAnnotatedText(document, block.text, bodyProfile, {
+        indent: 8,
+        lineGap: BODY_LINE_GAP,
+      });
       continue;
     }
 
     ensurePageSpace(document, 42);
-    renderAnnotatedText(document, block.text, bodyProfile);
+    renderAnnotatedText(document, block.text, bodyProfile, {
+      lineGap: BODY_LINE_GAP,
+    });
   }
 };
 

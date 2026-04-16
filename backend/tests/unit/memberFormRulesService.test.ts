@@ -209,6 +209,7 @@ const buildPoaSpecialAuthorityOption = (
   canonical_label: "Create or modify a trust",
   state_specific_label: null,
   sort_order: 10,
+  renderer_metadata: {},
   ...overrides,
 });
 
@@ -444,6 +445,65 @@ describe("memberFormRulesService", () => {
       allowed_value_labels: {
         create_or_modify_trust: "Create or modify a trust",
         make_gifts: "Make gifts (CA)",
+      },
+    });
+  });
+
+  it("prefers authority-scope-tagged POA options when they are present", () => {
+    const poaContract = buildPoaContract({
+      sections: [
+        buildSection({
+          key: "authority_scope",
+          title: "Authority Scope",
+          fields: [
+            buildMemberField({
+              key: "authority_scope_selection",
+              label: "Authority scope selection",
+              semantic_type: "authority_selection",
+              data_type: "array",
+              required: true,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const enriched = applyPoaSpecialAuthorityOptions(poaContract, [
+      buildPoaSpecialAuthorityOption({
+        canonical_key: "make_gifts",
+        canonical_label: "Make gifts",
+        state_specific_label: "Make gifts",
+        sort_order: 20,
+      }),
+      buildPoaSpecialAuthorityOption({
+        canonical_key: "real_property",
+        canonical_label: "Real property",
+        state_specific_label: "Real property transactions",
+        sort_order: 10,
+        renderer_metadata: {
+          authority_scope_surface: "core_authority",
+        },
+      }),
+      buildPoaSpecialAuthorityOption({
+        canonical_key: "taxes",
+        canonical_label: "Taxes",
+        state_specific_label: "Tax matters",
+        sort_order: 30,
+        renderer_metadata: {
+          authority_scope_surface: "core_authority",
+        },
+      }),
+    ]);
+
+    const authorityField = enriched.sections[0]?.fields.find(
+      (field) => field.key === "authority_scope_selection",
+    );
+
+    expect(authorityField?.validation).toMatchObject({
+      allowed_values: ["real_property", "taxes"],
+      allowed_value_labels: {
+        real_property: "Real property transactions",
+        taxes: "Tax matters",
       },
     });
   });
