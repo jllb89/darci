@@ -158,7 +158,7 @@ describe("documentGenerationRenderService", () => {
       ].join("\n"),
       placeholders: {},
       canonicalAnswers: {
-        trustee_power_matrix: ["real_property", "tax_matters"],
+        trustee_powers: ["Real property and deeds", "tax_matters"],
       },
       selectionCatalogs: {
         trustee_power_matrix: {

@@ -107,18 +107,6 @@ const fetchWithTokenRefresh = async (
   }
 };
 
-const formatFileSize = (value: number | null) => {
-  if (typeof value !== "number" || value <= 0) {
-    return "Unknown size";
-  }
-
-  if (value >= 1024 * 1024) {
-    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  return `${Math.max(1, Math.round(value / 1024))} KB`;
-};
-
 const formatStatusLabel = (value: string) => {
   switch (value) {
     case "queued":
@@ -510,15 +498,17 @@ export default function ReviewPage() {
   const secondaryApprovalCopy = payload?.review?.reviewApproval
     ? "DARCi has already assigned the registry number and prepared the signing set for this document."
     : justSubmitted
-      ? "Your document details are locked. Review the generated PDFs in this column before you move into signing."
+      ? null
       : "DARCi assigns the final registry number only after you approve the review set.";
   const reviewCardBaseClass =
-    "w-full rounded-xl border border-Color-Scheme-1-Border px-5 py-5 text-left transition-[opacity,transform,border-color] duration-200 ease-out";
+    "w-full rounded-xl border border-Color-Scheme-1-Border bg-white px-5 py-5 text-left transition-[opacity,transform,border-color,background-color,box-shadow] duration-200 ease-out";
+  const reviewActionButtonBaseClass =
+    "inline-flex min-h-10 min-w-[11rem] items-center justify-center px-4 py-2 text-center text-sm font-medium";
 
   const renderPreviewPanel = () => {
     if (isLoading && !payload) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] items-center justify-center border border-Color-Scheme-1-Border/35 bg-white px-6 text-center text-sm leading-6 text-Color-Neutral">
+        <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral">
           Loading review documents...
         </div>
       );
@@ -527,7 +517,7 @@ export default function ReviewPage() {
     if (selectedOutput) {
       if (isLoadingPreview && !previewSourceUrl) {
         return (
-          <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center border border-Color-Scheme-1-Border/35 bg-white px-6 text-center">
+          <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
             <span
               className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
               style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
@@ -542,7 +532,7 @@ export default function ReviewPage() {
       if (previewSourceUrl) {
         return (
           <object
-            className="h-[72vh] min-h-[560px] w-full border border-Color-Scheme-1-Border/35 bg-white"
+            className="h-[72vh] min-h-[560px] w-full rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f3f6f8]"
             data={previewSourceUrl}
             type="application/pdf"
           >
@@ -554,7 +544,7 @@ export default function ReviewPage() {
       }
 
       return (
-        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center border border-dashed border-amber-200 bg-white px-6 text-center">
+        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-dashed border-amber-200 bg-[#f7f9fb] px-6 text-center">
           <p className="text-sm font-medium text-Color-Scheme-1-Text">
             {previewErrorMessage ?? "The PDF preview is unavailable right now."}
           </p>
@@ -567,7 +557,7 @@ export default function ReviewPage() {
 
     if (isWaitingForRenderableOutputs) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center border border-Color-Scheme-1-Border/35 bg-white px-6 text-center">
+        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
           <span
             className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
             style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
@@ -581,14 +571,14 @@ export default function ReviewPage() {
 
     if (hasBlockedOutputs) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] items-center justify-center border border-dashed border-red-200 bg-white px-6 text-center text-sm leading-6 text-red-700">
+        <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-dashed border-red-200 bg-[#fdf6f6] px-6 text-center text-sm leading-6 text-red-700">
           One or more review outputs are blocked. Check the blocker details in the left column to resolve them before approval.
         </div>
       );
     }
 
     return (
-      <div className="flex h-[72vh] min-h-[560px] items-center justify-center border border-dashed border-Color-Scheme-1-Border/50 bg-white px-6 text-center text-sm leading-6 text-Color-Neutral">
+      <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-dashed border-Color-Scheme-1-Border/50 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral">
         Review PDFs will appear here as soon as they are ready.
       </div>
     );
@@ -633,7 +623,9 @@ export default function ReviewPage() {
               <div className="text-sm text-Color-Neutral">{approvalCopy}</div>
             </div>
 
-            <div className="text-sm leading-6 text-Color-Neutral">{secondaryApprovalCopy}</div>
+            {secondaryApprovalCopy ? (
+              <div className="text-sm leading-6 text-Color-Neutral">{secondaryApprovalCopy}</div>
+            ) : null}
 
               {errorMessage ? (
                 <div className="rounded-xl border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -649,36 +641,24 @@ export default function ReviewPage() {
 
               {payload?.review?.outputs.map((output) => {
                 const isSelected = output.outputKey === selectedOutput?.outputKey;
-                const detailSummary = [
-                  `Version ${output.version}`,
-                  formatFileSize(output.sizeBytes),
-                  formatDateLabel(output.createdAt) ?? "Timestamp pending",
-                ].join(" · ");
 
                 return (
                   <button
                     key={`${output.outputKey}-${output.versionId}`}
                     className={`${reviewCardBaseClass} ${
                       isSelected
-                        ? "border-Color-Scheme-1-Text"
-                        : "hover:border-Color-Scheme-1-Text"
+                        ? "border-Color-Scheme-1-Text bg-Color-Neutral-Lightest/70 shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
+                        : "hover:border-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest/55 hover:opacity-90 hover:shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
                     }`}
                     onClick={() => {
                       setSelectedOutputKey(output.outputKey);
                     }}
                     type="button"
                   >
-                    <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
-                      {output.outputLabel}
-                    </div>
-                    <div className="mt-2 text-xs text-Color-Neutral">
-                      <span className="leading-relaxed">
-                        {output.fileName ?? "Generated PDF ready for review."}
-                      </span>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-Color-Neutral">
-                      <div>{detailSummary}</div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
+                        {output.outputLabel}
+                      </div>
                       <div className="flex items-center gap-3 text-Color-Scheme-1-Text">
                         <span className="font-medium text-emerald-700">Ready</span>
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
@@ -797,7 +777,7 @@ export default function ReviewPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       {selectedOutput ? (
                         <a
-                          className="platform-btn-secondary px-3 py-2 text-sm"
+                          className={`${reviewActionButtonBaseClass} bg-black text-white transition hover:bg-neutral-800`}
                           href={selectedOutput.downloadUrl}
                           rel="noreferrer"
                           target="_blank"
@@ -806,7 +786,7 @@ export default function ReviewPage() {
                         </a>
                       ) : null}
                       <button
-                        className={`px-4 py-2 text-sm font-medium transition ${
+                        className={`${reviewActionButtonBaseClass} transition ${
                           payload?.review?.reviewApproval
                             ? "cursor-default bg-emerald-50 text-emerald-700"
                             : payload?.review?.canApprove && !isApproving
@@ -827,12 +807,11 @@ export default function ReviewPage() {
                       </button>
                     </div>
                   </div>
-                  <div className="mt-1 text-xs text-Color-Neutral">
-                    {selectedOutput?.fileName ?? "Select a reviewable PDF to preview it here."}
-                  </div>
                 </div>
 
-                <div className="space-y-2 bg-white p-3">{renderPreviewPanel()}</div>
+                <div className="space-y-2 rounded-[24px] border border-Color-Scheme-1-Border/35 bg-[linear-gradient(180deg,#f4f7fb,#eef3f9)] p-4 md:p-5">
+                  {renderPreviewPanel()}
+                </div>
               </div>
             </div>
           </div>

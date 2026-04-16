@@ -40,10 +40,12 @@ const BODY_FONT_SIZE = 10;
 const TITLE_FONT_SIZE = 15.4;
 const HEADING_FONT_SIZE = 11.8;
 const NOTICE_FONT_SIZE = 8.5;
+const FINE_PRINT_FONT_SIZE = 7.2;
 const BODY_LINE_GAP = 2.8;
 const HEADING_LINE_GAP = 3.1;
 const TITLE_LINE_GAP = 3.4;
 const NOTICE_LINE_GAP = 1.8;
+const FINE_PRINT_LINE_GAP = 1.3;
 const INLINE_VALUE_OPEN = "[[DARCI_VALUE]]";
 const INLINE_VALUE_CLOSE = "[[/DARCI_VALUE]]";
 const INLINE_PENDING_OPEN = "[[DARCI_PENDING]]";
@@ -79,7 +81,7 @@ type PdfFontSet = {
 };
 type TemplateBlock =
   | { kind: "blank" }
-  | { kind: "title" | "heading" | "notice" | "paragraph" | "bullet" | "table"; text: string }
+  | { kind: "title" | "heading" | "notice" | "fineprint" | "paragraph" | "bullet" | "table"; text: string }
   | { kind: "checklist"; text: string; checked: boolean }
   | { kind: "signature"; text: string; includeDate: boolean };
 
@@ -691,24 +693,25 @@ const drawChecklistItem = (
   const startX = document.page.margins.left;
   const startY = document.y;
   const boxSize = 11;
+  const boxY = startY + Math.round((BODY_FONT_SIZE + BODY_LINE_GAP - boxSize) / 2);
   const textX = startX + 18;
   const width = document.page.width - document.page.margins.right - textX;
 
   document.save();
   if (checked) {
-    document.fillColor(CHECKBOX_FILL_COLOR).roundedRect(startX, startY + 2, boxSize, boxSize, 2).fill();
+    document.fillColor(CHECKBOX_FILL_COLOR).roundedRect(startX, boxY, boxSize, boxSize, 2).fill();
     document
       .lineWidth(1.2)
       .strokeColor(ACCENT_TEXT_COLOR)
-      .moveTo(startX + 2.2, startY + 8)
-      .lineTo(startX + 4.7, startY + 10.5)
-      .lineTo(startX + 8.8, startY + 4.8)
+      .moveTo(startX + 2.2, boxY + 6)
+      .lineTo(startX + 4.7, boxY + 8.5)
+      .lineTo(startX + 8.8, boxY + 2.8)
       .stroke();
   } else {
     document
       .lineWidth(1)
       .strokeColor(BORDER_COLOR)
-      .roundedRect(startX, startY + 2, boxSize, boxSize, 2)
+      .roundedRect(startX, boxY, boxSize, boxSize, 2)
       .stroke();
   }
   document.restore();
@@ -727,7 +730,7 @@ const drawChecklistItem = (
     },
     {
       x: textX,
-      y: startY - 1,
+      y: startY,
       width,
       lineGap: BODY_LINE_GAP,
     },
@@ -1327,6 +1330,13 @@ const buildTemplateBlocks = (renderedTemplate: string) => {
       };
     }
 
+    if (isNotarialFinePrintLine(trimmed)) {
+      return {
+        kind: "fineprint",
+        text: trimmed,
+      };
+    }
+
     if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
       const cells = trimmed
         .split("|")
@@ -1382,6 +1392,12 @@ const normalizeSectionLabel = (value: string) => {
     .replace(/[:\s]+$/g, "")
     .trim()
     .toLowerCase();
+};
+
+const isNotarialFinePrintLine = (value: string) => {
+  return /^A notary public or other officer completing this certificate verifies only the identity/i.test(
+    value.trim(),
+  );
 };
 
 const isBlankSignatureLabel = (value: string) => {
@@ -1444,17 +1460,31 @@ const transformTableLines = (
 
   if (isTrusteePowerMatrix) {
     const selectedTrusteePowers = new Set(
-      parseSelectedOptionKeys(context.canonicalAnswers.trustee_power_matrix),
+      parseSelectedOptionKeys(
+        context.canonicalAnswers.trustee_power_matrix ??
+          context.canonicalAnswers.trustee_powers,
+      ),
     );
     const labelMap = buildSelectionLabelMap(
       context.selectionCatalogs.trustee_power_matrix,
       trusteePowerLabels,
     );
+    const selectedTrusteePowerLabels = new Set(
+      [...selectedTrusteePowers].map((key) =>
+        normalizeOptionComparisonText(labelMap[key] ?? humanizeOptionKey(key)),
+      ),
+    );
 
     return trusteePowerKeys.map((key) => {
       const resolvedKey = key ?? "";
       const label = labelMap[resolvedKey] ?? trusteePowerLabels[resolvedKey] ?? humanizeOptionKey(resolvedKey);
-      return `${selectedTrusteePowers.has(resolvedKey) ? BLOCK_CHECKED_PREFIX : BLOCK_UNCHECKED_PREFIX}${label}`;
+      const checked = matchesSelectionKey(
+        selectedTrusteePowers,
+        selectedTrusteePowerLabels,
+        label,
+        resolvedKey,
+      );
+      return `${checked ? BLOCK_CHECKED_PREFIX : BLOCK_UNCHECKED_PREFIX}${label}`;
     });
   }
 
@@ -1620,6 +1650,15 @@ const renderTemplateBlocks = (
     valueColor: BODY_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
   };
+  const finePrintProfile: TextRenderProfile = {
+    baseFont: fonts.regular,
+    valueFont: fonts.emphasis,
+    pendingFont: fonts.italic,
+    fontSize: FINE_PRINT_FONT_SIZE,
+    color: MUTED_TEXT_COLOR,
+    valueColor: MUTED_TEXT_COLOR,
+    pendingColor: MUTED_TEXT_COLOR,
+  };
 
   for (const block of blocks) {
     if (block.kind === "blank") {
@@ -1651,6 +1690,15 @@ const renderTemplateBlocks = (
         lineGap: NOTICE_LINE_GAP,
       });
       document.moveDown(0.2);
+      continue;
+    }
+
+    if (block.kind === "fineprint") {
+      ensurePageSpace(document, 34);
+      renderAnnotatedText(document, block.text, finePrintProfile, {
+        lineGap: FINE_PRINT_LINE_GAP,
+      });
+      document.moveDown(0.12);
       continue;
     }
 

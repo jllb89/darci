@@ -105,6 +105,13 @@ const normalizeCanonicalAnswersForGeneration = (
     normalizedAnswers.jurisdiction = draft.jurisdiction;
   }
 
+  const trusteePowerSelection =
+    normalizedAnswers.trustee_power_matrix ?? normalizedAnswers.trustee_powers;
+  if (trusteePowerSelection !== undefined) {
+    normalizedAnswers.trustee_power_matrix = trusteePowerSelection;
+    normalizedAnswers.trustee_powers = trusteePowerSelection;
+  }
+
   return normalizedAnswers;
 };
 
@@ -1133,6 +1140,7 @@ const isMissingRenderableValue = (value: unknown) => {
 const renderCaliforniaAcknowledgmentBlock = (input: {
   templateValue: unknown;
   signerObligations: DocumentOutputSignerUpsertInput[];
+  documentKey: string;
 }) => {
   const template = asTrimmedString(input.templateValue);
   if (!template) {
@@ -1145,13 +1153,27 @@ const renderCaliforniaAcknowledgmentBlock = (input: {
     .filter((name) => name.trim().length > 0)
     .join(", ");
 
-  return template
+  const renderedBlock = template
     .replaceAll("{{Acknowledgers}}", acknowledgers || "[Acknowledgers pending]")
     .replaceAll("{{County}}", "[County pending]")
     .replaceAll("{{Day}}", "[Day pending]")
     .replaceAll("{{Month}}", "[Month pending]")
     .replaceAll("{{Year}}", "[Year pending]")
     .replaceAll("{{NotaryName}}", "[Notary pending]");
+
+  if (
+    input.documentKey === "poa_general" &&
+    !/DARCi Power of Attorney/i.test(renderedBlock)
+  ) {
+    return [
+      "## DARCi Power of Attorney",
+      "(California Probate Code Section 4401)",
+      "",
+      renderedBlock,
+    ].join("\n");
+  }
+
+  return renderedBlock;
 };
 
 const resolvePlaceholderValue = (input: {
@@ -1159,6 +1181,7 @@ const resolvePlaceholderValue = (input: {
   canonicalAnswers: CanonicalAnswers;
   systemValues: Record<string, unknown>;
   signerObligations: DocumentOutputSignerUpsertInput[];
+  documentKey: string;
 }) => {
   if (input.binding.source === "member_form") {
     const canonicalKey = input.binding.canonicalKey;
@@ -1179,6 +1202,7 @@ const resolvePlaceholderValue = (input: {
       return renderCaliforniaAcknowledgmentBlock({
         templateValue: input.systemValues[systemKey],
         signerObligations: input.signerObligations,
+        documentKey: input.documentKey,
       });
     }
 
@@ -1463,6 +1487,7 @@ export const prepareGenerationRun = async (input: {
         canonicalAnswers,
         systemValues,
         signerObligations,
+        documentKey,
       }),
     ]),
   );
