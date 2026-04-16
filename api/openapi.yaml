@@ -675,7 +675,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /documents/intake/bootstrap:
     post:
-      summary: Create or resume intake draft document
+      summary: Create intake draft document or resume the latest draft when requested
       x-roles:
         - member
         - admin
@@ -3207,6 +3207,9 @@ components:
           type: string
         rulesSnapshotVersion:
           type: string
+        resumeLatestDraft:
+          type: boolean
+          default: false
     DocumentIntakeBootstrapResponse:
       type: object
       properties:

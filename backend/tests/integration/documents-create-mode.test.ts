@@ -185,7 +185,45 @@ describe("POST /documents with product flow mode", () => {
     });
   });
 
-  it("creates or resumes intake draft document", async () => {
+  it("starts a fresh intake draft by default", async () => {
+    mocks.bootstrapDocumentIntakeDraftMock.mockResolvedValueOnce({
+      created: true,
+      document: {
+        id: "doc-intake-2",
+        owner_id: "owner-1",
+        idn: null,
+        status: "draft",
+        document_type: "intake",
+        jurisdiction: "US-CA",
+        product_flow_mode: "trust_bundle",
+        selected_families: ["poa", "trust"],
+        output_bundle: [
+          {
+            outputKey: "trust_certificate",
+            outputLabel: "Certificate of Trust",
+            isRequired: true,
+            sortOrder: 10,
+            metadata: {},
+          },
+        ],
+        created_at: "2026-04-13T00:20:00.000Z",
+        updated_at: "2026-04-13T00:20:00.000Z",
+      },
+      draft: {
+        document_id: "doc-intake-2",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: null,
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {},
+        canonical_answers_json: {},
+        revision: 1,
+        created_at: "2026-04-13T00:20:00.000Z",
+        updated_at: "2026-04-13T00:20:00.000Z",
+      },
+    });
+
     const token = signToken({
       sub: "member-1",
       app_metadata: { role: "member" },
@@ -208,13 +246,14 @@ describe("POST /documents with product flow mode", () => {
         ownerId: "owner-1",
         productFlowMode: "trust_bundle",
         jurisdiction: "US-CA",
+        resumeLatestDraft: false,
       }),
     );
 
     expect(response.body).toEqual({
-      created: false,
+      created: true,
       document: {
-        id: "doc-intake-1",
+        id: "doc-intake-2",
         idn: null,
         status: "draft",
         documentType: "intake",
@@ -230,22 +269,51 @@ describe("POST /documents with product flow mode", () => {
             metadata: {},
           },
         ],
-        createdAt: "2026-04-13T00:00:00.000Z",
+        createdAt: "2026-04-13T00:20:00.000Z",
       },
       draft: {
-        documentId: "doc-intake-1",
+        documentId: "doc-intake-2",
         ownerId: "owner-1",
         productFlowMode: "trust_bundle",
         jurisdiction: "US-CA",
-        currentStep: "general_information",
+        currentStep: null,
         rulesSnapshotVersion: "member_form_rules_contract_v1",
-        answers: { trust_name: "Acme Trust" },
-        canonicalAnswers: { trust_name: "Acme Trust" },
-        revision: 3,
-        createdAt: "2026-04-13T00:00:00.000Z",
-        updatedAt: "2026-04-13T00:10:00.000Z",
+        answers: {},
+        canonicalAnswers: {},
+        revision: 1,
+        createdAt: "2026-04-13T00:20:00.000Z",
+        updatedAt: "2026-04-13T00:20:00.000Z",
       },
     });
+  });
+
+  it("resumes the latest intake draft only when requested", async () => {
+    const token = signToken({
+      sub: "member-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .post("/documents/intake/bootstrap")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        resumeLatestDraft: true,
+      });
+
+    expect(response.status).toBe(200);
+    expect(mocks.bootstrapDocumentIntakeDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        resumeLatestDraft: true,
+      }),
+    );
+
+    expect(response.body.created).toBe(false);
+    expect(response.body.draft?.revision).toBe(3);
   });
 
   it("persists mode families and output bundle on create", async () => {

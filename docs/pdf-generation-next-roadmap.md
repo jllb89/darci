@@ -35,6 +35,93 @@ What is still missing is the last-mile production layer:
 5. the simple handoff steps that happen after signature and before notarization,
 6. real acknowledgment append and watermark steps.
 
+## Concise Roadmap To Member-Facing Legal Documents
+
+This is the shortest execution order that gets us from debug review artifacts to real member-facing legal documents.
+
+## 1) Stop sending debug artifacts to members
+
+Goal:
+
+The member review surface must stop using generation-run debug PDFs.
+
+Work:
+
+1. split the current renderer into two outputs: member-facing legal document output and internal debug output,
+2. make `/app/review` use only member-facing legal document versions,
+3. keep run metadata, placeholder dumps, signer-obligation tables, and template-source snapshots internal-only.
+
+Exit signal:
+
+No member-facing PDF includes debug sections like `Resolved Placeholders`, `Signer Obligations`, `Deferred Requirements`, or `Template Source Reference`.
+
+## 2) Render the real legal document body for current launch outputs
+
+Goal:
+
+The PDF should read like the actual legal document, not like a diagnostic export.
+
+Work:
+
+1. render the actual template body for `trust_rrr` and `poa_document`,
+2. substitute placeholders directly into the legal text,
+3. convert enum and coded values into member-facing legal text,
+4. handle unresolved pre-sign fields intentionally instead of printing raw tokens or debug placeholders.
+
+Exit signal:
+
+The trust amendment and POA outputs are readable legal documents with clean substituted text.
+
+## 3) Add a preview watermark for pre-approval review PDFs
+
+Goal:
+
+Every member-facing review PDF shown before approval must be clearly marked as non-official.
+
+Work:
+
+1. apply a watermark to every page of pre-approval member-facing review PDFs,
+2. use the exact text `Preview document only, not official`,
+3. record `system.watermark_started` and `system.watermark_completed` for preview versions.
+
+Exit signal:
+
+All pre-approval member-facing PDFs are watermarked with `Preview document only, not official` and no official signing copy carries that preview watermark.
+
+## 4) Split preview documents from official signing documents
+
+Goal:
+
+Review PDFs and signing-ready PDFs must become different document versions with different rules.
+
+Work:
+
+1. keep preview PDFs available during `/app/review`,
+2. on review approval, assign the IDN and rerender the official signing set,
+3. remove the preview watermark from the official signing set,
+4. keep internal-only outputs out of the member-facing set,
+5. persist preview version ids separately from approved signing version ids.
+
+Exit signal:
+
+Members review watermarked preview PDFs first, then signing proceeds on a clean official version set generated after approval.
+
+## 5) Finish signature, notary, and finalization on top of official versions
+
+Goal:
+
+Once official signing versions exist, the rest of the workflow should operate on those versions only.
+
+Work:
+
+1. move signature capture to generation-run and output-signer scoped official versions,
+2. append acknowledgment and deferred notary data to the official document chain,
+3. finalize post-sign and post-notary document versions without reintroducing debug artifacts.
+
+Exit signal:
+
+The full member workflow runs on legal document versions only, from preview through signing and notarization.
+
 ## Locked Product Decisions For The Next Pass
 
 These decisions should be treated as fixed while implementing Phases A and B.
@@ -336,16 +423,18 @@ Replace the draft artifact renderer with a production PDF-only rendering pipelin
 Deliverables:
 
 1. final platform-generated outputs are always PDFs,
-2. `/app/review` route exists and uses the same app layout as `/app/start`,
-3. the process band is shown at step `2` in the review route,
-4. member-facing review displays generated PDFs,
-5. trust product review shows Trust Registration Amendment and POA only,
-6. Trust Certification is still generated but remains internal-only,
-7. Dynamic POA rerender and versioning rules are defined for ongoing edits.
+2. member-facing review no longer uses debug artifacts,
+3. `/app/review` route exists and uses the same app layout as `/app/start`,
+4. the process band is shown at step `2` in the review route,
+5. member-facing review displays legal-document PDFs,
+6. every pre-approval member-facing PDF includes the watermark `Preview document only, not official`,
+7. trust product review shows Trust Registration Amendment and POA only,
+8. Trust Certification is still generated but remains internal-only,
+9. Dynamic POA rerender and versioning rules are defined for ongoing edits.
 
 Exit signal:
 
-At least one CA flow and one OH flow can move from `/app/start` to `/app/review` and show the correct final member-facing PDFs.
+At least one CA flow and one OH flow can move from `/app/start` to `/app/review` and show watermarked member-facing legal PDFs with no debug sections.
 
 ## Phase B: Signer-Aware Signature Execution
 
@@ -378,10 +467,12 @@ Deliverables:
 2. audit logging for that approval step,
 3. IDN assignment and signing preparation at the moment of approval,
 4. the final approved IDN format, replacing the current placeholder-style value,
-5. signature enablement only after review approval,
-6. IDN hidden from member-facing surfaces until the document has actually been signed,
-7. product-aware handling of internal-only versus member-visible outputs during approval,
-8. Dynamic POA edit and rerender behavior confirmed for repeat visits.
+5. rerender the official signing set after approval,
+6. remove the preview watermark from the official signing set,
+7. signature enablement only after review approval,
+8. IDN hidden from member-facing surfaces until the document has actually been signed,
+9. product-aware handling of internal-only versus member-visible outputs during approval,
+10. Dynamic POA edit and rerender behavior confirmed for repeat visits.
 
 Exit signal:
 

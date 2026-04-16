@@ -286,7 +286,7 @@ That contract already knows:
 
 Plain English:
 
-Before the member starts entering real data, the frontend asks the backend to create or resume a draft workflow record.
+Before the member starts entering real data, the frontend asks the backend to create a fresh draft workflow record. Resume behavior is now explicit rather than automatic.
 
 Frontend file:
 

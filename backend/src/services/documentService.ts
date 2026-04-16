@@ -314,6 +314,7 @@ export type BootstrapDocumentIntakeDraftInput = {
   productFlowMode: string;
   jurisdiction: string;
   rulesSnapshotVersion: string;
+  resumeLatestDraft?: boolean;
   selectedFamilies?: string[] | null;
   outputBundle?: Array<Record<string, unknown>>;
   createdBy?: string | null;
@@ -1118,25 +1119,27 @@ const createDocumentIntakeDraft = async (input: BootstrapDocumentIntakeDraftInpu
 export const bootstrapDocumentIntakeDraft = async (
   input: BootstrapDocumentIntakeDraftInput,
 ): Promise<BootstrapDocumentIntakeDraftResult> => {
-  const existingDraft = await getLatestDocumentIntakeDraftByContext({
-    ownerId: input.ownerId,
-    productFlowMode: input.productFlowMode,
-    jurisdiction: input.jurisdiction,
-  });
+  if (input.resumeLatestDraft) {
+    const existingDraft = await getLatestDocumentIntakeDraftByContext({
+      ownerId: input.ownerId,
+      productFlowMode: input.productFlowMode,
+      jurisdiction: input.jurisdiction,
+    });
 
-  if (existingDraft) {
-    const existingDocument = await getDocumentById(existingDraft.document_id);
+    if (existingDraft) {
+      const existingDocument = await getDocumentById(existingDraft.document_id);
 
-    if (
-      existingDocument &&
-      existingDocument.owner_id === input.ownerId &&
-      !isDocumentIntakeLocked(existingDocument)
-    ) {
-      return {
-        created: false,
-        document: existingDocument,
-        draft: existingDraft,
-      };
+      if (
+        existingDocument &&
+        existingDocument.owner_id === input.ownerId &&
+        !isDocumentIntakeLocked(existingDocument)
+      ) {
+        return {
+          created: false,
+          document: existingDocument,
+          draft: existingDraft,
+        };
+      }
     }
   }
 

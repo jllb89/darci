@@ -17,8 +17,8 @@ Related:
 - [x] Applied migration `20260414150000_add_template_binding_rules.sql` to remote.
 - [x] Added draft persistence schema (`document_intake_drafts`, `document_intake_revisions`, and `documents` intake tracking columns).
 - [x] Added Phase B draft endpoints (`GET/PUT /documents/:id/intake-draft`) with integration tests and OpenAPI updates.
-- [x] Added intake bootstrap endpoint (`POST /documents/intake/bootstrap`) to create/resume draft documents before intake edits.
-- [x] Switched start flow to DB-primary draft hydration + autosave, with localStorage retained only as fallback.
+- [x] Added intake bootstrap endpoint (`POST /documents/intake/bootstrap`) to create fresh draft documents by default, with explicit resume support when requested.
+- [x] Switched start flow to DB-backed draft creation + autosave, with fresh bootstrap as the default and resume behavior reserved for explicit flows.
 - [x] Added Phase C submit/payload endpoints (`POST /documents/:id/intake-submit`, `GET /documents/:id/intake-payload`) with validation and canonical snapshot responses.
 - [x] Enforced intake lock semantics after submit (`intake_status` submitted/locked blocks autosave edits).
 - [x] Added Phase D schema (`template_registry`, `document_generation_runs`, and `document_versions.generation_run_id`) with CA/OH template pin seeds.
@@ -70,7 +70,7 @@ At submit time, each document has:
 
 At runtime:
 - frontend autosaves to DB every field update burst (debounced),
-- reload resumes from DB draft (no localStorage dependency),
+- reload starts from a fresh draft unless the caller explicitly requests resume behavior,
 - generation starts only if coverage gate passes,
 - CA/OH are explicitly enabled; all other jurisdictions blocked with reason.
 
@@ -342,7 +342,7 @@ Status: complete (3/3 complete)
 - [x] Switch frontend from localStorage-primary to DB-primary (localStorage optional fallback only).
 
 Dependency note:
-- Resolved: start flow now uses an intake bootstrap step to create/resume `document.id` before draft autosave starts.
+- Resolved: start flow now uses an intake bootstrap step to create a fresh `document.id` before draft autosave starts, with resume support available only when explicitly requested.
 
 Exit criteria:
 - [x] Draft survives refresh/device switch and shows revision timestamp.

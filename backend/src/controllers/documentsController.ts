@@ -276,6 +276,7 @@ const bootstrapDocumentIntakeDraftSchema = z
     productFlowMode: z.enum(productFlowModeKeys),
     jurisdiction: z.string().trim().min(1),
     rulesSnapshotVersion: z.string().trim().min(1).optional(),
+    resumeLatestDraft: z.boolean().optional(),
   })
   .passthrough();
 
@@ -1263,6 +1264,7 @@ export const bootstrapDocumentIntakeDraft = async (req: Request, res: Response) 
     productFlowMode: selection.modeKey,
     jurisdiction: parsed.data.jurisdiction,
     rulesSnapshotVersion,
+    resumeLatestDraft: parsed.data.resumeLatestDraft ?? false,
     selectedFamilies: [...selection.families],
     outputBundle: expectedOutputs.map((output) => ({
       outputKey: output.outputKey,

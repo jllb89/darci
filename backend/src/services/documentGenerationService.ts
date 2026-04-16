@@ -57,9 +57,20 @@ const revocationHolderLabels: Record<string, string> = {
   unsure: "Needs manual review",
 };
 
+const trusteeIncapacityStandardLabels: Record<string, string> = {
+  licensed_physician_determination: "A licensed physician's determination",
+  two_physician_determination: "Determination by two physicians",
+  court_determination: "A court determination",
+  written_resignation: "The trustee's written resignation",
+  unanimous_trustee_determination: "Unanimous determination of the acting trustees",
+  unable_to_manage_financial_affairs: "Inability to manage financial affairs",
+  other: "Another documented incapacity standard",
+  unsure: "Needs manual review",
+};
+
 const supportedSignerDocumentKeys = new Set(["poa_general", "trust_rrr", "trust_certificate"]);
 
-type CanonicalAnswers = Record<string, unknown>;
+export type CanonicalAnswers = Record<string, unknown>;
 
 type ParsedContact = {
   email: string | null;
@@ -528,7 +539,16 @@ const formatRevocationHolders = (canonicalAnswers: CanonicalAnswers) => {
   return revocationHolderLabels[mode] ?? mode;
 };
 
-const toRenderableMemberValue = (canonicalKey: string, canonicalAnswers: CanonicalAnswers) => {
+const formatTrusteeIncapacityStandard = (value: unknown) => {
+  const mode = asTrimmedString(value);
+  if (!mode) {
+    return null;
+  }
+
+  return trusteeIncapacityStandardLabels[mode] ?? mode;
+};
+
+export const toRenderableMemberValue = (canonicalKey: string, canonicalAnswers: CanonicalAnswers) => {
   const rawValue = canonicalAnswers[canonicalKey];
 
   switch (canonicalKey) {
@@ -550,6 +570,8 @@ const toRenderableMemberValue = (canonicalKey: string, canonicalAnswers: Canonic
       return formatAgentSignatureAuthority(rawValue);
     case "revocation_holders":
       return formatRevocationHolders(canonicalAnswers);
+    case "trustee_incapacity_standard":
+      return formatTrusteeIncapacityStandard(rawValue);
     case "trust_date":
     case "execution_date":
       return formatLongDate(rawValue) ?? asTrimmedString(rawValue);
@@ -1166,6 +1188,60 @@ const resolvePlaceholderValue = (input: {
   return null;
 };
 
+const getValidationAllowedValues = (validation: Record<string, unknown> | undefined) => {
+  if (!validation || !Array.isArray(validation.allowed_values)) {
+    return [] as string[];
+  }
+
+  return validation.allowed_values.filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+};
+
+const getValidationAllowedValueLabels = (
+  validation: Record<string, unknown> | undefined,
+) => {
+  if (!validation || !validation.allowed_value_labels || typeof validation.allowed_value_labels !== "object") {
+    return {} as Record<string, string>;
+  }
+
+  return Object.fromEntries(
+    Object.entries(validation.allowed_value_labels)
+      .filter(([key, value]) => key.trim().length > 0 && typeof value === "string" && value.trim().length > 0)
+      .map(([key, value]) => [key, typeof value === "string" ? value.trim() : ""]),
+  );
+};
+
+const buildSelectionCatalogs = (extractionDocument?: DocumentExtractionContract) => {
+  const fieldKeys = new Set(["authority_scope_selection", "trustee_power_matrix"]);
+  const selectionCatalogs: Record<
+    string,
+    {
+      allowedValues: string[];
+      allowedValueLabels: Record<string, string>;
+    }
+  > = {};
+
+  for (const field of extractionDocument?.fields ?? []) {
+    if (!fieldKeys.has(field.sourceFieldKey)) {
+      continue;
+    }
+
+    const allowedValues = getValidationAllowedValues(field.validation);
+    const allowedValueLabels = getValidationAllowedValueLabels(field.validation);
+    if (allowedValues.length === 0 && Object.keys(allowedValueLabels).length === 0) {
+      continue;
+    }
+
+    selectionCatalogs[field.sourceFieldKey] = {
+      allowedValues,
+      allowedValueLabels,
+    };
+  }
+
+  return selectionCatalogs;
+};
+
 export const buildGenerationRunBlockers = (input: {
   jurisdiction: string;
   outputKey: string;
@@ -1403,6 +1479,7 @@ export const prepareGenerationRun = async (input: {
     ...(extractionDocument ? { extractionDocument } : {}),
   });
   const status = summarizeGenerationRunStatus(blockingRequirements);
+  const selectionCatalogs = buildSelectionCatalogs(extractionDocument);
 
   const renderContext = {
     documentId: document.id,
@@ -1429,6 +1506,7 @@ export const prepareGenerationRun = async (input: {
       (obligation) => obligation.obligation_type === "acknowledger",
     ),
     systemValues,
+    selectionCatalogs,
     deferredRequirements: blockingRequirements.filter((requirement) => !requirement.blocking),
   } satisfies Record<string, unknown>;
 

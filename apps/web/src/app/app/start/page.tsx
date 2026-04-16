@@ -85,7 +85,6 @@ import {
   normalizeCanonicalKey,
   normalizeNameForComparison,
   normalizeSignatureAuthorityMode,
-  readStartFormDraft,
   sanitizeFormValuesRecord,
   toStringArrayValue,
   validatePersonContact,
@@ -175,6 +174,14 @@ type LeaveAction =
   | { type: "clear-product-selection" }
   | { type: "change-jurisdiction"; jurisdiction: string };
 
+type DraftSaveSnapshot = {
+  accessToken: string;
+  documentId: string;
+  productFlowMode: ProductFlowModeKey;
+  currentFormStep: FormStep;
+  formValues: Record<string, FormValue>;
+};
+
 export default function StartDocumentPage() {
   const router = useRouter();
   const { accessToken } = useStoredAuth();
@@ -215,6 +222,29 @@ export default function StartDocumentPage() {
   const hasPushedHistoryGuardRef = useRef(false);
   const lastServerDraftSignatureRef = useRef<string | null>(null);
   const contractContainerRef = useRef<HTMLDivElement | null>(null);
+  const draftDocumentIdRef = useRef<string | null>(null);
+  const draftRevisionRef = useRef<number | null>(null);
+  const draftSaveTimerRef = useRef<number | null>(null);
+  const draftSaveQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
+
+  const syncDraftDocumentId = useCallback((nextDraftDocumentId: string | null) => {
+    draftDocumentIdRef.current = nextDraftDocumentId;
+    setDraftDocumentId(nextDraftDocumentId);
+  }, []);
+
+  const syncDraftRevision = useCallback((nextDraftRevision: number | null) => {
+    draftRevisionRef.current = nextDraftRevision;
+    setDraftRevision(nextDraftRevision);
+  }, []);
+
+  const resetQueuedDraftSaves = useCallback(() => {
+    if (draftSaveTimerRef.current !== null) {
+      window.clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+
+    draftSaveQueueRef.current = Promise.resolve(true);
+  }, []);
 
   const selectedJurisdictionLabel = useMemo(() => {
     const selected = jurisdictions.find(
@@ -252,6 +282,154 @@ export default function StartDocumentPage() {
     isLoadingMemberForm ||
     !memberForm;
   const isActiveSourceToggleDisabled = isLoadingMemberForm || !memberForm;
+
+  const queueDraftSave = useCallback(
+    (snapshot: DraftSaveSnapshot) => {
+      const signature = buildDraftSignature(
+        snapshot.currentFormStep,
+        snapshot.formValues,
+      );
+
+      const queuedSave = draftSaveQueueRef.current.then(async () => {
+        if (lastServerDraftSignatureRef.current === signature) {
+          return true;
+        }
+
+        setIsSavingDraft(true);
+
+        try {
+          const requestPayload: Record<string, unknown> = {
+            currentStep: snapshot.currentFormStep,
+            rulesSnapshotVersion: "member_form_rules_contract_v1",
+            answers: snapshot.formValues,
+          };
+
+          if (typeof draftRevisionRef.current === "number") {
+            requestPayload.expectedRevision = draftRevisionRef.current;
+          }
+
+          const response = await fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${snapshot.documentId}/intake-draft`,
+            snapshot.accessToken,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(requestPayload),
+            },
+          );
+
+          const payload = (await response.json().catch(() => null)) as
+            | DocumentIntakeDraftResponsePayload
+            | null;
+
+          if (draftDocumentIdRef.current !== snapshot.documentId) {
+            return true;
+          }
+
+          if (response.status === 409) {
+            const currentRevision =
+              typeof payload?.currentRevision === "number"
+                ? payload.currentRevision
+                : null;
+
+            if (currentRevision !== null) {
+              syncDraftRevision(currentRevision);
+            }
+
+            const latestResponse = await fetchWithTokenRefresh(
+              `${apiBaseUrl}/documents/${snapshot.documentId}/intake-draft`,
+              snapshot.accessToken,
+            );
+            const latestPayload = (await latestResponse
+              .json()
+              .catch(() => null)) as DocumentIntakeDraftResponsePayload | null;
+
+            if (
+              draftDocumentIdRef.current === snapshot.documentId &&
+              latestResponse.ok &&
+              latestPayload?.draft
+            ) {
+              const mergedFormValues = {
+                ...snapshot.formValues,
+                ...sanitizeFormValuesRecord(latestPayload.draft.answers),
+              };
+              const syncedCurrentFormStep =
+                snapshot.productFlowMode === "trust_bundle"
+                  ? "general_information"
+                  : coerceDraftFormStep(latestPayload.draft.currentStep);
+
+              setFormValues(mergedFormValues);
+              setCurrentFormStep(syncedCurrentFormStep);
+              syncDraftRevision(latestPayload.draft.revision);
+              setDraftUpdatedAt(latestPayload.draft.updatedAt);
+              lastServerDraftSignatureRef.current = buildDraftSignature(
+                syncedCurrentFormStep,
+                mergedFormValues,
+              );
+            }
+
+            const message =
+              "Draft changed in another session. Loaded the latest saved version.";
+            setDraftSaveNotice(message);
+            showToast({
+              tone: "warning",
+              message,
+              durationMs: 5000,
+            });
+
+            return false;
+          }
+
+          if (!response.ok || !payload?.draft) {
+            throw new Error(payload?.message ?? "Failed to save draft");
+          }
+
+          syncDraftRevision(payload.draft.revision);
+          setDraftUpdatedAt(payload.draft.updatedAt);
+          setDraftSaveNotice(null);
+          lastServerDraftSignatureRef.current = signature;
+
+          return true;
+        } catch (error) {
+          if (draftDocumentIdRef.current !== snapshot.documentId) {
+            return true;
+          }
+
+          const message =
+            error instanceof Error ? error.message : "Failed to save draft";
+
+          setDraftSaveNotice(message);
+          showToast({
+            tone: "error",
+            message,
+            durationMs: 5000,
+          });
+
+          return true;
+        } finally {
+          if (draftDocumentIdRef.current === snapshot.documentId) {
+            setIsSavingDraft(false);
+          }
+        }
+      });
+
+      draftSaveQueueRef.current = queuedSave.catch(() => true);
+
+      return queuedSave;
+    },
+    [showToast, syncDraftRevision],
+  );
+
+  const waitForQueuedDraftSaves = useCallback(async () => {
+    if (draftSaveTimerRef.current !== null) {
+      window.clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+
+    return draftSaveQueueRef.current;
+  }, []);
 
   useEffect(() => {
     if (!accessToken) {
@@ -312,11 +490,12 @@ export default function StartDocumentPage() {
           setSelectedJurisdiction("");
           setMemberForm(null);
           setFormValues({});
-          setDraftDocumentId(null);
-          setDraftRevision(null);
+          syncDraftDocumentId(null);
+          syncDraftRevision(null);
           setDraftUpdatedAt(null);
           setDraftSaveNotice(null);
           setIsSavingDraft(false);
+          resetQueuedDraftSaves();
           lastServerDraftSignatureRef.current = null;
           setErrorMessage(
             error instanceof Error ? error.message : "Failed to load product modes",
@@ -334,7 +513,7 @@ export default function StartDocumentPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, resetQueuedDraftSaves, syncDraftDocumentId, syncDraftRevision]);
 
   useEffect(() => {
     if (!accessToken || !selectedProductFlowMode) {
@@ -388,11 +567,12 @@ export default function StartDocumentPage() {
         if (nextJurisdictions.length === 0) {
           setMemberForm(null);
           setFormValues({});
-          setDraftDocumentId(null);
-          setDraftRevision(null);
+          syncDraftDocumentId(null);
+          syncDraftRevision(null);
           setDraftUpdatedAt(null);
           setDraftSaveNotice(null);
           setIsSavingDraft(false);
+          resetQueuedDraftSaves();
           lastServerDraftSignatureRef.current = null;
         }
       } catch (error) {
@@ -401,11 +581,12 @@ export default function StartDocumentPage() {
           setSelectedJurisdiction("");
           setMemberForm(null);
           setFormValues({});
-          setDraftDocumentId(null);
-          setDraftRevision(null);
+          syncDraftDocumentId(null);
+          syncDraftRevision(null);
           setDraftUpdatedAt(null);
           setDraftSaveNotice(null);
           setIsSavingDraft(false);
+          resetQueuedDraftSaves();
           lastServerDraftSignatureRef.current = null;
           setResolvedProductFlowMode(
             productFlowModes.find((mode) => mode.modeKey === selectedProductFlowMode) ??
@@ -427,7 +608,14 @@ export default function StartDocumentPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, productFlowModes, selectedProductFlowMode]);
+  }, [
+    accessToken,
+    productFlowModes,
+    resetQueuedDraftSaves,
+    selectedProductFlowMode,
+    syncDraftDocumentId,
+    syncDraftRevision,
+  ]);
 
   useEffect(() => {
     if (!accessToken || !selectedProductFlowMode || !selectedJurisdiction) {
@@ -440,6 +628,8 @@ export default function StartDocumentPage() {
       setIsLoadingMemberForm(true);
       setErrorMessage(null);
       setMissingRequirements([]);
+      resetQueuedDraftSaves();
+      lastServerDraftSignatureRef.current = null;
 
       try {
         const query = new URLSearchParams({
@@ -486,11 +676,6 @@ export default function StartDocumentPage() {
           jurisdictionLabel: selectedJurisdictionLabel,
         });
 
-        const localDraft = readStartFormDraft(
-          selectedProductFlowMode,
-          selectedJurisdiction,
-        );
-
         let bootstrapPayload: DocumentIntakeBootstrapResponsePayload | null = null;
         let bootstrapErrorMessage: string | null = null;
 
@@ -507,6 +692,7 @@ export default function StartDocumentPage() {
                 productFlowMode: selectedProductFlowMode,
                 jurisdiction: selectedJurisdiction,
                 rulesSnapshotVersion: "member_form_rules_contract_v1",
+                resumeLatestDraft: false,
               }),
             },
           );
@@ -548,8 +734,8 @@ export default function StartDocumentPage() {
 
           setFormValues(nextFormValues);
           setCurrentFormStep(nextCurrentFormStep);
-          setDraftDocumentId(bootstrapPayload.document.id);
-          setDraftRevision(
+          syncDraftDocumentId(bootstrapPayload.document.id);
+          syncDraftRevision(
             typeof remoteDraft?.revision === "number" ? remoteDraft.revision : null,
           );
           setDraftUpdatedAt(
@@ -563,21 +749,17 @@ export default function StartDocumentPage() {
           );
         } else {
           const fallbackNotice = bootstrapErrorMessage
-            ? `Using local draft fallback: ${bootstrapErrorMessage}`
-            : "Using local draft fallback";
+            ? `Draft persistence unavailable: ${bootstrapErrorMessage}. Starting with a fresh form.`
+            : "Draft persistence unavailable. Starting with a fresh form.";
           const nextFormValues = {
             ...initialValues,
-            ...(localDraft?.formValues ?? {}),
           };
-          const nextCurrentFormStep =
-            selectedProductFlowMode === "trust_bundle"
-              ? "general_information"
-              : (localDraft?.currentFormStep ?? "general_information");
+          const nextCurrentFormStep = "general_information";
 
           setFormValues(nextFormValues);
           setCurrentFormStep(nextCurrentFormStep);
-          setDraftDocumentId(null);
-          setDraftRevision(null);
+          syncDraftDocumentId(null);
+          syncDraftRevision(null);
           setDraftUpdatedAt(null);
           setIsSavingDraft(false);
           setDraftSaveNotice(fallbackNotice);
@@ -592,8 +774,8 @@ export default function StartDocumentPage() {
         if (!cancelled) {
           setMemberForm(null);
           setFormValues({});
-          setDraftDocumentId(null);
-          setDraftRevision(null);
+          syncDraftDocumentId(null);
+          syncDraftRevision(null);
           setDraftUpdatedAt(null);
           setDraftSaveNotice(null);
           setIsSavingDraft(false);
@@ -618,9 +800,13 @@ export default function StartDocumentPage() {
     };
   }, [
     accessToken,
+    resetQueuedDraftSaves,
     selectedJurisdiction,
     selectedJurisdictionLabel,
     selectedProductFlowMode,
+    showToast,
+    syncDraftDocumentId,
+    syncDraftRevision,
   ]);
 
   useEffect(() => {
@@ -830,130 +1016,35 @@ export default function StartDocumentPage() {
       return;
     }
 
-    const saveTimer = window.setTimeout(() => {
-      const persistDraft = async () => {
-        setIsSavingDraft(true);
+    draftSaveTimerRef.current = window.setTimeout(() => {
+      draftSaveTimerRef.current = null;
 
-        try {
-          const requestPayload: Record<string, unknown> = {
-            currentStep: currentFormStep,
-            rulesSnapshotVersion: "member_form_rules_contract_v1",
-            answers: formValues,
-          };
-
-          if (typeof draftRevision === "number") {
-            requestPayload.expectedRevision = draftRevision;
-          }
-
-          const response = await fetchWithTokenRefresh(
-            `${apiBaseUrl}/documents/${draftDocumentId}/intake-draft`,
-            accessToken,
-            {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(requestPayload),
-            },
-          );
-
-          const payload = (await response.json().catch(() => null)) as
-            | DocumentIntakeDraftResponsePayload
-            | null;
-
-          if (response.status === 409) {
-            const currentRevision =
-              typeof payload?.currentRevision === "number"
-                ? payload.currentRevision
-                : null;
-
-            if (currentRevision !== null) {
-              setDraftRevision(currentRevision);
-            }
-
-            const latestResponse = await fetchWithTokenRefresh(
-              `${apiBaseUrl}/documents/${draftDocumentId}/intake-draft`,
-              accessToken,
-            );
-            const latestPayload = (await latestResponse
-              .json()
-              .catch(() => null)) as DocumentIntakeDraftResponsePayload | null;
-
-            if (latestResponse.ok && latestPayload?.draft) {
-              const mergedFormValues = {
-                ...formValues,
-                ...sanitizeFormValuesRecord(latestPayload.draft.answers),
-              };
-              const syncedCurrentStep =
-                selectedProductFlowMode === "trust_bundle"
-                  ? "general_information"
-                  : coerceDraftFormStep(latestPayload.draft.currentStep);
-
-              setFormValues(mergedFormValues);
-              setCurrentFormStep(syncedCurrentStep);
-              setDraftRevision(latestPayload.draft.revision);
-              setDraftUpdatedAt(latestPayload.draft.updatedAt);
-              lastServerDraftSignatureRef.current = buildDraftSignature(
-                syncedCurrentStep,
-                mergedFormValues,
-              );
-            }
-
-            setDraftSaveNotice(
-              "Draft changed in another session. Loaded the latest saved version.",
-            );
-            showToast({
-              tone: "warning",
-              message: "Draft changed in another session. Loaded the latest saved version.",
-              durationMs: 5000,
-            });
-
-            return;
-          }
-
-          if (!response.ok || !payload?.draft) {
-            throw new Error(payload?.message ?? "Failed to save draft");
-          }
-
-          setDraftRevision(payload.draft.revision);
-          setDraftUpdatedAt(payload.draft.updatedAt);
-          setDraftSaveNotice(null);
-          lastServerDraftSignatureRef.current = signature;
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Failed to save draft";
-
-          setDraftSaveNotice(
-            message,
-          );
-          showToast({
-            tone: "error",
-            message,
-            durationMs: 5000,
-          });
-        } finally {
-          setIsSavingDraft(false);
-        }
-      };
-
-      void persistDraft();
+      void queueDraftSave({
+        accessToken,
+        documentId: draftDocumentId,
+        productFlowMode: selectedProductFlowMode,
+        currentFormStep,
+        formValues,
+      });
     }, 750);
 
     return () => {
-      window.clearTimeout(saveTimer);
+      if (draftSaveTimerRef.current !== null) {
+        window.clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
     };
   }, [
     accessToken,
     currentFormStep,
     draftDocumentId,
-    draftRevision,
     formValues,
     isLoadingMemberForm,
     isValidatingMemberFormSubmission,
     memberForm,
+    queueDraftSave,
     selectedJurisdiction,
     selectedProductFlowMode,
-    showToast,
   ]);
 
   const sourceOnlyVisibleCount = useMemo(() => {
@@ -1433,6 +1524,15 @@ export default function StartDocumentPage() {
     setSubmissionErrorMessage(null);
 
     try {
+      const draftSaveReady = await waitForQueuedDraftSaves();
+
+      if (!draftSaveReady) {
+        setSubmissionErrorMessage(
+          "Your draft changed before submission. Review the latest saved version and submit again.",
+        );
+        return false;
+      }
+
       const response = await fetchWithTokenRefresh(
         `${apiBaseUrl}/documents/${draftDocumentId}/intake-submit`,
         accessToken,
@@ -1445,8 +1545,8 @@ export default function StartDocumentPage() {
             currentStep: currentFormStep,
             rulesSnapshotVersion: "member_form_rules_contract_v1",
             answers: formValues,
-            ...(typeof draftRevision === "number"
-              ? { expectedRevision: draftRevision }
+            ...(typeof draftRevisionRef.current === "number"
+              ? { expectedRevision: draftRevisionRef.current }
               : {}),
           }),
         },
@@ -1471,7 +1571,7 @@ export default function StartDocumentPage() {
 
       if (response.status === 409) {
         if (typeof payload?.currentRevision === "number") {
-          setDraftRevision(payload.currentRevision);
+          syncDraftRevision(payload.currentRevision);
         }
 
         setSubmissionErrorMessage(
@@ -1488,9 +1588,13 @@ export default function StartDocumentPage() {
         return false;
       }
 
-      setDraftRevision(payload.draft.revision);
+      syncDraftRevision(payload.draft.revision);
       setDraftUpdatedAt(payload.draft.updatedAt);
       setDraftSaveNotice("Intake submitted and locked for generation.");
+      lastServerDraftSignatureRef.current = buildDraftSignature(
+        currentFormStep,
+        formValues,
+      );
       showToast({
         tone: "success",
         message: "Intake submitted and locked for generation.",
@@ -1514,12 +1618,14 @@ export default function StartDocumentPage() {
     accessToken,
     currentFormStep,
     draftDocumentId,
-    draftRevision,
     formValues,
     memberForm,
     router,
     selectedJurisdiction,
     selectedProductFlowMode,
+    showToast,
+    syncDraftRevision,
+    waitForQueuedDraftSaves,
   ]);
 
   const handleFinalContinue = async () => {
