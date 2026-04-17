@@ -673,6 +673,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/review:
+    get:
+      summary: Get document review state
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentReviewResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/intake/bootstrap:
     post:
       summary: Create intake draft document or resume the latest draft when requested
@@ -768,6 +800,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeDraftConflictResponse"
+  /documents/{id}/intake-draft/resave:
+    post:
+      summary: Resave the current document intake draft snapshot
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentIntakeDraftResponse"
         "401":
           description: Unauthorized
           content:
@@ -1039,6 +1109,56 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DocumentGenerationRunDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/review-approval:
+    post:
+      summary: Approve the document review set for signing
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentReviewApprovalRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentReviewApprovalResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
           content:
@@ -3124,6 +3244,131 @@ components:
       properties:
         document:
           $ref: "#/components/schemas/Document"
+    DocumentReviewOutput:
+      type: object
+      properties:
+        outputKey:
+          type: string
+        outputLabel:
+          type: string
+        versionId:
+          type: string
+        generationRunId:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        fileName:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        downloadUrl:
+          type: string
+        isFinal:
+          type: boolean
+    PendingDocumentReviewOutput:
+      type: object
+      properties:
+        outputKey:
+          type: string
+        outputLabel:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - blocked
+            - rendering
+            - rendered
+            - failed
+            - canceled
+            - unsupported_format
+            - not_started
+        errorMessage:
+          type: string
+          nullable: true
+        versionId:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        blockers:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenerationRunBlocker"
+    DocumentReviewApproval:
+      type: object
+      properties:
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewSource:
+          type: string
+          nullable: true
+        latestVersionId:
+          type: string
+          nullable: true
+        latestRenderedRunId:
+          type: string
+          nullable: true
+        approvedOutputKeys:
+          type: array
+          items:
+            type: string
+        approvedVersionIds:
+          type: array
+          items:
+            type: string
+    DocumentReview:
+      type: object
+      properties:
+        state:
+          type: string
+          enum:
+            - approved
+            - ready
+            - generating
+            - empty
+        requiresGeneration:
+          type: boolean
+        missingOutputKeys:
+          type: array
+          items:
+            type: string
+        allVisibleOutputsReady:
+          type: boolean
+        canApprove:
+          type: boolean
+        reviewApproval:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/DocumentReviewApproval"
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentReviewOutput"
+        pendingOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingDocumentReviewOutput"
+    DocumentReviewResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/Document"
+        review:
+          $ref: "#/components/schemas/DocumentReview"
     DocumentCreateResponse:
       type: object
       properties:
@@ -3301,6 +3546,29 @@ components:
         currentRevision:
           type: integer
           minimum: 0
+    DocumentReviewApprovalRequest:
+      type: object
+      required:
+        - agreed
+      properties:
+        agreed:
+          type: boolean
+          enum:
+            - true
+    DocumentReviewApprovalResult:
+      allOf:
+        - $ref: "#/components/schemas/DocumentReviewApproval"
+        - type: object
+          properties:
+            signingReady:
+              type: boolean
+    DocumentReviewApprovalResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/Document"
+        reviewApproval:
+          $ref: "#/components/schemas/DocumentReviewApprovalResult"
     DocumentIntakeStatusConflictResponse:
       type: object
       properties:
