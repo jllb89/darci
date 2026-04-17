@@ -13,11 +13,13 @@ import {
   finalizeDocumentUpload,
   getDocument,
   getDocumentParties,
+  getDocumentSigning,
   getDocumentSignerObligations,
   getDocumentTimeline,
   getSignatureFields,
   listDocumentVersions,
   listDocuments,
+  captureSignature,
   finalizeSignatureUpload,
   requestSignatureUpload,
   resaveDocumentIntakeDraft,
@@ -102,6 +104,11 @@ router.get(
   requireRole(["member", "admin", "service_role"]),
   getDocumentSignerObligations,
 );
+router.get(
+  "/:id/signing",
+  requireRole(["member", "admin", "service_role"]),
+  getDocumentSigning,
+);
 router.put(
   "/:id/parties",
   requireRole(["member", "admin", "service_role"]),
@@ -110,6 +117,11 @@ router.put(
 router.get("/:id/versions", listDocumentVersions);
 router.get("/:id/timeline", getDocumentTimeline);
 router.get("/:id/signature-fields", getSignatureFields);
+router.post(
+  "/:id/signatures",
+  requireRole(["member", "admin", "service_role"]),
+  captureSignature
+);
 router.post(
   "/:id/signatures/request",
   requireRole(["member", "admin", "service_role"]),
@@ -125,7 +137,11 @@ router.post(
   requireRole(["member", "admin", "service_role"]),
   approveDocumentReview
 );
-router.post("/:id/sign", signDocument);
+router.post(
+  "/:id/sign",
+  requireRole(["member", "admin", "service_role"]),
+  signDocument
+);
 router.post("/:id/submit-notarization", submitNotarization);
 router.post(
   "/:id/append-acknowledgment",

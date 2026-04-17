@@ -1521,6 +1521,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signing:
+    get:
+      summary: Get signing workspace state
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSigningResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signatures:
+    post:
+      summary: Capture a typed or drawn signature
+      x-roles:
+        - member
+        - admin
+        - service_role
+      x-audit-events:
+        - member.signature_capture_started
+        - member.signature_capture_completed
+        - system.signature_linked_to_document
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignatureCaptureRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignatureCaptureResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/signatures/request:
     post:
       summary: Request member signature upload
@@ -1541,22 +1639,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - fileSize
-                - mimeType
-              properties:
-                fileName:
-                  type: string
-                fileSize:
-                  type: integer
-                  format: int64
-                mimeType:
-                  type: string
-                  enum:
-                    - image/png
-                    - image/svg+xml
-                    - image/jpeg
+              $ref: "#/components/schemas/SignatureUploadRequest"
       responses:
         "201":
           description: Created
@@ -1582,6 +1665,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/signatures/finalize:
     post:
       summary: Finalize member signature upload
@@ -1603,12 +1692,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - signatureId
-              properties:
-                signatureId:
-                  type: string
+              $ref: "#/components/schemas/SignatureFinalizeRequest"
       responses:
         "200":
           description: OK
@@ -1634,17 +1718,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/sign:
     post:
-      summary: Sign document
+      summary: Confirm the completed signing set
       x-roles:
         - member
         - admin
         - service_role
       x-audit-events:
-        - member.signature_capture_started
-        - member.signature_capture_completed
-        - system.signature_linked_to_document
+        - member.document_signatures_confirmed
       parameters:
         - in: path
           name: id
@@ -1656,20 +1744,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                signatureMethod:
-                  type: string
-                  description: draw|upload|typed
-                deviceType:
-                  type: string
+              $ref: "#/components/schemas/DocumentSignRequest"
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SignatureResponse"
+                $ref: "#/components/schemas/DocumentSignResponse"
         "400":
           description: Bad request
           content:
@@ -1678,6 +1760,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
@@ -3957,6 +4045,9 @@ components:
     SignatureFieldsResponse:
       type: object
       properties:
+        generationRunId:
+          type: string
+          nullable: true
         fields:
           type: array
           items:
@@ -3972,38 +4063,336 @@ components:
           type: string
         token:
           type: string
-    SignatureResponse:
+    SignatureUploadRequest:
       type: object
+      required:
+        - generationRunId
+        - outputSignerId
+        - fileSize
+        - mimeType
       properties:
-        status:
+        generationRunId:
           type: string
-        message:
+        outputSignerId:
           type: string
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+          format: int64
+        mimeType:
+          type: string
+          enum:
+            - image/png
+            - image/jpeg
+    SignatureFinalizeRequest:
+      type: object
+      required:
+        - signatureId
+        - generationRunId
+        - outputSignerId
+      properties:
         signatureId:
           type: string
-    SignatureUploadResponse:
+        generationRunId:
+          type: string
+        outputSignerId:
+          type: string
+    SignatureCaptureRequest:
       type: object
+      required:
+        - generationRunId
+        - outputSignerId
+        - captureMethod
       properties:
-        signature:
-          $ref: "#/components/schemas/SignatureUpload"
-        upload:
-          $ref: "#/components/schemas/UploadSession"
-    SignatureFinalizeResponse:
-      type: object
-      properties:
-        signature:
-          $ref: "#/components/schemas/SignatureUpload"
-    SignatureUpload:
+        generationRunId:
+          type: string
+        outputSignerId:
+          type: string
+        captureMethod:
+          type: string
+          enum:
+            - type
+            - draw
+        typedValue:
+          type: string
+        typedKind:
+          type: string
+          enum:
+            - name
+            - initials
+        imageDataUrl:
+          type: string
+    DocumentSignatureCapture:
       type: object
       properties:
         id:
           type: string
         documentId:
           type: string
+        generationRunId:
+          type: string
+          nullable: true
+        outputSignerId:
+          type: string
+          nullable: true
         storagePath:
           type: string
+          nullable: true
+        assetDownloadUrl:
+          type: string
+          nullable: true
         status:
           type: string
+          enum:
+            - upload_pending
+            - captured
+        captureMethod:
+          type: string
+          nullable: true
+          enum:
+            - upload
+            - type
+            - draw
+        typedValue:
+          type: string
+          nullable: true
+        typedKind:
+          type: string
+          nullable: true
+          enum:
+            - name
+            - initials
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+    SignatureUploadResponse:
+      type: object
+      properties:
+        signature:
+          $ref: "#/components/schemas/DocumentSignatureCapture"
+        upload:
+          $ref: "#/components/schemas/UploadSession"
+    SignatureFinalizeResponse:
+      type: object
+      properties:
+        signature:
+          $ref: "#/components/schemas/DocumentSignatureCapture"
+    SignatureCaptureResponse:
+      type: object
+      properties:
+        signature:
+          $ref: "#/components/schemas/DocumentSignatureCapture"
+    DocumentSigningExecution:
+      type: object
+      properties:
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        confirmedBySupabaseId:
+          type: string
+          nullable: true
+        confirmedByRole:
+          type: string
+          nullable: true
+        generationRunIds:
+          type: array
+          items:
+            type: string
+        completedOutputSignerIds:
+          type: array
+          items:
+            type: string
+        completedSignatureIds:
+          type: array
+          items:
+            type: string
+    DocumentSigningGroup:
+      type: object
+      properties:
+        generationRunId:
+          type: string
+        outputKey:
+          type: string
+        outputLabel:
+          type: string
+        signingGroup:
+          type: string
+        label:
+          type: string
+        minimumRequired:
+          type: integer
+          minimum: 1
+        capturedCount:
+          type: integer
+          minimum: 0
+        totalCount:
+          type: integer
+          minimum: 0
+        isSatisfied:
+          type: boolean
+    DocumentSigningSignature:
+      type: object
+      properties:
+        outputSignerId:
+          type: string
+        generationRunId:
+          type: string
+        outputKey:
+          type: string
+        outputLabel:
+          type: string
+        documentKey:
+          type: string
+        partyName:
+          type: string
+        partyRole:
+          type: string
+        signingGroup:
+          type: string
+          nullable: true
+        isRequired:
+          type: boolean
+        status:
+          type: string
+          enum:
+            - pending
+            - captured
+        captureMethod:
+          type: string
+          nullable: true
+          enum:
+            - upload
+            - type
+            - draw
+        typedValue:
+          type: string
+          nullable: true
+        typedKind:
+          type: string
+          nullable: true
+          enum:
+            - name
+            - initials
+        signatureId:
+          type: string
+          nullable: true
+        storagePath:
+          type: string
+          nullable: true
+        assetDownloadUrl:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+        groupMinimumRequired:
+          type: integer
+          nullable: true
+          minimum: 1
+        groupSatisfied:
+          type: boolean
+    DocumentSigningCompletion:
+      type: object
+      properties:
+        requiredSignatureCount:
+          type: integer
+          minimum: 0
+        capturedRequiredSignatureCount:
+          type: integer
+          minimum: 0
+        allRequiredSignaturesComplete:
+          type: boolean
+        canConfirm:
+          type: boolean
+    DocumentSigning:
+      type: object
+      properties:
+        state:
+          type: string
+          enum:
+            - not_ready
+            - preparing
+            - ready
+            - confirmed
+        reviewApproval:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/DocumentReviewApproval"
+        signingExecution:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/DocumentSigningExecution"
+        approvedOutputKeys:
+          type: array
+          items:
+            type: string
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentReviewOutput"
+        pendingOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingDocumentReviewOutput"
+        missingOutputKeys:
+          type: array
+          items:
+            type: string
+        requiresGeneration:
+          type: boolean
+        allOutputsReady:
+          type: boolean
+        signatures:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSigningSignature"
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSigningGroup"
+        completion:
+          $ref: "#/components/schemas/DocumentSigningCompletion"
+    DocumentSigningResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/Document"
+        signing:
+          $ref: "#/components/schemas/DocumentSigning"
+    DocumentSignRequest:
+      type: object
+      properties:
+        confirmed:
+          type: boolean
+          enum:
+            - true
+    DocumentSignResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        signingExecution:
+          $ref: "#/components/schemas/DocumentSigningExecution"
+        completion:
+          $ref: "#/components/schemas/DocumentSigningCompletion"
     NotarizationSubmitResponse:
       type: object
       properties:

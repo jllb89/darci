@@ -69,6 +69,27 @@ export const createSignatureUploadUrl = async (storagePath: string) => {
   };
 };
 
+export const createSignatureDownloadUrl = async (
+  storagePath: string,
+  expiresInSeconds = 60 * 60,
+) => {
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(signaturesBucket)
+    .createSignedUrl(storagePath, expiresInSeconds);
+
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message ?? "Failed to create signed signature URL");
+  }
+
+  return {
+    bucket: signaturesBucket,
+    path: storagePath,
+    signedUrl: data.signedUrl,
+    expiresInSeconds,
+  };
+};
+
 export const getDocumentObjectMetadata = async (storagePath: string) => {
   const segments = storagePath.split("/");
   const fileName = segments.pop();
@@ -164,5 +185,31 @@ export const getSignatureObjectMetadata = async (storagePath: string) => {
         : typeof metadata.contentType === "string"
           ? metadata.contentType
           : null,
+  };
+};
+
+export const uploadSignatureAsset = async (input: {
+  storagePath: string;
+  content: Buffer;
+  contentType: string;
+}) => {
+  const { error } = await supabaseStorage.storage.from(signaturesBucket).upload(
+    input.storagePath,
+    input.content,
+    {
+      contentType: input.contentType,
+      upsert: true,
+    },
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    bucket: signaturesBucket,
+    path: input.storagePath,
+    sizeBytes: input.content.byteLength,
+    mimeType: input.contentType,
   };
 };

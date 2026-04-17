@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
 import { formatLabel } from "@/app/app/start/startPageUtils";
@@ -184,6 +184,7 @@ const formatProductFlowModeLabel = (value: string | null | undefined) => {
 };
 
 export default function ReviewPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { accessToken } = useStoredAuth();
   const { showToast } = useAppToast();
@@ -344,7 +345,7 @@ export default function ReviewPage() {
         tone: "success",
         message: "Review approved. Your documents are ready for signing.",
       });
-      await fetchReview({ silent: true });
+      router.push(`/app/sign?documentId=${encodeURIComponent(documentId)}`);
     } catch (error) {
       const message =
         error instanceof Error
@@ -355,7 +356,15 @@ export default function ReviewPage() {
     } finally {
       setIsApproving(false);
     }
-  }, [accessToken, documentId, fetchReview, payload?.review?.canApprove, showToast]);
+  }, [accessToken, documentId, payload?.review?.canApprove, router, showToast]);
+
+  const continueToSigning = useCallback(() => {
+    if (!documentId) {
+      return;
+    }
+
+    router.push(`/app/sign?documentId=${encodeURIComponent(documentId)}`);
+  }, [documentId, router]);
 
   const saveDraftSnapshot = useCallback(async () => {
     if (!accessToken || !documentId || isSavingDraft) {
@@ -855,19 +864,28 @@ export default function ReviewPage() {
                     <button
                       className={`${reviewActionButtonBaseClass} transition ${
                         payload?.review?.reviewApproval
-                          ? "cursor-default bg-emerald-50 text-emerald-700"
+                          ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                           : payload?.review?.canApprove && !isApproving
                             ? "platform-btn-primary"
                             : "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
                       }`}
-                      disabled={Boolean(payload?.review?.reviewApproval) || !payload?.review?.canApprove || isApproving}
+                      disabled={
+                        payload?.review?.reviewApproval
+                          ? false
+                          : !payload?.review?.canApprove || isApproving
+                      }
                       onClick={() => {
+                        if (payload?.review?.reviewApproval) {
+                          continueToSigning();
+                          return;
+                        }
+
                         void approveReview();
                       }}
                       type="button"
                     >
                       {payload?.review?.reviewApproval
-                        ? "Review approved"
+                        ? "Go to signing"
                         : isApproving
                           ? "Approving review..."
                           : "Continue to signing"}

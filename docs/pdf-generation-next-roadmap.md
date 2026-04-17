@@ -1,6 +1,6 @@
 # PDF Generation Next Roadmap
 
-Last updated: 2026-04-15
+Last updated: 2026-04-17
 
 Related:
 - docs/pdf-generation-prerequisites-roadmap.md
@@ -26,12 +26,16 @@ After submission, the backend can resolve the correct outputs, the correct templ
 
 The backend can then create generation runs, mark them `queued` or `blocked`, put runnable work on a queue, have a worker pick it up, render a stored artifact, upload it, and link that artifact back to the document as a real `document_version`.
 
-What is still missing is the last-mile production layer:
+The member can now move from `/app/start` into `/app/review`, see member-facing review outputs, and explicitly approve the review set.
 
-1. real final PDF rendering for platform-generated outputs,
-2. the member review route, manual review approval step, and product-specific output visibility rules,
-3. IDN assignment and signing-preparation timing aligned to member review approval,
-4. signer-aware signature capture tied to `generationRunId` and `outputSignerId`,
+The backend can already persist review approval metadata and assign review-time system values, but the approval-to-sign handoff is not complete yet.
+
+What is still missing is the last-mile signing and closeout layer:
+
+1. real final PDF rendering for platform-generated outputs and official post-approval rerenders,
+2. the `/app/sign` route and the handoff from review approval into signing,
+3. signer-aware signature capture tied to `generationRunId` and `outputSignerId`,
+4. signature persistence and rendering for uploaded, typed, and drawn signatures,
 5. the simple handoff steps that happen after signature and before notarization,
 6. real acknowledgment append and watermark steps.
 
@@ -134,18 +138,28 @@ We should not expose DOCX outputs for member download or review.
 
 This means the final rendering work is about producing correct PDFs, not editable legal-document files.
 
-## 2) `/app/start` stays the intake route and `/app/review` becomes the next step
+## 2) `/app/start`, `/app/review`, and `/app/sign` are the core member flow
 
 The intake and contract form flow stays at `/app/start`.
 
-The next route should be `/app/review`.
+The next route is `/app/review`.
 
-That route should:
+After the member approves the PDFs in review, the next route should be `/app/sign`.
+
+`/app/review` should:
 
 1. use the same main app layout,
 2. reuse the process band concept,
 3. show the process band at step `2` for Review,
 4. render and display generated PDFs before signing.
+
+`/app/sign` should:
+
+1. use the same layout pattern as `/app/verify`,
+2. reuse the process band concept,
+3. show the process band at step `3` for Sign,
+4. load the official signing set produced after review approval,
+5. let the member complete required signatures before confirmation.
 
 ## 3) Trust product outputs are not all member-visible
 
@@ -189,7 +203,17 @@ At minimum, the IDN record should carry the IDN itself plus signer set, notary, 
 
 Current implementation note:
 
-The codebase already has a `documents.idn` field and related `registry_number` system value, but the timing, visibility, and final ID format still need to be aligned with this rule.
+The codebase now has review approval, review metadata persistence, and review-time IDN assignment, but the final ID format, visibility rules, and official post-approval rerender still need to be aligned with this rule.
+
+## 6) Signature capture supports upload, typed, and drawn input
+
+For this pass the member must be able to:
+
+1. upload a signature image in `jpg` or `png`,
+2. add a typed name or initials,
+3. draw a signature in the browser.
+
+The data model and APIs should preserve which method was used for each required signature and the rendered asset or text value needed to place it on the final output.
 
 ## What Is Already Prepared
 
@@ -284,6 +308,20 @@ Why this matters:
 
 Operators and future UI surfaces can inspect generation state instead of guessing.
 
+## 8) Review and approval foundation
+
+Already ready:
+
+1. `/app/review` exists in the member app shell,
+2. member-facing review can show reviewable outputs and hide internal-only outputs,
+3. review approval persists approval metadata and unlocks the next stage,
+4. intake drafts can be resaved from review,
+5. the OpenAPI contract now covers review state, review approval, and review draft-resave endpoints.
+
+Why this matters:
+
+The signature pass can build on a real approval checkpoint instead of inventing one.
+
 ## What We Do Not Need To Rebuild
 
 These parts are already in place and should be treated as foundation, not redone work:
@@ -297,7 +335,9 @@ These parts are already in place and should be treated as foundation, not redone
 7. signer and acknowledger snapshot resolution,
 8. system-value persistence,
 9. worker queue scaffolding,
-10. run-detail and signer-inspection endpoints.
+10. run-detail and signer-inspection endpoints,
+11. member review route foundation,
+12. review approval and review-state API foundation.
 
 ## What Is Still Missing
 
@@ -321,44 +361,48 @@ This is the biggest technical gap.
 
 Current state:
 
-Generation runs know about outputs, but the member-facing review rules are not fully implemented.
+`/app/review` exists and can show member-facing outputs, but the approval-to-sign handoff rules are not finished.
 
 Missing work:
 
-1. create `/app/review` as the post-intake review route,
-2. render generated PDFs in that route using the same app shell and the process band at step `2`,
-3. for trust flows, show Trust Registration Amendment and POA to the member,
-4. keep Trust Certification generated but internal-only,
-5. define which outputs are reviewable, signable, and internal-only by product flow.
+1. keep `/app/review` focused on preview and approval only,
+2. keep trust review limited to Trust Registration Amendment and POA while preserving Trust Certification as internal-only,
+3. define which outputs are reviewable, signable, and internal-only by product flow,
+4. hand the member off from `/app/review` into `/app/sign` on approval,
+5. keep output visibility rules consistent across review, sign, and notary stages.
 
 ## 3) Manual review approval and IDN preparation
 
 Current state:
 
-The review route does not exist yet, there is no explicit "member approved the PDFs" audit checkpoint, and the current backend can assign `documents.idn` during generation preparation.
+`/app/review` and review approval exist, and approval can already persist review metadata and assign review-time values.
 
 Missing work:
 
-1. add a manual approval action in `/app/review`,
-2. record a dedicated audit event when the member confirms the rendered PDFs are correct and ready to sign,
-3. assign the IDN or Illuminotary code when that approval happens,
-4. prepare signing and unlock signature actions only after that approval,
-5. use the product-approved IDN format instead of the current placeholder format,
-6. persist the minimum IDN metadata set for the approved document,
-7. keep the IDN hidden from member-facing responses until the document has been signed.
+1. rerender the official signing set immediately after approval using now-resolved values such as dates, DARCi number, trust number, and other review-time system values,
+2. persist approved signing version ids separately from preview version ids,
+3. route the member into `/app/sign` using the approved signing set, not the preview set,
+4. use the product-approved IDN format instead of the current placeholder format,
+5. persist the minimum IDN metadata set for the approved document,
+6. keep the IDN hidden from member-facing responses until the document has been signed.
 
 ## 4) Signer-aware signature execution
 
 Current state:
 
-The backend can list signer obligations and generate placeholder signature fields.
+The backend can list signer obligations and generate placeholder signature fields, but there is no real signing route or output-scoped signature execution yet.
 
 Missing work:
 
-1. `POST /documents/:id/signatures/request` should require `generationRunId` and `outputSignerId`,
-2. `POST /documents/:id/signatures/finalize` should link the uploaded signature to a signer obligation, not to the document owner,
-3. signature records need the right data model to track output-scoped signers,
-4. signature fields should come from the real rendered artifact, not from placeholder coordinates.
+1. create `/app/sign` as the post-review signing route using the same layout pattern as `/app/verify`,
+2. replace the review-document cards with one signature card per required signature,
+3. show which document each required signature belongs to,
+4. `POST /documents/:id/signatures/request` should require `generationRunId` and `outputSignerId`,
+5. `POST /documents/:id/signatures/finalize` should link the captured signature to a signer obligation, not to the document owner,
+6. signature records need the right data model to track output-scoped signers and signature method,
+7. accept uploaded signature images in `jpg` or `png`, typed name or initials, and drawn signatures,
+8. signature fields should come from the real rendered artifact, not from placeholder coordinates,
+9. keep the final Confirm action disabled until every required signature is complete.
 
 This is the biggest workflow gap.
 
@@ -392,16 +436,17 @@ Missing work:
 
 Current state:
 
-The start-page intake flow is real. The review route does not exist yet, and the document detail workspace is still mostly mock UI.
+The start-page intake flow and `/app/review` are real. The signing route and the downstream execution surfaces are still missing.
 
 Missing work:
 
-1. `/app/review` route with generated PDF display,
-2. live generation-run list and detail UI where needed,
-3. live blocker display,
-4. signer-obligation display,
-5. actions for cancel and recheck where appropriate,
-6. real signature and notary workflow screens that use the new backend model.
+1. `/app/sign` route with the official signing set,
+2. a `Sign documents` column with one card per required signature,
+3. signature-mode UI for upload, typed, and drawn input,
+4. a final Confirm action that unlocks only when all required signatures are complete,
+5. live generation-run list and detail UI where needed,
+6. live blocker display,
+7. real notary workflow screens that use the new backend model.
 
 ## 8) Quality and operational hardening
 
@@ -410,7 +455,7 @@ Missing work:
 1. more unit coverage for signer derivation and blocker rules,
 2. more integration coverage around worker-driven render completion,
 3. at least one full staging run using the worker and real queued generation runs,
-4. final OpenAPI and documentation cleanup once the execution layer is settled.
+4. final OpenAPI and documentation cleanup once signing and notarization execution are settled.
 
 ## Recommended Next Phases
 
@@ -440,43 +485,48 @@ At least one CA flow and one OH flow can move from `/app/start` to `/app/review`
 
 Goal:
 
-Move signature capture onto the new generation-run and output-signer model.
+Move signature capture onto the approved signing set and the new generation-run plus output-signer model.
 
 Deliverables:
 
-1. signature request and finalize endpoints that require output-scoped signer context,
-2. updated signature persistence,
-3. real rendered-output signature field mapping from final PDFs,
-4. signer-specific audit events,
-5. signature execution rules aligned with member-visible outputs versus internal-only outputs,
-6. signature execution remains blocked until the Phase C review-approval and IDN-preparation checkpoint is satisfied.
+1. `/app/sign` route exists and uses the same layout pattern as `/app/verify`,
+2. the process band is shown at step `3` in the signing route,
+3. the route loads the official signing set produced after review approval,
+4. the `Sign documents` column shows one card per required signature instead of document review cards,
+5. each signature card identifies which document the signature belongs to,
+6. signature request and finalize endpoints require output-scoped signer context,
+7. signature persistence supports uploaded `jpg` or `png`, typed name or initials, and drawn signatures,
+8. the data model records which signature method was used for each signer obligation,
+9. real rendered-output signature field mapping comes from final PDFs,
+10. signer-specific audit events exist,
+11. the final Confirm action stays disabled until all required signatures are complete.
 
 Exit signal:
 
-A generated output can say exactly which signer signed which output and where that signature belongs.
+A member can approve review, land on `/app/sign`, complete each required signature with a supported input mode, and confirm the signing step on the official signing set.
 
-## Phase C: Manual Review Approval And IDN Preparation
+## Phase C: Official Signing Set And Approval Handoff
 
 Goal:
 
-Add the manual review checkpoint where the member confirms the rendered PDFs are correct, DARCi assigns the IDN, and signing becomes available.
+Finish the approval-to-sign handoff so review approval produces the correct official signing set and routes the member into signing.
 
 Deliverables:
 
-1. a manual approval action in `/app/review` for "these PDFs are correct and ready to sign",
-2. audit logging for that approval step,
-3. IDN assignment and signing preparation at the moment of approval,
-4. the final approved IDN format, replacing the current placeholder-style value,
-5. rerender the official signing set after approval,
-6. remove the preview watermark from the official signing set,
-7. signature enablement only after review approval,
-8. IDN hidden from member-facing surfaces until the document has actually been signed,
-9. product-aware handling of internal-only versus member-visible outputs during approval,
+1. keep review approval as the checkpoint for "these PDFs are correct and ready to sign",
+2. rerender the official signing set after approval,
+3. populate the newly resolved values needed by the signing set, including dates, DARCi number, trust number, and related review-time values,
+4. remove the preview watermark from the official signing set,
+5. persist approved signing version ids separately from preview version ids,
+6. use the final approved IDN format instead of the current placeholder-style value,
+7. keep signature enablement blocked until review approval has completed,
+8. IDN remains hidden from member-facing surfaces until the document has actually been signed,
+9. product-aware handling of internal-only versus member-visible outputs during approval and signing,
 10. Dynamic POA edit and rerender behavior confirmed for repeat visits.
 
 Exit signal:
 
-The system can move from rendered PDFs to member-approved signing-ready outputs, with an audit trail and IDN assignment that follow the product rules.
+The system can move from member-approved review PDFs into `/app/sign` with a clean official signing set, resolved review-time values, and the correct approval metadata.
 
 ## Phase D: Notary Closeout And Finalization
 

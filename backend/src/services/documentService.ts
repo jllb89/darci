@@ -142,11 +142,25 @@ type DocumentIntakeRevisionEvent = "autosave" | "submit" | "system_migration";
 type SignatureRecord = {
   id: string;
   document_id: string;
+  generation_run_id: string | null;
+  document_output_signer_id: string | null;
   signer_id: string | null;
   signature_type: string | null;
   storage_path: string | null;
+  capture_method: string;
+  typed_value: string | null;
+  typed_kind: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  captured_at: string | null;
   created_at: string;
 };
+
+export type SignatureCaptureMethod = "upload" | "type" | "draw";
+
+export type SignatureTypedKind = "name" | "initials";
 
 type NotarizationRequestRecord = {
   id: string;
@@ -293,6 +307,9 @@ const templateArtifactSelectColumns =
 
 const documentGenerationRunSelectColumns =
   "id, document_id, intake_revision, output_key, document_key, template_key, template_version, template_hash, template_artifact_id, payload_json, coverage_json, render_context_json, blocking_requirements_json, resolved_sources_json, status, renderer_job_id, document_version_id, blocked_at, started_at, rendered_at, failed_at, canceled_at, failure_code, failure_details_json, cancellation_reason, error_message, created_at";
+
+const signatureSelectColumns =
+  "id, document_id, generation_run_id, document_output_signer_id, signer_id, signature_type, storage_path, capture_method, typed_value, typed_kind, mime_type, size_bytes, status, metadata, captured_at, created_at";
 
 export type SaveDocumentIntakeDraftInput = {
   documentId: string;
@@ -1538,19 +1555,39 @@ export const updateNotarizationRequest = async (
 export const createSignatureRecord = async (input: {
   signatureId: string;
   documentId: string;
+  generationRunId?: string | null;
+  documentOutputSignerId?: string | null;
   signerId: string | null;
-  storagePath: string;
+  storagePath?: string | null;
+  captureMethod: SignatureCaptureMethod;
+  typedValue?: string | null;
+  typedKind?: SignatureTypedKind | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  status?: "upload_pending" | "captured";
+  metadata?: Record<string, unknown>;
+  capturedAt?: string | null;
 }) => {
   const { data, error } = await supabaseAdmin
     .from("signatures")
     .insert({
       id: input.signatureId,
       document_id: input.documentId,
+      generation_run_id: input.generationRunId ?? null,
+      document_output_signer_id: input.documentOutputSignerId ?? null,
       signer_id: input.signerId,
       signature_type: "member",
-      storage_path: input.storagePath,
+      storage_path: input.storagePath ?? null,
+      capture_method: input.captureMethod,
+      typed_value: input.typedValue ?? null,
+      typed_kind: input.typedKind ?? null,
+      mime_type: input.mimeType ?? null,
+      size_bytes: input.sizeBytes ?? null,
+      status: input.status ?? "upload_pending",
+      metadata: input.metadata ?? {},
+      captured_at: input.capturedAt ?? null,
     })
-    .select("id, document_id, signer_id, signature_type, storage_path, created_at")
+    .select(signatureSelectColumns)
     .single();
 
   if (error || !data) {
@@ -1566,7 +1603,7 @@ export const getSignatureById = async (
 ) => {
   const { data, error } = await supabaseAdmin
     .from("signatures")
-    .select("id, document_id, signer_id, signature_type, storage_path, created_at")
+    .select(signatureSelectColumns)
     .eq("id", signatureId)
     .eq("document_id", documentId)
     .limit(1)
@@ -1577,6 +1614,90 @@ export const getSignatureById = async (
   }
 
   return data as SignatureRecord | null;
+};
+
+export const updateSignatureRecord = async (
+  signatureId: string,
+  documentId: string,
+  updates: {
+    storagePath?: string | null;
+    typedValue?: string | null;
+    typedKind?: SignatureTypedKind | null;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+    status?: "upload_pending" | "captured";
+    metadata?: Record<string, unknown>;
+    capturedAt?: string | null;
+  },
+) => {
+  const mappedUpdates: Record<string, unknown> = {};
+
+  if ("storagePath" in updates) {
+    mappedUpdates.storage_path = updates.storagePath ?? null;
+  }
+  if ("typedValue" in updates) {
+    mappedUpdates.typed_value = updates.typedValue ?? null;
+  }
+  if ("typedKind" in updates) {
+    mappedUpdates.typed_kind = updates.typedKind ?? null;
+  }
+  if ("mimeType" in updates) {
+    mappedUpdates.mime_type = updates.mimeType ?? null;
+  }
+  if ("sizeBytes" in updates) {
+    mappedUpdates.size_bytes = updates.sizeBytes ?? null;
+  }
+  if ("status" in updates) {
+    mappedUpdates.status = updates.status ?? null;
+  }
+  if ("metadata" in updates) {
+    mappedUpdates.metadata = updates.metadata ?? {};
+  }
+  if ("capturedAt" in updates) {
+    mappedUpdates.captured_at = updates.capturedAt ?? null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("signatures")
+    .update(mappedUpdates)
+    .eq("id", signatureId)
+    .eq("document_id", documentId)
+    .select(signatureSelectColumns)
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to update signature record");
+  }
+
+  return data as SignatureRecord;
+};
+
+export const listDocumentSignatures = async (input: {
+  documentId: string;
+  generationRunId?: string;
+  documentOutputSignerId?: string;
+}) => {
+  let query = supabaseAdmin
+    .from("signatures")
+    .select(signatureSelectColumns)
+    .eq("document_id", input.documentId)
+    .order("created_at", { ascending: false });
+
+  if (input.generationRunId) {
+    query = query.eq("generation_run_id", input.generationRunId);
+  }
+
+  if (input.documentOutputSignerId) {
+    query = query.eq("document_output_signer_id", input.documentOutputSignerId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as SignatureRecord[];
 };
 
 export const prepareDocumentForSigning = async (documentId: string) => {
