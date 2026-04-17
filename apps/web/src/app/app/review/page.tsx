@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
+import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
 import { formatLabel } from "@/app/app/start/startPageUtils";
 import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
@@ -133,20 +134,20 @@ const formatStatusLabel = (value: string) => {
   }
 };
 
-const getStatusToneClasses = (value: string) => {
+const getStatusTextClasses = (value: string) => {
   if (value === "failed" || value === "blocked" || value === "canceled") {
-    return "border-red-200 bg-red-50 text-red-700";
+    return "text-red-700";
   }
 
   if (value === "unsupported_format") {
-    return "border-amber-200 bg-amber-50 text-amber-800";
+    return "text-amber-800";
   }
 
   if (value === "rendered") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    return "text-emerald-700";
   }
 
-  return "border-sky-200 bg-sky-50 text-sky-700";
+  return "text-Color-Neutral";
 };
 
 const formatDateLabel = (value: string | null | undefined) => {
@@ -192,8 +193,9 @@ export default function ReviewPage() {
   const [payload, setPayload] = useState<ReviewPayload | null>(null);
   const [selectedOutputKey, setSelectedOutputKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isEnsuringGeneration, setIsEnsuringGeneration] = useState(false);
+  const [, setIsEnsuringGeneration] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -334,6 +336,46 @@ export default function ReviewPage() {
       setIsApproving(false);
     }
   }, [accessToken, documentId, fetchReview, payload?.review?.canApprove, showToast]);
+
+  const saveDraftSnapshot = useCallback(async () => {
+    if (!accessToken || !documentId || isSavingDraft) {
+      return;
+    }
+
+    setIsSavingDraft(true);
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${documentId}/intake-draft/resave`,
+        accessToken,
+        {
+          method: "POST",
+        },
+      );
+      const responsePayload = (await response.json().catch(() => null)) as
+        | DocumentIntakeDraftResponsePayload
+        | { message?: string }
+        | null;
+      const savedDraft =
+        responsePayload && "draft" in responsePayload ? responsePayload.draft : null;
+
+      if (!response.ok || !savedDraft) {
+        throw new Error(responsePayload?.message ?? "Failed to save draft.");
+      }
+
+      const savedAt = formatDateLabel(savedDraft.updatedAt);
+      showToast({
+        tone: "success",
+        message: savedAt ? `Draft saved at ${savedAt}.` : "Draft saved.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save draft.";
+      setErrorMessage(message);
+      showToast({ tone: "error", message });
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }, [accessToken, documentId, isSavingDraft, showToast]);
 
   useEffect(() => {
     generationAttemptRef.current = null;
@@ -501,7 +543,7 @@ export default function ReviewPage() {
       ? null
       : "DARCi assigns the final registry number only after you approve the review set.";
   const reviewCardBaseClass =
-    "w-full rounded-xl border border-Color-Scheme-1-Border bg-white px-5 py-5 text-left transition-[opacity,transform,border-color,background-color,box-shadow] duration-200 ease-out";
+    "w-full rounded-xl border border-Color-Scheme-1-Border px-5 py-5 text-left transition-[opacity,transform,border-color] duration-200 ease-out";
   const reviewActionButtonBaseClass =
     "inline-flex min-h-10 min-w-[11rem] items-center justify-center px-4 py-2 text-center text-sm font-medium";
 
@@ -549,7 +591,7 @@ export default function ReviewPage() {
             {previewErrorMessage ?? "The PDF preview is unavailable right now."}
           </p>
           <p className="mt-2 text-sm leading-6 text-Color-Neutral">
-            Use the Open PDF action above while DARCi refreshes the inline preview.
+            This embedded preview uses your browser&apos;s built-in PDF viewer. Reload the page if it does not recover.
           </p>
         </div>
       );
@@ -633,12 +675,6 @@ export default function ReviewPage() {
                 </div>
               ) : null}
 
-              {isEnsuringGeneration ? (
-                <div className="rounded-xl border border-sky-200 px-4 py-3 text-xs text-sky-700">
-                  Starting generation for any missing review PDFs.
-                </div>
-              ) : null}
-
               {payload?.review?.outputs.map((output) => {
                 const isSelected = output.outputKey === selectedOutput?.outputKey;
 
@@ -647,48 +683,32 @@ export default function ReviewPage() {
                     key={`${output.outputKey}-${output.versionId}`}
                     className={`${reviewCardBaseClass} ${
                       isSelected
-                        ? "border-Color-Scheme-1-Text bg-Color-Neutral-Lightest/70 shadow-[0_12px_32px_rgba(15,23,42,0.08)]"
-                        : "hover:border-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest/55 hover:opacity-90 hover:shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
+                        ? "border-Color-Scheme-1-Text"
+                        : "hover:border-Color-Scheme-1-Text"
                     }`}
                     onClick={() => {
                       setSelectedOutputKey(output.outputKey);
                     }}
                     type="button"
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
+                    <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
                         {output.outputLabel}
-                      </div>
-                      <div className="flex items-center gap-3 text-Color-Scheme-1-Text">
-                        <span className="font-medium text-emerald-700">Ready</span>
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
-                          <path
-                            d="m7.5 5.5 5 4.5-5 4.5"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="1.8"
-                          />
-                        </svg>
-                      </div>
+                    </div>
+                    <div className="mt-2 text-xs text-emerald-700">Ready</div>
+                    <div className="mt-2 text-Color-Scheme-1-Text">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
+                        <path
+                          d="m7.5 5.5 5 4.5-5 4.5"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                      </svg>
                     </div>
                   </button>
                 );
               })}
-
-              {payload?.review?.outputs.length === 0 && isWaitingForRenderableOutputs ? (
-                <div className="rounded-xl border border-Color-Scheme-1-Border px-5 py-8 text-center">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center border border-Color-Scheme-1-Border/35">
-                    <span
-                      className="block h-5 w-5 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
-                      style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
-                    />
-                  </div>
-                  <p className="mt-4 text-sm font-medium text-Color-Scheme-1-Text">
-                    Preparing your review PDFs.
-                  </p>
-                </div>
-              ) : null}
 
               {payload?.review?.outputs.length === 0 && !isWaitingForRenderableOutputs && !hasBlockedOutputs ? (
                 <div className="rounded-xl border border-dashed border-Color-Scheme-1-Border/50 px-5 py-5 text-sm leading-6 text-Color-Neutral">
@@ -709,20 +729,11 @@ export default function ReviewPage() {
                         key={`pending-${output.outputKey}`}
                         className={`${reviewCardBaseClass} cursor-default`}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
-                              {output.outputLabel}
-                            </div>
-                            <div className="mt-1 text-xs text-Color-Neutral">
-                              {output.mimeType ?? "PDF not ready yet"}
-                            </div>
-                          </div>
-                          <span
-                            className={`border px-2 py-1 text-[0.7rem] font-medium ${getStatusToneClasses(output.status)}`}
-                          >
-                            {formatStatusLabel(output.status)}
-                          </span>
+                        <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
+                          {output.outputLabel}
+                        </div>
+                        <div className={`mt-2 text-xs ${getStatusTextClasses(output.status)}`}>
+                          {formatStatusLabel(output.status)}
                         </div>
 
                         {output.errorMessage ? (
@@ -767,52 +778,50 @@ export default function ReviewPage() {
           </div>
 
           <div className="space-y-6">
-            <div id="contract-container" className="relative z-0 space-y-4 bg-white p-4">
-              <div className="space-y-4 p-4">
-                <div>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-sm font-medium">
-                      {selectedOutput?.outputLabel ?? "Document preview"}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {selectedOutput ? (
-                        <a
-                          className={`${reviewActionButtonBaseClass} bg-black text-white transition hover:bg-neutral-800`}
-                          href={selectedOutput.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open PDF
-                        </a>
-                      ) : null}
-                      <button
-                        className={`${reviewActionButtonBaseClass} transition ${
-                          payload?.review?.reviewApproval
-                            ? "cursor-default bg-emerald-50 text-emerald-700"
-                            : payload?.review?.canApprove && !isApproving
-                              ? "platform-btn-primary"
-                              : "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
-                        }`}
-                        disabled={Boolean(payload?.review?.reviewApproval) || !payload?.review?.canApprove || isApproving}
-                        onClick={() => {
-                          void approveReview();
-                        }}
-                        type="button"
-                      >
-                        {payload?.review?.reviewApproval
-                          ? "Review approved"
-                          : isApproving
-                            ? "Approving review..."
-                            : "Continue to signing"}
-                      </button>
-                    </div>
+            <div id="contract-container" className="relative z-0 bg-white p-12 space-y-4">
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm font-medium">
+                    {selectedOutput?.outputLabel ?? "Document preview"}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      className={`${reviewActionButtonBaseClass} border border-Color-Scheme-1-Border text-Color-Scheme-1-Text transition hover:border-Color-Scheme-1-Text ${
+                        isSavingDraft ? "cursor-wait" : ""
+                      }`}
+                      disabled={isSavingDraft}
+                      onClick={() => {
+                        void saveDraftSnapshot();
+                      }}
+                      type="button"
+                    >
+                      {isSavingDraft ? "Saving draft..." : "Save to drafts"}
+                    </button>
+                    <button
+                      className={`${reviewActionButtonBaseClass} transition ${
+                        payload?.review?.reviewApproval
+                          ? "cursor-default bg-emerald-50 text-emerald-700"
+                          : payload?.review?.canApprove && !isApproving
+                            ? "platform-btn-primary"
+                            : "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                      }`}
+                      disabled={Boolean(payload?.review?.reviewApproval) || !payload?.review?.canApprove || isApproving}
+                      onClick={() => {
+                        void approveReview();
+                      }}
+                      type="button"
+                    >
+                      {payload?.review?.reviewApproval
+                        ? "Review approved"
+                        : isApproving
+                          ? "Approving review..."
+                          : "Continue to signing"}
+                    </button>
                   </div>
                 </div>
-
-                <div className="space-y-2 rounded-[24px] border border-Color-Scheme-1-Border/35 bg-[linear-gradient(180deg,#f4f7fb,#eef3f9)] p-4 md:p-5">
-                  {renderPreviewPanel()}
-                </div>
               </div>
+
+              {renderPreviewPanel()}
             </div>
           </div>
         </div>

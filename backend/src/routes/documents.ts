@@ -20,6 +20,7 @@ import {
   listDocuments,
   finalizeSignatureUpload,
   requestSignatureUpload,
+  resaveDocumentIntakeDraft,
   submitDocumentIntakeDraft,
   getDocumentIntakePayload,
   signDocument,
@@ -55,6 +56,11 @@ router.put(
   "/:id/intake-draft",
   requireRole(["member", "admin", "service_role"]),
   saveDocumentIntakeDraft,
+);
+router.post(
+  "/:id/intake-draft/resave",
+  requireRole(["member", "admin", "service_role"]),
+  resaveDocumentIntakeDraft,
 );
 router.post(
   "/:id/intake-submit",

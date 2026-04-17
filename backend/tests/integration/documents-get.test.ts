@@ -822,6 +822,108 @@ describe("GET documents endpoints", () => {
     });
   });
 
+  it("resaves the persisted intake draft snapshot", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "pending_review",
+      document_type: "generic",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      document_id: "doc-1",
+      owner_id: "owner-1",
+      product_flow_mode: "trust_bundle",
+      jurisdiction: "US-CA",
+      current_step: "authority",
+      rules_snapshot_version: "member_form_rules_contract_v1",
+      answers_json: {
+        trust_name: "Family Trust",
+      },
+      canonical_answers_json: {
+        trust_name: "Family Trust",
+      },
+      revision: 2,
+      created_at: "2026-03-05T00:05:00.000Z",
+      updated_at: "2026-03-05T00:10:00.000Z",
+    });
+
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: false,
+      draft: {
+        document_id: "doc-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: "authority",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {
+          trust_name: "Family Trust",
+        },
+        canonical_answers_json: {
+          trust_name: "Family Trust",
+        },
+        revision: 3,
+        created_at: "2026-03-05T00:05:00.000Z",
+        updated_at: "2026-03-05T00:15:00.000Z",
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-draft/resave",
+      {},
+      "resaves the persisted intake draft snapshot",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveDocumentIntakeDraftMock).toHaveBeenCalledWith({
+      documentId: "doc-1",
+      ownerId: "owner-1",
+      productFlowMode: "trust_bundle",
+      jurisdiction: "US-CA",
+      currentStep: "authority",
+      rulesSnapshotVersion: "member_form_rules_contract_v1",
+      answers: {
+        trust_name: "Family Trust",
+      },
+      canonicalAnswers: {
+        trust_name: "Family Trust",
+      },
+      createdBy: "owner-1",
+      eventType: "autosave",
+    });
+    expect(response.body).toEqual({
+      draft: {
+        documentId: "doc-1",
+        ownerId: "owner-1",
+        productFlowMode: "trust_bundle",
+        jurisdiction: "US-CA",
+        currentStep: "authority",
+        rulesSnapshotVersion: "member_form_rules_contract_v1",
+        answers: {
+          trust_name: "Family Trust",
+        },
+        canonicalAnswers: {
+          trust_name: "Family Trust",
+        },
+        revision: 3,
+        createdAt: "2026-03-05T00:05:00.000Z",
+        updatedAt: "2026-03-05T00:15:00.000Z",
+      },
+    });
+  });
+
   it("submits intake draft and persists canonical payload", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",

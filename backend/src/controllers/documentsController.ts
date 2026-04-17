@@ -1817,6 +1817,46 @@ export const getDocumentIntakeDraft = async (req: Request, res: Response) => {
   });
 };
 
+export const resaveDocumentIntakeDraft = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const draft = await getDocumentIntakeDraftFromDb(document.id);
+  if (!draft) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document intake draft not found",
+    });
+  }
+
+  const result = await saveDocumentIntakeDraftToDb({
+    documentId: draft.document_id,
+    ownerId: draft.owner_id,
+    productFlowMode: draft.product_flow_mode,
+    jurisdiction: draft.jurisdiction,
+    currentStep: draft.current_step,
+    rulesSnapshotVersion: draft.rules_snapshot_version,
+    answers: draft.answers_json,
+    canonicalAnswers: draft.canonical_answers_json,
+    createdBy: document.owner_id,
+    eventType: "autosave",
+  });
+
+  if (result.conflict) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Draft revision mismatch",
+      currentRevision: result.currentRevision,
+    });
+  }
+
+  return res.status(200).json({
+    draft: mapDocumentIntakeDraftResponse(result.draft),
+  });
+};
+
 export const saveDocumentIntakeDraft = async (req: Request, res: Response) => {
   const document = await getAuthorizedDocument(req, res);
   if (!document) {
