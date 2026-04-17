@@ -51,6 +51,31 @@ export const createDocumentDownloadUrl = async (
   };
 };
 
+const toBuffer = async (value: Blob | ArrayBuffer | Uint8Array) => {
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value);
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value);
+  }
+
+  return Buffer.from(await value.arrayBuffer());
+};
+
+export const downloadDocumentObject = async (storagePath: string) => {
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(documentsBucket)
+    .download(storagePath);
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to download document object");
+  }
+
+  return toBuffer(data);
+};
+
 export const createSignatureUploadUrl = async (storagePath: string) => {
   const { data, error } = await supabaseStorage
     .storage
@@ -88,6 +113,19 @@ export const createSignatureDownloadUrl = async (
     signedUrl: data.signedUrl,
     expiresInSeconds,
   };
+};
+
+export const downloadSignatureAsset = async (storagePath: string) => {
+  const { data, error } = await supabaseStorage
+    .storage
+    .from(signaturesBucket)
+    .download(storagePath);
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to download signature asset");
+  }
+
+  return toBuffer(data);
 };
 
 export const getDocumentObjectMetadata = async (storagePath: string) => {

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -164,6 +165,25 @@ type SignatureResponse = {
   message?: string;
 };
 
+type SavedSignature = {
+  id: string;
+  captureMethod: "upload" | "type" | "draw";
+  typedValue: string | null;
+  typedKind: "name" | "initials" | null;
+  assetDownloadUrl: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  capturedAt: string | null;
+  createdAt: string;
+};
+
+type SavedSignaturesPayload = {
+  savedSignatures?: SavedSignature[];
+  message?: string;
+};
+
+type CaptureMode = "upload" | "type" | "draw" | "saved";
+
 const fetchWithTokenRefresh = async (
   url: string,
   accessToken: string,
@@ -267,6 +287,26 @@ const getCaptureStatusLabel = (signature: SigningSignature) => {
   return "Optional";
 };
 
+const formatProductFlowModeLabel = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value === "poa_only") {
+    return "POA Only";
+  }
+
+  return value
+    .split("_")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ")
+    .replace(/\bPoa\b/g, "POA");
+};
+
+const normalizePartyName = (value: string | null | undefined) => {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+};
+
 const getCanvasCoordinates = (
   canvas: HTMLCanvasElement,
   event: ReactPointerEvent<HTMLCanvasElement>,
@@ -291,6 +331,12 @@ export default function SignPage() {
   const isDrawingRef = useRef(false);
   const hasInkRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const inkBoundsRef = useRef<{
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [payload, setPayload] = useState<SigningPayload | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -299,9 +345,13 @@ export default function SignPage() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [activeSignerId, setActiveSignerId] = useState<string | null>(null);
   const [activeOutputKey, setActiveOutputKey] = useState<string | null>(null);
-  const [captureMode, setCaptureMode] = useState<"upload" | "type" | "draw">("type");
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("type");
   const [typedValues, setTypedValues] = useState<Record<string, string>>({});
   const [typedKinds, setTypedKinds] = useState<Record<string, "name" | "initials">>({});
+  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
+  const [isLoadingSavedSignatures, setIsLoadingSavedSignatures] = useState(false);
+  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
+  const [selectedSavedSignatureId, setSelectedSavedSignatureId] = useState<string | null>(null);
 
   const fetchSigning = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -351,24 +401,164 @@ export default function SignPage() {
       return;
     }
 
+    setSavedSignatures([]);
+    setSelectedSavedSignatureId(null);
+
     void fetchSigning();
   }, [accessToken, documentId, fetchSigning]);
 
+  const allSignatures = payload?.signing?.signatures ?? [];
+  const primarySelfSignature = useMemo(
+    () =>
+      allSignatures.find((signature) => signature.partyRole === "principal") ??
+      allSignatures.find((signature) => signature.partyRole === "grantor") ??
+      allSignatures[0] ??
+      null,
+    [allSignatures],
+  );
+  const primarySelfSignerName = useMemo(
+    () => normalizePartyName(primarySelfSignature?.partyName),
+    [primarySelfSignature?.partyName],
+  );
+  const visibleSignatures = useMemo(() => {
+    if (!primarySelfSignerName) {
+      return allSignatures;
+    }
+
+    return allSignatures.filter(
+      (signature) => normalizePartyName(signature.partyName) === primarySelfSignerName,
+    );
+  }, [allSignatures, primarySelfSignerName]);
+  const hiddenSignatures = useMemo(() => {
+    if (!primarySelfSignerName) {
+      return [] as SigningSignature[];
+    }
+
+    return allSignatures.filter(
+      (signature) => normalizePartyName(signature.partyName) !== primarySelfSignerName,
+    );
+  }, [allSignatures, primarySelfSignerName]);
+  const visibleRequiredSignatureCount = visibleSignatures.filter(
+    (signature) => signature.isRequired,
+  ).length;
+  const capturedVisibleRequiredSignatureCount = visibleSignatures.filter(
+    (signature) => signature.isRequired && signature.status === "captured",
+  ).length;
+  const principalSigningComplete =
+    visibleRequiredSignatureCount > 0 &&
+    capturedVisibleRequiredSignatureCount === visibleRequiredSignatureCount;
+  const remainingSignerCount = Array.from(
+    new Set(
+      hiddenSignatures
+        .map((signature) => normalizePartyName(signature.partyName))
+        .filter((name) => name.length > 0),
+    ),
+  ).length;
+  const selectedProductLabel = formatProductFlowModeLabel(
+    payload?.document?.productFlowMode ?? payload?.document?.documentType,
+  );
+  const signCardBaseClass =
+    "w-full rounded-xl border border-Color-Scheme-1-Border px-5 py-5 text-left transition-[opacity,transform,border-color] duration-200 ease-out";
+  const signActionButtonBaseClass =
+    "inline-flex min-h-10 items-center justify-center px-4 py-2 text-sm font-medium";
+  const previewPanelHeightClass = "h-[68vh] min-h-[520px]";
+
+  const fetchSavedSignatures = useCallback(async () => {
+    if (!accessToken || !documentId) {
+      return [] as SavedSignature[];
+    }
+
+    setIsLoadingSavedSignatures(true);
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${documentId}/signatures/saved`,
+        accessToken,
+        {
+          cache: "no-store",
+        },
+      );
+      const responsePayload = (await response.json().catch(() => null)) as
+        | SavedSignaturesPayload
+        | null;
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "Failed to load saved signatures.");
+      }
+
+      const nextSavedSignatures = responsePayload?.savedSignatures ?? [];
+      setSavedSignatures(nextSavedSignatures);
+      return nextSavedSignatures;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load saved signatures.";
+      setErrorMessage(message);
+      showToast({ tone: "error", message });
+      return [] as SavedSignature[];
+    } finally {
+      setIsLoadingSavedSignatures(false);
+    }
+  }, [accessToken, documentId, showToast]);
+
+  const resetCanvasSurface = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.beginPath();
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = 3;
+    context.strokeStyle = "#111111";
+    isDrawingRef.current = false;
+    hasInkRef.current = false;
+    lastPointRef.current = null;
+    inkBoundsRef.current = null;
+  }, []);
+
   useEffect(() => {
-    const signatures = payload?.signing?.signatures ?? [];
-    if (signatures.length === 0) {
+    if (visibleSignatures.length === 0) {
       setActiveSignerId(null);
       return;
     }
 
-    if (!activeSignerId || !signatures.some((signature) => signature.outputSignerId === activeSignerId)) {
-      setActiveSignerId(signatures[0]?.outputSignerId ?? null);
+    const preferredSignature =
+      visibleSignatures.find((signature) => signature.status !== "captured") ??
+      visibleSignatures[0] ??
+      null;
+
+    if (
+      !activeSignerId ||
+      !visibleSignatures.some((signature) => signature.outputSignerId === activeSignerId)
+    ) {
+      setActiveSignerId(preferredSignature?.outputSignerId ?? null);
+      return;
     }
-  }, [activeSignerId, payload?.signing?.signatures]);
+
+    const currentActiveSignature =
+      visibleSignatures.find((signature) => signature.outputSignerId === activeSignerId) ?? null;
+
+    if (
+      currentActiveSignature?.status === "captured" &&
+      preferredSignature &&
+      preferredSignature.outputSignerId !== currentActiveSignature.outputSignerId
+    ) {
+      setActiveSignerId(preferredSignature.outputSignerId);
+    }
+  }, [activeSignerId, visibleSignatures]);
 
   const activeSignature =
-    payload?.signing?.signatures.find((signature) => signature.outputSignerId === activeSignerId) ??
-    payload?.signing?.signatures[0] ??
+    visibleSignatures.find((signature) => signature.outputSignerId === activeSignerId) ??
+    visibleSignatures[0] ??
     null;
 
   useEffect(() => {
@@ -381,24 +571,31 @@ export default function SignPage() {
   }, [activeSignature]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
+    resetCanvasSurface();
+  }, [activeSignature?.outputSignerId, resetCanvasSurface]);
+
+  useEffect(() => {
+    if (captureMode !== "saved") {
       return;
     }
 
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return;
-    }
+    void fetchSavedSignatures();
+  }, [activeSignature?.outputSignerId, captureMode, fetchSavedSignatures]);
 
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.lineWidth = 3;
-    context.strokeStyle = "#111111";
-    hasInkRef.current = false;
-  }, [activeSignature?.outputSignerId]);
+  useEffect(() => {
+    if (captureMode !== "saved") {
+      setSelectedSavedSignatureId(null);
+    }
+  }, [captureMode]);
+
+  useEffect(() => {
+    if (
+      selectedSavedSignatureId &&
+      !savedSignatures.some((savedSignature) => savedSignature.id === selectedSavedSignatureId)
+    ) {
+      setSelectedSavedSignatureId(null);
+    }
+  }, [savedSignatures, selectedSavedSignatureId]);
 
   useEffect(() => {
     if (payload?.signing?.state !== "preparing") {
@@ -451,26 +648,81 @@ export default function SignPage() {
   const typedKind = activeSignature
     ? (typedKinds[activeSignature.outputSignerId] ?? activeSignature.typedKind ?? "name")
     : "name";
+  const canFinalizeSigningSet =
+    hiddenSignatures.length === 0 &&
+    payload?.signing?.state !== "confirmed" &&
+    Boolean(payload?.signing?.completion.canConfirm);
+  const shouldShowCaptureContainer =
+    Boolean(activeSignature) &&
+    activeSignature?.status !== "captured" &&
+    payload?.signing?.state !== "confirmed";
+  const selectedSavedSignature = savedSignatures.find(
+    (savedSignature) => savedSignature.id === selectedSavedSignatureId,
+  ) ?? null;
   const signingStateLabel = payload?.signing?.state === "confirmed"
-    ? "All required signatures are captured and confirmed."
+    ? "Signing is confirmed for this document set."
     : payload?.signing?.state === "preparing"
       ? "DARCi is preparing the official signing PDF set."
-      : "Capture each required signature, then confirm the signing set.";
+      : principalSigningComplete
+        ? hiddenSignatures.length > 0
+          ? "Your signature is complete. The remaining signers will be handled in the next workflow step."
+          : "Your signature is complete and the signing set is ready to confirm."
+        : "Only your signature is captured on this page right now.";
 
   const clearCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
+    resetCanvasSurface();
+  }, [resetCanvasSurface]);
+
+  const extendInkBounds = useCallback((point: { x: number; y: number }) => {
+    const padding = 6;
+    const nextBounds = {
+      minX: point.x - padding,
+      minY: point.y - padding,
+      maxX: point.x + padding,
+      maxY: point.y + padding,
+    };
+
+    if (!inkBoundsRef.current) {
+      inkBoundsRef.current = nextBounds;
       return;
     }
 
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return;
+    inkBoundsRef.current = {
+      minX: Math.min(inkBoundsRef.current.minX, nextBounds.minX),
+      minY: Math.min(inkBoundsRef.current.minY, nextBounds.minY),
+      maxX: Math.max(inkBoundsRef.current.maxX, nextBounds.maxX),
+      maxY: Math.max(inkBoundsRef.current.maxY, nextBounds.maxY),
+    };
+  }, []);
+
+  const buildDrawSignatureDataUrl = useCallback((canvas: HTMLCanvasElement) => {
+    const inkBounds = inkBoundsRef.current;
+    if (!inkBounds) {
+      return canvas.toDataURL("image/png");
     }
 
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    hasInkRef.current = false;
+    const padding = 14;
+    const left = Math.max(Math.floor(inkBounds.minX - padding), 0);
+    const top = Math.max(Math.floor(inkBounds.minY - padding), 0);
+    const right = Math.min(Math.ceil(inkBounds.maxX + padding), canvas.width);
+    const bottom = Math.min(Math.ceil(inkBounds.maxY + padding), canvas.height);
+    const width = Math.max(right - left, 1);
+    const height = Math.max(bottom - top, 1);
+    const croppedCanvas = document.createElement("canvas");
+
+    croppedCanvas.width = width;
+    croppedCanvas.height = height;
+
+    const croppedContext = croppedCanvas.getContext("2d");
+    if (!croppedContext) {
+      return canvas.toDataURL("image/png");
+    }
+
+    croppedContext.fillStyle = "#ffffff";
+    croppedContext.fillRect(0, 0, width, height);
+    croppedContext.drawImage(canvas, left, top, width, height, 0, 0, width, height);
+
+    return croppedCanvas.toDataURL("image/png");
   }, []);
 
   const beginDraw = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -488,10 +740,11 @@ export default function SignPage() {
     isDrawingRef.current = true;
     hasInkRef.current = true;
     lastPointRef.current = point;
+    extendInkBounds(point);
     canvas.setPointerCapture(event.pointerId);
     context.beginPath();
     context.moveTo(point.x, point.y);
-  }, []);
+  }, [extendInkBounds]);
 
   const continueDraw = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!isDrawingRef.current) {
@@ -519,8 +772,10 @@ export default function SignPage() {
     context.moveTo(lastPoint.x, lastPoint.y);
     context.lineTo(point.x, point.y);
     context.stroke();
+    extendInkBounds(lastPoint);
+    extendInkBounds(point);
     lastPointRef.current = point;
-  }, []);
+  }, [extendInkBounds]);
 
   const endDraw = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -541,132 +796,9 @@ export default function SignPage() {
     await fetchSigning({ silent: true });
   }, [fetchSigning]);
 
-  const handleTypedSave = useCallback(async () => {
-    if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
-      return;
-    }
-
-    const nextTypedValue = typedValue.trim();
-    if (!nextTypedValue) {
-      showToast({ tone: "error", message: "Enter the typed signature first." });
-      return;
-    }
-
-    setIsSavingCapture(true);
-
-    try {
-      const response = await fetchWithTokenRefresh(
-        `${apiBaseUrl}/documents/${documentId}/signatures`,
-        accessToken,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            generationRunId: activeSignature.generationRunId,
-            outputSignerId: activeSignature.outputSignerId,
-            captureMethod: "type",
-            typedValue: nextTypedValue,
-            typedKind,
-          }),
-        },
-      );
-      const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
-
-      if (!response.ok) {
-        throw new Error(responsePayload?.message ?? "Failed to save typed signature.");
-      }
-
-      showToast({ tone: "success", message: "Typed signature saved." });
-      await refreshAfterCapture();
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to save typed signature.";
-      setErrorMessage(message);
-      showToast({ tone: "error", message });
-    } finally {
-      setIsSavingCapture(false);
-    }
-  }, [
-    accessToken,
-    activeSignature,
-    documentId,
-    isSavingCapture,
-    refreshAfterCapture,
-    showToast,
-    typedKind,
-    typedValue,
-  ]);
-
-  const handleDrawSave = useCallback(async () => {
-    if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-
-    if (!hasInkRef.current) {
-      showToast({ tone: "error", message: "Draw the signature before saving it." });
-      return;
-    }
-
-    const imageDataUrl = canvas.toDataURL("image/png");
-    setIsSavingCapture(true);
-
-    try {
-      const response = await fetchWithTokenRefresh(
-        `${apiBaseUrl}/documents/${documentId}/signatures`,
-        accessToken,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            generationRunId: activeSignature.generationRunId,
-            outputSignerId: activeSignature.outputSignerId,
-            captureMethod: "draw",
-            imageDataUrl,
-          }),
-        },
-      );
-      const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
-
-      if (!response.ok) {
-        throw new Error(responsePayload?.message ?? "Failed to save drawn signature.");
-      }
-
-      clearCanvas();
-      showToast({ tone: "success", message: "Drawn signature saved." });
-      await refreshAfterCapture();
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to save drawn signature.";
-      setErrorMessage(message);
-      showToast({ tone: "error", message });
-    } finally {
-      setIsSavingCapture(false);
-    }
-  }, [
-    accessToken,
-    activeSignature,
-    clearCanvas,
-    documentId,
-    isSavingCapture,
-    refreshAfterCapture,
-    showToast,
-  ]);
-
-  const handleUploadChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0] ?? null;
-      event.target.value = "";
-
-      if (!file || !accessToken || !documentId || !activeSignature || isSavingCapture) {
+  const handleUploadFile = useCallback(
+    async (file: File) => {
+      if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
         return;
       }
 
@@ -735,9 +867,204 @@ export default function SignPage() {
 
         showToast({ tone: "success", message: "Uploaded signature saved." });
         await refreshAfterCapture();
+        void fetchSavedSignatures();
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to upload signature image.";
+        setErrorMessage(message);
+        showToast({ tone: "error", message });
+      } finally {
+        setIsDraggingUpload(false);
+        setIsSavingCapture(false);
+      }
+    },
+    [
+      accessToken,
+      activeSignature,
+      documentId,
+      fetchSavedSignatures,
+      isSavingCapture,
+      refreshAfterCapture,
+      showToast,
+    ],
+  );
+
+  const handleTypedSave = useCallback(async () => {
+    if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
+      return;
+    }
+
+    const nextTypedValue = typedValue.trim();
+    if (!nextTypedValue) {
+      showToast({ tone: "error", message: "Enter the typed signature first." });
+      return;
+    }
+
+    setIsSavingCapture(true);
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${documentId}/signatures`,
+        accessToken,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            generationRunId: activeSignature.generationRunId,
+            outputSignerId: activeSignature.outputSignerId,
+            captureMethod: "type",
+            typedValue: nextTypedValue,
+            typedKind,
+          }),
+        },
+      );
+      const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "Failed to save typed signature.");
+      }
+
+      showToast({ tone: "success", message: "Typed signature saved." });
+      await refreshAfterCapture();
+      void fetchSavedSignatures();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save typed signature.";
+      setErrorMessage(message);
+      showToast({ tone: "error", message });
+    } finally {
+      setIsSavingCapture(false);
+    }
+  }, [
+    accessToken,
+    activeSignature,
+    documentId,
+    fetchSavedSignatures,
+    isSavingCapture,
+    refreshAfterCapture,
+    showToast,
+    typedKind,
+    typedValue,
+  ]);
+
+  const handleDrawSave = useCallback(async () => {
+    if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    if (!hasInkRef.current) {
+      showToast({ tone: "error", message: "Draw the signature before saving it." });
+      return;
+    }
+
+    const imageDataUrl = buildDrawSignatureDataUrl(canvas);
+    setIsSavingCapture(true);
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${documentId}/signatures`,
+        accessToken,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            generationRunId: activeSignature.generationRunId,
+            outputSignerId: activeSignature.outputSignerId,
+            captureMethod: "draw",
+            imageDataUrl,
+          }),
+        },
+      );
+      const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "Failed to save drawn signature.");
+      }
+
+      clearCanvas();
+      showToast({ tone: "success", message: "Drawn signature saved." });
+      await refreshAfterCapture();
+      void fetchSavedSignatures();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to save drawn signature.";
+      setErrorMessage(message);
+      showToast({ tone: "error", message });
+    } finally {
+      setIsSavingCapture(false);
+    }
+  }, [
+    accessToken,
+    activeSignature,
+    buildDrawSignatureDataUrl,
+    clearCanvas,
+    documentId,
+    fetchSavedSignatures,
+    isSavingCapture,
+    refreshAfterCapture,
+    showToast,
+  ]);
+
+  const handleUploadChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+
+      if (!file) {
+        return;
+      }
+
+      await handleUploadFile(file);
+    },
+    [handleUploadFile],
+  );
+
+  const handleSavedSignatureApply = useCallback(
+    async (savedSignatureId: string) => {
+      if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
+        return;
+      }
+
+      setIsSavingCapture(true);
+
+      try {
+        const response = await fetchWithTokenRefresh(
+          `${apiBaseUrl}/documents/${documentId}/signatures`,
+          accessToken,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              generationRunId: activeSignature.generationRunId,
+              outputSignerId: activeSignature.outputSignerId,
+              captureMethod: "saved",
+              savedSignatureId,
+            }),
+          },
+        );
+        const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+
+        if (!response.ok) {
+          throw new Error(responsePayload?.message ?? "Failed to apply saved signature.");
+        }
+
+        showToast({ tone: "success", message: "Saved signature applied." });
+        await refreshAfterCapture();
+        setSelectedSavedSignatureId(null);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to apply saved signature.";
         setErrorMessage(message);
         showToast({ tone: "error", message });
       } finally {
@@ -796,7 +1123,7 @@ export default function SignPage() {
   const renderPreviewPanel = () => {
     if (isLoading && !payload) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral">
+        <div className={`flex ${previewPanelHeightClass} items-center justify-center bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral`}>
           Loading the signing set...
         </div>
       );
@@ -805,7 +1132,7 @@ export default function SignPage() {
     if (selectedOutput) {
       return (
         <object
-          className="h-[72vh] min-h-[560px] w-full rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f3f6f8]"
+          className={`${previewPanelHeightClass} w-full bg-[#f3f6f8]`}
           data={selectedOutput.downloadUrl}
           type="application/pdf"
         >
@@ -818,7 +1145,7 @@ export default function SignPage() {
 
     if (selectedPendingOutput) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
+        <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center bg-[#f7f9fb] px-6 text-center`}>
           <span
             className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
             style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
@@ -836,7 +1163,7 @@ export default function SignPage() {
     }
 
     return (
-      <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-dashed border-Color-Scheme-1-Border/50 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral">
+      <div className={`flex ${previewPanelHeightClass} items-center justify-center bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral`}>
         Official signing PDFs will appear here once DARCi finishes preparing them.
       </div>
     );
@@ -870,7 +1197,24 @@ export default function SignPage() {
       </div>
 
       <div className="space-y-6">
-        <div className="sticky top-[-4rem] z-[500]" data-process-band-sticky-host>
+        <div
+          className="flex flex-wrap items-center gap-2"
+          style={{ animation: "darciContentFadeIn 220ms ease-out both" }}
+        >
+          <div className="text-xs font-regular text-Color-Neutral">Selected product:</div>
+          <div className="inline-flex w-fit items-center gap-2 rounded-full bg-black px-3 py-1.5">
+            <div className="text-xs font-medium text-white">
+              {selectedProductLabel ?? "Selected product"}
+            </div>
+          </div>
+        </div>
+
+        <div aria-hidden className="h-px w-full" />
+        <div
+          className="sticky top-[-4rem] z-[500]"
+          data-process-band-sticky-host
+          style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
+        >
           <ProcessBand currentStep={3} />
         </div>
 
@@ -880,67 +1224,34 @@ export default function SignPage() {
           </div>
         ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
-          <div className="space-y-6 xl:sticky xl:top-20 xl:self-start">
-            <div className="rounded-[20px] border border-Color-Scheme-1-Border bg-white px-5 py-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                    Required signatures
-                  </div>
-                  <div className="mt-2 text-sm leading-6 text-Color-Neutral">
-                    {payload?.signing?.completion.requiredSignatureCount ?? 0} required directly. Confirm unlocks when every required signer and group rule is satisfied.
-                  </div>
-                </div>
-                <div className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white">
-                  {payload?.signing?.completion.capturedRequiredSignatureCount ?? 0}/
-                  {payload?.signing?.completion.requiredSignatureCount ?? 0}
-                </div>
+        <div
+          className="relative z-0 grid gap-6 lg:grid-cols-[1fr_2fr]"
+          style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "120ms" }}
+        >
+          <div
+            className="relative z-0 space-y-6 overflow-visible lg:sticky lg:self-start"
+            style={{ top: "var(--darci-process-band-follow-offset, 5rem)" }}
+          >
+            <div className="space-y-2 pb-2">
+              <div className="text-2xl font-medium">Sign documents</div>
+              <div className="text-sm text-Color-Neutral">
+                {hiddenSignatures.length > 0
+                  ? "Complete your own signature step first. The remaining signers will follow separately."
+                  : "Complete your signature on the prepared document set."}
               </div>
-
-              {payload?.signing?.signingExecution?.confirmedAt ? (
-                <div className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  Confirmed {formatDateLabel(payload.signing.signingExecution.confirmedAt) ?? "just now"}.
-                </div>
-              ) : null}
             </div>
 
-            {payload?.signing?.groups.length ? (
-              <div className="rounded-[20px] border border-Color-Scheme-1-Border bg-white px-5 py-5">
-                <div className="text-sm font-medium text-Color-Scheme-1-Text">Signing groups</div>
-                <div className="mt-4 space-y-3">
-                  {payload.signing.groups.map((group) => (
-                    <div
-                      key={`${group.generationRunId}-${group.signingGroup}`}
-                      className="rounded-xl border border-Color-Scheme-1-Border px-4 py-3"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-medium text-Color-Scheme-1-Text">{group.label}</div>
-                        <div className={`text-xs ${group.isSatisfied ? "text-emerald-700" : "text-Color-Neutral"}`}>
-                          {group.capturedCount}/{group.minimumRequired} complete
-                        </div>
-                      </div>
-                      <div className="mt-2 text-xs text-Color-Neutral">{group.outputLabel}</div>
-                      <div className="mt-2 text-xs leading-5 text-Color-Neutral">
-                        {group.minimumRequired} of {group.totalCount} signatures are needed from this group.
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
             <div className="space-y-3">
-              {(payload?.signing?.signatures ?? []).map((signature) => {
+              {visibleSignatures.map((signature) => {
                 const isActive = signature.outputSignerId === activeSignature?.outputSignerId;
 
                 return (
                   <button
                     key={signature.outputSignerId}
-                    className={`w-full rounded-[20px] border px-5 py-4 text-left transition ${
+                    className={`${signCardBaseClass} ${
                       isActive
-                        ? "border-Color-Scheme-1-Text bg-white"
-                        : "border-Color-Scheme-1-Border bg-white hover:border-Color-Scheme-1-Text"
+                        ? "border-Color-Scheme-1-Text"
+                        : "bg-white hover:border-Color-Scheme-1-Text"
                     }`}
                     onClick={() => {
                       setActiveSignerId(signature.outputSignerId);
@@ -951,17 +1262,16 @@ export default function SignPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                          {signature.partyName}
+                          {signature.outputLabel}
                         </div>
-                        <div className="mt-1 text-xs uppercase tracking-[0.08em] text-Color-Neutral">
-                          {signature.partyRole.replace(/_/g, " ")}
+                        <div className="mt-1 text-xs tracking-[0.02em] text-Color-Neutral">
+                          {signature.partyName} · {signature.partyRole.replace(/_/g, " ")}
                         </div>
                       </div>
                       <div className={`text-xs ${signature.status === "captured" ? "text-emerald-700" : "text-Color-Neutral"}`}>
                         {getCaptureStatusLabel(signature)}
                       </div>
                     </div>
-                    <div className="mt-3 text-sm text-Color-Neutral">{signature.outputLabel}</div>
                     {signature.signingGroup && signature.groupMinimumRequired ? (
                       <div className="mt-2 text-xs leading-5 text-Color-Neutral">
                         {signature.groupSatisfied
@@ -977,16 +1287,29 @@ export default function SignPage() {
                   </button>
                 );
               })}
+
+              {visibleSignatures.length === 0 ? (
+                <div className={`${signCardBaseClass} cursor-default`}>
+                  <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                    No signature is available in this step yet.
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-Color-Neutral">
+                    DARCi has prepared the signing PDFs, but there is no member-facing signature obligation available to capture here.
+                  </div>
+                </div>
+              ) : null}
             </div>
 
-            {activeSignature ? (
-              <div className="rounded-[20px] border border-Color-Scheme-1-Border bg-white px-5 py-5">
+            {shouldShowCaptureContainer ? (
+              <div className={signCardBaseClass}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                      {activeSignature.partyName}
+                      Signature capture
                     </div>
-                    <div className="mt-1 text-sm text-Color-Neutral">{activeSignature.outputLabel}</div>
+                    <div className="mt-1 text-sm text-Color-Neutral">
+                      {activeSignature.partyName} · {activeSignature.outputLabel}
+                    </div>
                   </div>
                   <div className={`text-xs ${activeSignature.status === "captured" ? "text-emerald-700" : "text-Color-Neutral"}`}>
                     {activeSignature.status === "captured" ? "Ready" : "Pending"}
@@ -1000,20 +1323,29 @@ export default function SignPage() {
                 ) : null}
 
                 <div className="mt-5 flex flex-wrap gap-2">
-                  {(["upload", "type", "draw"] as const).map((mode) => (
+                  {(["upload", "type", "draw", "saved"] as const).map((mode) => (
                     <button
                       key={mode}
                       className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition ${
                         captureMode === mode
                           ? "bg-black text-white"
-                          : "border border-Color-Scheme-1-Border text-Color-Scheme-1-Text"
+                          : "border border-Color-Scheme-1-Border text-Color-Neutral"
                       }`}
                       onClick={() => {
                         setCaptureMode(mode);
+                        if (mode === "saved") {
+                          void fetchSavedSignatures();
+                        }
                       }}
                       type="button"
                     >
-                      {mode === "upload" ? "Upload" : mode === "type" ? "Type" : "Draw"}
+                      {mode === "upload"
+                        ? "Upload"
+                        : mode === "type"
+                          ? "Type"
+                          : mode === "draw"
+                            ? "Draw"
+                            : "My saved signatures"}
                     </button>
                   ))}
                 </div>
@@ -1021,7 +1353,7 @@ export default function SignPage() {
                 {captureMode === "upload" ? (
                   <div className="mt-5 space-y-4">
                     <div className="text-sm leading-6 text-Color-Neutral">
-                      Upload a PNG or JPG image of this signature.
+                      Drag and drop a PNG or JPG image here, or choose one manually.
                     </div>
                     <input
                       ref={fileInputRef}
@@ -1030,18 +1362,61 @@ export default function SignPage() {
                       onChange={handleUploadChange}
                       type="file"
                     />
-                    <button
-                      className={`inline-flex min-h-10 items-center justify-center px-4 py-2 text-sm font-medium ${
-                        isSavingCapture ? "cursor-wait border border-Color-Scheme-1-Border text-Color-Neutral" : "platform-btn-primary"
+                    <div
+                      className={`rounded-[18px] border-2 border-dashed px-5 py-6 transition ${
+                        isDraggingUpload
+                          ? "border-Color-Scheme-1-Text bg-Color-Neutral-Lightest"
+                          : "border-Color-Scheme-1-Border bg-white"
                       }`}
-                      disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
-                      onClick={() => {
-                        fileInputRef.current?.click();
+                      onDragEnter={(event: ReactDragEvent<HTMLDivElement>) => {
+                        event.preventDefault();
+                        if (!isSavingCapture) {
+                          setIsDraggingUpload(true);
+                        }
                       }}
-                      type="button"
+                      onDragLeave={(event: ReactDragEvent<HTMLDivElement>) => {
+                        event.preventDefault();
+                        if (event.currentTarget === event.target) {
+                          setIsDraggingUpload(false);
+                        }
+                      }}
+                      onDragOver={(event: ReactDragEvent<HTMLDivElement>) => {
+                        event.preventDefault();
+                        if (!isSavingCapture) {
+                          setIsDraggingUpload(true);
+                        }
+                      }}
+                      onDrop={(event: ReactDragEvent<HTMLDivElement>) => {
+                        event.preventDefault();
+                        const file = event.dataTransfer.files?.[0] ?? null;
+                        if (!file) {
+                          setIsDraggingUpload(false);
+                          return;
+                        }
+
+                        void handleUploadFile(file);
+                      }}
                     >
-                      {isSavingCapture ? "Uploading..." : "Choose signature image"}
-                    </button>
+                      <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                        {isSavingCapture ? "Uploading signature..." : "Drop your signature image here"}
+                      </div>
+                      <div className="mt-2 text-sm leading-6 text-Color-Neutral">
+                        PNG and JPG files are supported.
+                      </div>
+                      <button
+                        className={`mt-4 ${signActionButtonBaseClass} ${
+                          isSavingCapture ? "cursor-wait border border-Color-Scheme-1-Border text-Color-Neutral" : "platform-btn-primary"
+                        }`}
+                        disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                        type="button"
+                      >
+                        {isSavingCapture ? "Uploading..." : "Choose signature image"}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 
@@ -1081,7 +1456,7 @@ export default function SignPage() {
                       </div>
                     </div>
                     <button
-                      className={`inline-flex min-h-10 items-center justify-center px-4 py-2 text-sm font-medium ${
+                      className={`${signActionButtonBaseClass} ${
                         isSavingCapture ? "cursor-wait border border-Color-Scheme-1-Border text-Color-Neutral" : "platform-btn-primary"
                       }`}
                       disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
@@ -1112,14 +1487,14 @@ export default function SignPage() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button
-                        className="inline-flex min-h-10 items-center justify-center border border-Color-Scheme-1-Border px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text"
+                        className={`${signActionButtonBaseClass} border border-Color-Scheme-1-Border text-Color-Scheme-1-Text`}
                         onClick={clearCanvas}
                         type="button"
                       >
                         Clear
                       </button>
                       <button
-                        className={`inline-flex min-h-10 items-center justify-center px-4 py-2 text-sm font-medium ${
+                        className={`${signActionButtonBaseClass} ${
                           isSavingCapture ? "cursor-wait border border-Color-Scheme-1-Border text-Color-Neutral" : "platform-btn-primary"
                         }`}
                         disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
@@ -1134,63 +1509,137 @@ export default function SignPage() {
                   </div>
                 ) : null}
 
-                {activeSignature.status === "captured" ? (
-                  <div className="mt-5 rounded-[18px] border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4">
-                    <div className="text-xs uppercase tracking-[0.08em] text-Color-Neutral">
-                      Saved capture
+                {captureMode === "saved" ? (
+                  <div className="mt-5 space-y-4">
+                    <div className="text-sm leading-6 text-Color-Neutral">
+                      Reuse any signature you already saved in a previous signing step.
                     </div>
-                    {activeSignature.captureMethod === "type" ? (
-                      <div className="mt-3 text-3xl italic text-Color-Scheme-1-Text" style={{ fontFamily: '"Times New Roman", serif' }}>
-                        {activeSignature.typedValue}
+
+                    {isLoadingSavedSignatures ? (
+                      <div className="rounded-[18px] border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-5 py-6 text-sm text-Color-Neutral">
+                        Loading saved signatures...
                       </div>
-                    ) : activeSignature.assetDownloadUrl ? (
-                      <object
-                        className="mt-3 max-h-28 rounded-lg border border-Color-Scheme-1-Border bg-white p-2"
-                        data={activeSignature.assetDownloadUrl}
-                        type={activeSignature.mimeType ?? "image/png"}
-                      >
-                        Saved signature image
-                      </object>
-                    ) : null}
+                    ) : savedSignatures.length > 0 ? (
+                      <>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {savedSignatures.map((savedSignature) => (
+                            <button
+                              key={savedSignature.id}
+                              className={`rounded-[18px] border px-4 py-4 text-left transition ${
+                                selectedSavedSignatureId === savedSignature.id
+                                  ? "border-Color-Scheme-1-Text bg-Color-Neutral-Lightest"
+                                  : "border-Color-Scheme-1-Border bg-white hover:border-Color-Scheme-1-Text"
+                              }`}
+                              disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
+                              onClick={() => {
+                                setSelectedSavedSignatureId(savedSignature.id);
+                              }}
+                              type="button"
+                            >
+                              <div className="text-[11px] leading-4 text-Color-Neutral">
+                                {savedSignature.captureMethod === "type" ? "Typed signature" : "Saved signature image"}
+                              </div>
+                              {savedSignature.captureMethod === "type" ? (
+                                <div className="mt-3 min-h-12 text-2xl italic text-Color-Scheme-1-Text" style={{ fontFamily: '"Times New Roman", serif' }}>
+                                  {savedSignature.typedValue}
+                                </div>
+                              ) : savedSignature.assetDownloadUrl ? (
+                                <img
+                                  alt="Saved signature"
+                                  className="mt-3 h-24 w-full rounded-lg border border-Color-Scheme-1-Border bg-white object-contain p-2"
+                                  src={savedSignature.assetDownloadUrl}
+                                />
+                              ) : (
+                                <div className="mt-3 rounded-lg border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-3 py-4 text-sm text-Color-Neutral">
+                                  Saved signature preview unavailable.
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            className={`${signActionButtonBaseClass} ${
+                              selectedSavedSignature && !isSavingCapture
+                                ? "platform-btn-primary"
+                                : "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                            }`}
+                            disabled={
+                              !selectedSavedSignature ||
+                              isSavingCapture ||
+                              payload?.signing?.state === "confirmed"
+                            }
+                            onClick={() => {
+                              if (!selectedSavedSignature) {
+                                return;
+                              }
+
+                              void handleSavedSignatureApply(selectedSavedSignature.id);
+                            }}
+                            type="button"
+                          >
+                            {isSavingCapture ? "Using signature..." : "Use this signature"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="rounded-[18px] border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-5 py-6 text-sm leading-6 text-Color-Neutral">
+                        No saved signatures are available yet. Save a typed, drawn, or uploaded signature once and it will appear here.
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
             ) : null}
 
-            <div className="rounded-[20px] border border-Color-Scheme-1-Border bg-white px-5 py-5">
-              <div className="text-sm font-medium text-Color-Scheme-1-Text">Confirm signing set</div>
-              <div className="mt-3 text-sm leading-6 text-Color-Neutral">
-                Confirm stays disabled until every required signature and signing group is complete.
+            {payload?.signing?.state === "confirmed" || (principalSigningComplete && hiddenSignatures.length > 0) ? (
+              <div className={`${signCardBaseClass} border-emerald-200 bg-emerald-50`}>
+                <div className="text-sm font-medium text-emerald-800">
+                  {payload?.signing?.state === "confirmed"
+                    ? "Signing confirmed"
+                    : "Your signature is complete"}
+                </div>
+                <div className="mt-3 text-sm leading-6 text-emerald-800/90">
+                  {payload?.signing?.state === "confirmed"
+                    ? "The prepared signing set is fully confirmed."
+                    : remainingSignerCount > 0
+                      ? `The next workflow step is notifying the remaining ${remainingSignerCount} signer${remainingSignerCount === 1 ? "" : "s"}.`
+                      : "Your signature has been saved on this prepared signing set."}
+                </div>
               </div>
-              <button
-                className={`mt-5 inline-flex min-h-11 w-full items-center justify-center px-4 py-2 text-sm font-medium transition ${
-                  payload?.signing?.state === "confirmed"
-                    ? "bg-emerald-50 text-emerald-700"
-                    : payload?.signing?.completion.canConfirm && !isConfirming
+            ) : hiddenSignatures.length > 0 ? (
+              <div className={signCardBaseClass}>
+                <div className="text-sm font-medium text-Color-Scheme-1-Text">Next after your signature</div>
+                <div className="mt-3 text-sm leading-6 text-Color-Neutral">
+                  Complete your own signature first. The remaining signer workflow stays out of view on this page for now.
+                </div>
+              </div>
+            ) : (
+              <div className={signCardBaseClass}>
+                <div className="text-sm font-medium text-Color-Scheme-1-Text">Confirm signing set</div>
+                <div className="mt-3 text-sm leading-6 text-Color-Neutral">
+                  Confirm unlocks once every signature required in this member step is complete.
+                </div>
+                <button
+                  className={`mt-5 inline-flex min-h-11 w-full items-center justify-center px-4 py-2 text-sm font-medium transition ${
+                    canFinalizeSigningSet && !isConfirming
                       ? "platform-btn-primary"
                       : "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
-                }`}
-                disabled={
-                  payload?.signing?.state === "confirmed"
-                    ? true
-                    : !payload?.signing?.completion.canConfirm || isConfirming
-                }
-                onClick={() => {
-                  void handleConfirm();
-                }}
-                type="button"
-              >
-                {payload?.signing?.state === "confirmed"
-                  ? "Signing confirmed"
-                  : isConfirming
-                    ? "Confirming..."
-                    : "Confirm signatures"}
-              </button>
-            </div>
+                  }`}
+                  disabled={!canFinalizeSigningSet || isConfirming}
+                  onClick={() => {
+                    void handleConfirm();
+                  }}
+                  type="button"
+                >
+                  {isConfirming ? "Confirming..." : "Confirm signatures"}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-6">
-            <div className="rounded-[20px] border border-Color-Scheme-1-Border bg-white p-5">
+            <div id="contract-container" className="relative z-0 bg-white p-12 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium text-Color-Scheme-1-Text">
@@ -1243,7 +1692,7 @@ export default function SignPage() {
               ) : null}
 
               {(payload?.signing?.pendingOutputs ?? []).length > 0 ? (
-                <div className="mt-5 rounded-[18px] border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4">
+                <div className="mt-5 rounded-xl border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4">
                   <div className="text-sm font-medium text-Color-Scheme-1-Text">Signing output status</div>
                   <div className="mt-3 space-y-3">
                     {payload?.signing?.pendingOutputs.map((output) => (
@@ -1262,6 +1711,12 @@ export default function SignPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              ) : null}
+
+              {remainingSignerCount > 0 ? (
+                <div className="mt-5 text-sm leading-6 text-Color-Neutral">
+                  {remainingSignerCount} remaining signer{remainingSignerCount === 1 ? "" : "s"} are outside this member step.
                 </div>
               ) : null}
             </div>

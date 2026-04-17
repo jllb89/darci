@@ -1,6 +1,12 @@
 import { access, readFile } from "fs/promises";
 import path from "path";
 import PDFDocument from "pdfkit";
+import {
+  PDFDocument as PdfLibDocument,
+  StandardFonts,
+  rgb,
+} from "pdf-lib";
+import type { PDFFont, PDFPage } from "pdf-lib";
 import { recordAuditEvent } from "./auditService";
 import {
   toRenderableMemberValue,
@@ -9,17 +15,27 @@ import {
 import {
   claimDocumentGenerationRunById,
   createGeneratedDocumentVersion,
+  getDocumentGenerationRunById,
   getDocumentById,
   getTemplateArtifactById,
   listDocumentOutputSigners,
+  listDocumentVersions,
+  updateDocumentOutputSignerMetadata,
   updateDocument,
   updateDocumentGenerationRun,
   type DocumentGenerationRunRecord,
   type DocumentOutputSignerRecord,
   type DocumentRecord,
+  type DocumentVersionRecord,
+  type SignatureCaptureMethod,
+  type SignatureRecord,
   type TemplateArtifactRecord,
 } from "./documentService";
-import { uploadGeneratedDocument } from "./storageService";
+import {
+  downloadDocumentObject,
+  downloadSignatureAsset,
+  uploadGeneratedDocument,
+} from "./storageService";
 import { logDocumentTrace } from "../utils/documentTrace";
 
 const PDF_PAGE_MARGINS = {
@@ -84,6 +100,21 @@ type TemplateBlock =
   | { kind: "title" | "heading" | "notice" | "fineprint" | "paragraph" | "bullet" | "table"; text: string }
   | { kind: "checklist"; text: string; checked: boolean }
   | { kind: "signature"; text: string; includeDate: boolean };
+
+type SignatureFieldRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type SignatureFieldPlacement = {
+  pageNumber: number;
+  label: string;
+  includeDate: boolean;
+  signatureRect: SignatureFieldRect;
+  dateRect: SignatureFieldRect | null;
+};
 
 const systemPlaceholderTokens = new Set([
   "DarciNo",
@@ -300,6 +331,101 @@ const getPlaceholderValues = (run: DocumentGenerationRunRecord) => {
 
 const getArtifactMetadata = (artifact: TemplateArtifactRecord) => {
   return isRecord(artifact.artifact_metadata) ? artifact.artifact_metadata : {};
+};
+
+const isFiniteNumber = (value: unknown): value is number => {
+  return typeof value === "number" && Number.isFinite(value);
+};
+
+const parseSignatureFieldRect = (value: unknown): SignatureFieldRect | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const x = value.x;
+  const y = value.y;
+  const width = value.width;
+  const height = value.height;
+
+  if (
+    !isFiniteNumber(x) ||
+    !isFiniteNumber(y) ||
+    !isFiniteNumber(width) ||
+    !isFiniteNumber(height)
+  ) {
+    return null;
+  }
+
+  return {
+    x,
+    y,
+    width,
+    height,
+  };
+};
+
+const parseSignatureFieldPlacement = (value: unknown): SignatureFieldPlacement | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const pageNumber = value.pageNumber;
+  const label = value.label;
+  const includeDate = value.includeDate;
+  const signatureRect = parseSignatureFieldRect(value.signatureRect);
+  const dateRect = value.dateRect === null ? null : parseSignatureFieldRect(value.dateRect);
+
+  if (
+    !isFiniteNumber(pageNumber) ||
+    typeof label !== "string" ||
+    typeof includeDate !== "boolean" ||
+    !signatureRect ||
+    (includeDate && !dateRect)
+  ) {
+    return null;
+  }
+
+  return {
+    pageNumber,
+    label,
+    includeDate,
+    signatureRect,
+    dateRect,
+  };
+};
+
+const getLatestVersionForRun = <T extends { generation_run_id: string | null }>(
+  versions: T[],
+  generationRunId: string,
+) => {
+  let latestVersion = null as T | null;
+
+  for (const version of versions) {
+    if (version.generation_run_id !== generationRunId) {
+      continue;
+    }
+
+    latestVersion = version;
+  }
+
+  return latestVersion;
+};
+
+const formatExecutionDateForField = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const month = `${parsed.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${parsed.getUTCDate()}`.padStart(2, "0");
+  const year = parsed.getUTCFullYear();
+
+  return `${month}/${day}/${year}`;
 };
 
 const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
@@ -764,6 +890,10 @@ const drawDigitalSignatureField = (
   text: string,
   includeDate: boolean,
   fonts: PdfFontSet,
+  options?: {
+    pageNumber: number;
+    onRender?: (placement: SignatureFieldPlacement) => void;
+  },
 ) => {
   const left = document.page.margins.left;
   const availableWidth =
@@ -794,8 +924,20 @@ const drawDigitalSignatureField = (
   const dateWidth = includeDate ? 106 : 0;
   const gap = includeDate ? 12 : 0;
   const signatureWidth = availableWidth - dateWidth - gap;
+  const signatureRect: SignatureFieldRect = {
+    x: left,
+    y: boxY,
+    width: signatureWidth,
+    height: 40,
+  };
 
-  drawDashedRoundedRect(document, left, boxY, signatureWidth, 40);
+  drawDashedRoundedRect(
+    document,
+    signatureRect.x,
+    signatureRect.y,
+    signatureRect.width,
+    signatureRect.height,
+  );
   document
     .font(fonts.italic)
     .fontSize(9)
@@ -804,9 +946,23 @@ const drawDigitalSignatureField = (
       lineBreak: false,
     });
 
+  let dateRect: SignatureFieldRect | null = null;
+
   if (includeDate) {
     const dateX = left + signatureWidth + gap;
-    drawDashedRoundedRect(document, dateX, boxY, dateWidth, 40);
+    dateRect = {
+      x: dateX,
+      y: boxY,
+      width: dateWidth,
+      height: 40,
+    };
+    drawDashedRoundedRect(
+      document,
+      dateRect.x,
+      dateRect.y,
+      dateRect.width,
+      dateRect.height,
+    );
     document
       .font(fonts.regular)
       .fontSize(9)
@@ -815,6 +971,14 @@ const drawDigitalSignatureField = (
         lineBreak: false,
       });
   }
+
+  options?.onRender?.({
+    pageNumber: options.pageNumber,
+    label: text,
+    includeDate,
+    signatureRect,
+    dateRect,
+  });
 
   document.y = boxY + 52;
   document.x = left;
@@ -1614,6 +1778,10 @@ const renderTemplateBlocks = (
   document: PdfDocument,
   blocks: TemplateBlock[],
   fonts: PdfFontSet,
+  options?: {
+    getCurrentPageNumber?: () => number;
+    onRenderSignatureField?: (placement: SignatureFieldPlacement) => void;
+  },
 ) => {
   const bodyProfile: TextRenderProfile = {
     baseFont: fonts.regular,
@@ -1720,7 +1888,12 @@ const renderTemplateBlocks = (
 
     if (block.kind === "signature") {
       ensurePageSpace(document, 96);
-      drawDigitalSignatureField(document, block.text, block.includeDate, fonts);
+      drawDigitalSignatureField(document, block.text, block.includeDate, fonts, {
+        pageNumber: options?.getCurrentPageNumber?.() ?? 1,
+        ...(options?.onRenderSignatureField
+          ? { onRender: options.onRenderSignatureField }
+          : {}),
+      });
       continue;
     }
 
@@ -1839,6 +2012,10 @@ const buildRenderedPdf = async (input: {
     },
   });
   const fonts = registerPdfFonts(pdf, brandAssets);
+  const signerPlacementQueue = [...input.signers]
+    .filter((signer) => signer.obligation_type === "signer")
+    .sort((left, right) => left.sort_order - right.sort_order);
+  const signaturePlacements = new Map<string, SignatureFieldPlacement>();
 
   const drawPageChrome = () => {
     drawBrandHeader(pdf, {
@@ -1881,7 +2058,17 @@ const buildRenderedPdf = async (input: {
     documentKey: input.run.document_key,
   });
 
-  renderTemplateBlocks(pdf, buildTemplateBlocks(renderedTemplate), fonts);
+  renderTemplateBlocks(pdf, buildTemplateBlocks(renderedTemplate), fonts, {
+    getCurrentPageNumber: () => pageCount,
+    onRenderSignatureField: (placement) => {
+      const signer = signerPlacementQueue.shift();
+      if (!signer) {
+        return;
+      }
+
+      signaturePlacements.set(signer.id, placement);
+    },
+  });
 
   pdf.end();
 
@@ -1889,7 +2076,338 @@ const buildRenderedPdf = async (input: {
     content: await completed,
     pageCount,
     isPreview,
+    signaturePlacements,
   };
+};
+
+const mergeSignaturePlacementIntoMetadata = (
+  metadata: Record<string, unknown>,
+  placement: SignatureFieldPlacement,
+) => {
+  return {
+    ...metadata,
+    signatureField: placement,
+  };
+};
+
+const toPdfLibRect = (pageHeight: number, rect: SignatureFieldRect) => {
+  return {
+    x: rect.x,
+    y: pageHeight - rect.y - rect.height,
+    width: rect.width,
+    height: rect.height,
+  };
+};
+
+const coverSignatureFieldInterior = (
+  page: PDFPage,
+  rect: SignatureFieldRect,
+) => {
+  const converted = toPdfLibRect(page.getHeight(), rect);
+
+  page.drawRectangle({
+    x: converted.x + 2,
+    y: converted.y + 2,
+    width: Math.max(converted.width - 4, 0),
+    height: Math.max(converted.height - 4, 0),
+    color: rgb(0.96, 0.96, 0.96),
+  });
+
+  return converted;
+};
+
+const replaceSignatureFieldWithLine = (
+  page: PDFPage,
+  rect: SignatureFieldRect,
+) => {
+  const converted = toPdfLibRect(page.getHeight(), rect);
+
+  page.drawRectangle({
+    x: converted.x,
+    y: converted.y,
+    width: converted.width,
+    height: converted.height,
+    color: rgb(1, 1, 1),
+  });
+
+  page.drawLine({
+    start: {
+      x: converted.x + 4,
+      y: converted.y + 5,
+    },
+    end: {
+      x: converted.x + converted.width - 4,
+      y: converted.y + 5,
+    },
+    thickness: 1,
+    color: rgb(0.52, 0.52, 0.52),
+  });
+
+  return converted;
+};
+
+const fitTextToRect = (input: {
+  text: string;
+  font: PDFFont;
+  width: number;
+  height: number;
+  minSize?: number;
+  maxSize?: number;
+}) => {
+  const minSize = input.minSize ?? 8;
+  let fontSize = Math.min(input.maxSize ?? 28, Math.max(input.height - 8, minSize));
+
+  while (
+    fontSize > minSize &&
+    input.font.widthOfTextAtSize(input.text, fontSize) > input.width - 12
+  ) {
+    fontSize -= 1;
+  }
+
+  return Math.max(fontSize, minSize);
+};
+
+const stampSignatureOnPdf = async (input: {
+  pdfBytes: Buffer;
+  placement: SignatureFieldPlacement;
+  signatureRecord: SignatureRecord;
+}) => {
+  const pdf = await PdfLibDocument.load(input.pdfBytes);
+  const pages = pdf.getPages();
+  const page = pages[input.placement.pageNumber - 1];
+
+  if (!page) {
+    throw new Error("Signature field page could not be resolved in the official PDF");
+  }
+
+  const signatureBox = replaceSignatureFieldWithLine(page, input.placement.signatureRect);
+  const signatureMethod =
+    input.signatureRecord.capture_method === "upload" ||
+    input.signatureRecord.capture_method === "type" ||
+    input.signatureRecord.capture_method === "draw"
+      ? (input.signatureRecord.capture_method as SignatureCaptureMethod)
+      : null;
+
+  if (signatureMethod === "type" && input.signatureRecord.typed_value) {
+    const typedFont = await pdf.embedFont(StandardFonts.TimesRomanItalic);
+    const fontSize = fitTextToRect({
+      text: input.signatureRecord.typed_value,
+      font: typedFont,
+      width: signatureBox.width,
+      height: signatureBox.height,
+      maxSize: 26,
+    });
+    const textHeight = typedFont.heightAtSize(fontSize);
+
+    page.drawText(input.signatureRecord.typed_value, {
+      x: signatureBox.x + 8,
+      y: signatureBox.y + (signatureBox.height - textHeight) / 2 - 1,
+      size: fontSize,
+      font: typedFont,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+  } else if (input.signatureRecord.storage_path) {
+    const assetBytes = await downloadSignatureAsset(input.signatureRecord.storage_path);
+    const embeddedImage = input.signatureRecord.mime_type === "image/jpeg"
+      ? await pdf.embedJpg(assetBytes)
+      : await pdf.embedPng(assetBytes);
+    const imageInsetX = signatureMethod === "draw" ? 2 : 6;
+    const imageInsetY = signatureMethod === "draw" ? 2 : 5;
+    const maxWidth = Math.max(signatureBox.width - imageInsetX * 2, 1);
+    const maxHeight = Math.max(signatureBox.height - imageInsetY * 2, 1);
+    const scale = Math.min(
+      maxWidth / embeddedImage.width,
+      maxHeight / embeddedImage.height,
+    );
+    const imageWidth = embeddedImage.width * scale;
+    const imageHeight = embeddedImage.height * scale;
+
+    page.drawImage(embeddedImage, {
+      x: signatureBox.x + (signatureBox.width - imageWidth) / 2,
+      y: signatureBox.y + (signatureBox.height - imageHeight) / 2 + 2,
+      width: imageWidth,
+      height: imageHeight,
+    });
+  }
+
+  if (input.placement.dateRect) {
+    const executionDate = formatExecutionDateForField(input.signatureRecord.captured_at);
+    if (executionDate) {
+      const dateBox = coverSignatureFieldInterior(page, input.placement.dateRect);
+      const dateFont = await pdf.embedFont(StandardFonts.Helvetica);
+      const fontSize = fitTextToRect({
+        text: executionDate,
+        font: dateFont,
+        width: dateBox.width,
+        height: dateBox.height,
+        minSize: 7,
+        maxSize: 11,
+      });
+      const textHeight = dateFont.heightAtSize(fontSize);
+
+      page.drawText(executionDate, {
+        x: dateBox.x + 8,
+        y: dateBox.y + (dateBox.height - textHeight) / 2 - 1,
+        size: fontSize,
+        font: dateFont,
+        color: rgb(0.22, 0.22, 0.22),
+      });
+    }
+  }
+
+  return Buffer.from(await pdf.save());
+};
+
+const hydrateSignaturePlacementsForRun = async (input: {
+  document: DocumentRecord;
+  run: DocumentGenerationRunRecord;
+  signers: DocumentOutputSignerRecord[];
+}) => {
+  const placements = new Map<string, SignatureFieldPlacement>();
+
+  for (const signer of input.signers) {
+    const placement = parseSignatureFieldPlacement(signer.metadata.signatureField);
+    if (placement) {
+      placements.set(signer.id, placement);
+    }
+  }
+
+  const signerCount = input.signers.filter((signer) => signer.obligation_type === "signer").length;
+  if (placements.size >= signerCount || !input.run.template_artifact_id) {
+    return placements;
+  }
+
+  const artifact = await getTemplateArtifactById(input.run.template_artifact_id);
+  if (!artifact) {
+    return placements;
+  }
+
+  const renderedPdf = await buildRenderedPdf({
+    document: input.document,
+    run: input.run,
+    artifact,
+    signers: input.signers,
+  });
+
+  await Promise.all(
+    input.signers.map((signer) => {
+      const placement = renderedPdf.signaturePlacements.get(signer.id);
+      if (!placement) {
+        return null;
+      }
+
+      placements.set(signer.id, placement);
+
+      return updateDocumentOutputSignerMetadata({
+        signerId: signer.id,
+        documentId: input.document.id,
+        generationRunId: input.run.id,
+        metadata: mergeSignaturePlacementIntoMetadata(signer.metadata ?? {}, placement),
+      });
+    }),
+  );
+
+  return placements;
+};
+
+export const applySignatureCaptureToDocumentOutput = async (input: {
+  document: DocumentRecord;
+  generationRunId: string;
+  outputSignerId: string;
+  signatureRecord: SignatureRecord;
+  actorContext?: { actorSupabaseId?: string; actorRole?: string };
+}) => {
+  const run = await getDocumentGenerationRunById({
+    runId: input.generationRunId,
+    documentId: input.document.id,
+  });
+
+  if (!run) {
+    throw new Error("Generation run could not be resolved for signature application");
+  }
+
+  const signers = await listDocumentOutputSigners({
+    documentId: input.document.id,
+    generationRunId: input.generationRunId,
+  });
+  const signer = signers.find(
+    (candidate) =>
+      candidate.id === input.outputSignerId && candidate.obligation_type === "signer",
+  );
+
+  if (!signer) {
+    throw new Error("Signature field mapping could not be resolved for this signer");
+  }
+
+  let placement = parseSignatureFieldPlacement(signer.metadata.signatureField);
+  if (!placement) {
+    placement = (await hydrateSignaturePlacementsForRun({
+      document: input.document,
+      run,
+      signers,
+    })).get(signer.id) ?? null;
+  }
+
+  if (!placement) {
+    throw new Error("Signature field placement is not available for this signing output");
+  }
+
+  const versions = await listDocumentVersions(input.document.id);
+  const latestVersion = getLatestVersionForRun(
+    versions as DocumentVersionRecord[],
+    input.generationRunId,
+  );
+
+  if (!latestVersion?.storage_path || latestVersion.mime_type !== "application/pdf") {
+    throw new Error("Official signing PDF could not be resolved for this generation run");
+  }
+
+  const currentPdf = await downloadDocumentObject(latestVersion.storage_path);
+  const stampedPdf = await stampSignatureOnPdf({
+    pdfBytes: currentPdf,
+    placement,
+    signatureRecord: input.signatureRecord,
+  });
+  const baseFileName = (latestVersion.file_name ?? `${run.output_key}.pdf`).replace(/\.pdf$/i, "");
+  const nextFileName = `${baseFileName.replace(/-signed$/i, "")}-signed.pdf`;
+  const storagePath = `${input.document.owner_id}/${input.document.id}/generated/${input.generationRunId}/${Date.now()}-${nextFileName}`;
+
+  await uploadGeneratedDocument({
+    storagePath,
+    content: stampedPdf,
+    contentType: "application/pdf",
+  });
+
+  const version = await createGeneratedDocumentVersion({
+    documentId: input.document.id,
+    generationRunId: input.generationRunId,
+    storagePath,
+    fileName: nextFileName,
+    mimeType: "application/pdf",
+    sizeBytes: stampedPdf.byteLength,
+    createdBy: input.document.owner_id,
+    isFinal: latestVersion.is_final === true,
+  });
+
+  await recordAuditEvent({
+    ...(input.actorContext ?? {}),
+    entityType: "document_version",
+    entityId: version.id,
+    action: "system.signature_applied_to_document",
+    metadata: {
+      document_id: input.document.id,
+      document_version_id: version.id,
+      source_version_id: latestVersion.id,
+      generation_run_id: input.generationRunId,
+      output_signer_id: input.outputSignerId,
+      signature_id: input.signatureRecord.id,
+      capture_method: input.signatureRecord.capture_method,
+      captured_at: input.signatureRecord.captured_at,
+      storage_path: storagePath,
+    },
+  });
+
+  return version;
 };
 
 export const processDocumentGenerationRun = async (input: {
@@ -1942,6 +2460,21 @@ export const processDocumentGenerationRun = async (input: {
       artifact,
       signers,
     });
+    await Promise.all(
+      signers.map((signer) => {
+        const placement = renderedPdf.signaturePlacements.get(signer.id);
+        if (!placement) {
+          return null;
+        }
+
+        return updateDocumentOutputSignerMetadata({
+          signerId: signer.id,
+          documentId: document.id,
+          generationRunId: claimedRun.id,
+          metadata: mergeSignaturePlacementIntoMetadata(signer.metadata ?? {}, placement),
+        });
+      }),
+    );
     const content = renderedPdf.content;
     const fileName = `${claimedRun.output_key}-${claimedRun.id.slice(0, 8)}.pdf`;
     const storagePath = `${document.owner_id}/${document.id}/generated/${claimedRun.id}/${fileName}`;

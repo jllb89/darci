@@ -366,6 +366,15 @@ export default function ReviewPage() {
     router.push(`/app/sign?documentId=${encodeURIComponent(documentId)}`);
   }, [documentId, router]);
 
+  const backToForm = useCallback(() => {
+    if (!documentId) {
+      router.push("/app/start");
+      return;
+    }
+
+    router.push(`/app/start?documentId=${encodeURIComponent(documentId)}`);
+  }, [documentId, router]);
+
   const saveDraftSnapshot = useCallback(async () => {
     if (!accessToken || !documentId || isSavingDraft) {
       return;
@@ -591,11 +600,12 @@ export default function ReviewPage() {
     "w-full rounded-xl border border-Color-Scheme-1-Border px-5 py-5 text-left transition-[opacity,transform,border-color] duration-200 ease-out";
   const reviewActionButtonBaseClass =
     "inline-flex min-h-10 min-w-[11rem] items-center justify-center px-4 py-2 text-center text-sm font-medium";
+  const previewPanelHeightClass = "h-[72vh] min-h-[560px]";
 
   const renderPreviewPanel = () => {
     if (isLoading && !payload) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral">
+        <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral`}>
           Loading review documents...
         </div>
       );
@@ -604,7 +614,7 @@ export default function ReviewPage() {
     if (selectedOutput) {
       if (shouldDeferPreviewUntilAllReady) {
         return (
-          <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
+          <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center`}>
             <span
               className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
               style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
@@ -621,7 +631,7 @@ export default function ReviewPage() {
 
       if (isLoadingPreview && !previewSourceUrl) {
         return (
-          <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
+          <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center`}>
             <span
               className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
               style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
@@ -636,7 +646,7 @@ export default function ReviewPage() {
       if (previewSourceUrl) {
         return (
           <object
-            className="h-[72vh] min-h-[560px] w-full rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f3f6f8]"
+            className={`${previewPanelHeightClass} w-full rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f3f6f8]`}
             data={previewSourceUrl}
             type="application/pdf"
           >
@@ -648,7 +658,7 @@ export default function ReviewPage() {
       }
 
       return (
-        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-dashed border-amber-200 bg-[#f7f9fb] px-6 text-center">
+        <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center rounded-[20px] border border-dashed border-amber-200 bg-[#f7f9fb] px-6 text-center`}>
           <p className="text-sm font-medium text-Color-Scheme-1-Text">
             {previewErrorMessage ?? "The PDF preview is unavailable right now."}
           </p>
@@ -661,7 +671,7 @@ export default function ReviewPage() {
 
     if (isWaitingForRenderableOutputs) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
+        <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center`}>
           <span
             className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
             style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
@@ -675,14 +685,14 @@ export default function ReviewPage() {
 
     if (hasBlockedOutputs) {
       return (
-        <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-dashed border-red-200 bg-[#fdf6f6] px-6 text-center text-sm leading-6 text-red-700">
+        <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] border border-dashed border-red-200 bg-[#fdf6f6] px-6 text-center text-sm leading-6 text-red-700`}>
           One or more review outputs are blocked. Check the blocker details in the left column to resolve them before approval.
         </div>
       );
     }
 
     return (
-      <div className="flex h-[72vh] min-h-[560px] items-center justify-center rounded-[20px] border border-dashed border-Color-Scheme-1-Border/50 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral">
+      <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] border border-dashed border-Color-Scheme-1-Border/50 bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral`}>
         Review PDFs will appear here as soon as they are ready.
       </div>
     );
@@ -723,7 +733,10 @@ export default function ReviewPage() {
           className="relative z-0 grid gap-6 lg:grid-cols-[1fr_2fr]"
           style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "120ms" }}
         >
-          <div className="relative z-0 space-y-6 overflow-visible lg:sticky lg:top-20 lg:self-start">
+          <div
+            className="relative z-0 space-y-6 overflow-visible lg:sticky lg:self-start"
+            style={{ top: "var(--darci-process-band-follow-offset, 5rem)" }}
+          >
             <div className="space-y-2 pb-2">
               <div className="text-2xl font-medium">Review documents</div>
               <div className="text-sm text-Color-Neutral">{approvalCopy}</div>
@@ -755,11 +768,19 @@ export default function ReviewPage() {
                     }}
                     type="button"
                   >
-                    <div className="font-display text-sm font-medium text-Color-Scheme-1-Text">
+                    <div
+                      className={`font-display text-sm font-medium ${
+                        isSelected ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"
+                      }`}
+                    >
                         {output.outputLabel}
                     </div>
                     <div className="mt-2 text-xs text-emerald-700">Ready</div>
-                    <div className="mt-2 text-Color-Scheme-1-Text">
+                    <div
+                      className={`mt-2 ${
+                        isSelected ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"
+                      }`}
+                    >
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
                         <path
                           d="m7.5 5.5 5 4.5-5 4.5"
@@ -849,6 +870,13 @@ export default function ReviewPage() {
                     {selectedOutput?.outputLabel ?? "Document preview"}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      className="inline-flex min-h-10 items-center justify-center px-2 py-2 text-sm font-medium text-Color-Neutral transition hover:text-Color-Scheme-1-Text"
+                      onClick={backToForm}
+                      type="button"
+                    >
+                      Back to form
+                    </button>
                     <button
                       className={`${reviewActionButtonBaseClass} border border-Color-Scheme-1-Border text-Color-Scheme-1-Text transition hover:border-Color-Scheme-1-Text ${
                         isSavingDraft ? "cursor-wait" : ""

@@ -17,6 +17,7 @@ import {
   getDocumentSignerObligations,
   getDocumentTimeline,
   getSignatureFields,
+  listSavedSignatures,
   listDocumentVersions,
   listDocuments,
   captureSignature,
@@ -117,6 +118,11 @@ router.put(
 router.get("/:id/versions", listDocumentVersions);
 router.get("/:id/timeline", getDocumentTimeline);
 router.get("/:id/signature-fields", getSignatureFields);
+router.get(
+  "/:id/signatures/saved",
+  requireRole(["member", "admin", "service_role"]),
+  listSavedSignatures,
+);
 router.post(
   "/:id/signatures",
   requireRole(["member", "admin", "service_role"]),

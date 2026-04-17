@@ -30,11 +30,14 @@ import {
   createNotarizationRequest,
   getDocumentById,
   getDocumentIntakeDraft as getDocumentIntakeDraftFromDb,
+  getDocumentOutputSignerById,
   getDocumentVersionById,
   getActiveNotarizationRequest,
   listDocumentGenerationRuns as listDocumentGenerationRunsFromDb,
+  listCapturedSignaturesForSigner,
   listDocumentSystemValues,
   getSignatureById,
+  getSignatureRecordById,
   getOrCreateUserId,
   getUserIdBySupabaseId,
   listDocumentParties as listDocumentPartiesFromDb,
@@ -46,6 +49,7 @@ import {
   replaceDocumentParties,
   saveDocumentIntakeDraft as saveDocumentIntakeDraftToDb,
   type SignatureCaptureMethod,
+  type SignatureRecord,
   type SignatureTypedKind,
   upsertDocumentSystemValues,
   updateDocumentGenerationRun,
@@ -58,7 +62,11 @@ import {
   prepareGenerationRun,
   syncDocumentPartiesFromCanonicalAnswers,
 } from "../services/documentGenerationService";
-import { processDocumentGenerationRun } from "../services/documentGenerationRenderService";
+import {
+  applySignatureCaptureToDocumentOutput,
+  processDocumentGenerationRun,
+  type SignatureFieldPlacement,
+} from "../services/documentGenerationRenderService";
 import {
   deriveMemberFormRulesByJurisdiction,
   type MemberFormRulesContract,
@@ -226,6 +234,18 @@ type SigningCompletionSummary = {
   canConfirm: boolean;
 };
 
+type SavedSignatureResponse = {
+  id: string;
+  captureMethod: SignatureCaptureMethod;
+  typedValue: string | null;
+  typedKind: SignatureTypedKind | null;
+  assetDownloadUrl: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  capturedAt: string | null;
+  createdAt: string;
+};
+
 type DocumentSigningState = {
   reviewApproval: ReviewApprovalValue | null;
   signingExecution: SigningExecutionValue | null;
@@ -386,10 +406,11 @@ const signatureRequestSchema = signatureTargetSchema
 
 const signatureCaptureSchema = signatureTargetSchema
   .extend({
-    captureMethod: z.enum(["type", "draw"]),
+    captureMethod: z.enum(["type", "draw", "saved"]),
     typedValue: z.string().trim().max(200).optional(),
     typedKind: z.enum(["name", "initials"]).optional(),
     imageDataUrl: z.string().min(1).optional(),
+    savedSignatureId: z.string().trim().min(1).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.captureMethod === "type") {
@@ -398,6 +419,18 @@ const signatureCaptureSchema = signatureTargetSchema
           code: z.ZodIssueCode.custom,
           path: ["typedValue"],
           message: "Typed signature text is required",
+        });
+      }
+
+      return;
+    }
+
+    if (data.captureMethod === "saved") {
+      if (!data.savedSignatureId || data.savedSignatureId.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["savedSignatureId"],
+          message: "Saved signature id is required",
         });
       }
 
@@ -804,6 +837,101 @@ const toTimestamp = (value: string) => {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 };
 
+const parseSignatureFieldPlacement = (value: unknown): SignatureFieldPlacement | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const asRecord = value as Record<string, unknown>;
+  const signatureRect = asRecord.signatureRect;
+  const dateRect = asRecord.dateRect;
+
+  if (
+    typeof asRecord.pageNumber !== "number" ||
+    typeof asRecord.label !== "string" ||
+    typeof asRecord.includeDate !== "boolean" ||
+    !signatureRect ||
+    typeof signatureRect !== "object" ||
+    Array.isArray(signatureRect)
+  ) {
+    return null;
+  }
+
+  const normalizedSignatureRect = signatureRect as Record<string, unknown>;
+  const normalizedDateRect =
+    dateRect && typeof dateRect === "object" && !Array.isArray(dateRect)
+      ? (dateRect as Record<string, unknown>)
+      : null;
+
+  if (
+    typeof normalizedSignatureRect.x !== "number" ||
+    typeof normalizedSignatureRect.y !== "number" ||
+    typeof normalizedSignatureRect.width !== "number" ||
+    typeof normalizedSignatureRect.height !== "number"
+  ) {
+    return null;
+  }
+
+  if (
+    asRecord.includeDate === true &&
+    (!normalizedDateRect ||
+      typeof normalizedDateRect.x !== "number" ||
+      typeof normalizedDateRect.y !== "number" ||
+      typeof normalizedDateRect.width !== "number" ||
+      typeof normalizedDateRect.height !== "number")
+  ) {
+    return null;
+  }
+
+  return {
+    pageNumber: asRecord.pageNumber,
+    label: asRecord.label,
+    includeDate: asRecord.includeDate,
+    signatureRect: {
+      x: normalizedSignatureRect.x,
+      y: normalizedSignatureRect.y,
+      width: normalizedSignatureRect.width,
+      height: normalizedSignatureRect.height,
+    },
+    dateRect: normalizedDateRect
+      ? {
+          x: normalizedDateRect.x as number,
+          y: normalizedDateRect.y as number,
+          width: normalizedDateRect.width as number,
+          height: normalizedDateRect.height as number,
+        }
+      : null,
+  };
+};
+
+const mapSavedSignatureResponse = async (
+  signature: SignatureRecord,
+): Promise<SavedSignatureResponse> => {
+  const assetDownloadUrl = signature.storage_path
+    ? (await createSignatureDownloadUrl(signature.storage_path)).signedUrl
+    : null;
+
+  return {
+    id: signature.id,
+    captureMethod:
+      signature.capture_method === "upload" ||
+      signature.capture_method === "type" ||
+      signature.capture_method === "draw"
+        ? signature.capture_method
+        : "type",
+    typedValue: signature.typed_value ?? null,
+    typedKind:
+      signature.typed_kind === "name" || signature.typed_kind === "initials"
+        ? signature.typed_kind
+        : null,
+    assetDownloadUrl,
+    mimeType: signature.mime_type ?? null,
+    sizeBytes: signature.size_bytes ?? null,
+    capturedAt: signature.captured_at ?? null,
+    createdAt: signature.created_at,
+  };
+};
+
 const mapBlockingRequirementResponse = (
   requirement: GenerationRunBlockingRequirement,
 ) => {
@@ -843,27 +971,24 @@ const shouldUseInlineReviewGenerationFallback = () => {
   );
 };
 
-const processQueuedReviewOutputsInline = async (input: {
+const processQueuedGenerationRunsInline = async (input: {
   document: DocumentRecord;
-  viewerRole?: string | null;
+  outputKeys: string[];
+  rendererJobPrefix: string;
 }) => {
   if (!shouldUseInlineReviewGenerationFallback()) {
     return false;
   }
 
-  const visibleOutputKeys = new Set(
-    resolveVisibleReviewOutputs(input.document, input.viewerRole).map(
-      (output) => output.outputKey,
-    ),
-  );
+  const outputKeys = new Set(input.outputKeys);
 
-  if (visibleOutputKeys.size === 0) {
+  if (outputKeys.size === 0) {
     return false;
   }
 
   const generationRuns = await listDocumentGenerationRunsFromDb(input.document.id);
   const queuedVisibleRuns = generationRuns.filter(
-    (run) => run.status === "queued" && visibleOutputKeys.has(run.output_key),
+    (run) => run.status === "queued" && outputKeys.has(run.output_key),
   );
 
   if (queuedVisibleRuns.length === 0) {
@@ -875,7 +1000,7 @@ const processQueuedReviewOutputsInline = async (input: {
   for (const run of queuedVisibleRuns) {
     const processed = await processDocumentGenerationRun({
       runId: run.id,
-      rendererJobId: `review-inline:${run.id}`,
+      rendererJobId: `${input.rendererJobPrefix}:${run.id}`,
     }).catch(() => null);
 
     if (processed) {
@@ -884,6 +1009,34 @@ const processQueuedReviewOutputsInline = async (input: {
   }
 
   return processedAny;
+};
+
+const processQueuedReviewOutputsInline = async (input: {
+  document: DocumentRecord;
+  viewerRole?: string | null;
+}) => {
+  return processQueuedGenerationRunsInline({
+    document: input.document,
+    outputKeys: resolveVisibleReviewOutputs(input.document, input.viewerRole).map(
+      (output) => output.outputKey,
+    ),
+    rendererJobPrefix: "review-inline",
+  });
+};
+
+const processQueuedSigningOutputsInline = async (input: {
+  document: DocumentRecord;
+  signing: Pick<DocumentSigningState, "approvedOutputKeys" | "pendingOutputs">;
+}) => {
+  if (!input.signing.pendingOutputs.some((output) => output.status === "queued")) {
+    return false;
+  }
+
+  return processQueuedGenerationRunsInline({
+    document: input.document,
+    outputKeys: input.signing.approvedOutputKeys,
+    rendererJobPrefix: "signing-inline",
+  });
 };
 
 const isRetryableReviewRunStatus = (status: DocumentGenerationRunRecord["status"]) => {
@@ -1836,18 +1989,43 @@ const ensureSigningState = async (input: {
   viewerRole?: string | null;
   actorContext?: { actorSupabaseId?: string; actorRole?: string };
 }) => {
+  let document = input.document;
   let signingState = await buildDocumentSigningState({
-    document: input.document,
+    document,
     ...(input.viewerRole !== undefined ? { viewerRole: input.viewerRole } : {}),
   });
 
   if (
-    input.document.status === "pending_signature" &&
+    document.status === "pending_signature" &&
+    signingState.reviewApproval?.approvedAt &&
+    !isDocumentIntakeLocked(document)
+  ) {
+    document = await updateDocument(document.id, {
+      intake_status: "submitted",
+      intake_submitted_at:
+        document.intake_submitted_at ?? signingState.reviewApproval.approvedAt,
+    });
+
+    logDocumentTrace("signing.intake_status_repaired", {
+      documentId: document.id,
+      repairedAt: new Date().toISOString(),
+      intakeStatus: document.intake_status,
+      intakeSubmittedAt: document.intake_submitted_at,
+    });
+
+    signingState = await buildDocumentSigningState({
+      document,
+      ...(input.viewerRole !== undefined ? { viewerRole: input.viewerRole } : {}),
+    });
+  }
+
+  if (
+    document.status === "pending_signature" &&
     signingState.reviewApproval?.approvedAt &&
     signingState.missingOutputKeys.length > 0
   ) {
     const creation = await createGenerationRunsForDocument({
-      document: input.document,
+      document,
       outputKeys: signingState.missingOutputKeys,
       reuseSatisfiedRunsCreatedAfter: signingState.reviewApproval.approvedAt,
       ...(input.actorContext ? { actorContext: input.actorContext } : {}),
@@ -1881,10 +2059,15 @@ const resolveSigningSignatureTarget = async (input: {
       signature.outputSignerId === input.outputSignerId &&
       signature.generationRunId === input.generationRunId,
   ) ?? null;
+  const signerRecord = await getDocumentOutputSignerById({
+    signerId: input.outputSignerId,
+    documentId: input.document.id,
+  });
 
   return {
     signingState,
     signatureTask,
+    signerRecord,
   };
 };
 
@@ -2580,6 +2763,11 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
   const updatedDocument = await updateDocument(document.id, {
     idn: assignedIdn,
     status: "pending_signature",
+    intake_status:
+      document.intake_status?.trim().toLowerCase() === "locked"
+        ? "locked"
+        : "submitted",
+    intake_submitted_at: document.intake_submitted_at ?? approvedAt,
   });
 
   await upsertDocumentSystemValues({
@@ -3759,23 +3947,45 @@ export const getSignatureFields = async (req: Request, res: Response) => {
 
   const fields = signerObligations
     .filter((signer) => signer.obligation_type === "signer")
-    .map((signer, index) => ({
-      id: `signature-field-${signer.id}`,
-      generationRunId: signer.generation_run_id,
-      partyName: signer.party_name,
-      partyRole: signer.party_role,
-      signingGroup: signer.signing_group,
-      pageNumber: 1,
-      x: 72,
-      y: 160 + index * 56,
-      width: 240,
-      height: 36,
-      required: signer.is_required,
-    }));
+    .map((signer, index) => {
+      const placement = parseSignatureFieldPlacement(signer.metadata.signatureField);
+
+      return {
+        id: `signature-field-${signer.id}`,
+        generationRunId: signer.generation_run_id,
+        partyName: signer.party_name,
+        partyRole: signer.party_role,
+        signingGroup: signer.signing_group,
+        pageNumber: placement?.pageNumber ?? 1,
+        x: placement?.signatureRect.x ?? 72,
+        y: placement?.signatureRect.y ?? 160 + index * 56,
+        width: placement?.signatureRect.width ?? 240,
+        height: placement?.signatureRect.height ?? 40,
+        required: signer.is_required,
+      };
+    });
 
   res.status(200).json({
     generationRunId: latestRunId,
     fields,
+  });
+};
+
+export const listSavedSignatures = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const savedSignatures = await listCapturedSignaturesForSigner({
+    signerId: document.owner_id,
+    limit: 24,
+  });
+
+  return res.status(200).json({
+    savedSignatures: await Promise.all(
+      savedSignatures.map((signature) => mapSavedSignatureResponse(signature)),
+    ),
   });
 };
 
@@ -3789,11 +3999,25 @@ export const getDocumentSigning = async (req: Request, res: Response) => {
     return;
   }
 
-  const signing = await ensureSigningState({
+  let signing = await ensureSigningState({
     document,
     viewerRole: req.user?.role ?? "member",
     actorContext: buildAuditActorContext(req),
   });
+
+  if (
+    signing.state === "preparing" &&
+    (await processQueuedSigningOutputsInline({
+      document,
+      signing,
+    }))
+  ) {
+    signing = await ensureSigningState({
+      document,
+      viewerRole: req.user?.role ?? "member",
+      actorContext: buildAuditActorContext(req),
+    });
+  }
 
   return res.status(200).json({
     document: mapDocumentResponse(document, req.user?.role ?? "member"),
@@ -3878,7 +4102,7 @@ export const signDocument = async (req: Request, res: Response) => {
       {
         systemKey: "signature_execution",
         value: signingExecution,
-        source: "review_approval",
+        source: "signature_execution",
         metadata: {
           confirmedAt,
         },
@@ -3905,6 +4129,78 @@ export const signDocument = async (req: Request, res: Response) => {
     signingExecution,
     completion: signing.completion,
   });
+};
+
+const mapCapturedSignatureResponse = async (signatureRecord: SignatureRecord) => {
+  const assetDownloadUrl = signatureRecord.storage_path
+    ? (await createSignatureDownloadUrl(signatureRecord.storage_path)).signedUrl
+    : null;
+
+  return {
+    signature: {
+      id: signatureRecord.id,
+      documentId: signatureRecord.document_id,
+      generationRunId: signatureRecord.generation_run_id,
+      outputSignerId: signatureRecord.document_output_signer_id,
+      status: signatureRecord.status,
+      captureMethod: signatureRecord.capture_method,
+      typedValue: signatureRecord.typed_value,
+      typedKind: signatureRecord.typed_kind,
+      storagePath: signatureRecord.storage_path,
+      assetDownloadUrl,
+      mimeType: signatureRecord.mime_type,
+      sizeBytes: signatureRecord.size_bytes,
+      capturedAt: signatureRecord.captured_at,
+    },
+  };
+};
+
+const completeSignatureCapture = async (input: {
+  document: DocumentRecord;
+  signatureTask: SigningSignatureResponse;
+  signatureRecord: SignatureRecord;
+  actorContext: { actorSupabaseId?: string; actorRole?: string };
+}) => {
+  await applySignatureCaptureToDocumentOutput({
+    document: input.document,
+    generationRunId: input.signatureTask.generationRunId,
+    outputSignerId: input.signatureTask.outputSignerId,
+    signatureRecord: input.signatureRecord,
+    actorContext: input.actorContext,
+  });
+
+  await recordAuditEvent({
+    ...input.actorContext,
+    entityType: "signature",
+    entityId: input.signatureRecord.id,
+    action: "member.signature_capture_completed",
+    metadata: {
+      signature_id: input.signatureRecord.id,
+      document_id: input.document.id,
+      generation_run_id: input.signatureTask.generationRunId,
+      output_signer_id: input.signatureTask.outputSignerId,
+      capture_method: input.signatureRecord.capture_method,
+      storage_path: input.signatureRecord.storage_path,
+      typed_value: input.signatureRecord.typed_value,
+      mime_type: input.signatureRecord.mime_type,
+      file_size: input.signatureRecord.size_bytes,
+    },
+  });
+
+  await recordAuditEvent({
+    ...input.actorContext,
+    entityType: "signature",
+    entityId: input.signatureRecord.id,
+    action: "system.signature_linked_to_document",
+    metadata: {
+      signature_id: input.signatureRecord.id,
+      document_id: input.document.id,
+      generation_run_id: input.signatureTask.generationRunId,
+      output_signer_id: input.signatureTask.outputSignerId,
+    },
+  });
+
+  return mapCapturedSignatureResponse(input.signatureRecord);
 };
 
 export const captureSignature = async (req: Request, res: Response) => {
@@ -3970,7 +4266,7 @@ export const captureSignature = async (req: Request, res: Response) => {
     },
   });
 
-  let signatureRecord;
+  let signatureRecord: SignatureRecord;
 
   if (parsed.data.captureMethod === "type") {
     signatureRecord = await createSignatureRecord({
@@ -3984,6 +4280,73 @@ export const captureSignature = async (req: Request, res: Response) => {
       typedKind: parsed.data.typedKind ?? "name",
       status: "captured",
       metadata,
+      capturedAt,
+    });
+  } else if (parsed.data.captureMethod === "saved") {
+    const savedSignatureId = parsed.data.savedSignatureId;
+    if (!savedSignatureId) {
+      return res.status(400).json({
+        error: "validation_error",
+        message: "Saved signature id is required",
+      });
+    }
+
+    const savedSignature = await getSignatureRecordById(savedSignatureId);
+
+    if (
+      !savedSignature ||
+      savedSignature.signer_id !== document.owner_id ||
+      savedSignature.status !== "captured"
+    ) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Saved signature not found",
+      });
+    }
+
+    if (
+      savedSignature.capture_method === "type" &&
+      (!savedSignature.typed_value || savedSignature.typed_value.trim().length === 0)
+    ) {
+      return res.status(409).json({
+        error: "conflict",
+        message: "Saved signature is missing its typed value",
+      });
+    }
+
+    if (
+      (savedSignature.capture_method === "upload" || savedSignature.capture_method === "draw") &&
+      !savedSignature.storage_path
+    ) {
+      return res.status(409).json({
+        error: "conflict",
+        message: "Saved signature asset could not be resolved",
+      });
+    }
+
+    signatureRecord = await createSignatureRecord({
+      signatureId,
+      documentId: document.id,
+      generationRunId: parsed.data.generationRunId,
+      documentOutputSignerId: parsed.data.outputSignerId,
+      signerId: document.owner_id,
+      storagePath: savedSignature.storage_path,
+      captureMethod:
+        savedSignature.capture_method === "upload" || savedSignature.capture_method === "draw"
+          ? savedSignature.capture_method
+          : "type",
+      typedValue: savedSignature.typed_value,
+      typedKind:
+        savedSignature.typed_kind === "name" || savedSignature.typed_kind === "initials"
+          ? savedSignature.typed_kind
+          : null,
+      mimeType: savedSignature.mime_type,
+      sizeBytes: savedSignature.size_bytes,
+      status: "captured",
+      metadata: {
+        ...metadata,
+        savedSignatureId: savedSignature.id,
+      },
       capturedAt,
     });
   } else {
@@ -4026,58 +4389,14 @@ export const captureSignature = async (req: Request, res: Response) => {
     });
   }
 
-  const assetDownloadUrl = signatureRecord.storage_path
-    ? (await createSignatureDownloadUrl(signatureRecord.storage_path)).signedUrl
-    : null;
-
-  await recordAuditEvent({
-    ...actorContext,
-    entityType: "signature",
-    entityId: signatureRecord.id,
-    action: "member.signature_capture_completed",
-    metadata: {
-      signature_id: signatureRecord.id,
-      document_id: document.id,
-      generation_run_id: signatureTask.generationRunId,
-      output_signer_id: signatureTask.outputSignerId,
-      capture_method: signatureRecord.capture_method,
-      storage_path: signatureRecord.storage_path,
-      typed_value: signatureRecord.typed_value,
-      mime_type: signatureRecord.mime_type,
-      file_size: signatureRecord.size_bytes,
-    },
-  });
-
-  await recordAuditEvent({
-    ...actorContext,
-    entityType: "signature",
-    entityId: signatureRecord.id,
-    action: "system.signature_linked_to_document",
-    metadata: {
-      signature_id: signatureRecord.id,
-      document_id: document.id,
-      generation_run_id: signatureTask.generationRunId,
-      output_signer_id: signatureTask.outputSignerId,
-    },
-  });
-
-  return res.status(201).json({
-    signature: {
-      id: signatureRecord.id,
-      documentId: signatureRecord.document_id,
-      generationRunId: signatureRecord.generation_run_id,
-      outputSignerId: signatureRecord.document_output_signer_id,
-      status: signatureRecord.status,
-      captureMethod: signatureRecord.capture_method,
-      typedValue: signatureRecord.typed_value,
-      typedKind: signatureRecord.typed_kind,
-      storagePath: signatureRecord.storage_path,
-      assetDownloadUrl,
-      mimeType: signatureRecord.mime_type,
-      sizeBytes: signatureRecord.size_bytes,
-      capturedAt: signatureRecord.captured_at,
-    },
-  });
+  return res.status(201).json(
+    await completeSignatureCapture({
+      document,
+      signatureTask,
+      signatureRecord,
+      actorContext,
+    }),
+  );
 };
 
 export const requestSignatureUpload = async (req: Request, res: Response) => {
@@ -4290,53 +4609,14 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
     capturedAt,
   });
 
-  await recordAuditEvent({
-    ...actorContext,
-    entityType: "signature",
-    entityId: updatedSignature.id,
-    action: "member.signature_capture_completed",
-    metadata: {
-      signature_id: updatedSignature.id,
-      document_id: document.id,
-      generation_run_id: parsed.data.generationRunId,
-      output_signer_id: parsed.data.outputSignerId,
-      storage_path: updatedSignature.storage_path,
-      file_size: objectMetadata.sizeBytes,
-      mime_type: normalizedMimeType,
-    },
-  });
-
-  await recordAuditEvent({
-    ...actorContext,
-    entityType: "signature",
-    entityId: updatedSignature.id,
-    action: "system.signature_linked_to_document",
-    metadata: {
-      signature_id: updatedSignature.id,
-      document_id: document.id,
-      generation_run_id: parsed.data.generationRunId,
-      output_signer_id: parsed.data.outputSignerId,
-    },
-  });
-
-  const assetDownloadUrl = updatedSignature.storage_path
-    ? (await createSignatureDownloadUrl(updatedSignature.storage_path)).signedUrl
-    : null;
-
-  res.status(200).json({
-    signature: {
-      id: updatedSignature.id,
-      documentId: document.id,
-      generationRunId: updatedSignature.generation_run_id,
-      outputSignerId: updatedSignature.document_output_signer_id,
-      storagePath: updatedSignature.storage_path,
-      assetDownloadUrl,
-      status: updatedSignature.status,
-      mimeType: updatedSignature.mime_type,
-      sizeBytes: updatedSignature.size_bytes,
-      capturedAt: updatedSignature.captured_at,
-    },
-  });
+  return res.status(200).json(
+    await completeSignatureCapture({
+      document,
+      signatureTask,
+      signatureRecord: updatedSignature,
+      actorContext,
+    }),
+  );
 };
 
 export const submitNotarization = async (req: Request, res: Response) => {

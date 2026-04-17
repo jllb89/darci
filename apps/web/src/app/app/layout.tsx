@@ -182,7 +182,7 @@ export default function AppLayout({
         {toast ? (
           <div className="pointer-events-none fixed inset-x-0 top-0 z-[80]">
             <div
-              className="w-full border-b border-white/10 bg-black px-6 py-2 text-white shadow-[0_16px_36px_rgba(0,0,0,0.24)] md:px-10"
+              className="w-full border-b border-black/10 bg-Color-Green px-6 py-2 text-Color-Neutral-Darkest shadow-[0_16px_36px_rgba(0,0,0,0.18)] md:px-10"
               role="status"
               style={{
                 animation:
@@ -191,7 +191,7 @@ export default function AppLayout({
                     : `darciToastSlideIn 260ms cubic-bezier(0.16,1,0.3,1) both`,
               }}
             >
-              <div className="flex items-center justify-center text-xs font-medium text-white">
+              <div className="flex items-center justify-center text-xs font-medium text-Color-Neutral-Darkest">
                 <span>{toast.message}</span>
               </div>
             </div>

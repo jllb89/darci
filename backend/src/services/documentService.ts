@@ -139,7 +139,7 @@ export type DocumentIntakeDraftRecord = {
 
 type DocumentIntakeRevisionEvent = "autosave" | "submit" | "system_migration";
 
-type SignatureRecord = {
+export type SignatureRecord = {
   id: string;
   document_id: string;
   generation_run_id: string | null;
@@ -264,7 +264,8 @@ export type DocumentSystemValueSource =
   | "derived_url"
   | "static_template_text"
   | "template_profile"
-  | "review_approval";
+  | "review_approval"
+  | "signature_execution";
 
 export type DocumentSystemValueRecord = {
   id: string;
@@ -686,6 +687,8 @@ export const updateDocument = async (
       | "product_flow_mode"
       | "selected_families"
       | "output_bundle"
+      | "intake_status"
+      | "intake_submitted_at"
     >
   >
 ) => {
@@ -1173,6 +1176,7 @@ export const saveDocumentIntakeDraft = async (
   input: SaveDocumentIntakeDraftInput,
 ): Promise<SaveDocumentIntakeDraftResult> => {
   const eventType = input.eventType ?? "autosave";
+  const existingDocument = await getDocumentById(input.documentId);
 
   const existing = await getDocumentIntakeDraft(input.documentId);
   if (existing && typeof input.expectedRevision === "number") {
@@ -1248,13 +1252,22 @@ export const saveDocumentIntakeDraft = async (
     intake_last_saved_at: string;
     intake_submitted_at?: string;
   } = {
-    intake_status: eventType === "submit" ? "submitted" : "draft",
+    intake_status:
+      eventType === "submit"
+        ? existingDocument?.intake_status?.trim().toLowerCase() === "locked"
+          ? "locked"
+          : "submitted"
+        : isDocumentIntakeLocked(existingDocument ?? {})
+          ? existingDocument?.intake_status?.trim().toLowerCase() === "locked"
+            ? "locked"
+            : "submitted"
+          : "draft",
     intake_schema_version: input.rulesSnapshotVersion,
     intake_last_saved_at: nowIso,
   };
 
-  if (eventType === "submit") {
-    documentUpdatePayload.intake_submitted_at = nowIso;
+  if (eventType === "submit" || isDocumentIntakeLocked(existingDocument ?? {})) {
+    documentUpdatePayload.intake_submitted_at = existingDocument?.intake_submitted_at ?? nowIso;
   }
 
   const { error: documentUpdateError } = await supabaseAdmin
@@ -1327,6 +1340,49 @@ export const listDocumentOutputSigners = async (input: {
   }
 
   return (data ?? []) as unknown as DocumentOutputSignerRecord[];
+};
+
+export const getDocumentOutputSignerById = async (input: {
+  signerId: string;
+  documentId: string;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_output_signers")
+    .select(documentOutputSignerSelectColumns)
+    .eq("id", input.signerId)
+    .eq("document_id", input.documentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data as DocumentOutputSignerRecord | null) ?? null;
+};
+
+export const updateDocumentOutputSignerMetadata = async (input: {
+  signerId: string;
+  documentId: string;
+  generationRunId: string;
+  metadata: Record<string, unknown>;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_output_signers")
+    .update({
+      metadata: input.metadata,
+    })
+    .eq("id", input.signerId)
+    .eq("document_id", input.documentId)
+    .eq("generation_run_id", input.generationRunId)
+    .select(documentOutputSignerSelectColumns)
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Failed to update document output signer metadata");
+  }
+
+  return data as DocumentOutputSignerRecord;
 };
 
 export const replaceDocumentOutputSigners = async (input: {
@@ -1616,6 +1672,21 @@ export const getSignatureById = async (
   return data as SignatureRecord | null;
 };
 
+export const getSignatureRecordById = async (signatureId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("signatures")
+    .select(signatureSelectColumns)
+    .eq("id", signatureId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as SignatureRecord | null;
+};
+
 export const updateSignatureRecord = async (
   signatureId: string,
   documentId: string,
@@ -1692,6 +1763,26 @@ export const listDocumentSignatures = async (input: {
   }
 
   const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as SignatureRecord[];
+};
+
+export const listCapturedSignaturesForSigner = async (input: {
+  signerId: string;
+  limit?: number;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("signatures")
+    .select(signatureSelectColumns)
+    .eq("signer_id", input.signerId)
+    .eq("status", "captured")
+    .order("captured_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(input.limit ?? 24);
 
   if (error) {
     throw new Error(error.message);

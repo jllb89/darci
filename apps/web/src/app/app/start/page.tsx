@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
@@ -35,6 +35,7 @@ import {
 import { buildMockFormValues } from "@/app/app/start/memberFormMockData";
 import {
   priorDocumentTypeOptions,
+  productFlowModeKeys,
   productFlowModesWithoutDocumentsColumn,
   productFlowStepFamilyScopes,
   productFlowStepLabels,
@@ -54,6 +55,7 @@ import type {
   DocumentIntakeBootstrapResponsePayload,
   DocumentIntakeDraftResponsePayload,
   DocumentIntakeSubmitResponsePayload,
+  DocumentSummary,
   MissingRequirement,
   ProductFlowModeDefinition,
   ProductFlowModesPayload,
@@ -186,10 +188,17 @@ type DraftSaveSnapshot = {
   formValues: Record<string, FormValue>;
 };
 
+type DocumentResponsePayload = {
+  document?: DocumentSummary;
+  message?: string;
+};
+
 export default function StartDocumentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { accessToken } = useStoredAuth();
   const { showToast } = useAppToast();
+  const resumeDocumentId = searchParams.get("documentId")?.trim() ?? "";
   const [productFlowModes, setProductFlowModes] = useState<ProductFlowModeDefinition[]>([]);
   const [selectedProductFlowMode, setSelectedProductFlowMode] = useState<
     ProductFlowModeKey | ""
@@ -261,6 +270,82 @@ export default function StartDocumentPage() {
 
     return formatJurisdictionDisplayLabel(selected.label, selected.code);
   }, [jurisdictions, selectedJurisdiction]);
+
+  useEffect(() => {
+    if (!accessToken || !resumeDocumentId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadResumeTarget = async () => {
+      try {
+        const [documentResponse, draftResponse] = await Promise.all([
+          fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${resumeDocumentId}`,
+            accessToken,
+            { cache: "no-store" },
+          ),
+          fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${resumeDocumentId}/intake-draft`,
+            accessToken,
+            { cache: "no-store" },
+          ),
+        ]);
+        const documentPayload = (await documentResponse.json().catch(() => null)) as
+          | DocumentResponsePayload
+          | null;
+        const draftPayload = (await draftResponse.json().catch(() => null)) as
+          | DocumentIntakeDraftResponsePayload
+          | null;
+
+        if (!documentResponse.ok || !documentPayload?.document) {
+          throw new Error(documentPayload?.message ?? "Failed to resume the existing draft.");
+        }
+
+        const nextModeRaw =
+          typeof draftPayload?.draft?.productFlowMode === "string"
+            ? draftPayload.draft.productFlowMode
+            : documentPayload.document.productFlowMode ?? "";
+        const nextJurisdiction =
+          typeof draftPayload?.draft?.jurisdiction === "string"
+            ? draftPayload.draft.jurisdiction
+            : documentPayload.document.jurisdiction ?? "";
+        const nextMode = productFlowModeKeys.includes(nextModeRaw as ProductFlowModeKey)
+          ? (nextModeRaw as ProductFlowModeKey)
+          : "";
+
+        if (cancelled) {
+          return;
+        }
+
+        setIsMockDataEnabled(false);
+
+        if (nextMode) {
+          setSelectedProductFlowMode(nextMode);
+        }
+
+        if (nextJurisdiction) {
+          setSelectedJurisdiction(nextJurisdiction);
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const message =
+          error instanceof Error ? error.message : "Failed to resume the existing draft.";
+        setErrorMessage(message);
+        showToast({ tone: "error", message });
+      }
+    };
+
+    void loadResumeTarget();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, resumeDocumentId, showToast]);
 
   const selectedProductFlowModeDefinition = useMemo(() => {
     if (!selectedProductFlowMode) {
@@ -681,35 +766,56 @@ export default function StartDocumentPage() {
         });
 
         let bootstrapPayload: DocumentIntakeBootstrapResponsePayload | null = null;
+        let resumeDraftPayload: DocumentIntakeDraftResponsePayload | null = null;
         let bootstrapErrorMessage: string | null = null;
 
         try {
-          const bootstrapResponse = await fetchWithTokenRefresh(
-            `${apiBaseUrl}/documents/intake/bootstrap`,
-            accessToken,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
+          if (resumeDocumentId) {
+            const draftResponse = await fetchWithTokenRefresh(
+              `${apiBaseUrl}/documents/${resumeDocumentId}/intake-draft`,
+              accessToken,
+              {
+                cache: "no-store",
               },
-              body: JSON.stringify({
-                productFlowMode: selectedProductFlowMode,
-                jurisdiction: selectedJurisdiction,
-                rulesSnapshotVersion: "member_form_rules_contract_v1",
-                resumeLatestDraft: false,
-              }),
-            },
-          );
-
-          bootstrapPayload = (await bootstrapResponse.json().catch(() => null)) as
-            | DocumentIntakeBootstrapResponsePayload
-            | null;
-
-          if (!bootstrapResponse.ok || !bootstrapPayload?.document?.id) {
-            throw new Error(
-              bootstrapPayload?.message ||
-                "Failed to initialize intake draft persistence",
             );
+
+            resumeDraftPayload = (await draftResponse.json().catch(() => null)) as
+              | DocumentIntakeDraftResponsePayload
+              | null;
+
+            if (!draftResponse.ok) {
+              throw new Error(
+                resumeDraftPayload?.message ?? "Failed to load the existing intake draft",
+              );
+            }
+          } else {
+            const bootstrapResponse = await fetchWithTokenRefresh(
+              `${apiBaseUrl}/documents/intake/bootstrap`,
+              accessToken,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  productFlowMode: selectedProductFlowMode,
+                  jurisdiction: selectedJurisdiction,
+                  rulesSnapshotVersion: "member_form_rules_contract_v1",
+                  resumeLatestDraft: false,
+                }),
+              },
+            );
+
+            bootstrapPayload = (await bootstrapResponse.json().catch(() => null)) as
+              | DocumentIntakeBootstrapResponsePayload
+              | null;
+
+            if (!bootstrapResponse.ok || !bootstrapPayload?.document?.id) {
+              throw new Error(
+                bootstrapPayload?.message ||
+                  "Failed to initialize intake draft persistence",
+              );
+            }
           }
         } catch (error) {
           bootstrapErrorMessage =
@@ -724,7 +830,34 @@ export default function StartDocumentPage() {
 
         setMemberForm(payload.memberForm);
 
-        if (bootstrapPayload?.document?.id) {
+        if (resumeDocumentId) {
+          const remoteDraft = resumeDraftPayload?.draft;
+          const remoteValues = sanitizeFormValuesRecord(remoteDraft?.answers ?? {});
+          const nextFormValues = {
+            ...initialValues,
+            ...remoteValues,
+          };
+          const nextCurrentFormStep = coerceDraftFormStep(
+            remoteDraft?.currentStep,
+            selectedProductFlowMode,
+          );
+
+          setFormValues(nextFormValues);
+          setCurrentFormStep(nextCurrentFormStep);
+          syncDraftDocumentId(resumeDocumentId);
+          syncDraftRevision(
+            typeof remoteDraft?.revision === "number" ? remoteDraft.revision : null,
+          );
+          setDraftUpdatedAt(
+            typeof remoteDraft?.updatedAt === "string" ? remoteDraft.updatedAt : null,
+          );
+          setDraftSaveNotice(null);
+          setIsSavingDraft(false);
+          lastServerDraftSignatureRef.current = buildDraftSignature(
+            nextCurrentFormStep,
+            nextFormValues,
+          );
+        } else if (bootstrapPayload?.document?.id) {
           const remoteDraft = bootstrapPayload.draft;
           const remoteValues = sanitizeFormValuesRecord(remoteDraft?.answers ?? {});
           const nextFormValues = {
@@ -808,13 +941,20 @@ export default function StartDocumentPage() {
     selectedJurisdiction,
     selectedJurisdictionLabel,
     selectedProductFlowMode,
+    resumeDocumentId,
     showToast,
     syncDraftDocumentId,
     syncDraftRevision,
   ]);
 
   useEffect(() => {
-    if (!isMockDataEnabled || !memberForm || !selectedJurisdiction || isLoadingMemberForm) {
+    if (
+      !isMockDataEnabled ||
+      !memberForm ||
+      !selectedJurisdiction ||
+      isLoadingMemberForm ||
+      resumeDocumentId
+    ) {
       return;
     }
 
@@ -828,6 +968,7 @@ export default function StartDocumentPage() {
     isLoadingMemberForm,
     isMockDataEnabled,
     memberForm,
+    resumeDocumentId,
     selectedJurisdiction,
     selectedJurisdictionLabel,
   ]);
