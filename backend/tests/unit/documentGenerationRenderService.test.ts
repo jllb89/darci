@@ -130,9 +130,13 @@ describe("documentGenerationRenderService", () => {
     expect(rendered).not.toContain("Pending completion");
   });
 
-  it("normalizes preview notarial text and exports the preview watermark copy", () => {
+  it("omits the California notarial acknowledgment block from generated preview output", () => {
     const rendered = renderLegalTemplateText({
-      templateSource: "{{CA_Notarial_Acknowledgment_Block}}",
+      templateSource: [
+        "Before the acknowledgment block.",
+        "{{CA_Notarial_Acknowledgment_Block}}",
+        "After the acknowledgment block.",
+      ].join("\n"),
       placeholders: {
         CA_Notarial_Acknowledgment_Block:
           "State of California\nCounty of [County pending]\nOn [Day pending] day of [Month pending] [Year pending], before me, [Notary pending].",
@@ -142,10 +146,29 @@ describe("documentGenerationRenderService", () => {
     const visible = stripRenderControlTokens(rendered);
 
     expect(PREVIEW_WATERMARK_TEXT).toBe("Preview document only, not official");
-    expect(visible).toContain("County of ________________");
-    expect(visible).toContain("before me, ________________.");
-    expect(rendered).not.toContain("[County pending]");
-    expect(rendered).not.toContain("[Notary pending]");
+    expect(visible).toContain("Before the acknowledgment block.");
+    expect(visible).toContain("After the acknowledgment block.");
+    expect(visible).not.toContain("State of California");
+    expect(visible).not.toContain("County of");
+  });
+
+  it("prepends the POA title before the first notice block", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "Notice: This power of attorney is effective immediately.",
+        "The principal designates the agent below.",
+      ].join("\n"),
+      placeholders: {},
+      documentKey: "poa_general",
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).toContain("Power of Attorney");
+    expect(visible.indexOf("Power of Attorney")).toBeLessThan(
+      visible.indexOf("Notice: This power of attorney is effective immediately."),
+    );
+    expect(rendered.startsWith("# Power of Attorney")).toBe(true);
   });
 
   it("marks trustee powers using the selected matrix", () => {

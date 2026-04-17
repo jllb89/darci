@@ -1022,8 +1022,6 @@ const previewFallbackCopy: Record<string, string> = {
   "Trust.No": "Assigned after review approval",
   DdpoaNo: "Assigned after review approval",
   "QR Code": "Verification URL will be assigned after review approval.",
-  CA_Notarial_Acknowledgment_Block:
-    "California notarial acknowledgment will be completed during notarization.",
   County: "________________",
   Day: "____",
   Month: "________________",
@@ -1047,16 +1045,6 @@ const placeholderCanonicalKeyAliases: Record<string, string> = {
   "SpecialInstructions[text 6400]": "special_instructions",
   "all agents must act jointly to exercise these powers *OR* any may exercise these powers separately":
     "agent_signature_authority",
-};
-
-const normalizeAcknowledgmentPreviewText = (value: string) => {
-  return value
-    .replaceAll("[Acknowledgers pending]", "________________")
-    .replaceAll("[County pending]", "________________")
-    .replaceAll("[Day pending]", "____")
-    .replaceAll("[Month pending]", "________________")
-    .replaceAll("[Year pending]", "________")
-    .replaceAll("[Notary pending]", "________________");
 };
 
 const resolveIndexedPriorDocumentValue = (
@@ -1173,12 +1161,25 @@ const formatResolvedPlaceholderText = (token: string, value: unknown) => {
     return url ? `Verification URL: ${url}` : null;
   }
 
-  if (token === "CA_Notarial_Acknowledgment_Block") {
-    const block = formatRenderableValue(value);
-    return block ? normalizeAcknowledgmentPreviewText(block) : null;
+  return formatRenderableValue(value);
+};
+
+const prependDocumentTitleIfMissing = (renderedTemplate: string, documentKey?: string) => {
+  const trimmed = renderedTemplate.trim();
+
+  if (documentKey !== "poa_general") {
+    return trimmed;
   }
 
-  return formatRenderableValue(value);
+  if (!trimmed) {
+    return "# Power of Attorney";
+  }
+
+  if (/^#{1,3}\s+(?:DARCi\s+)?Power of Attorney\b/im.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `# Power of Attorney\n\n${trimmed}`;
 };
 
 type RenderTransformContext = {
@@ -1745,6 +1746,7 @@ export const renderLegalTemplateText = (input: {
   canonicalAnswers?: CanonicalAnswers;
   selectionCatalogs?: Record<string, SelectionCatalog>;
   isPreview: boolean;
+  documentKey?: string;
 }) => {
   const normalizedTemplateSource = unescapeTemplateSource(input.templateSource);
   const placeholderLookup = new Map(
@@ -1758,6 +1760,11 @@ export const renderLegalTemplateText = (input: {
     /{{\s*([^{}]+?)\s*}}|<<\s*([^<>]+?)\s*>>/g,
     (_match, curlyToken?: string, angleToken?: string) => {
       const token = normalizePlaceholderToken(curlyToken ?? angleToken ?? "");
+
+      if (token === "CA_Notarial_Acknowledgment_Block") {
+        return "";
+      }
+
       const placeholderValue = placeholderLookup.get(token);
       const resolvedPlaceholder =
         placeholderValue === undefined ? null : formatResolvedPlaceholderText(token, placeholderValue);
@@ -1786,15 +1793,18 @@ export const renderLegalTemplateText = (input: {
     .map((line) => normalizeTemplateLine(line))
     .filter((line) => !shouldOmitRenderedLine(line));
 
-  return squashBlankLines(
-    transformRenderedLines(normalizedLines, {
-      canonicalAnswers: input.canonicalAnswers ?? {},
-      selectionCatalogs: input.selectionCatalogs ?? {},
-    }),
-  )
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return prependDocumentTitleIfMissing(
+    squashBlankLines(
+      transformRenderedLines(normalizedLines, {
+        canonicalAnswers: input.canonicalAnswers ?? {},
+        selectionCatalogs: input.selectionCatalogs ?? {},
+      }),
+    )
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+    input.documentKey,
+  );
 };
 
 const buildRenderedPdf = async (input: {
@@ -1868,6 +1878,7 @@ const buildRenderedPdf = async (input: {
     canonicalAnswers,
     selectionCatalogs,
     isPreview,
+    documentKey: input.run.document_key,
   });
 
   renderTemplateBlocks(pdf, buildTemplateBlocks(renderedTemplate), fonts);

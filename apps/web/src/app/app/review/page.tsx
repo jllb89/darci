@@ -201,6 +201,26 @@ export default function ReviewPage() {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [previewErrorMessage, setPreviewErrorMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!documentId) {
+      return;
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const mainElement = document.querySelector("main");
+      if (mainElement instanceof HTMLElement) {
+        mainElement.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [documentId]);
+
   const fetchReview = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!accessToken || !documentId) {
@@ -443,9 +463,25 @@ export default function ReviewPage() {
     payload?.review?.outputs.find((output) => output.outputKey === selectedOutputKey) ??
     payload?.review?.outputs[0] ??
     null;
+  const review = payload?.review ?? null;
+
+  const hasActivePendingOutputs = (review?.pendingOutputs ?? []).some((output) =>
+    isActiveGenerationStatus(output.status),
+  );
+  const shouldDeferPreviewUntilAllReady = review
+    ? !review.allVisibleOutputsReady &&
+      hasActivePendingOutputs &&
+      review.outputs.length + review.pendingOutputs.length > 1
+    : false;
+  const selectedPreviewOutputKey = shouldDeferPreviewUntilAllReady
+    ? null
+    : selectedOutput?.outputKey ?? null;
+  const selectedPreviewDownloadUrl = shouldDeferPreviewUntilAllReady
+    ? null
+    : selectedOutput?.downloadUrl ?? null;
 
   useEffect(() => {
-    if (!selectedOutput) {
+    if (!selectedPreviewOutputKey || !selectedPreviewDownloadUrl) {
       setPreviewUrl((currentUrl) => {
         if (currentUrl) {
           URL.revokeObjectURL(currentUrl);
@@ -473,7 +509,7 @@ export default function ReviewPage() {
 
     const loadPreview = async () => {
       try {
-        const response = await fetch(selectedOutput.downloadUrl, {
+        const response = await fetch(selectedPreviewDownloadUrl, {
           cache: "no-store",
           signal: abortController.signal,
         });
@@ -515,7 +551,7 @@ export default function ReviewPage() {
       isActive = false;
       abortController.abort();
     };
-  }, [selectedOutput]);
+  }, [selectedPreviewDownloadUrl, selectedPreviewOutputKey]);
 
   const readyOutputCount = payload?.review?.outputs.length ?? 0;
   const blockedOutputCount = (payload?.review?.pendingOutputs ?? []).filter((output) =>
@@ -557,6 +593,23 @@ export default function ReviewPage() {
     }
 
     if (selectedOutput) {
+      if (shouldDeferPreviewUntilAllReady) {
+        return (
+          <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
+            <span
+              className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
+              style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
+            />
+            <p className="mt-4 text-sm font-medium text-Color-Scheme-1-Text">
+              Preparing your full review set.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-Color-Neutral">
+              The preview will appear once every document in this package is ready.
+            </p>
+          </div>
+        );
+      }
+
       if (isLoadingPreview && !previewSourceUrl) {
         return (
           <div className="flex h-[72vh] min-h-[560px] flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center">
@@ -648,8 +701,10 @@ export default function ReviewPage() {
           </div>
         </div>
 
+        <div aria-hidden className="h-px w-full" />
         <div
-          className="relative z-[500]"
+          className="sticky top-[-4rem] z-[500]"
+          data-process-band-sticky-host
           style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
         >
           <ProcessBand currentStep={payload?.review?.reviewApproval ? 3 : 2} />

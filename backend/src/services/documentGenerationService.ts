@@ -1137,45 +1137,6 @@ const isMissingRenderableValue = (value: unknown) => {
   return false;
 };
 
-const renderCaliforniaAcknowledgmentBlock = (input: {
-  templateValue: unknown;
-  signerObligations: DocumentOutputSignerUpsertInput[];
-  documentKey: string;
-}) => {
-  const template = asTrimmedString(input.templateValue);
-  if (!template) {
-    return null;
-  }
-
-  const acknowledgers = input.signerObligations
-    .filter((signer) => signer.obligation_type === "acknowledger")
-    .map((signer) => signer.party_name)
-    .filter((name) => name.trim().length > 0)
-    .join(", ");
-
-  const renderedBlock = template
-    .replaceAll("{{Acknowledgers}}", acknowledgers || "[Acknowledgers pending]")
-    .replaceAll("{{County}}", "[County pending]")
-    .replaceAll("{{Day}}", "[Day pending]")
-    .replaceAll("{{Month}}", "[Month pending]")
-    .replaceAll("{{Year}}", "[Year pending]")
-    .replaceAll("{{NotaryName}}", "[Notary pending]");
-
-  if (
-    input.documentKey === "poa_general" &&
-    !/DARCi Power of Attorney/i.test(renderedBlock)
-  ) {
-    return [
-      "## DARCi Power of Attorney",
-      "(California Probate Code Section 4401)",
-      "",
-      renderedBlock,
-    ].join("\n");
-  }
-
-  return renderedBlock;
-};
-
 const resolvePlaceholderValue = (input: {
   binding: DocumentTemplateBinding;
   canonicalAnswers: CanonicalAnswers;
@@ -1199,11 +1160,7 @@ const resolvePlaceholderValue = (input: {
     }
 
     if (input.binding.placeholder === "CA_Notarial_Acknowledgment_Block") {
-      return renderCaliforniaAcknowledgmentBlock({
-        templateValue: input.systemValues[systemKey],
-        signerObligations: input.signerObligations,
-        documentKey: input.documentKey,
-      });
+      return null;
     }
 
     return input.systemValues[systemKey] ?? null;
@@ -1327,6 +1284,10 @@ export const buildGenerationRunBlockers = (input: {
 
   for (const binding of input.extractionDocument.templateBindings ?? []) {
     if (!binding.required) {
+      continue;
+    }
+
+    if (binding.placeholder === "CA_Notarial_Acknowledgment_Block") {
       continue;
     }
 

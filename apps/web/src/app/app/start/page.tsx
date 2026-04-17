@@ -78,7 +78,6 @@ import {
   getSectionMicrocopy,
   hasOriginatingPriorDocumentType,
   isNameInList,
-  isProductFlowModeKey,
   isProductFlowStepKey,
   isTaxIdOwnerSelectionBoundToTrustmakers,
   isTrusteeListField,
@@ -127,12 +126,30 @@ const fetchWithTokenRefresh = async (
   }
 };
 
-const coerceDraftFormStep = (value: unknown): FormStep => {
+const getDefaultFormStep = (
+  productFlowMode?: ProductFlowModeKey | "" | null,
+): FormStep => {
+  return productFlowMode === "trust_bundle"
+    ? "trust_requirements"
+    : "general_information";
+};
+
+const coerceDraftFormStep = (
+  value: unknown,
+  productFlowMode?: ProductFlowModeKey | "" | null,
+): FormStep => {
+  const defaultFormStep = getDefaultFormStep(productFlowMode);
+
   if (typeof value !== "string") {
-    return "general_information";
+    return defaultFormStep;
   }
 
   const normalized = value.trim();
+
+  if (normalized === "general_information" && productFlowMode === "trust_bundle") {
+    return "trust_requirements";
+  }
+
   if (isProductFlowStepKey(normalized)) {
     return normalized;
   }
@@ -141,7 +158,7 @@ const coerceDraftFormStep = (value: unknown): FormStep => {
     return "trust_requirements";
   }
 
-  return "general_information";
+  return defaultFormStep;
 };
 
 const buildDraftSignature = (
@@ -152,19 +169,6 @@ const buildDraftSignature = (
     currentFormStep,
     formValues,
   });
-};
-
-const formatDraftUpdatedAtLabel = (value: string | null | undefined) => {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toLocaleString();
 };
 
 type LeaveAction =
@@ -214,8 +218,8 @@ export default function StartDocumentPage() {
   const [currentFormStep, setCurrentFormStep] = useState<FormStep>("general_information");
   const [activeDropzoneFieldKey, setActiveDropzoneFieldKey] = useState<string | null>(null);
   const [draftDocumentId, setDraftDocumentId] = useState<string | null>(null);
-  const [draftRevision, setDraftRevision] = useState<number | null>(null);
-  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
+  const [, setDraftRevision] = useState<number | null>(null);
+  const [, setDraftUpdatedAt] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [, setDraftSaveNotice] = useState<string | null>(null);
   const allowLeavingRef = useRef(false);
@@ -355,10 +359,10 @@ export default function StartDocumentPage() {
                 ...snapshot.formValues,
                 ...sanitizeFormValuesRecord(latestPayload.draft.answers),
               };
-              const syncedCurrentFormStep =
-                snapshot.productFlowMode === "trust_bundle"
-                  ? "general_information"
-                  : coerceDraftFormStep(latestPayload.draft.currentStep);
+              const syncedCurrentFormStep = coerceDraftFormStep(
+                latestPayload.draft.currentStep,
+                snapshot.productFlowMode,
+              );
 
               setFormValues(mergedFormValues);
               setCurrentFormStep(syncedCurrentFormStep);
@@ -727,10 +731,10 @@ export default function StartDocumentPage() {
             ...initialValues,
             ...remoteValues,
           };
-          const nextCurrentFormStep =
-            selectedProductFlowMode === "trust_bundle"
-              ? "general_information"
-              : coerceDraftFormStep(remoteDraft?.currentStep);
+          const nextCurrentFormStep = coerceDraftFormStep(
+            remoteDraft?.currentStep,
+            selectedProductFlowMode,
+          );
 
           setFormValues(nextFormValues);
           setCurrentFormStep(nextCurrentFormStep);
@@ -754,7 +758,7 @@ export default function StartDocumentPage() {
           const nextFormValues = {
             ...initialValues,
           };
-          const nextCurrentFormStep = "general_information";
+          const nextCurrentFormStep = getDefaultFormStep(selectedProductFlowMode);
 
           setFormValues(nextFormValues);
           setCurrentFormStep(nextCurrentFormStep);
@@ -848,6 +852,9 @@ export default function StartDocumentPage() {
 
   const configuredWizardStepKeys = useMemo<FormStep[]>(() => {
     const modeDefinition = selectedProductFlowModeDefinition ?? resolvedProductFlowMode;
+    const fallbackStepOrder = selectedProductFlowMode
+      ? productFlowStepOrderByMode[selectedProductFlowMode]
+      : productFlowStepOrderByMode.trust_bundle;
 
     const configuredKeys = [...(modeDefinition?.ui ?? [])]
       .filter((entry) => entry.layoutMode === "wizard-step")
@@ -855,15 +862,15 @@ export default function StartDocumentPage() {
       .map((entry) => entry.groupKey)
       .filter((groupKey): groupKey is FormStep => isProductFlowStepKey(groupKey));
 
+    if (selectedProductFlowMode === "trust_bundle") {
+      return fallbackStepOrder;
+    }
+
     if (configuredKeys.length > 0) {
       return [...new Set(configuredKeys)];
     }
 
-    if (selectedProductFlowMode) {
-      return productFlowStepOrderByMode[selectedProductFlowMode];
-    }
-
-    return productFlowStepOrderByMode.trust_bundle;
+    return fallbackStepOrder;
   }, [resolvedProductFlowMode, selectedProductFlowMode, selectedProductFlowModeDefinition]);
 
   const formStepDefinitions = useMemo<ProductFlowStepDefinition[]>(() => {
@@ -968,8 +975,8 @@ export default function StartDocumentPage() {
   const hasNextFormStep = nextFormStep !== null;
 
   useEffect(() => {
-    setCurrentFormStep("general_information");
-  }, [selectedJurisdiction]);
+    setCurrentFormStep(getDefaultFormStep(selectedProductFlowMode));
+  }, [selectedJurisdiction, selectedProductFlowMode]);
 
   useEffect(() => {
     if (formStepDefinitions.length === 0) {
@@ -977,9 +984,11 @@ export default function StartDocumentPage() {
     }
 
     if (!formStepDefinitions.some((stepDefinition) => stepDefinition.stepKey === currentFormStep)) {
-      setCurrentFormStep(formStepDefinitions[0]?.stepKey ?? "general_information");
+      setCurrentFormStep(
+        formStepDefinitions[0]?.stepKey ?? getDefaultFormStep(selectedProductFlowMode),
+      );
     }
-  }, [currentFormStep, formStepDefinitions]);
+  }, [currentFormStep, formStepDefinitions, selectedProductFlowMode]);
 
   useEffect(() => {
     if (!selectedProductFlowMode || !selectedJurisdiction || !memberForm) {
@@ -1746,7 +1755,7 @@ export default function StartDocumentPage() {
     setIsMockDataEnabled(true);
     setMemberForm(null);
     setFormValues({});
-    setCurrentFormStep("general_information");
+    setCurrentFormStep(getDefaultFormStep(normalizedMode));
     setMissingRequirements([]);
     setErrorMessage(null);
     setSubmissionErrorMessage(null);
@@ -1759,7 +1768,7 @@ export default function StartDocumentPage() {
       setIsMockDataEnabled(true);
       setMemberForm(null);
       setFormValues({});
-      setCurrentFormStep("general_information");
+      setCurrentFormStep(getDefaultFormStep(selectedProductFlowMode));
       setMissingRequirements([]);
       setErrorMessage(null);
       setSubmissionErrorMessage(null);
@@ -1960,10 +1969,6 @@ export default function StartDocumentPage() {
           {!hasFormatError && (missingEmail || missingPhone) ? (
             <div className="text-xs text-Color-Neutral">Email and phone are required.</div>
           ) : null}
-
-          <div className="text-xs text-Color-Neutral">
-            Select the country flag and dialing code, then add the direct phone number.
-          </div>
         </div>
       );
     }
@@ -2372,7 +2377,7 @@ export default function StartDocumentPage() {
                     </label>
                   ) : isTrusteeField ? (
                     <div className="text-xs text-Color-Neutral">
-                      Choose "Named signing trustee" in Signing Authority to select a specific signer.
+                      Choose &quot;Named signing trustee&quot; in Signing Authority to select a specific signer.
                     </div>
                   ) : (
                     <div className="text-xs text-Color-Neutral">Email and phone are required.</div>
@@ -2421,7 +2426,7 @@ export default function StartDocumentPage() {
 
           {namedSignerModeConflict ? (
             <div className="border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              Clear trustee signer selections or switch Signing Authority to "Named signing trustee".
+              Clear trustee signer selections or switch Signing Authority to &quot;Named signing trustee&quot;.
             </div>
           ) : null}
 
@@ -3027,8 +3032,10 @@ export default function StartDocumentPage() {
             </div>
           </div>
 
+          <div aria-hidden className="h-px w-full" />
           <div
-            className="relative z-[500]"
+            className="sticky top-[-4rem] z-[500]"
+            data-process-band-sticky-host
             style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
           >
             <ProcessBand />
@@ -3145,19 +3152,31 @@ export default function StartDocumentPage() {
                   ) : null}
 
                   {isLoadingMemberForm ? (
-                    <div className="text-sm text-Color-Neutral">Loading member form requirements...</div>
+                    <div className="text-sm text-Color-Neutral">Loading requirements...</div>
                   ) : memberForm ? (
                     <div className="space-y-4">
                       {activeFormStep ? (
-                        <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                          {activeFormStep.label}
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                            {activeFormStep.label}
+                          </div>
+                          {selectedModeKeyForLayout === "trust_bundle" &&
+                          activeFormStep.stepKey === "poa_requirements" ? (
+                            <div className="text-xs text-Color-Neutral">
+                              These POA details apply to the companion power of attorney included with this trust package.
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
 
                       {displayedPrimarySections.map((section) => renderSection(section))}
 
                       {hasPreviousFormStep || hasNextFormStep ? (
-                        <div className="flex flex-wrap items-center gap-2 pt-2">
+                        <div
+                          className={`flex flex-wrap items-center gap-2 pt-2 ${
+                            hasPreviousFormStep ? "justify-between" : "justify-end"
+                          }`}
+                        >
                           {hasPreviousFormStep ? (
                             <button
                               type="button"
@@ -3183,7 +3202,7 @@ export default function StartDocumentPage() {
                               className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border/40 bg-Color-Scheme-1-Text px-4 py-2 text-sm font-medium text-white transition hover:bg-Color-Scheme-1-Text/90"
                               onClick={continueToNextSectionGroup}
                             >
-                              Continue to {nextFormStep?.label}
+                              {hasPreviousFormStep ? `Continue to ${nextFormStep?.label}` : "Continue"}
                               <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20">
                                 <path
                                   d="m7.5 5.5 5 4.5-5 4.5"
@@ -3232,7 +3251,10 @@ export default function StartDocumentPage() {
             </div>
 
             {shouldRenderDocumentsColumn ? (
-              <div className="relative z-0 space-y-4 overflow-visible bg-white p-4 lg:sticky lg:top-20 lg:self-start">
+              <div
+                className="relative z-0 space-y-4 overflow-visible bg-white p-4 lg:sticky lg:self-start"
+                style={{ top: "var(--darci-process-band-follow-offset, 5rem)" }}
+              >
               {!selectedJurisdiction ? (
                 <div className="rounded-md border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-xs text-Color-Neutral">
                   Select a jurisdiction first to unlock document uploads.

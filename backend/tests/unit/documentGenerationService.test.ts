@@ -144,4 +144,30 @@ describe("documentGenerationService blockers", () => {
       }),
     ]);
   });
+
+  it("ignores California notarial acknowledgment placeholders during review generation", () => {
+    const blockers = buildGenerationRunBlockers({
+      jurisdiction: "US-CA",
+      outputKey: "poa_document",
+      documentKey: "poa_general",
+      templateResolved: true,
+      templateArtifact: { id: "artifact-1" } as never,
+      extractionDocument: buildExtractionDocument([
+        {
+          placeholder: "CA_Notarial_Acknowledgment_Block",
+          description: "California notarial acknowledgment block.",
+          required: true,
+          source: "system",
+          status: "system_value",
+        },
+      ]),
+      signerObligations,
+      placeholderValues: {
+        CA_Notarial_Acknowledgment_Block: null,
+      },
+      allowReviewDeferredSystemValues: true,
+    });
+
+    expect(blockers).toEqual([]);
+  });
 });

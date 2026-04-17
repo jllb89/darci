@@ -23,7 +23,7 @@ export const productFlowStepLabels: Record<FormStep, string> = {
 export const productFlowStepSectionKeys: Record<FormStep, MemberFacingSectionKey[]> = {
   general_information: ["basic_info"],
   poa_requirements: ["people", "authority", "execution"],
-  trust_requirements: ["people", "authority", "advanced"],
+  trust_requirements: ["basic_info", "people", "authority", "advanced"],
 };
 
 export const productFlowStepFamilyScopes: Record<FormStep, FieldFamilyScope[]> = {
@@ -34,7 +34,7 @@ export const productFlowStepFamilyScopes: Record<FormStep, FieldFamilyScope[]> =
 
 export const productFlowStepOrderByMode: Record<ProductFlowModeKey, FormStep[]> = {
   poa_only: ["general_information", "poa_requirements"],
-  trust_bundle: ["general_information", "poa_requirements", "trust_requirements"],
+  trust_bundle: ["trust_requirements", "poa_requirements"],
   notarize_document: ["general_information", "poa_requirements"],
 };
 
