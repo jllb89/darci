@@ -44,6 +44,28 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
     newDocumentHref: "/app/start",
     showNewDocument: true,
   },
+  pro: {
+    primaryItems: [
+      { label: "Start", href: "/app", icon: "start" },
+      {
+        label: "My documents",
+        href: "/app/documents",
+        icon: "documents",
+        sectionLabel: "Documents",
+      },
+      { label: "Verify a document", href: "/app/verification", icon: "verify" },
+      {
+        label: "Notifications",
+        href: "/app/notifications",
+        icon: "notifications",
+        sectionLabel: "Activity",
+      },
+      { label: "Requests", href: "/app/requests", icon: "requests" },
+    ],
+    settingsHref: "/app/settings",
+    newDocumentHref: "/app/start",
+    showNewDocument: true,
+  },
   notary: {
     primaryItems: [
       { label: "Start", href: "/app/notary", icon: "start" },
@@ -195,8 +217,10 @@ type AppSidebarProps = {
   pathname: string;
   role: StoredUserRole;
   availableRoles: StoredUserRole[];
+  onSwitchRole?: (role: StoredUserRole) => void;
   onLogout?: () => void;
   isLoggingOut?: boolean;
+  isSwitchingRole?: boolean;
   profileName: string;
   profileEmail: string;
 };
@@ -205,8 +229,10 @@ export default function AppSidebar({
   pathname,
   role,
   availableRoles,
+  onSwitchRole,
   onLogout,
   isLoggingOut = false,
+  isSwitchingRole = false,
   profileName,
   profileEmail,
 }: AppSidebarProps) {
@@ -315,14 +341,24 @@ export default function AppSidebar({
             <div className="rounded-md border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-2.5 py-2">
               {rolesToDisplay.length > 0 ? (
                 <>
+                  <div className="px-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-Color-Neutral/80">
+                    Switch profile
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
                     {rolesToDisplay.map((allowedRole) => (
-                      <span
+                      <button
                         key={allowedRole}
-                        className="rounded-full bg-Color-Neutral-Lighter px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.06em] text-Color-Scheme-1-Text"
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.06em] transition-colors duration-200 ease-in-out ${
+                          allowedRole === role
+                            ? "bg-Color-Scheme-1-Text text-white"
+                            : "bg-Color-Neutral-Lighter text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lighter/70"
+                        }`}
+                        disabled={isSwitchingRole || allowedRole === role}
+                        onClick={() => onSwitchRole?.(allowedRole)}
+                        type="button"
                       >
                         {allowedRole}
-                      </span>
+                      </button>
                     ))}
                   </div>
                   <div className="my-2 border-t border-Color-Scheme-1-Border/40" />

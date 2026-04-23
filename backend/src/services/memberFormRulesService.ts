@@ -440,6 +440,49 @@ export const applyTemplateDrivenRequiredness = async (
   };
 };
 
+const MANDATORY_MEMBER_CONTACT_FIELD_KEYS = new Set([
+  "principal_contact",
+  "agent_contact",
+  "grantors",
+  "trustees",
+  "successor_trustees",
+]);
+
+export const applyMandatoryContactRequiredness = (
+  contract: InputRequirementsContract,
+): InputRequirementsContract => {
+  let changed = false;
+
+  const sections = contract.sections.map((section) => ({
+    ...section,
+    fields: section.fields.map((field) => {
+      if (
+        !MANDATORY_MEMBER_CONTACT_FIELD_KEYS.has(field.key) ||
+        field.collect_from !== "member" ||
+        field.required
+      ) {
+        return field;
+      }
+
+      changed = true;
+
+      return {
+        ...field,
+        required: true,
+      };
+    }),
+  }));
+
+  if (!changed) {
+    return contract;
+  }
+
+  return {
+    ...contract,
+    sections,
+  };
+};
+
 const normalizeFamilies = (families: MemberFormFamily[]) => {
   const unique = new Set<MemberFormFamily>();
 
@@ -741,11 +784,13 @@ const buildContractsBySelection = async (
       });
 
       contracts.push(
-        await applyTemplateDrivenRequiredness(
-          applyMemberFormFallbackHelpText(
-            applyPoaSpecialAuthorityOptions(
-              applyPoaGlossaryHelpText(poaContract, poaDetails.glossary),
-              poaDetails.specialAuthorities,
+        applyMandatoryContactRequiredness(
+          await applyTemplateDrivenRequiredness(
+            applyMemberFormFallbackHelpText(
+              applyPoaSpecialAuthorityOptions(
+                applyPoaGlossaryHelpText(poaContract, poaDetails.glossary),
+                poaDetails.specialAuthorities,
+              ),
             ),
           ),
         ),
@@ -766,15 +811,17 @@ const buildContractsBySelection = async (
       });
     } else {
       contracts.push(
-        await applyTemplateDrivenRequiredness(
-          applyMemberFormFallbackHelpText(
-            applyTrusteePowersOptions(
-              deriveInputRequirements({
-                family: "trust",
-                documentType: selection.trustType,
-                record: trustRequirementDetails.requirement,
-              }),
-              trustRequirementDetails.trusteePowers,
+        applyMandatoryContactRequiredness(
+          await applyTemplateDrivenRequiredness(
+            applyMemberFormFallbackHelpText(
+              applyTrusteePowersOptions(
+                deriveInputRequirements({
+                  family: "trust",
+                  documentType: selection.trustType,
+                  record: trustRequirementDetails.requirement,
+                }),
+                trustRequirementDetails.trusteePowers,
+              ),
             ),
           ),
         ),
@@ -792,13 +839,15 @@ const buildContractsBySelection = async (
       });
     } else {
       contracts.push(
-        await applyTemplateDrivenRequiredness(
-          applyMemberFormFallbackHelpText(
-            deriveInputRequirements({
-              family: "idn",
-              documentType: selection.idnType,
-              record: idnRequirement,
-            }),
+        applyMandatoryContactRequiredness(
+          await applyTemplateDrivenRequiredness(
+            applyMemberFormFallbackHelpText(
+              deriveInputRequirements({
+                family: "idn",
+                documentType: selection.idnType,
+                record: idnRequirement,
+              }),
+            ),
           ),
         ),
       );

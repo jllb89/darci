@@ -1,15 +1,34 @@
 import { Router } from "express";
 import {
-  getNotaryContext,
+  cancelMeeting,
+  confirmMeeting,
+  createMeetingArtifactRecord,
+  proposeMeeting,
+  recordIdentityVerification,
   regenerateCode,
+  recordMeetingCheckin,
+  recordMeetingNoShow,
+  recordProximityEvaluation,
+  rescheduleMeeting,
   resendCode,
+  reviewRequestDecision,
   resolveCode,
   signRequest,
   submitRequest,
 } from "../controllers/notaryController";
+import {
+  getNotaryContext,
+  listNotaryRequests,
+} from "../controllers/notaryWorkspaceController";
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
+
+router.get(
+  "/requests",
+  requireRole(["notary", "admin", "service_role"]),
+  listNotaryRequests
+);
 
 router.post(
   "/code/resolve",
@@ -30,6 +49,56 @@ router.get(
   "/requests/:id/context",
   requireRole(["notary", "admin", "service_role"]),
   getNotaryContext
+);
+router.post(
+  "/requests/:id/review-decision",
+  requireRole(["notary", "admin", "service_role"]),
+  reviewRequestDecision
+);
+router.post(
+  "/requests/:id/meeting/propose",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  proposeMeeting
+);
+router.post(
+  "/requests/:id/meeting/check-in",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  recordMeetingCheckin
+);
+router.post(
+  "/requests/:id/meeting/confirm",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  confirmMeeting
+);
+router.post(
+  "/requests/:id/meeting/reschedule",
+  requireRole(["notary", "admin", "service_role"]),
+  rescheduleMeeting
+);
+router.post(
+  "/requests/:id/meeting/cancel",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  cancelMeeting
+);
+router.post(
+  "/requests/:id/meeting/no-show",
+  requireRole(["notary", "admin", "service_role"]),
+  recordMeetingNoShow
+);
+router.post(
+  "/requests/:id/meeting/identity-verification",
+  requireRole(["notary", "admin", "service_role"]),
+  recordIdentityVerification
+);
+router.post(
+  "/requests/:id/meeting/proximity-evaluation",
+  requireRole(["notary", "admin", "service_role"]),
+  recordProximityEvaluation
+);
+router.post(
+  "/requests/:id/meeting/artifacts",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  createMeetingArtifactRecord
 );
 router.post(
   "/requests/:id/sign",

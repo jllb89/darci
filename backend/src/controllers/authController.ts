@@ -1,6 +1,10 @@
 import { Request, Response } from "express";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import {
+  ensureUserIdentityFromAuth,
+  toUserResponse,
+} from "../services/userRoleService";
 import { sendValidationError } from "../utils/validation";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -35,14 +39,6 @@ const refreshSchema = z.object({
   refreshToken: z.string().trim().min(1),
 });
 
-const normalizeRole = (role?: string) => {
-  if (role === "notary" || role === "admin") {
-    return role;
-  }
-
-  return "member";
-};
-
 const ensureConfigured = (res: Response) => {
   if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
     res.status(500).json({
@@ -75,34 +71,6 @@ const createSupabaseSessionClient = () => {
   });
 };
 
-const upsertUserProfile = async (input: {
-  supabaseUserId: string;
-  email: string | null;
-  role?: string;
-  firstName?: string | null;
-  lastName?: string | null;
-}) => {
-  const payload = {
-    supabase_user_id: input.supabaseUserId,
-    email: input.email,
-    role: normalizeRole(input.role),
-    first_name: input.firstName ?? null,
-    last_name: input.lastName ?? null,
-  };
-
-  const { data, error } = await supabaseAdmin
-    .from("users")
-    .upsert(payload, { onConflict: "supabase_user_id" })
-    .select("id, email, role, status, first_name, last_name")
-    .single();
-
-  if (error || !data) {
-    throw new Error(error?.message ?? "Failed to sync user profile");
-  }
-
-  return data;
-};
-
 export const login = async (req: Request, res: Response) => {
   if (!ensureConfigured(res)) {
     return;
@@ -126,7 +94,7 @@ export const login = async (req: Request, res: Response) => {
   }
 
   try {
-    const profile = await upsertUserProfile({
+    const profile = await ensureUserIdentityFromAuth({
       supabaseUserId: data.user.id,
       email: data.user.email ?? parsed.data.email,
       role: (data.user.app_metadata?.role as string | undefined) ?? "member",
@@ -137,18 +105,15 @@ export const login = async (req: Request, res: Response) => {
     return res.status(200).json({
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
-      user: {
-        id: profile.id,
-        email: profile.email,
-        role: normalizeRole(profile.role ?? undefined),
-        status: profile.status ?? "active",
-        firstName: profile.first_name,
-        lastName: profile.last_name,
-      },
+      user: toUserResponse(profile),
     });
   } catch (syncError) {
-    return res.status(500).json({
-      error: "internal_error",
+    const statusCode = syncError instanceof Error && "statusCode" in syncError
+      ? Number((syncError as { statusCode?: number }).statusCode) || 500
+      : 500;
+
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
       message:
         syncError instanceof Error ? syncError.message : "Failed to sync user",
     });
@@ -233,7 +198,7 @@ export const refresh = async (req: Request, res: Response) => {
   }
 
   try {
-    const profile = await upsertUserProfile({
+    const profile = await ensureUserIdentityFromAuth({
       supabaseUserId: data.user.id,
       email: data.user.email ?? null,
       role: (data.user.app_metadata?.role as string | undefined) ?? "member",
@@ -244,17 +209,14 @@ export const refresh = async (req: Request, res: Response) => {
     return res.status(200).json({
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
-      user: {
-        id: profile.id,
-        email: profile.email,
-        role: normalizeRole(profile.role ?? undefined),
-        status: profile.status ?? "active",
-        firstName: profile.first_name,
-        lastName: profile.last_name,
-      },
+      user: toUserResponse(profile),
     });
   } catch (syncError) {
-    return res.status(500).json({
+    const statusCode = syncError instanceof Error && "statusCode" in syncError
+      ? Number((syncError as { statusCode?: number }).statusCode) || 500
+      : 500;
+
+    return res.status(statusCode).json({
       error: "internal_error",
       message:
         syncError instanceof Error ? syncError.message : "Failed to sync user",
@@ -301,7 +263,7 @@ export const signup = async (req: Request, res: Response) => {
   }
 
   try {
-    const profile = await upsertUserProfile({
+    const profile = await ensureUserIdentityFromAuth({
       supabaseUserId: createdUser.user.id,
       email: createdUser.user.email ?? email,
       role: "member",
@@ -316,31 +278,21 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(201).json({
         accessToken: null,
         refreshToken: null,
-        user: {
-          id: profile.id,
-          email: profile.email,
-          role: normalizeRole(profile.role ?? undefined),
-          status: profile.status ?? "active",
-          firstName: profile.first_name,
-          lastName: profile.last_name,
-        },
+        user: toUserResponse(profile),
       });
     }
 
     return res.status(201).json({
       accessToken: loginData.session.access_token,
       refreshToken: loginData.session.refresh_token,
-      user: {
-        id: profile.id,
-        email: profile.email,
-        role: normalizeRole(profile.role ?? undefined),
-        status: profile.status ?? "active",
-        firstName: profile.first_name,
-        lastName: profile.last_name,
-      },
+      user: toUserResponse(profile),
     });
   } catch (syncError) {
-    return res.status(500).json({
+    const statusCode = syncError instanceof Error && "statusCode" in syncError
+      ? Number((syncError as { statusCode?: number }).statusCode) || 500
+      : 500;
+
+    return res.status(statusCode).json({
       error: "internal_error",
       message:
         syncError instanceof Error ? syncError.message : "Failed to sync user",

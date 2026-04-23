@@ -1,6 +1,13 @@
 import { Request, Response } from "express";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import {
+  listUserRoleAssignmentsBySupabaseUserId,
+  switchActiveRoleBySupabaseUserId,
+  toUserResponse,
+  upsertUserRoleAssignmentBySupabaseUserId,
+  UserRoleServiceError,
+} from "../services/userRoleService";
 import { sendValidationError } from "../utils/validation";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -9,14 +16,32 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
 const updateUserRoleSchema = z.object({
-  role: z.enum(["member", "notary", "admin"]),
+  role: z.enum(["member", "pro", "notary", "admin"]),
 });
 
-const normalizeRole = (role?: string) => {
-  if (role === "notary" || role === "admin") {
-    return role;
+const upsertUserRoleSchema = z.object({
+  role: z.enum(["member", "pro", "notary", "admin"]),
+  status: z.enum(["active", "suspended", "revoked"]).default("active"),
+  makeActive: z.boolean().optional(),
+  grantedReason: z.string().trim().min(1).max(500).optional(),
+});
+
+const parseSupabaseUserId = (req: Request, res: Response) => {
+  if (typeof req.params.id !== "string") {
+    res.status(400).json({
+      error: "validation_error",
+      message: "Supabase user id is required",
+      details: [
+        {
+          path: "id",
+          message: "Supabase user id is required",
+        },
+      ],
+    });
+    return null;
   }
-  return "member";
+
+  return req.params.id;
 };
 
 export const updateUserRole = async (req: Request, res: Response) => {
@@ -27,17 +52,9 @@ export const updateUserRole = async (req: Request, res: Response) => {
     });
   }
 
-  if (typeof req.params.id !== "string") {
-    return res.status(400).json({
-      error: "validation_error",
-      message: "Supabase user id is required",
-      details: [
-        {
-          path: "id",
-          message: "Supabase user id is required",
-        },
-      ],
-    });
+  const supabaseUserId = parseSupabaseUserId(req, res);
+  if (!supabaseUserId) {
+    return;
   }
 
   const parsed = updateUserRoleSchema.safeParse(req.body ?? {});
@@ -45,63 +62,104 @@ export const updateUserRole = async (req: Request, res: Response) => {
     return sendValidationError(res, parsed.error);
   }
 
-  const supabaseUserId = req.params.id;
-  const nextRole = parsed.data.role;
-
-  const { data: authData, error: authError } =
-    await supabaseAdmin.auth.admin.updateUserById(supabaseUserId, {
-      app_metadata: { role: nextRole },
+  try {
+    const user = await upsertUserRoleAssignmentBySupabaseUserId({
+      supabaseUserId,
+      role: parsed.data.role,
+      status: "active",
+      makeActive: true,
+      ...(req.user?.id ? { grantedBySupabaseUserId: req.user.id } : {}),
+      grantedReason: "Updated via legacy admin role endpoint",
     });
 
-  if (authError) {
-    return res.status(500).json({
-      error: "internal_error",
-      message: authError.message,
+    return res.status(200).json({ user: toUserResponse(user) });
+  } catch (error) {
+    const statusCode = error instanceof UserRoleServiceError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
+      message: error instanceof Error ? error.message : "Failed to update user role",
     });
   }
+};
 
-  const { data: userRow, error: userError } = await supabaseAdmin
-    .from("users")
-    .update({ role: nextRole })
-    .eq("supabase_user_id", supabaseUserId)
-    .select("id, supabase_user_id, email, role, status, created_at")
-    .maybeSingle();
+export const listUserRoles = async (req: Request, res: Response) => {
+  const supabaseUserId = parseSupabaseUserId(req, res);
+  if (!supabaseUserId) {
+    return;
+  }
 
-  if (userError) {
-    return res.status(500).json({
-      error: "internal_error",
-      message: userError.message,
+  try {
+    const user = await listUserRoleAssignmentsBySupabaseUserId(supabaseUserId);
+    return res.status(200).json({
+      user: toUserResponse(user),
+      roleAssignments: user.roleAssignments,
+    });
+  } catch (error) {
+    const statusCode = error instanceof UserRoleServiceError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
+      message: error instanceof Error ? error.message : "Failed to list user roles",
     });
   }
+};
 
-  let user = userRow;
-  if (!user) {
-    const { data: insertedUser, error: insertError } = await supabaseAdmin
-      .from("users")
-      .insert({
-        supabase_user_id: supabaseUserId,
-        email: authData?.user?.email ?? null,
-        role: nextRole,
-      })
-      .select("id, supabase_user_id, email, role, status, created_at")
-      .single();
-
-    if (insertError || !insertedUser) {
-      return res.status(500).json({
-        error: "internal_error",
-        message: insertError?.message ?? "Failed to create user record",
-      });
-    }
-
-    user = insertedUser;
+export const upsertUserRole = async (req: Request, res: Response) => {
+  const supabaseUserId = parseSupabaseUserId(req, res);
+  if (!supabaseUserId) {
+    return;
   }
 
-  res.status(200).json({
-    user: {
-      id: user.id,
-      email: user.email,
-      role: normalizeRole(user.role),
-      status: user.status ?? "active",
-    },
-  });
+  const parsed = upsertUserRoleSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  try {
+    const user = await upsertUserRoleAssignmentBySupabaseUserId({
+      supabaseUserId,
+      role: parsed.data.role,
+      status: parsed.data.status,
+      ...(parsed.data.makeActive !== undefined ? { makeActive: parsed.data.makeActive } : {}),
+      ...(req.user?.id ? { grantedBySupabaseUserId: req.user.id } : {}),
+      ...(parsed.data.grantedReason ? { grantedReason: parsed.data.grantedReason } : {}),
+    });
+
+    return res.status(200).json({
+      user: toUserResponse(user),
+      roleAssignments: user.roleAssignments,
+    });
+  } catch (error) {
+    const statusCode = error instanceof UserRoleServiceError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
+      message: error instanceof Error ? error.message : "Failed to upsert user role",
+    });
+  }
+};
+
+export const switchUserActiveRole = async (req: Request, res: Response) => {
+  const supabaseUserId = parseSupabaseUserId(req, res);
+  if (!supabaseUserId) {
+    return;
+  }
+
+  const parsed = updateUserRoleSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  try {
+    const user = await switchActiveRoleBySupabaseUserId({
+      supabaseUserId,
+      role: parsed.data.role,
+    });
+
+    return res.status(200).json({ user: toUserResponse(user) });
+  } catch (error) {
+    const statusCode = error instanceof UserRoleServiceError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
+      message: error instanceof Error ? error.message : "Failed to switch active role",
+    });
+  }
 };

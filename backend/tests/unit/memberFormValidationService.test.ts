@@ -20,6 +20,26 @@ const buildTrustContract = (): MemberFormRulesContract => {
           title: "People",
           fields: [
             {
+              canonical_key: "principal_contact",
+              label: "Principal contact",
+              semantic_type: "contact",
+              data_type: "string",
+              required: true,
+              repeatable: false,
+              sources: [],
+              ui_group: "people",
+            },
+            {
+              canonical_key: "agent_contact",
+              label: "Agent contact",
+              semantic_type: "contact",
+              data_type: "string",
+              required: true,
+              repeatable: false,
+              sources: [],
+              ui_group: "people",
+            },
+            {
               canonical_key: "grantors",
               label: "Trustmakers",
               semantic_type: "person_list",
@@ -79,10 +99,23 @@ const buildFormValues = (
   const trusteeAlice = JSON.stringify({
     fullName: "Alice Trustee",
     isSigningTrustee: true,
+    email: "alice.trustee@example.com",
+  });
+  const grantorAlice = JSON.stringify({
+    fullName: "Alice Trustmaker",
+    isSigningTrustee: false,
+    email: "alice.trustmaker@example.com",
+  });
+  const grantorBob = JSON.stringify({
+    fullName: "Bob Trustmaker",
+    isSigningTrustee: false,
+    email: "bob.trustmaker@example.com",
   });
 
   return {
-    grantors: ["Alice Trustmaker", "Bob Trustmaker"],
+    principal_contact: JSON.stringify({ email: "principal@example.com" }),
+    agent_contact: JSON.stringify({ email: "agent@example.com" }),
+    grantors: [grantorAlice, grantorBob],
     tax_id_owner: "Alice Trustmaker",
     trustees: [trusteeAlice],
     trustee_signature_authority: "named_signing_trustee",
@@ -91,6 +124,62 @@ const buildFormValues = (
 };
 
 describe("memberFormValidationService", () => {
+  it("fails when principal contact email is missing", () => {
+    const contract = buildTrustContract();
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        principal_contact: "",
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.code === "principal_contact_required")).toBe(
+      true,
+    );
+  });
+
+  it("fails when a trustee entry is missing email", () => {
+    const contract = buildTrustContract();
+    const trusteeWithoutEmail = JSON.stringify({
+      fullName: "Alice Trustee",
+      isSigningTrustee: true,
+    });
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        trustees: [trusteeWithoutEmail],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) => error.code === "trustees_contact_email_required"),
+    ).toBe(true);
+  });
+
+  it("fails when a grantor entry is missing email", () => {
+    const contract = buildTrustContract();
+    const grantorWithoutEmail = JSON.stringify({
+      fullName: "Alice Trustmaker",
+      isSigningTrustee: false,
+    });
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        grantors: [grantorWithoutEmail],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) => error.code === "grantors_contact_email_required"),
+    ).toBe(true);
+  });
+
   it("passes when trustmaker-bound tax ID owner matches entered trustmakers", () => {
     const contract = buildTrustContract();
 
@@ -224,6 +313,7 @@ describe("memberFormValidationService", () => {
     const trusteeAlice = JSON.stringify({
       fullName: "Alice Trustee",
       isSigningTrustee: false,
+      email: "alice.trustee@example.com",
     });
 
     const result = validateMemberFormSubmission(
@@ -243,6 +333,7 @@ describe("memberFormValidationService", () => {
     const trusteeAlice = JSON.stringify({
       fullName: "Alice Trustee",
       isSigningTrustee: false,
+      email: "alice.trustee@example.com",
     });
 
     const result = validateMemberFormSubmission(

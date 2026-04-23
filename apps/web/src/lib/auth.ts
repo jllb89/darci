@@ -7,12 +7,13 @@ export const REFRESH_TOKEN_KEY = "darci.refreshToken";
 export const USER_KEY = "darci.user";
 const AUTH_STORAGE_EVENT = "darci-auth-storage";
 
-export type StoredUserRole = "member" | "notary" | "admin";
+export type StoredUserRole = "member" | "pro" | "notary" | "admin";
 
 export type StoredUser = {
   id: string;
   email: string;
   role: StoredUserRole;
+  availableRoles?: StoredUserRole[];
   status: string;
   firstName?: string | null;
   lastName?: string | null;
@@ -105,6 +106,39 @@ export const getStoredUser = () => getStoredAuth().user;
 
 export const getStoredUserRole = (): StoredUserRole | null => {
   return getStoredUser()?.role ?? null;
+};
+
+export const switchStoredUserRole = async (role: StoredUserRole) => {
+  const { accessToken, refreshToken } = getStoredAuth();
+
+  if (!accessToken) {
+    throw new Error("Missing session");
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}/users/me/active-role`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ role }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { user?: StoredUser | null; message?: string }
+    | null;
+
+  if (!response.ok || !payload?.user) {
+    throw new Error(payload?.message || "Failed to switch profile");
+  }
+
+  setStoredAuth({
+    accessToken,
+    refreshToken,
+    user: payload.user,
+  });
+
+  return payload.user;
 };
 
 export const setStoredAuth = (input: {

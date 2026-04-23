@@ -200,12 +200,12 @@ const personContactFieldKeys = new Set([
 ]);
 
 const structuredPersonListKeys = new Set([
+  "grantors",
   "trustees",
   "successor_trustees",
 ]);
 
 const repeatableTextListKeys = new Set([
-  "grantors",
   "successor_agents",
   "successor_agent_list",
 ]);

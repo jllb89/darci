@@ -8,6 +8,7 @@ import {
 } from "pdf-lib";
 import type { PDFFont, PDFPage } from "pdf-lib";
 import { recordAuditEvent } from "./auditService";
+import { queueDocumentReadyForReviewNotification } from "./notificationService";
 import {
   toRenderableMemberValue,
   type CanonicalAnswers,
@@ -2544,6 +2545,13 @@ export const processDocumentGenerationRun = async (input: {
           document_version_id: version.id,
           review_source: "generated_output",
         },
+      });
+
+      await queueDocumentReadyForReviewNotification({
+        documentId: document.id,
+        documentVersionId: version.id,
+        generationRunId: renderedRun.id,
+        reviewSource: "generated_output",
       });
     }
 

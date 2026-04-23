@@ -123,6 +123,19 @@ const getMockPersonContactValue = (canonicalKey: string) => {
 
 const getMockPersonListValue = (canonicalKey: string) => {
   const normalized = normalizeCanonicalKey(canonicalKey);
+  
+  if (normalized === "grantors") {
+    return serializePersonListItems([
+      {
+        fullName: "Alex Grantor",
+        email: "grantor.mock@example.com",
+        phoneCountryIso2: DEFAULT_PHONE_COUNTRY_ISO2,
+        phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
+        phone: "4155550103",
+        isSigningTrustee: false,
+      },
+    ]);
+  }
 
   if (normalized === "trustees") {
     return serializePersonListItems([

@@ -69,6 +69,9 @@ Use the following `action` values exactly as written:
 - `system.code_validated`
 - `system.code_consumed`
 - `notary.request_opened`
+- `notary.request_approved`
+- `notary.request_rejected`
+- `notary.request_changes_requested`
 - `system.ack_template_selected`
 - `system.ack_page_generated`
 - `system.ack_page_appended`
@@ -270,6 +273,38 @@ Include these fields where applicable. Keep metadata minimal and stable.
 - metadata:
   - `request_id` (uuid)
   - `document_id` (uuid)
+
+**notary.request_approved**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `document_id` (uuid)
+  - `workflow_id` (uuid)
+  - `decision_id` (uuid)
+  - `decided_by_user_id` (uuid)
+
+**notary.request_rejected**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `document_id` (uuid)
+  - `workflow_id` (uuid)
+  - `decision_id` (uuid)
+  - `decided_by_user_id` (uuid)
+  - `summary` (text, optional)
+
+**notary.request_changes_requested**
+- entity_type: `notarization_request`
+- entity_id: `notarization_requests.id`
+- metadata:
+  - `request_id` (uuid)
+  - `document_id` (uuid)
+  - `workflow_id` (uuid)
+  - `decision_id` (uuid)
+  - `decided_by_user_id` (uuid)
+  - `summary` (text, optional)
 
 ### 8) DARCi appends acknowledgment page
 

@@ -36,6 +36,16 @@ describe("memberFormControls", () => {
     expect(getMemberFieldControlKind(trusteesField, [])).toBe("repeatable-person-list");
   });
 
+  it("maps grantor list fields to repeatable structured person controls", () => {
+    const grantorsField = buildField({
+      canonical_key: "grantors",
+      data_type: "array",
+      semantic_type: "person_list",
+    });
+
+    expect(getMemberFieldControlKind(grantorsField, [])).toBe("repeatable-person-list");
+  });
+
   it("maps principal/agent contact fields to person-contact controls", () => {
     const principalContactField = buildField({
       canonical_key: "principal_contact",
@@ -46,7 +56,7 @@ describe("memberFormControls", () => {
     expect(getMemberFieldControlKind(principalContactField, [])).toBe("person-contact");
   });
 
-  it("keeps other person list fields as repeatable text list controls", () => {
+  it("keeps successor-agent person list fields as repeatable text list controls", () => {
     const successorAgentsField = buildField({
       canonical_key: "successor_agent_list",
       data_type: "array",

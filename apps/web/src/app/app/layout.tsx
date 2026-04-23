@@ -10,6 +10,7 @@ import {
 } from "@/components/app/AppToastContext";
 import {
   logoutStoredAuth,
+  switchStoredUserRole,
   useStoredAuth,
   useStoredSession,
   useStoredUser,
@@ -26,7 +27,14 @@ type ToastState = {
 const TOAST_EXIT_DURATION_MS = 240;
 
 const isStoredUserRole = (value: unknown): value is StoredUserRole => {
-  return value === "member" || value === "notary" || value === "admin";
+  return value === "member" || value === "pro" || value === "notary" || value === "admin";
+};
+
+const roleLandingPath: Record<StoredUserRole, string> = {
+  member: "/app",
+  pro: "/app",
+  notary: "/app/notary",
+  admin: "/app",
 };
 
 const getAvailableRoles = (user: ReturnType<typeof useStoredUser>, fallbackRole: StoredUserRole) => {
@@ -67,6 +75,7 @@ export default function AppLayout({
   const profileEmail = user?.email ?? "email@example.com";
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isSwitchingRole, setIsSwitchingRole] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [toastPhase, setToastPhase] = useState<"hidden" | "visible" | "closing">("hidden");
 
@@ -168,6 +177,28 @@ export default function AppLayout({
     }
   };
 
+  const handleRoleSwitch = async (nextRole: StoredUserRole) => {
+    if (nextRole === role || isSwitchingRole) {
+      return;
+    }
+
+    setIsSwitchingRole(true);
+    clearToast();
+
+    try {
+      await switchStoredUserRole(nextRole);
+      showToast({ tone: "success", message: `Switched to ${nextRole} profile` });
+      router.push(roleLandingPath[nextRole]);
+    } catch (error) {
+      showToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Failed to switch profile",
+      });
+    } finally {
+      setIsSwitchingRole(false);
+    }
+  };
+
   if (!hasHydrated) {
     return null;
   }
@@ -199,7 +230,9 @@ export default function AppLayout({
         ) : null}
         <AppSidebar
           isLoggingOut={isLoggingOut}
+          isSwitchingRole={isSwitchingRole}
           onLogout={handleLogout}
+          onSwitchRole={handleRoleSwitch}
           pathname={pathname}
           availableRoles={availableRoles}
           profileEmail={profileEmail}

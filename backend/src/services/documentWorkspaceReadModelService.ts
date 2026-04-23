@@ -1,0 +1,131 @@
+import type { DocumentRecord } from "./documentService";
+import {
+  getLatestNotarizationCodeForRequest,
+  getLatestNotarizationRequestForDocument,
+} from "./documentService";
+import { listFinalizationStatusHistory } from "./documentFinalizationService";
+import { getVisibleDocumentIdn } from "./documentVisibilityService";
+import { listWorkflowStatusHistory } from "./illuminotarizationWorkflowService";
+
+export type DocumentWorkspaceSummary = {
+  workflow: {
+    requestId: string | null;
+    workflowId: string | null;
+    requestStatus: string | null;
+    latestWorkflowStatus: string | null;
+    latestWorkflowStatusAt: string | null;
+    submittedAt: string | null;
+    assignedNotaryId: string | null;
+    latestCodeStatus: string | null;
+    latestCodeExpiresAt: string | null;
+  };
+  finalization: {
+    latestStatus: string | null;
+    latestStatusAt: string | null;
+    isAnchored: boolean;
+    isVerificationChecked: boolean;
+  };
+  verification: {
+    status: "unavailable" | "pending_finalization" | "ready";
+    idn: string | null;
+    verifyPath: string | null;
+  };
+};
+
+const buildDefaultSummary = (visibleIdn: string | null): DocumentWorkspaceSummary => ({
+  workflow: {
+    requestId: null,
+    workflowId: null,
+    requestStatus: null,
+    latestWorkflowStatus: null,
+    latestWorkflowStatusAt: null,
+    submittedAt: null,
+    assignedNotaryId: null,
+    latestCodeStatus: null,
+    latestCodeExpiresAt: null,
+  },
+  finalization: {
+    latestStatus: null,
+    latestStatusAt: null,
+    isAnchored: false,
+    isVerificationChecked: false,
+  },
+  verification: {
+    status: visibleIdn ? "pending_finalization" : "unavailable",
+    idn: visibleIdn,
+    verifyPath: visibleIdn ? `/verify/${encodeURIComponent(visibleIdn)}` : null,
+  },
+});
+
+export const buildDocumentWorkspaceSummary = async (input: {
+  document: Pick<DocumentRecord, "id" | "idn" | "status">;
+  viewerRole?: string | null | undefined;
+}) => {
+  const visibleIdn = getVisibleDocumentIdn({
+    idn: input.document.idn,
+    status: input.document.status,
+    viewerRole: input.viewerRole,
+  });
+
+  const summary = buildDefaultSummary(visibleIdn);
+  const request = await getLatestNotarizationRequestForDocument(input.document.id);
+  const latestCode = request
+    ? await getLatestNotarizationCodeForRequest(request.id)
+    : null;
+  const [workflowStatusHistory, finalizationStatusHistory] = await Promise.all([
+    request?.workflow_id ? listWorkflowStatusHistory(request.workflow_id) : Promise.resolve([]),
+    listFinalizationStatusHistory(input.document.id),
+  ]);
+
+  const latestWorkflowStatus = workflowStatusHistory.at(-1) ?? null;
+  const latestFinalizationStatus = finalizationStatusHistory.at(-1) ?? null;
+  const isAnchored = finalizationStatusHistory.some((entry) => entry.status === "ledger_anchored");
+  const isVerificationChecked = finalizationStatusHistory.some(
+    (entry) => entry.status === "verification_checked",
+  );
+
+  summary.workflow = {
+    requestId: request?.id ?? null,
+    workflowId: request?.workflow_id ?? null,
+    requestStatus: request?.status ?? null,
+    latestWorkflowStatus: latestWorkflowStatus?.next_status ?? request?.status ?? null,
+    latestWorkflowStatusAt: latestWorkflowStatus?.created_at ?? null,
+    submittedAt: request?.submitted_at ?? null,
+    assignedNotaryId: request?.assigned_notary_id ?? null,
+    latestCodeStatus: latestCode?.status ?? null,
+    latestCodeExpiresAt: latestCode?.expires_at ?? null,
+  };
+
+  summary.finalization = {
+    latestStatus: latestFinalizationStatus?.status ?? null,
+    latestStatusAt: latestFinalizationStatus?.created_at ?? null,
+    isAnchored,
+    isVerificationChecked,
+  };
+
+  summary.verification = {
+    status: !visibleIdn ? "unavailable" : isAnchored ? "ready" : "pending_finalization",
+    idn: visibleIdn,
+    verifyPath: visibleIdn ? `/verify/${encodeURIComponent(visibleIdn)}` : null,
+  };
+
+  return summary;
+};
+
+export const buildDocumentWorkspaceSummaries = async (input: {
+  documents: Array<Pick<DocumentRecord, "id" | "idn" | "status">>;
+  viewerRole?: string | null | undefined;
+}) => {
+  const summaries = await Promise.all(
+    input.documents.map(async (document) => {
+      const summary = await buildDocumentWorkspaceSummary({
+        document,
+        viewerRole: input.viewerRole,
+      });
+
+      return [document.id, summary] as const;
+    }),
+  );
+
+  return new Map<string, DocumentWorkspaceSummary>(summaries);
+};

@@ -21,42 +21,46 @@ This document defines the chronological document lifecycle and assigns responsib
    - member.document_upload_completed
    - system.document_created (Platform)
 
-3. Assign IDN + prepare for signing (Platform)
-   - system.document_idn_assigned
-   - system.document_prepared_for_signing
+3. Review generated documents (Member + Platform)
+   - system.document_ready_for_review
+   - member.document_review_approved
 
-4. Electronic signing (Member + Signers)
+4. Assign IDN + prepare for signing (Platform)
+   - system.document_idn_assigned
+   - system.document_signing_prepared
+
+5. Electronic signing (Member + Signers)
    - member.signature_capture_started (each signer)
    - member.signature_capture_completed (each signer)
    - system.signature_linked_to_document (Platform)
 
-5. Submit for illuminotarization (Member)
+6. Submit for illuminotarization (Member)
    - member.notarization_submit_started
    - member.notarization_submitted
 
-6. Code generation + delivery (Platform)
+7. Code generation + delivery (Platform)
    - system.code_generated
    - system.code_delivered
 
-7. Code sharing (Member)
+8. Code sharing (Member)
    - member.code_shared
 
-8. Notary access via code (Notary + Platform)
+9. Notary access via code (Notary + Platform)
    - notary.code_entered
    - system.code_validated (Platform)
    - system.code_consumed (Platform)
    - notary.request_opened
 
-9. Acknowledgment page appended (Platform)
+10. Acknowledgment page appended (Platform)
    - system.ack_template_selected
    - system.ack_page_generated
    - system.ack_page_appended
 
-10. Watermark applied (Platform)
+11. Watermark applied (Platform)
    - system.watermark_started
    - system.watermark_completed
 
-11. Meeting negotiation and scheduling (Member + Notary)
+12. Meeting negotiation and scheduling (Member + Notary)
    - member.meeting_time_proposed
    - notary.meeting_time_proposed
    - member.meeting_time_confirmed
@@ -66,23 +70,23 @@ This document defines the chronological document lifecycle and assigns responsib
    - notary.meeting_cancelled (if needed)
    - system.meeting_no_show_recorded (if needed)
 
-12. In-person verification + seal/signature (Notary)
+13. In-person verification + seal/signature (Notary)
    - notary.meeting_started
    - notary.identity_verified
    - notary.meeting_completed
    - notary.seal_applied
    - notary.signature_applied
 
-13. Final document creation + hashing (Platform)
+14. Final document creation + hashing (Platform)
    - system.notarized_document_created
    - system.hashing_started
    - system.hashing_completed
 
-14. Ledger anchoring (Platform)
+15. Ledger anchoring (Platform)
    - system.ledger_anchor_requested
    - system.ledger_anchor_completed
 
-15. Public verification (Public + Platform)
+16. Public verification (Public + Platform)
    - public.verification_requested
    - system.verification_result_returned
 

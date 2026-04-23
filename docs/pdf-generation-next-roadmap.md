@@ -28,16 +28,15 @@ The backend can then create generation runs, mark them `queued` or `blocked`, pu
 
 The member can now move from `/app/start` into `/app/review`, see member-facing review outputs, and explicitly approve the review set.
 
-The backend can already persist review approval metadata and assign review-time system values, but the approval-to-sign handoff is not complete yet.
+The backend now persists review approval metadata, assigns review-time system values, prepares the official signing set, and hands approved documents into `/app/sign`.
 
-What is still missing is the last-mile signing and closeout layer:
+What is still missing is the downstream closeout layer and the remaining hardening work:
 
-1. real final PDF rendering for platform-generated outputs and official post-approval rerenders,
-2. the `/app/sign` route and the handoff from review approval into signing,
-3. signer-aware signature capture tied to `generationRunId` and `outputSignerId`,
-4. signature persistence and rendering for uploaded, typed, and drawn signatures,
-5. the simple handoff steps that happen after signature and before notarization,
-6. real acknowledgment append and watermark steps.
+1. continued hardening of final PDF rendering and versioning rules across all outputs,
+2. the simple handoff steps that happen after signature and before notarization,
+3. real acknowledgment append and watermark steps on the new document-version chain,
+4. notary-stage closeout integration,
+5. more QA, operational visibility, and final documentation cleanup.
 
 ## Concise Roadmap To Member-Facing Legal Documents
 
@@ -390,21 +389,15 @@ Missing work:
 
 Current state:
 
-The backend can list signer obligations and generate placeholder signature fields, but there is no real signing route or output-scoped signature execution yet.
+The backend now exposes real signing workspace state, routes approved documents into `/app/sign`, and captures uploaded, typed, drawn, and saved signatures against `generationRunId` and `outputSignerId`.
 
-Missing work:
+Remaining work:
 
-1. create `/app/sign` as the post-review signing route using the same layout pattern as `/app/verify`,
-2. replace the review-document cards with one signature card per required signature,
-3. show which document each required signature belongs to,
-4. `POST /documents/:id/signatures/request` should require `generationRunId` and `outputSignerId`,
-5. `POST /documents/:id/signatures/finalize` should link the captured signature to a signer obligation, not to the document owner,
-6. signature records need the right data model to track output-scoped signers and signature method,
-7. accept uploaded signature images in `jpg` or `png`, typed name or initials, and drawn signatures,
-8. signature fields should come from the real rendered artifact, not from placeholder coordinates,
-9. keep the final Confirm action disabled until every required signature is complete.
+1. widen validation coverage for signature placement and signer grouping across more templates and products,
+2. add more integration and regression coverage around PDF stamping and completion state,
+3. continue improving operator-facing inspection and debugging surfaces for signing execution.
 
-This is the biggest workflow gap.
+This is now primarily a hardening and coverage gap.
 
 ## 5) Pre-notarization handoff
 
@@ -436,17 +429,13 @@ Missing work:
 
 Current state:
 
-The start-page intake flow and `/app/review` are real. The signing route and the downstream execution surfaces are still missing.
+The start-page intake flow, `/app/review`, and `/app/sign` are real. Review can hand the member back to the same draft, and signing supports upload, typed, drawn, and saved-signature reuse against the official signing set.
 
-Missing work:
+Remaining work:
 
-1. `/app/sign` route with the official signing set,
-2. a `Sign documents` column with one card per required signature,
-3. signature-mode UI for upload, typed, and drawn input,
-4. a final Confirm action that unlocks only when all required signatures are complete,
-5. live generation-run list and detail UI where needed,
-6. live blocker display,
-7. real notary workflow screens that use the new backend model.
+1. live generation-run list and detail UI where needed,
+2. live blocker display,
+3. real notary workflow screens that use the new backend model.
 
 ## 8) Quality and operational hardening
 

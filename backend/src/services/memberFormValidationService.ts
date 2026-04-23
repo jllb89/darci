@@ -15,9 +15,12 @@ export type MemberFormValidationResult = {
 
 type MemberFacingField = MemberFormRulesContract["aggregatedForm"]["sections"][number]["fields"][number];
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
 type TrusteeRow = {
   fullName: string;
   isSigningTrustee: boolean;
+  email: string | null;
 };
 
 type SignatureAuthorityMode =
@@ -121,11 +124,16 @@ const extractTrusteeRows = (value: MemberFormSubmissionValue | undefined) => {
         const fullName =
           typeof parsed.fullName === "string" ? parsed.fullName.trim() : "";
         const isSigningTrustee = parsed.isSigningTrustee === true;
+        const email =
+          typeof parsed.email === "string" && emailPattern.test(parsed.email.trim())
+            ? parsed.email.trim()
+            : null;
 
         fallbackName = fullName || fallbackName;
         rows.push({
           fullName: fallbackName,
           isSigningTrustee,
+          email,
         });
         continue;
       }
@@ -136,11 +144,50 @@ const extractTrusteeRows = (value: MemberFormSubmissionValue | undefined) => {
     rows.push({
       fullName: fallbackName,
       isSigningTrustee: false,
+      email: null,
     });
   }
 
   return rows;
 };
+
+const extractEmailFromContactValue = (value: MemberFormSubmissionValue | undefined) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (emailPattern.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    const email = parsed.email;
+    if (typeof email === "string" && emailPattern.test(email.trim())) {
+      return email.trim();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const flattenMemberFields = (contract: MemberFormRulesContract) => {
+  return contract.aggregatedForm.sections.flatMap((section) => section.fields);
+};
+
+const MANDATORY_CONTACT_LIST_KEYS = new Set(["grantors", "trustees", "successor_trustees"]);
+const MANDATORY_CONTACT_VALUE_KEYS = new Set(["principal_contact", "agent_contact"]);
 
 const getFieldByCanonicalKey = (
   contract: MemberFormRulesContract,
@@ -226,9 +273,52 @@ export const validateMemberFormSubmission = (
 ): MemberFormValidationResult => {
   const errors: MemberFormValidationError[] = [];
 
+  for (const field of flattenMemberFields(contract)) {
+    const canonicalKey = normalizeCanonicalKey(field.canonical_key);
+    if (!field.required) {
+      continue;
+    }
+
+    if (MANDATORY_CONTACT_VALUE_KEYS.has(canonicalKey)) {
+      const email = extractEmailFromContactValue(formValues[field.canonical_key]);
+      if (!email) {
+        errors.push({
+          code: `${canonicalKey}_required`,
+          field: field.canonical_key,
+          message: `Enter a valid email for ${field.label}.`,
+        });
+      }
+      continue;
+    }
+
+    if (MANDATORY_CONTACT_LIST_KEYS.has(canonicalKey)) {
+      const trustees = extractTrusteeRows(formValues[field.canonical_key]).filter(
+        (trustee) => trustee.fullName.trim().length > 0,
+      );
+
+      if (trustees.length === 0) {
+        errors.push({
+          code: `${canonicalKey}_required`,
+          field: field.canonical_key,
+          message: `Add at least one ${field.label.toLowerCase().replace(/\s+/g, " ")}.`,
+        });
+        continue;
+      }
+
+      const missingEmail = trustees.some((trustee) => !trustee.email);
+      if (missingEmail) {
+        errors.push({
+          code: `${canonicalKey}_contact_email_required`,
+          field: field.canonical_key,
+          message: `Each ${field.label.toLowerCase()} entry must include a valid email address.`,
+        });
+      }
+    }
+  }
+
   if (!contract.families.includes("trust")) {
     return {
-      valid: true,
+      valid: errors.length === 0,
       errors,
     };
   }

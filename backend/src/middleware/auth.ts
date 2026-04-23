@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
-import { createClient } from "@supabase/supabase-js";
+import { getUserIdentityContextBySupabaseId, normalizeRuntimeRole } from "../services/userRoleService";
 
 const publicPaths = [
   "/health",
@@ -13,37 +13,13 @@ const publicPaths = [
 ];
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const supabaseAdmin =
-  supabaseUrl && supabaseServiceRoleKey
-    ? createClient(supabaseUrl, supabaseServiceRoleKey)
-    : null;
-
-const resolveRoleFromDb = async (supabaseUserId?: string) => {
-  if (!supabaseAdmin || !supabaseUserId) {
-    return null;
-  }
-
-  const { data, error } = await supabaseAdmin
-    .from("users")
-    .select("role")
-    .eq("supabase_user_id", supabaseUserId)
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data?.role) {
-    return null;
-  }
-
-  return data.role as string;
-};
 
 const isPublicPath = (path: string) => {
   if (publicPaths.includes(path)) {
     return true;
   }
 
-  return path.startsWith("/verify/");
+  return path.startsWith("/verify/") || path.startsWith("/invites/public/");
 };
 
 export const requireAuth = async (
@@ -51,12 +27,14 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction
 ) => {
-  if (isPublicPath(req.path)) {
-    return next();
-  }
+  const publicPath = isPublicPath(req.path);
 
   const authHeader = req.headers.authorization ?? "";
   if (!authHeader.startsWith("Bearer ")) {
+    if (publicPath) {
+      return next();
+    }
+
     console.warn("Auth missing bearer token", { path: req.path });
     return res.status(401).json({
       error: "unauthorized",
@@ -131,14 +109,23 @@ export const requireAuth = async (
     }
     const roleFromToken = (roleFromMeta ?? decoded.role) as string | undefined;
     if (roleFromToken) {
-      user.role = roleFromToken;
+      user.role = roleFromToken === "service_role"
+        ? "service_role"
+        : normalizeRuntimeRole(roleFromToken);
     }
 
-    if (!user.role || user.role === "authenticated") {
-      const roleFromDb = await resolveRoleFromDb(user.id);
-      if (roleFromDb) {
-        user.role = roleFromDb;
+    if (user.id && user.role !== "service_role") {
+      const dbIdentityContext = await getUserIdentityContextBySupabaseId(user.id);
+      if (dbIdentityContext) {
+        user.dbUserId = dbIdentityContext.id;
+        user.role = dbIdentityContext.role;
+        user.availableRoles = dbIdentityContext.availableRoles;
+        user.status = dbIdentityContext.status;
+      } else if (!user.role || user.role === "authenticated") {
+        user.role = "member";
       }
+    } else if (!user.role || user.role === "authenticated") {
+      user.role = "member";
     }
 
     req.user = user;

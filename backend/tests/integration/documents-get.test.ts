@@ -46,6 +46,9 @@ const mocks = vi.hoisted(() => ({
   syncDocumentPartiesFromCanonicalAnswersMock: vi.fn(),
   prepareGenerationRunMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
+  buildDocumentWorkspaceSummaryMock: vi.fn(),
+  buildDocumentWorkspaceSummariesMock: vi.fn(),
+  getUserIdentityContextBySupabaseIdMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -74,6 +77,23 @@ vi.mock("../../src/services/documentService", () => ({
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
 }));
+
+vi.mock("../../src/services/documentWorkspaceReadModelService", () => ({
+  buildDocumentWorkspaceSummary: mocks.buildDocumentWorkspaceSummaryMock,
+  buildDocumentWorkspaceSummaries: mocks.buildDocumentWorkspaceSummariesMock,
+}));
+
+vi.mock("../../src/services/userRoleService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/userRoleService")>(
+    "../../src/services/userRoleService",
+  );
+
+  return {
+    ...actual,
+    getUserIdentityContextBySupabaseId:
+      mocks.getUserIdentityContextBySupabaseIdMock,
+  };
+});
 
 vi.mock("../../src/services/memberFormRulesService", async () => {
   const actual = await vi.importActual<typeof import("../../src/services/memberFormRulesService")>(
@@ -236,6 +256,79 @@ describe("GET documents endpoints", () => {
     mocks.buildMemberFormDocumentExtractionPayloadMock.mockReset();
     mocks.syncDocumentPartiesFromCanonicalAnswersMock.mockReset();
     mocks.prepareGenerationRunMock.mockReset();
+    mocks.buildDocumentWorkspaceSummaryMock.mockReset();
+    mocks.buildDocumentWorkspaceSummariesMock.mockReset();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
+
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "admin-user-1",
+      supabaseUserId: "admin-1",
+      email: "admin@example.com",
+      role: "admin",
+      status: "active",
+      firstName: "Admin",
+      lastName: "User",
+      availableRoles: ["admin"],
+      roleAssignments: [],
+    });
+
+    mocks.buildDocumentWorkspaceSummaryMock.mockResolvedValue({
+      workflow: {
+        requestId: null,
+        workflowId: null,
+        requestStatus: null,
+        latestWorkflowStatus: null,
+        latestWorkflowStatusAt: null,
+        submittedAt: null,
+        assignedNotaryId: null,
+        latestCodeStatus: null,
+        latestCodeExpiresAt: null,
+      },
+      finalization: {
+        latestStatus: null,
+        latestStatusAt: null,
+        isAnchored: false,
+        isVerificationChecked: false,
+      },
+      verification: {
+        status: "unavailable",
+        idn: null,
+        verifyPath: null,
+      },
+    });
+    mocks.buildDocumentWorkspaceSummariesMock.mockImplementation(
+      async ({ documents }: { documents: Array<{ id: string; idn: string | null }> }) => {
+        return new Map(
+          documents.map((document) => [
+            document.id,
+            {
+              workflow: {
+                requestId: null,
+                workflowId: null,
+                requestStatus: null,
+                latestWorkflowStatus: null,
+                latestWorkflowStatusAt: null,
+                submittedAt: null,
+                assignedNotaryId: null,
+                latestCodeStatus: null,
+                latestCodeExpiresAt: null,
+              },
+              finalization: {
+                latestStatus: null,
+                latestStatusAt: null,
+                isAnchored: false,
+                isVerificationChecked: false,
+              },
+              verification: {
+                status: document.idn ? "pending_finalization" : "unavailable",
+                idn: document.idn,
+                verifyPath: document.idn ? `/verify/${document.idn}` : null,
+              },
+            },
+          ]),
+        );
+      },
+    );
 
     mocks.isDocumentIntakeLockedMock.mockImplementation(() => false);
     mocks.buildSelectionForModeMock.mockResolvedValue({
@@ -331,6 +424,30 @@ describe("GET documents endpoints", () => {
           documentType: "generic",
           jurisdiction: "US-OH",
           createdAt: "2026-03-05T00:00:00.000Z",
+          summary: {
+            workflow: {
+              requestId: null,
+              workflowId: null,
+              requestStatus: null,
+              latestWorkflowStatus: null,
+              latestWorkflowStatusAt: null,
+              submittedAt: null,
+              assignedNotaryId: null,
+              latestCodeStatus: null,
+              latestCodeExpiresAt: null,
+            },
+            finalization: {
+              latestStatus: null,
+              latestStatusAt: null,
+              isAnchored: false,
+              isVerificationChecked: false,
+            },
+            verification: {
+              status: "unavailable",
+              idn: null,
+              verifyPath: null,
+            },
+          },
         },
         {
           id: "doc-2",
@@ -339,6 +456,30 @@ describe("GET documents endpoints", () => {
           documentType: "generic",
           jurisdiction: "US-OH",
           createdAt: "2026-03-05T00:01:00.000Z",
+          summary: {
+            workflow: {
+              requestId: null,
+              workflowId: null,
+              requestStatus: null,
+              latestWorkflowStatus: null,
+              latestWorkflowStatusAt: null,
+              submittedAt: null,
+              assignedNotaryId: null,
+              latestCodeStatus: null,
+              latestCodeExpiresAt: null,
+            },
+            finalization: {
+              latestStatus: null,
+              latestStatusAt: null,
+              isAnchored: false,
+              isVerificationChecked: false,
+            },
+            verification: {
+              status: "pending_finalization",
+              idn: "IDN-1234",
+              verifyPath: "/verify/IDN-1234",
+            },
+          },
         },
       ],
     });
@@ -375,6 +516,30 @@ describe("GET documents endpoints", () => {
         documentType: "generic",
         jurisdiction: "US-OH",
         createdAt: "2026-03-05T00:00:00.000Z",
+        summary: {
+          workflow: {
+            requestId: null,
+            workflowId: null,
+            requestStatus: null,
+            latestWorkflowStatus: null,
+            latestWorkflowStatusAt: null,
+            submittedAt: null,
+            assignedNotaryId: null,
+            latestCodeStatus: null,
+            latestCodeExpiresAt: null,
+          },
+          finalization: {
+            latestStatus: null,
+            latestStatusAt: null,
+            isAnchored: false,
+            isVerificationChecked: false,
+          },
+          verification: {
+            status: "unavailable",
+            idn: null,
+            verifyPath: null,
+          },
+        },
       },
     });
   });

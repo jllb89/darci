@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getOrCreateUserIdMock: vi.fn(),
   listDocumentsMock: vi.fn(),
   listRecentAuditEventsForDocumentIdsMock: vi.fn(),
+  getUserIdentityContextBySupabaseIdMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -17,6 +18,18 @@ vi.mock("../../src/services/auditService", () => ({
   listRecentAuditEventsForDocumentIds:
     mocks.listRecentAuditEventsForDocumentIdsMock,
 }));
+
+vi.mock("../../src/services/userRoleService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/userRoleService")>(
+    "../../src/services/userRoleService"
+  );
+
+  return {
+    ...actual,
+    getUserIdentityContextBySupabaseId:
+      mocks.getUserIdentityContextBySupabaseIdMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -56,6 +69,36 @@ describe("GET /dashboard/member", () => {
     mocks.getOrCreateUserIdMock.mockReset();
     mocks.listDocumentsMock.mockReset();
     mocks.listRecentAuditEventsForDocumentIdsMock.mockReset();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockImplementation(
+      async (supabaseUserId: string) => {
+        if (supabaseUserId === "admin-1") {
+          return {
+            id: "admin-user-1",
+            supabaseUserId,
+            email: "admin@example.com",
+            role: "admin",
+            status: "active",
+            firstName: "Admin",
+            lastName: "User",
+            availableRoles: ["admin"],
+            roleAssignments: [],
+          };
+        }
+
+        return {
+          id: "owner-1",
+          supabaseUserId,
+          email: "member@example.com",
+          role: "member",
+          status: "active",
+          firstName: "Member",
+          lastName: "User",
+          availableRoles: ["member"],
+          roleAssignments: [],
+        };
+      }
+    );
   });
 
   it("requires auth", async () => {

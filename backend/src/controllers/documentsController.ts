@@ -5,6 +5,13 @@ import { enqueueDocumentGenerationRun, enqueueWebhook } from "../worker/jobs";
 import { sendValidationError } from "../utils/validation";
 import { recordAuditEvent } from "../services/auditService";
 import {
+  queueDocumentReadyForReviewNotification,
+  queueDocumentSigningPreparedNotification,
+  queueMemberSignaturesRecordedNotification,
+  queueNotarizationSubmissionConfirmationNotification,
+  queueNotaryNextStepNotification,
+} from "../services/notificationService";
+import {
   bootstrapDocumentIntakeDraft as bootstrapDocumentIntakeDraftFromDb,
   claimNextQueuedDocumentGenerationRun,
   createDocumentGenerationRun,
@@ -13,6 +20,7 @@ import {
   type DocumentVersionRecord,
   type GenerationRunBlockingRequirement,
   type GenerationRunStatus,
+  type DocumentOutputSignerUpsertInput,
   getActiveTemplateArtifact,
   isDocumentIntakeLocked,
   getActiveTemplateRegistryForOutput,
@@ -58,6 +66,16 @@ import {
   updateDocumentVersion,
 } from "../services/documentService";
 import {
+  createCodeDeliveryRecord,
+  createIlluminotarizationWorkflow,
+  createIlluminotarizationWorkflowDocument,
+  createIlluminotarizationWorkflowStatusHistoryEntry,
+  listWorkflowStatusHistory,
+  transitionIlluminotarizationWorkflowStatus,
+  upsertIlluminotarizationWorkflowAssignment,
+  type IlluminotarizationWorkflowRecord,
+} from "../services/illuminotarizationWorkflowService";
+import {
   mapDocumentOutputSignerResponse,
   prepareGenerationRun,
   syncDocumentPartiesFromCanonicalAnswers,
@@ -92,9 +110,23 @@ import {
   resolveExpectedOutputsForMode,
 } from "../services/productFlowModeService";
 import {
+  buildDocumentWorkspaceSummaries,
+  buildDocumentWorkspaceSummary,
+} from "../services/documentWorkspaceReadModelService";
+import {
   getVisibleDocumentIdn,
   shouldExposeDocumentReviewOutput,
 } from "../services/documentVisibilityService";
+import {
+  appendAcknowledgmentPage as appendAcknowledgmentPageToDocument,
+  DocumentFinalizationConflictError,
+  DocumentFinalizationForbiddenError,
+  DocumentFinalizationNotFoundError,
+  listFinalizationStatusHistory,
+  watermarkWithNotice as finalizeDocumentWithWatermark,
+} from "../services/documentFinalizationService";
+import { buildDocumentTimeline } from "../services/documentTimelineService";
+import { getUserIdentityContextByUserId } from "../services/userRoleService";
 import { logDocumentTrace } from "../utils/documentTrace";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -112,6 +144,11 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneCountryCodePattern = /^\+\d{1,4}$/;
 const FINAL_IDN_LENGTH = 12;
 const FINAL_IDN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const UPLOADED_DOCUMENT_OUTPUT_KEY = "uploaded_document";
+const UPLOADED_DOCUMENT_DOCUMENT_KEY = "uploaded_document";
+const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
+const UPLOADED_DOCUMENT_TEMPLATE_VERSION = "uploaded_pdf";
+const UPLOADED_DOCUMENT_TEMPLATE_HASH = "uploaded_pdf";
 
 const documentPartyRoles = [
   "principal",
@@ -379,6 +416,7 @@ const finalizeUploadSchema = z
 
 const submitNotarizationSchema = z.object({
   webhookUrl: z.string().url().optional(),
+  selectedNotaryUserId: z.string().min(1).optional(),
 }).passthrough();
 
 const reviewApprovalSchema = z
@@ -709,6 +747,23 @@ const buildAuditActorContext = (req: Request) => {
   return actorContext;
 };
 
+const buildIlluminotarizationWorkflowResponse = (
+  workflow: IlluminotarizationWorkflowRecord | null,
+) => {
+  if (!workflow) {
+    return null;
+  }
+
+  return {
+    id: workflow.id,
+    status: workflow.status,
+    workflowKind: workflow.workflow_kind,
+    selectedNotaryUserId: workflow.selected_notary_user_id,
+    assignedNotaryUserId: workflow.assigned_notary_user_id,
+    currentLegacyRequestId: workflow.current_legacy_request_id,
+  };
+};
+
 const isFinalIdn = (value: string | null) => {
   return typeof value === "string" && /^[A-Z0-9]{12}$/.test(value.trim());
 };
@@ -739,6 +794,68 @@ const resolveReviewApprovalIdn = (document: { idn: string | null; status: string
 
 const buildVerificationUrl = (idn: string) => {
   return `https://www.darciregistry.com/verify/${encodeURIComponent(idn)}`;
+};
+
+const mapDocumentVersionSummary = (version: DocumentVersionRecord) => {
+  return {
+    id: version.id,
+    version: version.version,
+    storagePath: version.storage_path,
+    fileName: version.file_name,
+    mimeType: version.mime_type,
+    sizeBytes: version.size_bytes,
+    isFinal: version.is_final,
+    createdAt: version.created_at,
+  };
+};
+
+const mapDocumentFinalizationExecutionSummary = (execution: {
+  id: string;
+  execution_kind: string;
+  status: string;
+  source_document_version_id: string;
+  output_document_version_id: string | null;
+  template_id: string | null;
+  template_version: string | null;
+  watermark_text: string | null;
+  completed_at: string | null;
+}) => {
+  return {
+    id: execution.id,
+    kind: execution.execution_kind,
+    status: execution.status,
+    sourceVersionId: execution.source_document_version_id,
+    outputVersionId: execution.output_document_version_id,
+    templateId: execution.template_id,
+    templateVersion: execution.template_version,
+    watermarkText: execution.watermark_text,
+    completedAt: execution.completed_at,
+  };
+};
+
+const sendDocumentFinalizationError = (res: Response, error: unknown) => {
+  if (error instanceof DocumentFinalizationNotFoundError) {
+    return res.status(404).json({
+      error: "not_found",
+      message: error.message,
+    });
+  }
+
+  if (error instanceof DocumentFinalizationForbiddenError) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: error.message,
+    });
+  }
+
+  if (error instanceof DocumentFinalizationConflictError) {
+    return res.status(409).json({
+      error: "conflict",
+      message: error.message,
+    });
+  }
+
+  throw error;
 };
 
 const resolveIdnTitle = (
@@ -901,6 +1018,218 @@ const parseSignatureFieldPlacement = (value: unknown): SignatureFieldPlacement |
           height: normalizedDateRect.height as number,
         }
       : null,
+  };
+};
+
+const buildUploadedDocumentOutputEntry = (input: {
+  outputLabel: string;
+}): ParsedOutputBundleEntry => {
+  return {
+    outputKey: UPLOADED_DOCUMENT_OUTPUT_KEY,
+    outputLabel: input.outputLabel,
+    isRequired: true,
+    sortOrder: 0,
+    metadata: {
+      source: "uploaded_pdf",
+      synthetic: true,
+    },
+  };
+};
+
+const buildDefaultUploadedSignatureFieldPlacement = (input: {
+  index: number;
+  label: string;
+}): SignatureFieldPlacement => {
+  return {
+    pageNumber: 1,
+    label: input.label,
+    includeDate: false,
+    signatureRect: {
+      x: 72,
+      y: 160 + input.index * 56,
+      width: 240,
+      height: 40,
+    },
+    dateRect: null,
+  };
+};
+
+const buildUploadedDocumentSignerInputs = (input: {
+  parties: DocumentPartyRecord[];
+  outputLabel: string;
+}): DocumentOutputSignerUpsertInput[] => {
+  return input.parties
+    .filter((party) => party.is_signing_party)
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map((party, index) => ({
+      document_party_id: party.id,
+      output_key: UPLOADED_DOCUMENT_OUTPUT_KEY,
+      document_key: UPLOADED_DOCUMENT_DOCUMENT_KEY,
+      party_role: party.party_role,
+      party_name: party.full_name,
+      obligation_type: "signer",
+      is_required: true,
+      resolution_source: "manual_override",
+      sort_order: index,
+      metadata: {
+        source: "uploaded_pdf",
+        outputLabel: input.outputLabel,
+        signatureField: buildDefaultUploadedSignatureFieldPlacement({
+          index,
+          label: party.full_name,
+        }),
+      },
+    }));
+};
+
+type UploadedDocumentSigningPreparationResult = {
+  document: DocumentRecord;
+  ready: boolean;
+  error: Record<string, unknown> | null;
+};
+
+const ensureUploadedDocumentSigningPreparation = async (input: {
+  document: DocumentRecord;
+  reviewApproval: ReviewApprovalValue;
+}) : Promise<UploadedDocumentSigningPreparationResult> => {
+  let document = input.document;
+  const parsedOutputBundle = parseOutputBundle(document.output_bundle);
+  const outputLabel =
+    parsedOutputBundle.find((output) => output.outputKey === UPLOADED_DOCUMENT_OUTPUT_KEY)
+      ?.outputLabel ?? resolveIdnTitle(document, null);
+
+  if (!parsedOutputBundle.some((output) => output.outputKey === UPLOADED_DOCUMENT_OUTPUT_KEY)) {
+    document = await updateDocument(document.id, {
+      output_bundle: [
+        ...parsedOutputBundle,
+        buildUploadedDocumentOutputEntry({
+          outputLabel,
+        }),
+      ],
+    });
+  }
+
+  const versions = await listDocumentVersionsFromDb(document.id);
+  const approvedVersion =
+    (input.reviewApproval.latestVersionId
+      ? versions.find((version) => version.id === input.reviewApproval.latestVersionId)
+      : null) ??
+    input.reviewApproval.approvedVersionIds
+      .map((versionId) => versions.find((version) => version.id === versionId) ?? null)
+      .find((version): version is DocumentVersionRecord => Boolean(version)) ??
+    getLatestPdfVersion(versions);
+
+  if (!approvedVersion?.storage_path || approvedVersion.mime_type !== "application/pdf") {
+    return {
+      document,
+      ready: false,
+      error: {
+        error: "not_found",
+        message: "Approved uploaded PDF version could not be resolved for signing preparation",
+      },
+    };
+  }
+
+  const generationRuns = await listDocumentGenerationRunsFromDb(document.id);
+  let uploadedRun =
+    generationRuns.find(
+      (run) =>
+        run.output_key === UPLOADED_DOCUMENT_OUTPUT_KEY &&
+        run.document_version_id === approvedVersion.id,
+    ) ??
+    generationRuns.find((run) => run.output_key === UPLOADED_DOCUMENT_OUTPUT_KEY) ??
+    null;
+
+  const renderedAt = input.reviewApproval.approvedAt ?? new Date().toISOString();
+
+  if (!uploadedRun) {
+    uploadedRun = await createDocumentGenerationRun({
+      documentId: document.id,
+      intakeRevision: Math.max(approvedVersion.version, 1),
+      outputKey: UPLOADED_DOCUMENT_OUTPUT_KEY,
+      documentKey: UPLOADED_DOCUMENT_DOCUMENT_KEY,
+      templateKey: UPLOADED_DOCUMENT_TEMPLATE_KEY,
+      templateVersion: UPLOADED_DOCUMENT_TEMPLATE_VERSION,
+      templateHash: UPLOADED_DOCUMENT_TEMPLATE_HASH,
+      payload: {
+        source: "uploaded_pdf_review_approval",
+        reviewApproval: input.reviewApproval,
+        approvedVersionId: approvedVersion.id,
+      },
+      coverage: {
+        source: "uploaded_pdf_review_approval",
+        synthetic: true,
+      },
+      renderContext: {
+        source: "uploaded_pdf_review_approval",
+      },
+      resolvedSources: {
+        reviewSource: input.reviewApproval.reviewSource ?? "uploaded_pdf",
+      },
+      status: "rendered",
+      documentVersionId: approvedVersion.id,
+      renderedAt,
+      startedAt: renderedAt,
+    });
+  } else if (
+    uploadedRun.document_version_id !== approvedVersion.id ||
+    uploadedRun.status !== "rendered" ||
+    !uploadedRun.rendered_at
+  ) {
+    uploadedRun = await updateDocumentGenerationRun(uploadedRun.id, {
+      document_version_id: approvedVersion.id,
+      status: "rendered",
+      blocked_at: null,
+      started_at: uploadedRun.started_at ?? renderedAt,
+      rendered_at: uploadedRun.rendered_at ?? renderedAt,
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+      error_message: null,
+    });
+  }
+
+  if (approvedVersion.generation_run_id !== uploadedRun.id) {
+    await updateDocumentVersion(approvedVersion.id, {
+      generation_run_id: uploadedRun.id,
+    });
+  }
+
+  const existingSigners = await listDocumentOutputSigners({
+    documentId: document.id,
+    generationRunId: uploadedRun.id,
+  });
+
+  if (existingSigners.length === 0) {
+    const parties = await listDocumentPartiesFromDb(document.id);
+    const signerInputs = buildUploadedDocumentSignerInputs({
+      parties,
+      outputLabel,
+    });
+
+    if (signerInputs.length > 0) {
+      await replaceDocumentOutputSigners({
+        documentId: document.id,
+        generationRunId: uploadedRun.id,
+        signers: signerInputs,
+      });
+    }
+  }
+
+  logDocumentTrace("signing.uploaded_document_prepared", {
+    documentId: document.id,
+    generationRunId: uploadedRun.id,
+    approvedVersionId: approvedVersion.id,
+    outputLabel,
+    signerCount: existingSigners.length,
+  });
+
+  return {
+    document,
+    ready: true,
+    error: null,
   };
 };
 
@@ -2021,6 +2350,23 @@ const ensureSigningState = async (input: {
 
   if (
     document.status === "pending_signature" &&
+    signingState.reviewApproval?.reviewSource === "uploaded_pdf" &&
+    signingState.reviewApproval.approvedOutputKeys.includes(UPLOADED_DOCUMENT_OUTPUT_KEY)
+  ) {
+    const preparation = await ensureUploadedDocumentSigningPreparation({
+      document,
+      reviewApproval: signingState.reviewApproval,
+    });
+
+    document = preparation.document;
+    signingState = await buildDocumentSigningState({
+      document,
+      ...(input.viewerRole !== undefined ? { viewerRole: input.viewerRole } : {}),
+    });
+  }
+
+  if (
+    document.status === "pending_signature" &&
     signingState.reviewApproval?.approvedAt &&
     signingState.missingOutputKeys.length > 0
   ) {
@@ -2528,6 +2874,13 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
         review_source: "uploaded_pdf",
       },
     });
+
+    await queueDocumentReadyForReviewNotification({
+      documentId: updatedDocument.id,
+      documentVersionId: updatedVersion.id,
+      reviewSource: "uploaded_pdf",
+      requestedBySupabaseUserId: req.user?.id,
+    });
   }
 
   res.status(200).json({
@@ -2603,8 +2956,16 @@ export const getDocument = async (req: Request, res: Response) => {
     return;
   }
 
+  const summary = await buildDocumentWorkspaceSummary({
+    document,
+    viewerRole: req.user?.role ?? "member",
+  });
+
   res.status(200).json({
-    document: mapDocumentResponse(document, req.user?.role ?? "member"),
+    document: {
+      ...mapDocumentResponse(document, req.user?.role ?? "member"),
+      summary,
+    },
   });
 };
 
@@ -2676,11 +3037,27 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
   });
 
   if (document.status === "pending_signature" && isFinalIdn(document.idn) && review.reviewApproval) {
+    let signingReady = true;
+    let idempotentDocument = document;
+
+    if (
+      review.reviewApproval.reviewSource === "uploaded_pdf" &&
+      review.reviewApproval.approvedOutputKeys.includes(UPLOADED_DOCUMENT_OUTPUT_KEY)
+    ) {
+      const preparation = await ensureUploadedDocumentSigningPreparation({
+        document,
+        reviewApproval: review.reviewApproval,
+      });
+
+      idempotentDocument = preparation.document;
+      signingReady = preparation.ready;
+    }
+
     return res.status(200).json({
-      document: mapDocumentResponse(document, req.user?.role ?? "member"),
+      document: mapDocumentResponse(idempotentDocument, req.user?.role ?? "member"),
       reviewApproval: {
         approvedAt: review.reviewApproval.approvedAt,
-        signingReady: true,
+        signingReady,
         reviewSource: review.reviewApproval.reviewSource,
         latestVersionId: review.reviewApproval.latestVersionId,
         latestRenderedRunId: review.reviewApproval.latestRenderedRunId,
@@ -2866,40 +3243,71 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
     },
   });
 
-  await recordAuditEvent({
-    ...actorContext,
-    entityType: "document",
-    entityId: updatedDocument.id,
-    action: "system.document_signing_prepared",
-    metadata: {
-      document_id: updatedDocument.id,
-      approved_at: approvedAt,
-      idn: assignedIdn,
-      signer_count: signerNames.length,
-      review_source: reviewSource,
-    },
-  });
+  let signingReady = false;
+  let signingPreparationError: Record<string, unknown> | null = null;
+  let signingPreparedDocument = updatedDocument;
 
-  const signingGeneration = await createGenerationRunsForDocument({
-    document: updatedDocument,
-    outputKeys: review.outputs.map((output) => output.outputKey),
-    reuseSatisfiedRunsCreatedAfter: approvedAt,
-    actorContext,
-  });
+  if (reviewSource === "uploaded_pdf") {
+    const preparation = await ensureUploadedDocumentSigningPreparation({
+      document: updatedDocument,
+      reviewApproval: {
+        approvedAt,
+        reviewSource,
+        latestVersionId: latestReviewedOutput.versionId,
+        latestRenderedRunId: latestReviewedOutput.generationRunId,
+        approvedOutputKeys: review.outputs.map((output) => output.outputKey),
+        approvedVersionIds: review.outputs.map((output) => output.versionId),
+      },
+    });
 
-  if (signingGeneration.error) {
-    logDocumentTrace("review.signing_generation_deferred", {
-      documentId: updatedDocument.id,
+    signingPreparedDocument = preparation.document;
+    signingReady = preparation.ready;
+    signingPreparationError = preparation.error;
+  } else {
+    const signingGeneration = await createGenerationRunsForDocument({
+      document: updatedDocument,
+      outputKeys: review.outputs.map((output) => output.outputKey),
+      reuseSatisfiedRunsCreatedAfter: approvedAt,
+      actorContext,
+    });
+
+    signingReady = !signingGeneration.error;
+    signingPreparationError = signingGeneration.error?.body ?? null;
+  }
+
+  if (signingReady) {
+    await recordAuditEvent({
+      ...actorContext,
+      entityType: "document",
+      entityId: signingPreparedDocument.id,
+      action: "system.document_signing_prepared",
+      metadata: {
+        document_id: signingPreparedDocument.id,
+        approved_at: approvedAt,
+        idn: assignedIdn,
+        signer_count: signerNames.length,
+        review_source: reviewSource,
+      },
+    });
+
+    await queueDocumentSigningPreparedNotification({
+      documentId: signingPreparedDocument.id,
       approvedAt,
-      error: signingGeneration.error.body,
+      requestedBySupabaseUserId: req.user?.id,
+    });
+  } else if (signingPreparationError) {
+    logDocumentTrace("review.signing_generation_deferred", {
+      documentId: signingPreparedDocument.id,
+      approvedAt,
+      error: signingPreparationError,
     });
   }
 
   return res.status(200).json({
-    document: mapDocumentResponse(updatedDocument, req.user?.role ?? "member"),
+    document: mapDocumentResponse(signingPreparedDocument, req.user?.role ?? "member"),
     reviewApproval: {
       approvedAt,
-      signingReady: !signingGeneration.error,
+      signingReady,
       reviewSource,
       latestVersionId: latestReviewedOutput.versionId,
       latestRenderedRunId: latestReviewedOutput.generationRunId,
@@ -3801,11 +4209,16 @@ export const listDocuments = async (req: Request, res: Response) => {
   }
 
   const documents = await listDocumentsFromDb(ownerId);
+  const summaries = await buildDocumentWorkspaceSummaries({
+    documents,
+    viewerRole: req.user?.role ?? "member",
+  });
 
   res.status(200).json({
-    documents: documents.map((document) =>
-      mapDocumentResponse(document, req.user?.role ?? "member"),
-    ),
+    documents: documents.map((document) => ({
+      ...mapDocumentResponse(document, req.user?.role ?? "member"),
+      summary: summaries.get(document.id) ?? null,
+    })),
   });
 };
 
@@ -3888,15 +4301,30 @@ export const updateDocumentParties = async (req: Request, res: Response) => {
 };
 
 export const getDocumentTimeline = async (req: Request, res: Response) => {
-  res.status(200).json({
-    timeline: [
-      {
-        action: "submitted",
-        timestamp: new Date().toISOString(),
-        actorId: "TODO_ACTOR_ID",
-      },
-    ],
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const [systemValues, request, finalizationStatusHistory] = await Promise.all([
+    listDocumentSystemValues(document.id),
+    getActiveNotarizationRequest(document.id),
+    listFinalizationStatusHistory(document.id),
+  ]);
+
+  const workflowStatusHistory = request?.workflow_id
+    ? await listWorkflowStatusHistory(request.workflow_id)
+    : [];
+
+  const timeline = buildDocumentTimeline({
+    document,
+    systemValues,
+    request,
+    workflowStatusHistory,
+    finalizationStatusHistory,
   });
+
+  res.status(200).json({ timeline });
 };
 
 export const getDocumentSignerObligations = async (
@@ -4122,6 +4550,12 @@ export const signDocument = async (req: Request, res: Response) => {
       completed_output_signer_ids: signingExecution.completedOutputSignerIds,
       completed_signature_ids: signingExecution.completedSignatureIds,
     },
+  });
+
+  await queueMemberSignaturesRecordedNotification({
+    documentId: document.id,
+    confirmedAt,
+    requestedBySupabaseUserId: req.user?.id,
   });
 
   return res.status(200).json({
@@ -4655,12 +5089,36 @@ export const submitNotarization = async (req: Request, res: Response) => {
   }
 
   const role = req.user.role ?? "member";
+  const actorUserId = await getUserIdBySupabaseId(req.user.id);
   if (role !== "admin" && role !== "service_role") {
-    const ownerId = await getUserIdBySupabaseId(req.user.id);
-    if (!ownerId || document.owner_id !== ownerId) {
+    if (!actorUserId || document.owner_id !== actorUserId) {
       return res.status(404).json({
         error: "not_found",
         message: "Document not found",
+      });
+    }
+  }
+
+  const selectedNotaryUserId = parsed.data.selectedNotaryUserId?.trim() || null;
+  if (selectedNotaryUserId) {
+    const selectedNotaryContext = await getUserIdentityContextByUserId(
+      selectedNotaryUserId,
+    );
+    const selectedNotaryHasActiveAssignment =
+      selectedNotaryContext?.roleAssignments.some(
+        (assignment) => assignment.role === "notary" && assignment.status === "active",
+      ) ?? false;
+
+    if (!selectedNotaryContext || !selectedNotaryHasActiveAssignment) {
+      return res.status(400).json({
+        error: "validation_error",
+        message: "Selected notary must be an active notary user",
+        details: [
+          {
+            path: "selectedNotaryUserId",
+            message: "Selected notary must be an active notary user",
+          },
+        ],
       });
     }
   }
@@ -4686,13 +5144,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
     });
   }
 
-  const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
-  if (req.user?.id) {
-    actorContext.actorSupabaseId = req.user.id;
-  }
-  if (req.user?.role) {
-    actorContext.actorRole = req.user.role;
-  }
+  const actorContext = buildAuditActorContext(req);
 
   await recordAuditEvent({
     ...actorContext,
@@ -4701,13 +5153,71 @@ export const submitNotarization = async (req: Request, res: Response) => {
     action: "member.notarization_submit_started",
     metadata: {
       document_id: documentId,
+      selected_notary_user_id: selectedNotaryUserId,
     },
   });
 
   const submittedAt = new Date().toISOString();
+  const workflow = await createIlluminotarizationWorkflow({
+    ownerUserId: document.owner_id,
+    createdByUserId: actorUserId,
+    primaryDocumentId: documentId,
+    status: "submitted",
+    selectedNotaryUserId,
+    submittedAt,
+    contextJson: {
+      compatibilityMode: "legacy_request_bridge",
+      selectedNotaryLocked: Boolean(selectedNotaryUserId),
+    },
+    metadata: {
+      source: "documents.submit-notarization",
+      actorRole: req.user.role ?? null,
+    },
+  });
+
   const request = await createNotarizationRequest({
     documentId,
     submittedAt,
+    workflowId: workflow.id,
+  });
+
+  if (selectedNotaryUserId) {
+    await upsertIlluminotarizationWorkflowAssignment({
+      workflowId: workflow.id,
+      assignmentKind: "selected_notary",
+      userId: selectedNotaryUserId,
+      assignedByUserId: actorUserId,
+      assignmentSource: "member_selection",
+      metadata: {
+        requestId: request.id,
+        documentId,
+      },
+    });
+  }
+
+  await createIlluminotarizationWorkflowDocument({
+    workflowId: workflow.id,
+    documentId,
+    notarizationRequestId: request.id,
+    bundleRole: "primary",
+    isPrimary: true,
+    sortOrder: 0,
+    metadata: {
+      source: "documents.submit-notarization",
+    },
+  });
+
+  await createIlluminotarizationWorkflowStatusHistoryEntry({
+    workflowId: workflow.id,
+    nextStatus: "submitted",
+    changedByUserId: actorUserId,
+    changeSource: "submit_notarization",
+    changeReason: "Document submitted into illuminotarization workflow",
+    legacyRequestId: request.id,
+    metadata: {
+      documentId,
+      selectedNotaryUserId,
+    },
   });
 
   await updateDocument(documentId, { status: "pending_notary" });
@@ -4715,14 +5225,13 @@ export const submitNotarization = async (req: Request, res: Response) => {
   const ttlMinutes = Number(process.env.NOTARIZATION_CODE_TTL_MINUTES ?? 30);
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
 
-  let codeRecord = null as
-    | Awaited<ReturnType<typeof createNotarizationCode>>
-    | null;
+  let codeRecord = null as Awaited<ReturnType<typeof createNotarizationCode>> | null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = `NTR-${randomUUID().slice(0, 8).toUpperCase()}`;
     try {
       codeRecord = await createNotarizationCode({
         requestId: request.id,
+        workflowId: workflow.id,
         code,
         expiresAt,
       });
@@ -4734,6 +5243,10 @@ export const submitNotarization = async (req: Request, res: Response) => {
     }
   }
 
+  if (!codeRecord) {
+    throw new Error("Failed to generate illuminotarization code");
+  }
+
   await recordAuditEvent({
     ...actorContext,
     entityType: "notarization_request",
@@ -4742,35 +5255,108 @@ export const submitNotarization = async (req: Request, res: Response) => {
     metadata: {
       request_id: request.id,
       document_id: documentId,
+      workflow_id: workflow.id,
+      selected_notary_user_id: selectedNotaryUserId,
       submitted_at: submittedAt,
     },
   });
 
-  if (codeRecord) {
-    await recordAuditEvent({
-      ...actorContext,
-      entityType: "illuminotarization_code",
-      entityId: codeRecord.id,
-      action: "system.code_generated",
-      metadata: {
-        code_id: codeRecord.id,
-        request_id: request.id,
-        expires_at: codeRecord.expires_at,
-      },
-    });
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "illuminotarization_code",
+    entityId: codeRecord.id,
+    action: "system.code_generated",
+    metadata: {
+      code_id: codeRecord.id,
+      request_id: request.id,
+      workflow_id: workflow.id,
+      expires_at: codeRecord.expires_at,
+    },
+  });
 
+  const deliveredAt = new Date().toISOString();
+  const notaryNextStepJob = await queueNotaryNextStepNotification({
+    documentId,
+    requestId: request.id,
+    codeId: codeRecord.id,
+    codeValue: codeRecord.code,
+    expiresAt: codeRecord.expires_at,
+    deliveryReason: "initial_submit",
+    requestedBySupabaseUserId: req.user?.id,
+  });
+
+  await createCodeDeliveryRecord({
+    workflowId: workflow.id,
+    legacyRequestId: request.id,
+    illuminotarizationCodeId: codeRecord.id,
+    notificationJobId: notaryNextStepJob?.jobId ?? null,
+    recipientUserId: document.owner_id,
+    channel: "email",
+    deliveryMethod: "notification_outbox",
+    deliveryReason: "initial_submit",
+    status: "delivered",
+    codeValueSnapshot: codeRecord.code,
+    expiresAt: codeRecord.expires_at,
+    deliveredAt,
+    metadata: {
+      source: "documents.submit-notarization",
+      selectedNotaryUserId,
+    },
+  });
+
+  const workflowAfterCodeDelivery = await transitionIlluminotarizationWorkflowStatus({
+    workflowId: workflow.id,
+    nextStatus: "code_delivered",
+    changedByUserId: actorUserId,
+    changeSource: "code_delivery",
+    changeReason: "Initial illuminotarization code delivered to document owner",
+    legacyRequestId: request.id,
+    metadata: {
+      codeId: codeRecord.id,
+      deliveryReason: "initial_submit",
+    },
+    workflowUpdates: {
+      currentLegacyRequestId: request.id,
+      lastCodeGeneratedAt: codeRecord.created_at,
+      submittedAt,
+    },
+  });
+
+  await recordAuditEvent({
+    ...actorContext,
+    entityType: "illuminotarization_code",
+    entityId: codeRecord.id,
+    action: "system.code_delivered",
+    metadata: {
+      code_id: codeRecord.id,
+      request_id: request.id,
+      workflow_id: workflow.id,
+      delivery_method: "notification_outbox_email",
+      delivery_reason: "initial_submit",
+      delivered_at: deliveredAt,
+    },
+  });
+
+  if (selectedNotaryUserId) {
     await recordAuditEvent({
       ...actorContext,
-      entityType: "illuminotarization_code",
-      entityId: codeRecord.id,
-      action: "system.code_delivered",
+      entityType: "illuminotarization_workflow",
+      entityId: workflow.id,
+      action: "member.notary_selected",
       metadata: {
-        code_id: codeRecord.id,
-        delivery_method: "in_app",
-        delivered_at: new Date().toISOString(),
+        workflow_id: workflow.id,
+        request_id: request.id,
+        document_id: documentId,
+        selected_notary_user_id: selectedNotaryUserId,
       },
     });
   }
+
+  await queueNotarizationSubmissionConfirmationNotification({
+    documentId,
+    requestId: request.id,
+    requestedBySupabaseUserId: req.user?.id,
+  });
 
   const { webhookUrl } = parsed.data;
   if (webhookUrl) {
@@ -4779,7 +5365,9 @@ export const submitNotarization = async (req: Request, res: Response) => {
       payload: {
         requestId: request.id,
         documentId,
-        code: codeRecord?.code ?? null,
+        workflowId: workflow.id,
+        selectedNotaryUserId,
+        code: codeRecord.code,
         expiresAt,
         productFlowMode: document.product_flow_mode,
         selectedFamilies: document.selected_families,
@@ -4792,6 +5380,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
     request: {
       id: request.id,
       documentId: request.document_id,
+      workflowId: request.workflow_id,
       status: request.status,
       submittedAt: request.submitted_at,
     },
@@ -4799,27 +5388,216 @@ export const submitNotarization = async (req: Request, res: Response) => {
       id: documentId,
       status: "pending_notary",
     },
-    code: codeRecord
-      ? {
-          id: codeRecord.id,
-          code: codeRecord.code,
-          status: codeRecord.status,
-          expiresAt: codeRecord.expires_at,
-        }
-      : null,
+    code: {
+      id: codeRecord.id,
+      code: codeRecord.code,
+      status: codeRecord.status,
+      expiresAt: codeRecord.expires_at,
+    },
+    workflow: buildIlluminotarizationWorkflowResponse(workflowAfterCodeDelivery),
   });
 };
 
 export const appendAcknowledgment = async (req: Request, res: Response) => {
-  res.status(200).json({
-    status: "ok",
-    message: `TODO: append acknowledgment page and notice for ${req.params.id}`,
-  });
+  if (!req.user?.id && req.user?.role !== "service_role") {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
+
+  if (typeof req.params.id !== "string" || req.params.id.trim().length === 0) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document id is required",
+      details: [
+        {
+          path: "id",
+          message: "Document id is required",
+        },
+      ],
+    });
+  }
+
+  try {
+    const result = await appendAcknowledgmentPageToDocument({
+      documentId: req.params.id.trim(),
+      actorSupabaseId: req.user?.id,
+      actorRole: req.user?.role ?? null,
+    });
+
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "acknowledgment_page",
+      entityId: result.acknowledgmentPage.id,
+      action: "system.ack_template_selected",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        jurisdiction: result.acknowledgmentPage.jurisdiction,
+        template_id: result.execution.template_id,
+        template_version: result.execution.template_version,
+      },
+    });
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "acknowledgment_page",
+      entityId: result.acknowledgmentPage.id,
+      action: "system.ack_page_generated",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        acknowledgment_page_id: result.acknowledgmentPage.id,
+      },
+    });
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "document_version",
+      entityId: result.version.id,
+      action: "system.ack_page_appended",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        document_version_id: result.version.id,
+        execution_run_id: result.execution.id,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      documentId: result.document.id,
+      requestId: result.request.id,
+      acknowledgmentPage: {
+        id: result.acknowledgmentPage.id,
+        jurisdiction: result.acknowledgmentPage.jurisdiction,
+        content: result.acknowledgmentPage.content,
+        createdAt: result.acknowledgmentPage.created_at,
+      },
+      execution: mapDocumentFinalizationExecutionSummary(result.execution),
+      version: mapDocumentVersionSummary(result.version),
+    });
+  } catch (error) {
+    return sendDocumentFinalizationError(res, error);
+  }
 };
 
 export const watermarkDocument = async (req: Request, res: Response) => {
-  res.status(200).json({
-    status: "ok",
-    message: `TODO: watermark document with IDN and notice for ${req.params.id}`,
-  });
+  if (!req.user?.id && req.user?.role !== "service_role") {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
+
+  if (typeof req.params.id !== "string" || req.params.id.trim().length === 0) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document id is required",
+      details: [
+        {
+          path: "id",
+          message: "Document id is required",
+        },
+      ],
+    });
+  }
+
+  try {
+    const result = await finalizeDocumentWithWatermark({
+      documentId: req.params.id.trim(),
+      actorSupabaseId: req.user?.id,
+      actorRole: req.user?.role ?? null,
+    });
+    const ledgerStatus = result.ledgerAnchorAttempt?.status ?? "anchored";
+
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "document_version",
+      entityId: result.version.id,
+      action: "system.watermark_started",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        document_version_id: result.version.id,
+        watermark_text: result.execution.watermark_text,
+      },
+    });
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "document_version",
+      entityId: result.version.id,
+      action: "system.watermark_completed",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        document_version_id: result.version.id,
+        watermark_text: result.execution.watermark_text,
+      },
+    });
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "document_version",
+      entityId: result.version.id,
+      action: "system.notarized_document_created",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        document_version_id: result.version.id,
+        storage_path: result.version.storage_path,
+        is_final: result.version.is_final,
+      },
+    });
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "ledger_entry",
+      entityId: result.ledgerEntry.id,
+      action: "system.hashing_completed",
+      metadata: {
+        request_id: result.request.id,
+        document_id: result.document.id,
+        document_version_id: result.version.id,
+        hash: result.hashRecord.hash,
+        hash_algorithm: result.hashRecord.algorithm,
+      },
+    });
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "ledger_entry",
+      entityId: result.ledgerEntry.id,
+      action: "system.ledger_anchor_completed",
+      metadata: {
+        request_id: result.request.id,
+        ledger_entry_id: result.ledgerEntry.id,
+        document_id: result.document.id,
+        idn: result.ledgerEntry.idn,
+        hash: result.ledgerEntry.hash,
+        ledger_tx_id: result.ledgerEntry.ledger_tx_id,
+        anchored_at: result.ledgerEntry.anchored_at,
+        status: ledgerStatus,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      documentId: result.document.id,
+      requestId: result.request.id,
+      execution: mapDocumentFinalizationExecutionSummary(result.execution),
+      version: mapDocumentVersionSummary(result.version),
+      hashRecord: {
+        id: result.hashRecord.id,
+        algorithm: result.hashRecord.algorithm,
+        hash: result.hashRecord.hash,
+        status: result.hashRecord.status,
+        completedAt: result.hashRecord.completed_at,
+      },
+      ledger: {
+        id: result.ledgerEntry.id,
+        ledgerTxId: result.ledgerEntry.ledger_tx_id,
+        anchoredAt: result.ledgerEntry.anchored_at,
+        status: ledgerStatus,
+      },
+    });
+  } catch (error) {
+    return sendDocumentFinalizationError(res, error);
+  }
 };

@@ -10,26 +10,82 @@ const mocks = vi.hoisted(() => ({
   listDocumentGenerationRunsMock: vi.fn(),
   listDocumentOutputSignersMock: vi.fn(),
   listDocumentPartiesMock: vi.fn(),
+  getDocumentIntakeDraftMock: vi.fn(),
+  getActiveTemplateRegistryForOutputMock: vi.fn(),
+  getActiveTemplateArtifactMock: vi.fn(),
+  createDocumentGenerationRunMock: vi.fn(),
+  updateDocumentVersionMock: vi.fn(),
+  replaceDocumentOutputSignersMock: vi.fn(),
   upsertDocumentSystemValuesMock: vi.fn(),
   updateDocumentMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   createDocumentDownloadUrlMock: vi.fn(),
+  prepareGenerationRunMock: vi.fn(),
+  deriveMemberFormRulesByJurisdictionMock: vi.fn(),
+  buildMemberFormDocumentExtractionPayloadMock: vi.fn(),
+  queueDocumentSigningPreparedNotificationMock: vi.fn(),
 }));
 
-vi.mock("../../src/services/documentService", () => ({
-  getDocumentById: mocks.getDocumentByIdMock,
-  getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
-  listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
-  listDocumentVersions: mocks.listDocumentVersionsMock,
-  listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
-  listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
-  listDocumentParties: mocks.listDocumentPartiesMock,
-  upsertDocumentSystemValues: mocks.upsertDocumentSystemValuesMock,
-  updateDocument: mocks.updateDocumentMock,
-}));
+vi.mock("../../src/services/documentService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/documentService")>();
+
+  return {
+    ...actual,
+    getDocumentById: mocks.getDocumentByIdMock,
+    getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
+    listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
+    listDocumentVersions: mocks.listDocumentVersionsMock,
+    listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
+    listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
+    listDocumentParties: mocks.listDocumentPartiesMock,
+    getDocumentIntakeDraft: mocks.getDocumentIntakeDraftMock,
+    getActiveTemplateRegistryForOutput: mocks.getActiveTemplateRegistryForOutputMock,
+    getActiveTemplateArtifact: mocks.getActiveTemplateArtifactMock,
+    createDocumentGenerationRun: mocks.createDocumentGenerationRunMock,
+    updateDocumentVersion: mocks.updateDocumentVersionMock,
+    replaceDocumentOutputSigners: mocks.replaceDocumentOutputSignersMock,
+    upsertDocumentSystemValues: mocks.upsertDocumentSystemValuesMock,
+    updateDocument: mocks.updateDocumentMock,
+  };
+});
+
+vi.mock("../../src/services/documentGenerationService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/documentGenerationService")>();
+
+  return {
+    ...actual,
+    prepareGenerationRun: mocks.prepareGenerationRunMock,
+  };
+});
+
+vi.mock("../../src/services/memberFormRulesService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/memberFormRulesService")>();
+
+  return {
+    ...actual,
+    deriveMemberFormRulesByJurisdiction: mocks.deriveMemberFormRulesByJurisdictionMock,
+  };
+});
+
+vi.mock("../../src/services/memberFormDocumentExtractionService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/memberFormDocumentExtractionService")>();
+
+  return {
+    ...actual,
+    buildMemberFormDocumentExtractionPayload: mocks.buildMemberFormDocumentExtractionPayloadMock,
+  };
+});
 
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
+}));
+
+vi.mock("../../src/services/notificationService", () => ({
+  queueDocumentReadyForReviewNotification: vi.fn().mockResolvedValue(null),
+  queueDocumentSigningPreparedNotification: mocks.queueDocumentSigningPreparedNotificationMock,
+  queueMemberSignaturesRecordedNotification: vi.fn().mockResolvedValue(null),
+  queueNotarizationSubmissionConfirmationNotification: vi.fn().mockResolvedValue(null),
+  queueNotaryNextStepNotification: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../../src/services/storageService", () => ({
@@ -47,7 +103,19 @@ type TokenPayload = {
 
 const signToken = (payload: TokenPayload) => {
   const secret = process.env.SUPABASE_JWT_SECRET ?? "test-secret";
-  return jwt.sign(payload, secret, { expiresIn: "1h" });
+  return jwt.sign(
+    {
+      ...payload,
+      sub:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          payload.sub ?? "",
+        )
+          ? payload.sub
+          : "00000000-0000-4000-8000-000000000001",
+    },
+    secret,
+    { expiresIn: "1h" },
+  );
 };
 
 describe("document review approval", () => {
@@ -60,10 +128,20 @@ describe("document review approval", () => {
     mocks.listDocumentGenerationRunsMock.mockReset();
     mocks.listDocumentOutputSignersMock.mockReset();
     mocks.listDocumentPartiesMock.mockReset();
+    mocks.getDocumentIntakeDraftMock.mockReset();
+    mocks.getActiveTemplateRegistryForOutputMock.mockReset();
+    mocks.getActiveTemplateArtifactMock.mockReset();
+    mocks.createDocumentGenerationRunMock.mockReset();
+    mocks.updateDocumentVersionMock.mockReset();
+    mocks.replaceDocumentOutputSignersMock.mockReset();
     mocks.upsertDocumentSystemValuesMock.mockReset();
     mocks.updateDocumentMock.mockReset();
     mocks.recordAuditEventMock.mockReset();
     mocks.createDocumentDownloadUrlMock.mockReset();
+    mocks.prepareGenerationRunMock.mockReset();
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockReset();
+    mocks.buildMemberFormDocumentExtractionPayloadMock.mockReset();
+    mocks.queueDocumentSigningPreparedNotificationMock.mockReset();
     mocks.createDocumentDownloadUrlMock.mockResolvedValue({
       bucket: "documents",
       path: "owner-1/doc-1/generated/ver-1.pdf",
@@ -127,6 +205,90 @@ describe("document review approval", () => {
       },
     ]);
     mocks.listDocumentPartiesMock.mockResolvedValue([]);
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      id: "draft-1",
+      document_id: "doc-1",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      rules_snapshot_version: "2026.03.05",
+      revision: 7,
+      canonical_answers_json: {},
+      created_at: "2026-03-05T00:00:00.000Z",
+      updated_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      availabilityConflict: null,
+      contract: {},
+      missing: [],
+    });
+    mocks.buildMemberFormDocumentExtractionPayloadMock.mockResolvedValue({
+      generatedAt: "2026-03-05T00:10:00.000Z",
+    });
+    mocks.getActiveTemplateRegistryForOutputMock.mockResolvedValue(null);
+    mocks.getActiveTemplateArtifactMock.mockResolvedValue(null);
+    mocks.prepareGenerationRunMock.mockResolvedValue({
+      document: {
+        id: "doc-1",
+        owner_id: "owner-1",
+      },
+      documentKey: "trust_rrr_document",
+      status: "blocked",
+      blockingRequirements: [
+        {
+          code: "deferred_generation",
+          message: "Deferred in test",
+          blocking: true,
+        },
+      ],
+      resolvedSources: {},
+      renderContext: {},
+      extractionDocument: null,
+      signerObligations: [
+        {
+          output_key: "trust_rrr",
+          document_key: "trust_rrr_document",
+          party_role: "trustee",
+          party_name: "Taylor Trustee",
+          obligation_type: "signer",
+          is_required: true,
+          resolution_source: "template",
+          sort_order: 0,
+          metadata: {},
+        },
+      ],
+      errorMessage: "Deferred in test",
+    });
+    mocks.createDocumentGenerationRunMock.mockResolvedValue({
+      id: "run-2",
+      document_id: "doc-1",
+      intake_revision: 7,
+      output_key: "trust_rrr",
+      document_key: "trust_rrr_document",
+      template_key: "unresolved_template",
+      template_version: "unresolved",
+      template_hash: "unresolved",
+      template_artifact_id: null,
+      payload_json: {},
+      coverage_json: {},
+      render_context_json: {},
+      blocking_requirements_json: [],
+      resolved_sources_json: {},
+      status: "blocked",
+      renderer_job_id: null,
+      document_version_id: null,
+      blocked_at: "2026-03-05T00:10:00.000Z",
+      started_at: null,
+      rendered_at: null,
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+      error_message: "Deferred in test",
+      created_at: "2026-03-05T00:10:00.000Z",
+    });
+    mocks.replaceDocumentOutputSignersMock.mockResolvedValue([]);
+    mocks.queueDocumentSigningPreparedNotificationMock.mockResolvedValue(null);
     mocks.updateDocumentMock.mockImplementation(async (_documentId: string, updates: Record<string, unknown>) => ({
       id: "doc-1",
       owner_id: "owner-1",
@@ -144,6 +306,8 @@ describe("document review approval", () => {
           metadata: {},
         },
       ],
+      intake_status: updates.intake_status,
+      intake_submitted_at: updates.intake_submitted_at,
       created_at: "2026-03-05T00:00:00.000Z",
     }));
     mocks.upsertDocumentSystemValuesMock.mockResolvedValue([]);
@@ -180,7 +344,142 @@ describe("document review approval", () => {
         ]),
       }),
     );
-    expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(3);
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("approves uploaded PDFs by provisioning a synthetic uploaded-document signing run", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: null,
+      status: "pending_review",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: null,
+      output_bundle: [],
+      intake_status: null,
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-1",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "owner-1/doc-1/uploads/original.pdf",
+        file_name: "original.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1024,
+        is_final: false,
+        generation_run_id: null,
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([]);
+    mocks.listDocumentPartiesMock.mockResolvedValue([]);
+    mocks.updateDocumentMock
+      .mockImplementationOnce(async (_documentId: string, updates: Record<string, unknown>) => ({
+        id: "doc-1",
+        owner_id: "owner-1",
+        idn: updates.idn,
+        status: updates.status,
+        document_type: "generic",
+        jurisdiction: "US-OH",
+        product_flow_mode: null,
+        output_bundle: [],
+        intake_status: updates.intake_status,
+        intake_submitted_at: updates.intake_submitted_at,
+        created_at: "2026-03-05T00:00:00.000Z",
+      }))
+      .mockImplementationOnce(async (_documentId: string, updates: Record<string, unknown>) => ({
+        id: "doc-1",
+        owner_id: "owner-1",
+        idn: typeof updates.idn === "string" ? updates.idn : null,
+        status: "pending_signature",
+        document_type: "generic",
+        jurisdiction: "US-OH",
+        product_flow_mode: null,
+        output_bundle: Array.isArray(updates.output_bundle) ? updates.output_bundle : [],
+        intake_status: "submitted",
+        intake_submitted_at: "2026-03-05T00:10:00.000Z",
+        created_at: "2026-03-05T00:00:00.000Z",
+      }));
+    mocks.createDocumentGenerationRunMock.mockResolvedValue({
+      id: "run-uploaded",
+      document_id: "doc-1",
+      intake_revision: 1,
+      output_key: "uploaded_document",
+      document_key: "uploaded_document",
+      template_key: "uploaded_pdf",
+      template_version: "uploaded_pdf",
+      template_hash: "uploaded_pdf",
+      template_artifact_id: null,
+      payload_json: {},
+      coverage_json: {},
+      render_context_json: {},
+      blocking_requirements_json: [],
+      resolved_sources_json: {},
+      status: "rendered",
+      renderer_job_id: null,
+      document_version_id: "ver-1",
+      blocked_at: null,
+      started_at: "2026-03-05T00:10:00.000Z",
+      rendered_at: "2026-03-05T00:10:00.000Z",
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+      error_message: null,
+      created_at: "2026-03-05T00:10:00.000Z",
+    });
+    mocks.updateDocumentVersionMock.mockResolvedValue({
+      id: "ver-1",
+      document_id: "doc-1",
+      version: 1,
+      storage_path: "owner-1/doc-1/uploads/original.pdf",
+      file_name: "original.pdf",
+      mime_type: "application/pdf",
+      size_bytes: 1024,
+      is_final: false,
+      generation_run_id: "run-uploaded",
+      created_by: "owner-1",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.upsertDocumentSystemValuesMock.mockResolvedValue([]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .post("/documents/doc-1/review-approval")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ agreed: true });
+
+    expect(response.status).toBe(200);
+    expect(response.body.document.status).toBe("pending_signature");
+    expect(response.body.reviewApproval.signingReady).toBe(true);
+    expect(mocks.createDocumentGenerationRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        outputKey: "uploaded_document",
+        documentKey: "uploaded_document",
+        documentVersionId: "ver-1",
+        status: "rendered",
+      }),
+    );
+    expect(mocks.updateDocumentVersionMock).toHaveBeenCalledWith(
+      "ver-1",
+      expect.objectContaining({
+        generation_run_id: "run-uploaded",
+      }),
+    );
+    expect(mocks.replaceDocumentOutputSignersMock).not.toHaveBeenCalled();
   });
 
   it("returns existing approval idempotently", async () => {

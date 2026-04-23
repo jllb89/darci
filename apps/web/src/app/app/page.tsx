@@ -286,6 +286,89 @@ function NotaryDashboard({ user }: { user: StoredUser | null }) {
   );
 }
 
+function ProDashboard({ user }: { user: StoredUser | null }) {
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-2xl font-medium">Pro Dashboard</div>
+          <div className="text-sm text-Color-Neutral">
+            Active client and document work for {getDisplayName(user)}.
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        {memberStats.map((item) => (
+          <div
+            key={item.label}
+            className="rounded-lg border border-Color-Scheme-1-Border/40 p-4"
+          >
+            <div className="text-xs uppercase text-Color-Neutral">{item.label}</div>
+            <div className="mt-2 text-2xl font-medium">{item.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        <div className="space-y-6">
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-sm font-medium">Documents</div>
+            <div className="mt-4 space-y-3">
+              {recentDocuments.map((doc) => (
+                <div key={doc.title} className="flex items-center justify-between text-sm">
+                  <div>
+                    <div className="font-medium">{doc.title}</div>
+                    <div className="text-xs text-Color-Neutral">{doc.status}</div>
+                  </div>
+                  <div className="text-xs text-Color-Neutral">{doc.updated}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-sm font-medium">Requests</div>
+            <div className="mt-4 space-y-3 text-sm">
+              {memberRequests.map((item) => (
+                <div key={item.name} className="space-y-1">
+                  <div className="font-medium">{item.name}</div>
+                  <div className="text-xs text-Color-Neutral">
+                    {item.requestor} • {item.status}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-sm font-medium">Upcoming sessions</div>
+            <div className="mt-4 space-y-3 text-sm">
+              {memberSessions.map((session) => (
+                <div key={session.title} className="space-y-1">
+                  <div className="font-medium">{session.title}</div>
+                  <div className="text-xs text-Color-Neutral">
+                    {session.time} • {session.host}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-sm font-medium">Recent activity</div>
+            <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
+              {memberActivity.map((item) => (
+                <div key={item}>{item}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminDashboard({ user }: { user: StoredUser | null }) {
   return (
     <div className="space-y-8">
@@ -329,6 +412,10 @@ function AdminDashboard({ user }: { user: StoredUser | null }) {
 export default function DashboardPage() {
   const user = useStoredUser();
   const role = user?.role ?? null;
+
+  if (role === "pro") {
+    return <ProDashboard user={user} />;
+  }
 
   if (role === "notary") {
     return <NotaryDashboard user={user} />;

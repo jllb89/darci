@@ -2,6 +2,14 @@ openapi: 3.0.3
 info:
   title: DARCI Notarization API
   version: 0.1.0
+  description: |
+    Phase 1 multi-role identity is live.
+
+    Phase 2 billing and entitlements plus Phase 3 invite and notification schema foundations are also live in the staging DB.
+
+    `pro` is a first-class runtime role and currently satisfies member-authorized routes where the product surface is member-equivalent.
+
+    This OpenAPI document only describes mounted HTTP endpoints. The currently mounted review, signing, and notarization flows now enqueue notification outbox rows and delivery-ledger rows against the seeded template keys, and invite issuance plus public claim APIs are now published. Billing payment-request APIs and external delivery-provider APIs are still not published yet.
 servers:
   - url: "{apiBaseUrl}"
     description: Base URL for local, staging, or production.
@@ -138,6 +146,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /users/me:
     get:
       summary: Current user
@@ -150,6 +181,40 @@ paths:
                 $ref: "#/components/schemas/UserResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/me/active-role:
+    patch:
+      summary: Switch my active role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActiveRoleSwitchRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -195,36 +260,19 @@ paths:
   /dashboard:
     get:
       summary: Role-aware dashboard
-      description: Returns the dashboard for the authenticated user's role.
+      description: Returns the dashboard for the authenticated user's active role.
       x-roles:
         - member
+        - pro
         - notary
         - admin
-        - service_role
-      parameters:
-        - in: query
-          name: role
-          schema:
-            type: string
-            enum:
-              - member
-              - notary
-          description: Optional override for admin/service_role.
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/DashboardResponse"
-                  - $ref: "#/components/schemas/NotaryDashboardResponse"
-        "400":
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/RoleAwareDashboardResponse"
         "401":
           description: Unauthorized
           content:
@@ -237,26 +285,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /dashboard/notary:
+  /admin/users/{id}/roles:
     get:
-      summary: Notary dashboard
+      summary: List user role assignments
+      description: Returns the target user's current active runtime role plus all assigned role capability rows.
       x-roles:
-        - notary
         - admin
         - service_role
       parameters:
-        - in: query
-          name: notaryId
+        - in: path
+          name: id
+          required: true
           schema:
             type: string
-          description: Internal notary user id (admin/service_role only).
+          description: Supabase Auth user id (JWT sub).
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/NotaryDashboardResponse"
+                $ref: "#/components/schemas/UserRoleAssignmentsResponse"
         "400":
           description: Bad request
           content:
@@ -275,10 +324,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /admin/users/{id}/role:
-    patch:
-      summary: Update user role
-      description: Updates role for a Supabase Auth user id and the internal users table.
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Upsert user role assignment
+      description: Assigns, updates, suspends, or revokes a role capability for the target user and can optionally make it the active runtime role immediately.
       x-roles:
         - admin
         - service_role
@@ -294,16 +348,58 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - role
-              properties:
-                role:
-                  type: string
-                  enum:
-                    - member
-                    - notary
-                    - admin
+              $ref: "#/components/schemas/AdminUserRoleUpsertRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRoleAssignmentsResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/users/{id}/active-role:
+    patch:
+      summary: Switch user active role
+      description: Switches the target user's active runtime role to one of their already assigned active roles.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Supabase Auth user id (JWT sub).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActiveRoleSwitchRequest"
       responses:
         "200":
           description: OK
@@ -331,6 +427,438 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notification-jobs:
+    get:
+      summary: List notification jobs
+      description: Returns paginated notification outbox jobs with delivery counts for operator observability.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - scheduled
+              - processing
+              - sent
+              - partially_sent
+              - completed
+              - failed
+              - canceled
+              - suppressed
+        - in: query
+          name: channel
+          schema:
+            type: string
+            enum:
+              - email
+              - sms
+              - in_app
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationJobsListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notification-jobs/{id}:
+    get:
+      summary: Get notification job detail
+      description: Returns a notification job with delivery rows and outbound message events.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationJobDetailResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invites:
+    get:
+      summary: List document invites
+      description: Returns paginated invite lifecycle records for a document or signer obligation. Member-authorized access is limited to documents owned by the caller.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: documentId
+          schema:
+            type: string
+          description: Required for member or Pro callers.
+        - in: query
+          name: documentOutputSignerId
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/InviteStatus"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentInvitesListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create document invite
+      description: Issues a new document-signing invite for a signer obligation, persists a claim token, and queues the seeded invite notification template.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentInviteRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentInviteMutationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invites/{id}/resend:
+    post:
+      summary: Resend document invite
+      description: Rotates the active invite token, queues the reminder template, and advances resend counters.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResendDocumentInviteRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentInviteMutationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invites/{id}/revoke:
+    post:
+      summary: Revoke document invite
+      description: Revokes the invite lifecycle record and all remaining active invite tokens.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeDocumentInviteRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentInviteMutationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invites/public/{token}:
+    get:
+      summary: Validate public invite token
+      description: Validates an invite token for public signer entry. Bearer auth is optional and is only used to hydrate existing-account claim context.
+      security: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicInviteResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /invites/public/{token}/claim:
+    post:
+      summary: Claim public invite token
+      description: Claims an invite token for the current session or signup flow and returns the updated invite lifecycle snapshot.
+      security: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimInviteRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteClaimResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: Gone
           content:
             application/json:
               schema:
@@ -1134,6 +1662,10 @@ paths:
         - member
         - admin
         - service_role
+      x-audit-events:
+        - member.document_review_approved
+        - system.document_idn_assigned
+        - system.document_signing_prepared
       parameters:
         - in: path
           name: id
@@ -1365,6 +1897,129 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /internal/notification-jobs/run-due:
+    post:
+      summary: Run due notification jobs
+      description: Claims and executes due notification outbox jobs through the configured internal provider adapter boundary.
+      x-roles:
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunDueNotificationJobsRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunDueNotificationJobsResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/notification-deliveries/{id}/events:
+    post:
+      summary: Record notification delivery event
+      description: Records a provider delivery event and reconciles notification delivery and job state.
+      x-roles:
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationDeliveryEventRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDeliveryEventResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /internal/meeting-artifacts/enforce-retention:
+    post:
+      summary: Enforce meeting artifact retention
+      description: Marks meeting artifacts as expired when retention windows have elapsed.
+      x-roles:
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnforceMeetingArtifactRetentionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnforceMeetingArtifactRetentionResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/parties:
     get:
       summary: List document parties
@@ -1470,9 +2125,9 @@ paths:
   /documents/{id}/timeline:
     get:
       summary: Get document status timeline
+      description: Returns the persisted document timeline assembled from document, workflow, and finalization state.
       x-roles:
         - member
-        - notary
         - admin
         - service_role
       parameters:
@@ -1488,6 +2143,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DocumentTimelineResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
           content:
@@ -1517,6 +2178,38 @@ paths:
                 $ref: "#/components/schemas/SignatureFieldsResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signatures/saved:
+    get:
+      summary: List saved member signatures for reuse
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedSignaturesResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
           content:
             application/json:
               schema:
@@ -1567,7 +2260,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/signatures:
     post:
-      summary: Capture a typed or drawn signature
+      summary: Capture a typed, drawn, or saved signature
       x-roles:
         - member
         - admin
@@ -1825,6 +2518,10 @@ paths:
   /documents/{id}/submit-notarization:
     post:
       summary: Submit for notarization
+      description: |
+        Creates the compatibility notarization request plus the Phase 4 illuminotarization workflow row, returns the active code material, and enqueues the current notarization confirmation and next-step email templates in the internal notification outbox.
+
+        Runtime records `system.code_delivered` with notification-outbox delivery metadata and now also writes workflow status history and code-delivery ledger rows. An optional selected notary can be pre-bound through the Phase 1 multi-role identity model.
       x-roles:
         - member
         - admin
@@ -1832,6 +2529,7 @@ paths:
       x-audit-events:
         - member.notarization_submit_started
         - member.notarization_submitted
+        - member.notary_selected
         - system.code_generated
         - system.code_delivered
       parameters:
@@ -1850,6 +2548,9 @@ paths:
                 webhookUrl:
                   type: string
                   format: uri
+                selectedNotaryUserId:
+                  type: string
+                  description: Optional internal user id for an active notary selected by the member. When present, only that notary may successfully resolve the code.
       responses:
         "201":
           description: Created
@@ -2573,6 +3274,10 @@ paths:
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
+      x-audit-events:
+        - system.ack_template_selected
+        - system.ack_page_generated
+        - system.ack_page_appended
       x-roles:
         - notary
         - admin
@@ -2589,9 +3294,27 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                $ref: "#/components/schemas/DocumentAcknowledgmentResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
@@ -2599,6 +3322,12 @@ paths:
   /documents/{id}/watermark:
     post:
       summary: Watermark document
+      x-audit-events:
+        - system.watermark_started
+        - system.watermark_completed
+        - system.notarized_document_created
+        - system.hashing_completed
+        - system.ledger_anchor_completed
       x-roles:
         - notary
         - admin
@@ -2615,9 +3344,27 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                $ref: "#/components/schemas/DocumentWatermarkResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
@@ -2625,10 +3372,15 @@ paths:
   /notary/code/resolve:
     post:
       summary: Resolve code
+      description: Resolves an illuminotarization code, records the access attempt, and transitions the compatibility workflow into in-review when the claim succeeds. If the workflow is reserved for a selected notary, other notaries receive a conflict response.
       x-roles:
         - notary
         - admin
         - service_role
+      x-audit-events:
+        - notary.code_resolved
+        - system.code_consumed
+        - system.request_assigned_to_notary
       requestBody:
         required: true
         content:
@@ -2680,10 +3432,13 @@ paths:
   /notary/code/resend:
     post:
       summary: Resend code
+      description: Requeues the current active notarization code through the internal notification outbox, appends a Phase 4 code-delivery ledger row, and returns the same active code material.
       x-roles:
         - notary
         - admin
         - service_role
+      x-audit-events:
+        - system.code_delivered
       requestBody:
         required: true
         content:
@@ -2702,6 +3457,18 @@ paths:
                 $ref: "#/components/schemas/CodeResponse"
         "400":
           description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
@@ -2709,10 +3476,14 @@ paths:
   /notary/code/regenerate:
     post:
       summary: Regenerate code
+      description: Revokes the prior active code, creates a fresh active code, appends a new Phase 4 code-delivery ledger row, and queues the next-step email template again through the internal notification outbox.
       x-roles:
         - notary
         - admin
         - service_role
+      x-audit-events:
+        - system.code_generated
+        - system.code_delivered
       requestBody:
         required: true
         content:
@@ -2735,9 +3506,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests:
+    get:
+      summary: List notary workspace requests
+      description: Returns the authenticated notary queue backed by persisted request, workflow, meeting, and finalization state.
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+          description: Optional queue-status filter.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryQueueResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/context:
     get:
       summary: Notary context panel data
+      description: Returns the real notary request context backed by persisted request, workflow, meeting, evidence, and finalization state.
       x-roles:
         - notary
         - admin
@@ -2761,9 +3597,83 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/review-decision:
+    post:
+      summary: Record notary review decision
+      description: Records an illuminotary review decision against the Phase 4 workflow, appends a review-decision ledger row, transitions workflow status, and keeps the legacy request row synchronized where that compatibility layer can express the result.
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - notary.request_approved
+        - notary.request_rejected
+        - notary.request_changes_requested
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotaryReviewDecisionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryReviewDecisionResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/sign:
     post:
       summary: Notary sign
+      description: Compatibility placeholder. Direct signing is not mounted on this route; the live closeout path continues through meeting execution and document finalization.
       x-roles:
         - notary
         - admin
@@ -2775,12 +3685,12 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: OK
+        "501":
+          description: Not implemented
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
           content:
@@ -2790,6 +3700,7 @@ paths:
   /notary/requests/{id}/submit:
     post:
       summary: Submit notarized document
+      description: Compatibility placeholder. The mounted closeout path uses document watermark and verification finalization rather than this route.
       x-roles:
         - notary
         - admin
@@ -2801,12 +3712,12 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: OK
+        "501":
+          description: Not implemented
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
           content:
@@ -2816,6 +3727,7 @@ paths:
   /notary/requests/{id}/meeting/propose:
     post:
       summary: Propose meeting times
+      description: Creates or updates the Phase 5 meeting record for a notarization request, stores the current proposed slot set in meeting metadata, and seeds the default member/notary meeting participants.
       x-roles:
         - member
         - notary
@@ -2855,9 +3767,89 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/check-in:
+    post:
+      summary: Record meeting participant check-in
+      description: Records a Phase 5 participant check-in for the request meeting and optionally persists a geolocation sample for same-place evidence.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - notary.meeting_started
+        - notary.meeting_completed
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingCheckinRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingCheckinResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/meeting/confirm:
     post:
       summary: Confirm meeting time
+      description: Confirms the currently selected meeting time for the request and, when finalized by the illuminotary-side actor, records the meeting as scheduled and queues the member meeting confirmation notification.
       x-roles:
         - member
         - notary
@@ -2898,9 +3890,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/meeting/reschedule:
     post:
       summary: Reschedule meeting
+      description: Replaces the currently scheduled meeting slot, clears prior participant confirmations, and queues an updated meeting confirmation notice.
       x-roles:
         - notary
         - admin
@@ -2938,9 +3949,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/meeting/cancel:
     post:
       summary: Cancel meeting
+      description: Cancels the request meeting, records cancellation metadata, and marks unresolved participants as canceled.
       x-roles:
         - member
         - notary
@@ -2979,9 +4009,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/meeting/no-show:
     post:
       summary: Record no-show
+      description: Records a member or illuminotary no-show outcome against the request meeting and updates the meeting status accordingly.
       x-roles:
         - notary
         - admin
@@ -3019,21 +4068,208 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/identity-verification:
+    post:
+      summary: Record identity verification
+      description: Persists a Phase 5 identity verification event for a meeting participant and writes the corresponding identity check-in entry.
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - notary.identity_verified
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingIdentityVerificationRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingIdentityVerificationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/proximity-evaluation:
+    post:
+      summary: Record same-place evaluation
+      description: Computes and persists a Phase 5 same-place proximity evaluation using member and illuminotary geolocation samples.
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingProximityEvaluationRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingProximityEvaluationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/artifacts:
+    post:
+      summary: Persist meeting artifact metadata
+      description: Persists a Phase 5 meeting artifact reference and optionally links it to a participant, check-in, or identity-verification event.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingArtifactRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingArtifactResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /ledger/anchor:
     post:
       summary: Anchor ledger entry
+      description: Compatibility placeholder. Manual anchoring is not mounted on this route; the live Phase 6 flow persists hash, anchor-attempt, and verification state together during document finalization.
       x-roles:
         - admin
         - service_role
       responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiResponse"
-        "400":
-          description: Bad request
+        "501":
+          description: Not implemented
           content:
             application/json:
               schema:
@@ -3088,10 +4324,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /verification:
+    get:
+      summary: List verification results
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: idn
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - verified
+              - unverified
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int32
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            format: int32
+            default: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationWorkspaceListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /verification/{idn}:
+    get:
+      summary: Get verification result detail
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: idn
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationWorkspaceDetailResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /verify/{idn}:
     get:
       summary: Verify document authenticity
       security: []
+      x-audit-events:
+        - public.verification_requested
+        - system.verification_result_returned
       parameters:
         - in: path
           name: idn
@@ -3153,6 +4470,84 @@ components:
         createdAt:
           type: string
           format: date-time
+    DocumentWorkspaceWorkflowSummary:
+      type: object
+      properties:
+        requestId:
+          type: string
+          nullable: true
+        workflowId:
+          type: string
+          nullable: true
+        requestStatus:
+          type: string
+          nullable: true
+        latestWorkflowStatus:
+          type: string
+          nullable: true
+        latestWorkflowStatusAt:
+          type: string
+          format: date-time
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        assignedNotaryId:
+          type: string
+          nullable: true
+        latestCodeStatus:
+          type: string
+          nullable: true
+        latestCodeExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+    DocumentWorkspaceFinalizationSummary:
+      type: object
+      properties:
+        latestStatus:
+          type: string
+          nullable: true
+        latestStatusAt:
+          type: string
+          format: date-time
+          nullable: true
+        isAnchored:
+          type: boolean
+        isVerificationChecked:
+          type: boolean
+    DocumentWorkspaceVerificationSummary:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - unavailable
+            - pending_finalization
+            - ready
+        idn:
+          type: string
+          nullable: true
+        verifyPath:
+          type: string
+          nullable: true
+    DocumentWorkspaceSummary:
+      type: object
+      properties:
+        workflow:
+          $ref: "#/components/schemas/DocumentWorkspaceWorkflowSummary"
+        finalization:
+          $ref: "#/components/schemas/DocumentWorkspaceFinalizationSummary"
+        verification:
+          $ref: "#/components/schemas/DocumentWorkspaceVerificationSummary"
+    DocumentWorkspaceDocument:
+      allOf:
+        - $ref: "#/components/schemas/Document"
+        - type: object
+          properties:
+            summary:
+              $ref: "#/components/schemas/DocumentWorkspaceSummary"
     DocumentOutputBundleItem:
       type: object
       properties:
@@ -3215,39 +4610,234 @@ components:
           format: date-time
         actorId:
           type: string
-    NotaryContext:
+    NotaryQueueRequest:
       type: object
       properties:
-        requestId:
+        id:
           type: string
         documentId:
           type: string
-        jurisdiction:
-          type: string
-        idRequirements:
-          type: string
-        acknowledgmentTemplate:
-          type: string
-        appearanceType:
-          type: string
-          description: Appearance model for notarization (e.g., ipen).
-        venueRequired:
-          type: boolean
-        consentRequired:
-          type: boolean
-        meetingId:
+        workflowId:
           type: string
           nullable: true
-        meetingStatus:
+        status:
           type: string
-        meetingScheduledAt:
+          nullable: true
+        queueStatus:
+          type: string
+          nullable: true
+        submittedAt:
           type: string
           format: date-time
           nullable: true
-        meetingTimezone:
+    NotaryFinalizationSummary:
+      type: object
+      properties:
+        latestStatus:
           type: string
           nullable: true
-        meetingLocation:
+        latestStatusAt:
+          type: string
+          format: date-time
+          nullable: true
+        isAnchored:
+          type: boolean
+        isVerificationChecked:
+          type: boolean
+        verificationStatus:
+          type: string
+          nullable: true
+        anchoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        publicVerifyPath:
+          type: string
+          nullable: true
+    NotaryQueueRequestSummary:
+      type: object
+      properties:
+        request:
+          $ref: "#/components/schemas/NotaryQueueRequest"
+        document:
+          $ref: "#/components/schemas/DocumentWorkspaceDocument"
+        owner:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        workflow:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestDetailWorkflow"
+        latestCodeDelivery:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestCodeDelivery"
+        meeting:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/DashboardMeetingSummary"
+        finalization:
+          $ref: "#/components/schemas/NotaryFinalizationSummary"
+        nextAction:
+          type: string
+          nullable: true
+    NotaryQueueResponse:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotaryQueueRequestSummary"
+        meetings:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardMeetingSummary"
+        counts:
+          $ref: "#/components/schemas/NotaryDashboardCounts"
+    NotaryDocumentVersionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        version:
+          type: integer
+        fileName:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        isFinal:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    NotaryContextDocument:
+      allOf:
+        - $ref: "#/components/schemas/DocumentWorkspaceDocument"
+        - type: object
+          properties:
+            versions:
+              type: array
+              items:
+                $ref: "#/components/schemas/NotaryDocumentVersionSummary"
+    NotaryEvidenceContext:
+      type: object
+      properties:
+        checkins:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingCheckin"
+        geolocationSamples:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingGeolocation"
+        identityVerifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingIdentityVerification"
+        proximityEvaluations:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingProximityEvaluation"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingArtifact"
+    NotaryFinalizationHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        changeSource:
+          type: string
+        changeReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    NotaryFinalizationDetail:
+      allOf:
+        - $ref: "#/components/schemas/NotaryFinalizationSummary"
+        - type: object
+          properties:
+            hash:
+              type: string
+              nullable: true
+            ledgerTxId:
+              type: string
+              nullable: true
+            anchorAttempt:
+              allOf:
+                - nullable: true
+                - $ref: "#/components/schemas/VerificationWorkspaceAnchorAttempt"
+            history:
+              type: array
+              items:
+                $ref: "#/components/schemas/NotaryFinalizationHistoryEntry"
+    NotaryContextCapabilities:
+      type: object
+      properties:
+        canReviewRequest:
+          type: boolean
+        canManageMeeting:
+          type: boolean
+        canRecordEvidence:
+          type: boolean
+        canFinalizeDocument:
+          type: boolean
+        canOpenVerification:
+          type: boolean
+    NotaryContext:
+      type: object
+      properties:
+        request:
+          $ref: "#/components/schemas/NotaryQueueRequest"
+        document:
+          $ref: "#/components/schemas/NotaryContextDocument"
+        owner:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        notary:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        workflow:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestDetailWorkflow"
+        latestCodeDelivery:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestCodeDelivery"
+        meeting:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/Meeting"
+        evidence:
+          $ref: "#/components/schemas/NotaryEvidenceContext"
+        finalization:
+          $ref: "#/components/schemas/NotaryFinalizationDetail"
+        capabilities:
+          $ref: "#/components/schemas/NotaryContextCapabilities"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotarizationRequestWarning"
+        nextAction:
           type: string
           nullable: true
     DocumentListResponse:
@@ -3256,20 +4846,57 @@ components:
         documents:
           type: array
           items:
-            $ref: "#/components/schemas/Document"
+            $ref: "#/components/schemas/DocumentWorkspaceDocument"
     DashboardResponse:
       type: object
       properties:
         documents:
           type: array
           items:
-            $ref: "#/components/schemas/Document"
+            $ref: "#/components/schemas/DashboardDocumentSummary"
         activity:
           type: array
           items:
             $ref: "#/components/schemas/DashboardActivity"
         counts:
           $ref: "#/components/schemas/DashboardCounts"
+    RoleAwareDashboardResponse:
+      type: object
+      properties:
+        role:
+          type: string
+          enum:
+            - member
+            - pro
+            - notary
+            - admin
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardMetric"
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardDocumentSummary"
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRequestSummary"
+        meetings:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardMeetingSummary"
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardActivity"
+        alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardAlert"
+        nextAction:
+          type: string
+          nullable: true
     NotaryDashboardResponse:
       type: object
       properties:
@@ -3303,10 +4930,117 @@ components:
         entityId:
           type: string
           nullable: true
+    DashboardMetric:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        value:
+          type: integer
+    DashboardAlert:
+      type: object
+      properties:
+        key:
+          type: string
+        message:
+          type: string
+    DashboardDocumentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        idn:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DashboardRequestSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        documentId:
+          type: string
+        documentType:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        ownerId:
+          type: string
+          nullable: true
+        ownerName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        meetingId:
+          type: string
+          nullable: true
+        meetingScheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        meetingStatus:
+          type: string
+          nullable: true
+    DashboardMeetingSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        requestId:
+          type: string
+        documentId:
+          type: string
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        ownerName:
+          type: string
+          nullable: true
+        scheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
     DashboardCounts:
       type: object
       properties:
         draft:
+          type: integer
+        pendingReview:
           type: integer
         pendingSignature:
           type: integer
@@ -3331,7 +5065,7 @@ components:
       type: object
       properties:
         document:
-          $ref: "#/components/schemas/Document"
+          $ref: "#/components/schemas/DocumentWorkspaceDocument"
     DocumentReviewOutput:
       type: object
       properties:
@@ -3480,6 +5214,123 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DocumentVersion"
+    AcknowledgmentPage:
+      type: object
+      properties:
+        id:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        content:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    DocumentFinalizationExecution:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+            - acknowledgment_append
+            - watermark
+        status:
+          type: string
+          enum:
+            - pending
+            - completed
+            - failed
+        sourceVersionId:
+          type: string
+        outputVersionId:
+          type: string
+          nullable: true
+        templateId:
+          type: string
+          nullable: true
+        templateVersion:
+          type: string
+          nullable: true
+        watermarkText:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DocumentHashRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        algorithm:
+          type: string
+        hash:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - completed
+            - failed
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DocumentLedgerAnchor:
+      type: object
+      properties:
+        id:
+          type: string
+        ledgerTxId:
+          type: string
+          nullable: true
+        anchoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum:
+            - pending
+            - anchored
+            - failed
+    DocumentAcknowledgmentResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        documentId:
+          type: string
+        requestId:
+          type: string
+        acknowledgmentPage:
+          $ref: "#/components/schemas/AcknowledgmentPage"
+        execution:
+          $ref: "#/components/schemas/DocumentFinalizationExecution"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
+    DocumentWatermarkResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        documentId:
+          type: string
+        requestId:
+          type: string
+        execution:
+          $ref: "#/components/schemas/DocumentFinalizationExecution"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
+        hashRecord:
+          $ref: "#/components/schemas/DocumentHashRecord"
+        ledger:
+          $ref: "#/components/schemas/DocumentLedgerAnchor"
     DocumentIntakeDraft:
       type: object
       properties:
@@ -4052,6 +5903,50 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SignatureField"
+    SavedSignature:
+      type: object
+      properties:
+        id:
+          type: string
+        captureMethod:
+          type: string
+          enum:
+            - upload
+            - type
+            - draw
+        typedValue:
+          type: string
+          nullable: true
+        typedKind:
+          type: string
+          nullable: true
+          enum:
+            - name
+            - initials
+        assetDownloadUrl:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    SavedSignaturesResponse:
+      type: object
+      properties:
+        savedSignatures:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedSignature"
     UploadSession:
       type: object
       properties:
@@ -4114,6 +6009,7 @@ components:
           enum:
             - type
             - draw
+            - saved
         typedValue:
           type: string
         typedKind:
@@ -4122,6 +6018,8 @@ components:
             - name
             - initials
         imageDataUrl:
+          type: string
+        savedSignatureId:
           type: string
     DocumentSignatureCapture:
       type: object
@@ -4402,6 +6300,8 @@ components:
           $ref: "#/components/schemas/NotarizationDocument"
         code:
           $ref: "#/components/schemas/NotarizationCode"
+        workflow:
+          $ref: "#/components/schemas/NotarizationWorkflow"
     NotarizationDocument:
       type: object
       properties:
@@ -4416,6 +6316,9 @@ components:
           type: string
         documentId:
           type: string
+        workflowId:
+          type: string
+          nullable: true
         status:
           type: string
         submittedAt:
@@ -4443,15 +6346,197 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NotarizationRequest"
+    NotarizationRequestDetailWorkflow:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - draft
+            - submitted
+            - code_delivered
+            - in_review
+            - changes_requested
+            - approved
+            - rejected
+            - completed
+            - canceled
+            - expired
+          nullable: true
+        latestStatus:
+          type: string
+          enum:
+            - draft
+            - submitted
+            - code_delivered
+            - in_review
+            - changes_requested
+            - approved
+            - rejected
+            - completed
+            - canceled
+            - expired
+          nullable: true
+        latestStatusAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        selectedNotaryUserId:
+          type: string
+          nullable: true
+        assignedNotaryUserId:
+          type: string
+          nullable: true
+        lastCodeGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
+    NotarizationRequestCodeDelivery:
+      type: object
+      properties:
+        id:
+          type: string
+        channel:
+          type: string
+          enum:
+            - email
+            - sms
+            - in_app
+            - manual
+        deliveryMethod:
+          type: string
+          enum:
+            - notification_outbox
+            - manual_copy
+            - legacy_backfill
+        deliveryReason:
+          type: string
+          enum:
+            - initial_submit
+            - resent
+            - regenerated
+            - manual_copy
+        status:
+          type: string
+          enum:
+            - queued
+            - delivered
+            - consumed
+            - expired
+            - revoked
+            - failed
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
+        invalidatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    NotarizationRequestCapabilities:
+      type: object
+      properties:
+        canViewDocument:
+          type: boolean
+        canViewTimeline:
+          type: boolean
+        canManageMeeting:
+          type: boolean
+        canReviewRequest:
+          type: boolean
+        canFinalizeDocument:
+          type: boolean
+        canOpenVerification:
+          type: boolean
+    NotarizationRequestWarning:
+      type: object
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+        message:
+          type: string
     NotarizationRequestDetailResponse:
       type: object
       properties:
         request:
           $ref: "#/components/schemas/NotarizationRequest"
         document:
-          $ref: "#/components/schemas/NotarizationDocument"
+          $ref: "#/components/schemas/DocumentWorkspaceDocument"
+        workflow:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestDetailWorkflow"
+        latestCodeDelivery:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestCodeDelivery"
+        owner:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        notary:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
         meeting:
-          $ref: "#/components/schemas/Meeting"
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/Meeting"
+        capabilities:
+          $ref: "#/components/schemas/NotarizationRequestCapabilities"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotarizationRequestWarning"
+        nextAction:
+          type: string
+          nullable: true
+    WorkspaceIdentitySummary:
+      type: object
+      properties:
+        userId:
+          type: string
+        supabaseUserId:
+          type: string
+        displayName:
+          type: string
+        fullName:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        role:
+          type: string
+        status:
+          type: string
     RequestTimelineResponse:
       type: object
       properties:
@@ -4459,6 +6544,207 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TimelineEvent"
+    VerificationWorkspaceSummary:
+      type: object
+      properties:
+        idn:
+          type: string
+        documentId:
+          type: string
+        status:
+          type: string
+          enum:
+            - verified
+            - unverified
+        documentStatus:
+          type: string
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        owner:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        notary:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        anchoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        publicVerifyPath:
+          type: string
+    VerificationWorkspaceListResponse:
+      type: object
+      properties:
+        verifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationWorkspaceSummary"
+    VerificationWorkspaceDocument:
+      type: object
+      properties:
+        id:
+          type: string
+        idn:
+          type: string
+        status:
+          type: string
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        publicVerifyPath:
+          type: string
+    VerificationWorkspaceAuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actorId:
+          type: string
+          nullable: true
+    VerificationWorkspaceResult:
+      type: object
+      properties:
+        idn:
+          type: string
+        documentId:
+          type: string
+        documentStatus:
+          type: string
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        ledgerTxId:
+          type: string
+          nullable: true
+        anchoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum:
+            - verified
+            - unverified
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        publicVerifyPath:
+          type: string
+    VerificationWorkspaceLatestCheck:
+      type: object
+      properties:
+        id:
+          type: string
+        resultStatus:
+          type: string
+          enum:
+            - verified
+            - unverified
+            - not_found
+        createdAt:
+          type: string
+          format: date-time
+    VerificationWorkspaceAnchorAttempt:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - anchored
+            - failed
+        attemptNumber:
+          type: integer
+        requestedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        failedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+    VerificationWorkspaceDetailResponse:
+      type: object
+      properties:
+        verification:
+          $ref: "#/components/schemas/VerificationWorkspaceResult"
+        request:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequest"
+        workflow:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestDetailWorkflow"
+        latestCodeDelivery:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotarizationRequestCodeDelivery"
+        latestCheck:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/VerificationWorkspaceLatestCheck"
+        anchorAttempt:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/VerificationWorkspaceAnchorAttempt"
+        owner:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        notary:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/WorkspaceIdentitySummary"
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationWorkspaceDocument"
+        audit:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationWorkspaceAuditEvent"
     MeetingResponse:
       type: object
       properties:
@@ -4471,6 +6757,9 @@ components:
           type: string
         requestId:
           type: string
+        workflowId:
+          type: string
+          nullable: true
         scheduledAt:
           type: string
           format: date-time
@@ -4482,6 +6771,99 @@ components:
           nullable: true
         status:
           type: string
+        samePlaceRequired:
+          type: boolean
+        samePlaceStatus:
+          type: string
+          nullable: true
+        proposedSlots:
+          type: array
+          items:
+            type: string
+            format: date-time
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingParticipant"
+    MeetingParticipant:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        participantRole:
+          type: string
+          enum:
+            - member
+            - notary
+            - signer
+            - trusted_person
+            - witness
+            - observer
+        status:
+          type: string
+        presenceRequired:
+          type: boolean
+        participantLabel:
+          type: string
+          nullable: true
+        arrivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        departedAt:
+          type: string
+          format: date-time
+          nullable: true
+    MeetingGeolocation:
+      type: object
+      properties:
+        id:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        accuracyMeters:
+          type: number
+          nullable: true
+        altitudeMeters:
+          type: number
+          nullable: true
+        sampleKind:
+          type: string
+        captureStage:
+          type: string
+        capturedAt:
+          type: string
+          format: date-time
+    MeetingCheckin:
+      type: object
+      properties:
+        id:
+          type: string
+        meetingId:
+          type: string
+        meetingParticipantId:
+          type: string
+        participantRole:
+          type: string
+        checkinKind:
+          type: string
+        status:
+          type: string
+        recordedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          nullable: true
+        geolocation:
+          allOf:
+            - $ref: "#/components/schemas/MeetingGeolocation"
+          nullable: true
     MeetingProposalRequest:
       type: object
       required:
@@ -4497,6 +6879,65 @@ components:
           type: string
         location:
           type: string
+    MeetingCheckinRequest:
+      type: object
+      required:
+        - checkinKind
+      properties:
+        participantRole:
+          type: string
+          enum:
+            - member
+            - notary
+        checkinKind:
+          type: string
+          enum:
+            - arrival
+            - proximity
+            - identity
+            - meeting_start
+            - meeting_end
+            - manual
+        recordedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        geolocation:
+          type: object
+          properties:
+            latitude:
+              type: number
+            longitude:
+              type: number
+            accuracyMeters:
+              type: number
+            altitudeMeters:
+              type: number
+            sampleKind:
+              type: string
+              enum:
+                - device_gps
+                - network
+                - manual_pin
+                - derived
+            captureStage:
+              type: string
+              enum:
+                - checkin
+                - checkin_confirmation
+                - proximity_validation
+                - meeting_start
+                - meeting_end
+    MeetingCheckinResponse:
+      type: object
+      properties:
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+        participant:
+          $ref: "#/components/schemas/MeetingParticipant"
+        checkin:
+          $ref: "#/components/schemas/MeetingCheckin"
     MeetingConfirmRequest:
       type: object
       required:
@@ -4548,6 +6989,245 @@ components:
           enum:
             - member
             - notary
+        recordedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    MeetingIdentityVerificationRequest:
+      type: object
+      required:
+        - verificationMethod
+      properties:
+        participantRole:
+          type: string
+          enum:
+            - member
+            - notary
+            - signer
+            - trusted_person
+            - witness
+            - observer
+        verificationMethod:
+          type: string
+          enum:
+            - in_person_document
+            - credential_scan
+            - manual_attestation
+            - knowledge_based
+            - biometric
+            - other
+        status:
+          type: string
+          enum:
+            - pending
+            - verified
+            - failed
+            - manual_review
+        subjectName:
+          type: string
+        documentType:
+          type: string
+        documentLast4:
+          type: string
+        issuingJurisdiction:
+          type: string
+        verifiedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    MeetingIdentityVerification:
+      type: object
+      properties:
+        id:
+          type: string
+        meetingId:
+          type: string
+        meetingParticipantId:
+          type: string
+        participantRole:
+          type: string
+        verificationMethod:
+          type: string
+        status:
+          type: string
+        subjectName:
+          type: string
+          nullable: true
+        documentType:
+          type: string
+          nullable: true
+        documentLast4:
+          type: string
+          nullable: true
+        issuingJurisdiction:
+          type: string
+          nullable: true
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        meetingCheckinId:
+          type: string
+          nullable: true
+    MeetingIdentityVerificationResponse:
+      type: object
+      properties:
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+        participant:
+          $ref: "#/components/schemas/MeetingParticipant"
+        checkin:
+          $ref: "#/components/schemas/MeetingCheckin"
+        identityVerification:
+          $ref: "#/components/schemas/MeetingIdentityVerification"
+    MeetingProximityEvaluationRequest:
+      type: object
+      properties:
+        memberSampleId:
+          type: string
+        notarySampleId:
+          type: string
+        thresholdMeters:
+          type: number
+        evaluatedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    MeetingProximityEvaluation:
+      type: object
+      properties:
+        id:
+          type: string
+        meetingId:
+          type: string
+        evaluationKind:
+          type: string
+        status:
+          type: string
+        thresholdMeters:
+          type: number
+        observedDistanceMeters:
+          type: number
+          nullable: true
+        evaluatedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          nullable: true
+        memberSample:
+          allOf:
+            - $ref: "#/components/schemas/MeetingGeolocation"
+          nullable: true
+        notarySample:
+          allOf:
+            - $ref: "#/components/schemas/MeetingGeolocation"
+          nullable: true
+    MeetingProximityEvaluationResponse:
+      type: object
+      properties:
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+        evaluation:
+          $ref: "#/components/schemas/MeetingProximityEvaluation"
+    MeetingArtifactRequest:
+      type: object
+      required:
+        - artifactKind
+      properties:
+        participantRole:
+          type: string
+          enum:
+            - member
+            - notary
+            - signer
+            - trusted_person
+            - witness
+            - observer
+        meetingCheckinId:
+          type: string
+        identityVerificationEventId:
+          type: string
+        artifactKind:
+          type: string
+          enum:
+            - identity_document
+            - identity_selfie
+            - consent_capture
+            - location_photo
+            - verification_summary
+            - seal_preview
+            - meeting_note
+            - other
+        storageBucket:
+          type: string
+        storagePath:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        capturedAt:
+          type: string
+          format: date-time
+        retentionUntil:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    MeetingArtifact:
+      type: object
+      properties:
+        id:
+          type: string
+        meetingId:
+          type: string
+        meetingParticipantId:
+          type: string
+          nullable: true
+        meetingCheckinId:
+          type: string
+          nullable: true
+        identityVerificationEventId:
+          type: string
+          nullable: true
+        artifactKind:
+          type: string
+        status:
+          type: string
+        storageBucket:
+          type: string
+          nullable: true
+        storagePath:
+          type: string
+          nullable: true
+        mimeType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          nullable: true
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+        retentionUntil:
+          type: string
+          format: date-time
+          nullable: true
+    MeetingArtifactResponse:
+      type: object
+      properties:
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+        artifact:
+          $ref: "#/components/schemas/MeetingArtifact"
     NotarizationCode:
       type: object
       properties:
@@ -4560,6 +7240,38 @@ components:
         expiresAt:
           type: string
           format: date-time
+    NotarizationWorkflow:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - draft
+            - submitted
+            - code_delivered
+            - in_review
+            - changes_requested
+            - approved
+            - rejected
+            - completed
+            - canceled
+            - expired
+        workflowKind:
+          type: string
+          enum:
+            - single_document
+            - document_bundle
+        selectedNotaryUserId:
+          type: string
+          nullable: true
+        assignedNotaryUserId:
+          type: string
+          nullable: true
+        currentLegacyRequestId:
+          type: string
+          nullable: true
     NotaryCodeResolveResponse:
       type: object
       properties:
@@ -4570,10 +7282,15 @@ components:
               type: string
             documentId:
               type: string
+            workflowId:
+              type: string
+              nullable: true
             status:
               type: string
         code:
           $ref: "#/components/schemas/NotarizationCode"
+        workflow:
+          $ref: "#/components/schemas/NotarizationWorkflow"
     AuditEvent:
       type: object
       properties:
@@ -4611,11 +7328,82 @@ components:
         expiresAt:
           type: string
           format: date-time
+        workflow:
+          $ref: "#/components/schemas/NotarizationWorkflow"
     NotaryContextResponse:
       type: object
       properties:
         context:
           $ref: "#/components/schemas/NotaryContext"
+    NotaryReviewDecisionRequest:
+      type: object
+      required:
+        - decision
+      properties:
+        decision:
+          type: string
+          enum:
+            - approved
+            - rejected
+            - changes_requested
+        summary:
+          type: string
+          nullable: true
+        decisionNotes:
+          type: string
+          nullable: true
+    NotaryReviewDecisionResponse:
+      type: object
+      properties:
+        request:
+          type: object
+          properties:
+            id:
+              type: string
+            documentId:
+              type: string
+            workflowId:
+              type: string
+            status:
+              type: string
+        decision:
+          type: object
+          properties:
+            id:
+              type: string
+            decision:
+              type: string
+              enum:
+                - approved
+                - rejected
+                - changes_requested
+            summary:
+              type: string
+              nullable: true
+            decisionNotes:
+              type: string
+              nullable: true
+            decidedAt:
+              type: string
+              format: date-time
+            decidedByUserId:
+              type: string
+        workflow:
+          $ref: "#/components/schemas/NotarizationWorkflow"
+    RuntimeRole:
+      type: string
+      description: Active runtime roles supported by the current Phase 1 multi-role identity model.
+      enum:
+        - member
+        - pro
+        - notary
+        - admin
+    UserRoleStatus:
+      type: string
+      enum:
+        - active
+        - suspended
+        - revoked
     User:
       type: object
       properties:
@@ -4630,13 +7418,59 @@ components:
           type: string
           nullable: true
         role:
-          type: string
-          enum:
-            - member
-            - notary
-            - admin
+          $ref: "#/components/schemas/RuntimeRole"
+        availableRoles:
+          type: array
+          description: Assigned active roles available for profile switching in the current app session.
+          items:
+            $ref: "#/components/schemas/RuntimeRole"
         status:
           type: string
+    UserRoleAssignment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/RuntimeRole"
+        status:
+          $ref: "#/components/schemas/UserRoleStatus"
+        isActiveProfile:
+          type: boolean
+        grantedReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ActiveRoleSwitchRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          $ref: "#/components/schemas/RuntimeRole"
+    AdminUserRoleUpsertRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          $ref: "#/components/schemas/RuntimeRole"
+        status:
+          allOf:
+            - $ref: "#/components/schemas/UserRoleStatus"
+          default: active
+        makeActive:
+          type: boolean
+        grantedReason:
+          type: string
+          minLength: 1
+          maxLength: 500
     LoginRequest:
       type: object
       required:
@@ -4699,6 +7533,988 @@ components:
       properties:
         user:
           $ref: "#/components/schemas/User"
+    UserRoleAssignmentsResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        roleAssignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRoleAssignment"
+    InviteStatus:
+      type: string
+      enum:
+        - draft
+        - queued
+        - sent
+        - opened
+        - claimed
+        - accepted
+        - declined
+        - revoked
+        - expired
+        - completed
+        - failed
+    InviteClaimMode:
+      type: string
+      enum:
+        - none
+        - optional_signup
+        - required_signup
+        - existing_account_only
+    InviteTokenStatus:
+      type: string
+      enum:
+        - active
+        - consumed
+        - expired
+        - revoked
+    InviteRecipientSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        targetUserId:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          enum:
+            - email
+            - sms
+            - in_app
+        deliveryAddress:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+          nullable: true
+        status:
+          type: string
+        isPrimary:
+          type: boolean
+        lastNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastEventAt:
+          type: string
+          format: date-time
+          nullable: true
+    DocumentInviteTokenSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        tokenPrefix:
+          type: string
+          nullable: true
+        purpose:
+          type: string
+        status:
+          $ref: "#/components/schemas/InviteTokenStatus"
+        maxUses:
+          type: integer
+        useCount:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedByUserId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PublicInviteTokenSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        tokenPrefix:
+          type: string
+          nullable: true
+        purpose:
+          type: string
+        status:
+          $ref: "#/components/schemas/InviteTokenStatus"
+        maxUses:
+          type: integer
+        useCount:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedByUserId:
+          type: string
+          nullable: true
+        isExpired:
+          type: boolean
+        canClaim:
+          type: boolean
+    DocumentInviteClaimSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        inviteTokenId:
+          type: string
+          nullable: true
+        claimedUserId:
+          type: string
+          nullable: true
+        createdUserId:
+          type: string
+          nullable: true
+        claimStatus:
+          type: string
+        claimMethod:
+          type: string
+        claimChannel:
+          type: string
+        claimAddress:
+          type: string
+          nullable: true
+        claimedAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        declinedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PublicInviteClaimSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        inviteTokenId:
+          type: string
+          nullable: true
+        claimedUserId:
+          type: string
+          nullable: true
+        createdUserId:
+          type: string
+          nullable: true
+        claimStatus:
+          type: string
+        claimMethod:
+          type: string
+        claimChannel:
+          type: string
+        claimAddress:
+          type: string
+          nullable: true
+        claimedAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        declinedAt:
+          type: string
+          format: date-time
+          nullable: true
+    DocumentInviteDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        documentId:
+          type: string
+        documentOutputSignerId:
+          type: string
+          nullable: true
+        documentPartyId:
+          type: string
+          nullable: true
+        createdByUserId:
+          type: string
+          nullable: true
+        claimedUserId:
+          type: string
+          nullable: true
+        templateId:
+          type: string
+          nullable: true
+        inviteKind:
+          type: string
+        accessScope:
+          type: string
+        claimMode:
+          $ref: "#/components/schemas/InviteClaimMode"
+        status:
+          $ref: "#/components/schemas/InviteStatus"
+        inviteLabel:
+          type: string
+          nullable: true
+        recipientName:
+          type: string
+          nullable: true
+        partyRole:
+          type: string
+          nullable: true
+        obligationType:
+          type: string
+          nullable: true
+        outputKey:
+          type: string
+          nullable: true
+        documentKey:
+          type: string
+          nullable: true
+        requiresAcceptance:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        firstOpenedAt:
+          type: string
+          format: date-time
+          nullable: true
+        firstClickedAt:
+          type: string
+          format: date-time
+          nullable: true
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        declinedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveryCount:
+          type: integer
+        resendCount:
+          type: integer
+        context:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        recipients:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteRecipientSummary"
+        latestToken:
+          allOf:
+            - $ref: "#/components/schemas/DocumentInviteTokenSummary"
+          nullable: true
+        latestClaim:
+          allOf:
+            - $ref: "#/components/schemas/DocumentInviteClaimSummary"
+          nullable: true
+    PublicInviteView:
+      type: object
+      properties:
+        id:
+          type: string
+        documentId:
+          type: string
+        documentOutputSignerId:
+          type: string
+          nullable: true
+        inviteKind:
+          type: string
+        accessScope:
+          type: string
+        claimMode:
+          $ref: "#/components/schemas/InviteClaimMode"
+        status:
+          $ref: "#/components/schemas/InviteStatus"
+        recipientName:
+          type: string
+          nullable: true
+        partyRole:
+          type: string
+          nullable: true
+        obligationType:
+          type: string
+          nullable: true
+        outputKey:
+          type: string
+          nullable: true
+        documentKey:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        firstOpenedAt:
+          type: string
+          format: date-time
+          nullable: true
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveryCount:
+          type: integer
+        resendCount:
+          type: integer
+        requesterName:
+          type: string
+          nullable: true
+        claimedUserId:
+          type: string
+          nullable: true
+        documentLabel:
+          type: string
+        recipients:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteRecipientSummary"
+        token:
+          $ref: "#/components/schemas/PublicInviteTokenSummary"
+        latestClaim:
+          allOf:
+            - $ref: "#/components/schemas/PublicInviteClaimSummary"
+          nullable: true
+    DocumentInvitesPage:
+      type: object
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+    DocumentInvitesListResponse:
+      type: object
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentInviteDetail"
+        page:
+          $ref: "#/components/schemas/DocumentInvitesPage"
+    CreateDocumentInviteRequest:
+      type: object
+      required:
+        - documentId
+        - documentOutputSignerId
+        - recipientEmail
+        - claimMode
+      properties:
+        documentId:
+          type: string
+        documentOutputSignerId:
+          type: string
+        recipientEmail:
+          type: string
+          format: email
+        recipientName:
+          type: string
+          nullable: true
+        inviteLabel:
+          type: string
+          nullable: true
+        claimMode:
+          $ref: "#/components/schemas/InviteClaimMode"
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        idempotencyKey:
+          type: string
+          nullable: true
+    ResendDocumentInviteRequest:
+      type: object
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+    RevokeDocumentInviteRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+    ClaimInviteRequest:
+      type: object
+      properties:
+        claimAddress:
+          type: string
+          nullable: true
+    DocumentInviteAccess:
+      type: object
+      properties:
+        token:
+          type: string
+        accessUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    InviteNotificationDispatch:
+      type: object
+      properties:
+        jobId:
+          type: string
+        deliveryId:
+          type: string
+        templateId:
+          type: string
+        templateKey:
+          type: string
+    DocumentInviteMutationResponse:
+      type: object
+      properties:
+        invite:
+          $ref: "#/components/schemas/DocumentInviteDetail"
+        access:
+          allOf:
+            - $ref: "#/components/schemas/DocumentInviteAccess"
+          nullable: true
+        notification:
+          allOf:
+            - $ref: "#/components/schemas/InviteNotificationDispatch"
+          nullable: true
+        existing:
+          type: boolean
+    PublicInviteResponse:
+      type: object
+      properties:
+        invite:
+          $ref: "#/components/schemas/PublicInviteView"
+    InviteClaimResponse:
+      type: object
+      properties:
+        invite:
+          $ref: "#/components/schemas/PublicInviteView"
+        claim:
+          $ref: "#/components/schemas/PublicInviteClaimSummary"
+    NotificationJobDeliveryCounts:
+      type: object
+      properties:
+        total:
+          type: integer
+        queued:
+          type: integer
+        sent:
+          type: integer
+        delivered:
+          type: integer
+        failed:
+          type: integer
+        suppressed:
+          type: integer
+    NotificationJobSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        templateId:
+          type: string
+          nullable: true
+        templateKey:
+          type: string
+          nullable: true
+        jobKind:
+          type: string
+        channel:
+          type: string
+          enum:
+            - email
+            - sms
+            - in_app
+        status:
+          type: string
+          enum:
+            - queued
+            - scheduled
+            - processing
+            - sent
+            - partially_sent
+            - completed
+            - failed
+            - canceled
+            - suppressed
+        priority:
+          type: string
+        scheduledFor:
+          type: string
+          format: date-time
+        processingStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        attemptCount:
+          type: integer
+        dedupeKey:
+          type: string
+          nullable: true
+        documentId:
+          type: string
+          nullable: true
+        notarizationRequestId:
+          type: string
+          nullable: true
+        inviteId:
+          type: string
+          nullable: true
+        requestedByUserId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deliveryCounts:
+          $ref: "#/components/schemas/NotificationJobDeliveryCounts"
+    NotificationJobsPage:
+      type: object
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+    NotificationJobsListResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationJobSummary"
+        page:
+          $ref: "#/components/schemas/NotificationJobsPage"
+    NotificationJobDetailJob:
+      allOf:
+        - $ref: "#/components/schemas/NotificationJobSummary"
+        - type: object
+          properties:
+            billingPaymentRequestId:
+              type: string
+              nullable: true
+            canceledAt:
+              type: string
+              format: date-time
+              nullable: true
+            payload:
+              type: object
+              additionalProperties: true
+            metadata:
+              type: object
+              additionalProperties: true
+    NotificationDeliverySummary:
+      type: object
+      properties:
+        id:
+          type: string
+        targetUserId:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          enum:
+            - email
+            - sms
+            - in_app
+        recipientAddress:
+          type: string
+          nullable: true
+        recipientDisplayName:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          enum:
+            - internal
+            - resend
+            - sendgrid
+            - ses
+            - twilio
+            - webhook
+        providerMessageId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - pending
+            - queued
+            - sent
+            - delivered
+            - failed
+            - bounced
+            - complained
+            - opened
+            - clicked
+            - accepted
+            - suppressed
+        attemptNumber:
+          type: integer
+        queuedAt:
+          type: string
+          format: date-time
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        failedAt:
+          type: string
+          format: date-time
+          nullable: true
+        bouncedAt:
+          type: string
+          format: date-time
+          nullable: true
+        openedAt:
+          type: string
+          format: date-time
+          nullable: true
+        clickedAt:
+          type: string
+          format: date-time
+          nullable: true
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorCode:
+          type: string
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NotificationOutboundEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        deliveryId:
+          type: string
+        eventType:
+          type: string
+          enum:
+            - queued
+            - sent
+            - delivered
+            - deferred
+            - failed
+            - bounced
+            - complained
+            - opened
+            - clicked
+            - accepted
+            - rejected
+            - unsubscribed
+            - rendered
+        provider:
+          type: string
+          enum:
+            - internal
+            - resend
+            - sendgrid
+            - ses
+            - twilio
+            - webhook
+        providerEventId:
+          type: string
+          nullable: true
+        eventAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    NotificationJobDetailResponse:
+      type: object
+      properties:
+        job:
+          $ref: "#/components/schemas/NotificationJobDetailJob"
+        deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationDeliverySummary"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationOutboundEvent"
+    RunDueNotificationJobsRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+    NotificationJobProcessSummary:
+      type: object
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - scheduled
+            - processing
+            - sent
+            - partially_sent
+            - completed
+            - failed
+            - canceled
+            - suppressed
+        attemptedDeliveryCount:
+          type: integer
+        deliveredCount:
+          type: integer
+        failedCount:
+          type: integer
+        scheduledFor:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+    RunDueNotificationJobsResponse:
+      type: object
+      properties:
+        scannedCount:
+          type: integer
+        claimedCount:
+          type: integer
+        processedCount:
+          type: integer
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationJobProcessSummary"
+    NotificationDeliveryEventRequest:
+      type: object
+      required:
+        - provider
+        - eventType
+      properties:
+        provider:
+          type: string
+          enum:
+            - internal
+            - resend
+            - sendgrid
+            - ses
+            - twilio
+            - webhook
+        eventType:
+          type: string
+          enum:
+            - queued
+            - sent
+            - delivered
+            - deferred
+            - failed
+            - bounced
+            - complained
+            - opened
+            - clicked
+            - accepted
+            - rejected
+            - unsubscribed
+            - rendered
+        providerEventId:
+          type: string
+          nullable: true
+        eventAt:
+          type: string
+          format: date-time
+          nullable: true
+        payload:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+    NotificationDeliveryEventResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+        jobStatus:
+          type: string
+          enum:
+            - queued
+            - scheduled
+            - processing
+            - sent
+            - partially_sent
+            - completed
+            - failed
+            - canceled
+            - suppressed
+        deliveryId:
+          type: string
+        deliveryStatus:
+          type: string
+          enum:
+            - pending
+            - queued
+            - sent
+            - delivered
+            - failed
+            - bounced
+            - complained
+            - opened
+            - clicked
+            - accepted
+            - suppressed
+    EnforceMeetingArtifactRetentionRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+    MeetingArtifactRetentionSummary:
+      type: object
+      properties:
+        artifactId:
+          type: string
+        meetingId:
+          type: string
+        previousStatus:
+          type: string
+          enum:
+            - active
+            - redacted
+            - expired
+            - deleted
+        nextStatus:
+          type: string
+          enum:
+            - active
+            - redacted
+            - expired
+            - deleted
+        retentionUntil:
+          type: string
+          format: date-time
+          nullable: true
+        storageBucket:
+          type: string
+          nullable: true
+        storagePath:
+          type: string
+          nullable: true
+        redactedAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+    EnforceMeetingArtifactRetentionResponse:
+      type: object
+      properties:
+        scannedCount:
+          type: integer
+        updatedCount:
+          type: integer
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MeetingArtifactRetentionSummary"
     TemplateBindingRule:
       type: object
       properties:
@@ -6231,10 +10047,16 @@ components:
           type: string
         hash:
           type: string
+          nullable: true
         ledgerTxId:
           type: string
+          nullable: true
         anchoredAt:
           type: string
           format: date-time
+          nullable: true
         status:
           type: string
+          enum:
+            - verified
+            - unverified

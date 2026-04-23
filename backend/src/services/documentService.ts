@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { normalizeRuntimeRole } from "./userRoleService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -162,9 +163,10 @@ export type SignatureCaptureMethod = "upload" | "type" | "draw";
 
 export type SignatureTypedKind = "name" | "initials";
 
-type NotarizationRequestRecord = {
+export type NotarizationRequestRecord = {
   id: string;
   document_id: string;
+  workflow_id: string | null;
   assigned_notary_id: string | null;
   status: string | null;
   submitted_at: string | null;
@@ -174,6 +176,7 @@ type NotarizationRequestRecord = {
 type NotarizationCodeRecord = {
   id: string;
   request_id: string;
+  workflow_id: string | null;
   code: string;
   status: string | null;
   expires_at: string | null;
@@ -449,7 +452,7 @@ export const getOrCreateUserId = async (
     .insert({
       supabase_user_id: supabaseUserId,
       email: email ?? null,
-      role: role ?? "member",
+      role: normalizeRuntimeRole(role),
     })
     .select("id")
     .single();
@@ -1479,7 +1482,7 @@ export const upsertDocumentSystemValues = async (input: {
 export const getActiveNotarizationRequest = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("notarization_requests")
-    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .select("id, document_id, workflow_id, assigned_notary_id, status, submitted_at, created_at")
     .eq("document_id", documentId)
     .in("status", ["pending", "in_review"])
     .limit(1)
@@ -1492,18 +1495,77 @@ export const getActiveNotarizationRequest = async (documentId: string) => {
   return data as NotarizationRequestRecord | null;
 };
 
+export const getLatestNotarizationRequestForDocument = async (documentId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("notarization_requests")
+    .select("id, document_id, workflow_id, assigned_notary_id, status, submitted_at, created_at")
+    .eq("document_id", documentId)
+    .order("submitted_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as NotarizationRequestRecord | null;
+};
+
+export const listNotarizationRequests = async (input: {
+  documentIds?: string[];
+  assignedNotaryId?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}) => {
+  if (input.documentIds && input.documentIds.length === 0) {
+    return [] as NotarizationRequestRecord[];
+  }
+
+  let query = supabaseAdmin
+    .from("notarization_requests")
+    .select("id, document_id, workflow_id, assigned_notary_id, status, submitted_at, created_at")
+    .order("submitted_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false });
+
+  if (input.documentIds) {
+    query = query.in("document_id", input.documentIds);
+  }
+
+  if (input.assignedNotaryId) {
+    query = query.eq("assigned_notary_id", input.assignedNotaryId);
+  }
+
+  if (input.status) {
+    query = query.eq("status", input.status);
+  }
+
+  const limit = Math.max(1, input.limit ?? 50);
+  const offset = Math.max(0, input.offset ?? 0);
+  const { data, error } = await query.range(offset, offset + limit - 1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as NotarizationRequestRecord[];
+};
+
 export const createNotarizationRequest = async (input: {
   documentId: string;
   submittedAt: string;
+  workflowId?: string | null | undefined;
 }) => {
   const { data, error } = await supabaseAdmin
     .from("notarization_requests")
     .insert({
       document_id: input.documentId,
+      workflow_id: input.workflowId ?? null,
       status: "pending",
       submitted_at: input.submittedAt,
     })
-    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .select("id, document_id, workflow_id, assigned_notary_id, status, submitted_at, created_at")
     .single();
 
   if (error || !data) {
@@ -1515,6 +1577,7 @@ export const createNotarizationRequest = async (input: {
 
 export const createNotarizationCode = async (input: {
   requestId: string;
+  workflowId?: string | null | undefined;
   code: string;
   expiresAt: string;
 }) => {
@@ -1522,12 +1585,13 @@ export const createNotarizationCode = async (input: {
     .from("illuminotarization_codes")
     .insert({
       request_id: input.requestId,
+      workflow_id: input.workflowId ?? null,
       code: input.code,
       status: "active",
       expires_at: input.expiresAt,
     })
     .select(
-      "id, request_id, code, status, expires_at, consumed_at, created_at"
+      "id, request_id, workflow_id, code, status, expires_at, consumed_at, created_at"
     )
     .single();
 
@@ -1542,7 +1606,7 @@ export const getNotarizationCodeByValue = async (code: string) => {
   const { data, error } = await supabaseAdmin
     .from("illuminotarization_codes")
     .select(
-      "id, request_id, code, status, expires_at, consumed_at, created_at"
+      "id, request_id, workflow_id, code, status, expires_at, consumed_at, created_at"
     )
     .eq("code", code)
     .limit(1)
@@ -1555,16 +1619,36 @@ export const getNotarizationCodeByValue = async (code: string) => {
   return data as NotarizationCodeRecord | null;
 };
 
+export const getLatestNotarizationCodeForRequest = async (requestId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("illuminotarization_codes")
+    .select(
+      "id, request_id, workflow_id, code, status, expires_at, consumed_at, created_at"
+    )
+    .eq("request_id", requestId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as NotarizationCodeRecord | null;
+};
+
 export const updateNotarizationCode = async (
   codeId: string,
-  updates: Partial<Pick<NotarizationCodeRecord, "status" | "consumed_at">>
+  updates: Partial<
+    Pick<NotarizationCodeRecord, "status" | "expires_at" | "consumed_at">
+  >
 ) => {
   const { data, error } = await supabaseAdmin
     .from("illuminotarization_codes")
     .update(updates)
     .eq("id", codeId)
     .select(
-      "id, request_id, code, status, expires_at, consumed_at, created_at"
+      "id, request_id, workflow_id, code, status, expires_at, consumed_at, created_at"
     )
     .single();
 
@@ -1578,7 +1662,7 @@ export const updateNotarizationCode = async (
 export const getNotarizationRequestById = async (requestId: string) => {
   const { data, error } = await supabaseAdmin
     .from("notarization_requests")
-    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .select("id, document_id, workflow_id, assigned_notary_id, status, submitted_at, created_at")
     .eq("id", requestId)
     .limit(1)
     .maybeSingle();
@@ -1592,13 +1676,15 @@ export const getNotarizationRequestById = async (requestId: string) => {
 
 export const updateNotarizationRequest = async (
   requestId: string,
-  updates: Partial<Pick<NotarizationRequestRecord, "assigned_notary_id" | "status">>
+  updates: Partial<
+    Pick<NotarizationRequestRecord, "workflow_id" | "assigned_notary_id" | "status">
+  >
 ) => {
   const { data, error } = await supabaseAdmin
     .from("notarization_requests")
     .update(updates)
     .eq("id", requestId)
-    .select("id, document_id, assigned_notary_id, status, submitted_at, created_at")
+    .select("id, document_id, workflow_id, assigned_notary_id, status, submitted_at, created_at")
     .single();
 
   if (error || !data) {

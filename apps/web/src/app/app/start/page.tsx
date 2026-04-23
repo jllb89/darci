@@ -2372,10 +2372,17 @@ export default function StartDocumentPage() {
     if (controlKind === "repeatable-person-list") {
       const items = parsePersonListItems(fieldValue);
       const isTrusteeField = normalizedCanonicalKey === "trustees";
+      const isGrantorField = normalizedCanonicalKey === "grantors";
       const isSuccessorTrusteeField = normalizedCanonicalKey === "successor_trustees";
-      const roleLabel = isTrusteeField ? "Acting trustee" : "Successor trustee";
+      const roleLabel = isTrusteeField
+        ? "Acting trustee"
+        : isGrantorField
+          ? "Trustmaker"
+          : "Successor trustee";
       const addButtonLabel = isTrusteeField
         ? "Add acting trustee"
+        : isGrantorField
+          ? "Add trustmaker"
         : isSuccessorTrusteeField
           ? "Add successor trustee"
           : "Add person";
