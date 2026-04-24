@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+# Build context: repo root (docker build -f backend/Dockerfile.worker .)
+# Identical build to the API image — only the CMD differs.
+
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY packages/types/package*.json ./packages/types/
+RUN cd packages/types && npm ci
+COPY packages/types ./packages/types
+RUN cd packages/types && npm run build
+
+COPY backend/package*.json ./backend/
+RUN cd backend && npm ci
+
+COPY backend ./backend
+RUN cd backend && npm run build
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/backend/dist ./dist
+COPY --from=builder /app/backend/node_modules ./node_modules
+COPY --from=builder /app/backend/package.json ./package.json
+
+CMD ["node", "dist/worker/index.js"]

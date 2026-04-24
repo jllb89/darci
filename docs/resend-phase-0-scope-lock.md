@@ -1,7 +1,7 @@
 # Resend Phase 0 Scope Lock
 
 Last updated: 2026-04-23
-Status: In progress
+Status: Approved — closed
 
 ## Goal
 
@@ -10,9 +10,9 @@ Lock environment strategy, sender identities, rollout ownership, and non-goals b
 ## Current Backend Reality
 
 1. Notification queueing already exists and is live through the outbox model.
-2. Notification provider delivery in runtime currently defaults to internal provider behavior.
+2. Notification provider delivery now supports both `internal` and `resend`, with environment-driven selection.
 3. Invite orchestration idempotency and dedupe are already in place and are out of scope for this phase.
-4. No Resend environment variables are currently defined in backend env example.
+4. Resend API key and webhook secret placeholders are now documented in `backend/.env.example`.
 
 ## Scope Decision
 
@@ -28,23 +28,23 @@ Approved scope for Resend rollout:
 | Environment | Provider Mode | Sending Domain | Webhook Mode | Notes |
 | --- | --- | --- | --- | --- |
 | local | internal (default) | none | optional | Local should not require Resend credentials. |
-| staging | resend | staging subdomain | enabled | Validate delivery lifecycle and webhook mapping. |
-| production | resend | production domain | enabled | Full rollout with canary and fallback. |
+| staging | resend | darciregistry.com | enabled | Shares production domain. Staging subdomain (staging.darciregistry.com) deferred — add when budget allows. |
+| production | resend | darciregistry.com | enabled | Full rollout with canary and fallback. |
 
 ## Sender Identity Matrix
 
 | Email Family | From Name | From Address | Reply-To | Owner |
 | --- | --- | --- | --- | --- |
-| invite and signer | DARCI Signatures | no-reply@<domain> | support@<domain> | Product + Eng |
-| notarization and meeting | DARCI Notarization | no-reply@<domain> | support@<domain> | Product + Ops |
-| verification and completion | DARCI Registry | no-reply@<domain> | support@<domain> | Product + Ops |
-| billing and payment request | DARCI Billing | billing@<domain> | support@<domain> | Product + Finance |
+| invite and signer | DARCI Signatures | no-reply@darciregistry.com | support@darciregistry.com | Product + Eng |
+| notarization and meeting | DARCI Notarization | no-reply@darciregistry.com | support@darciregistry.com | Product + Ops |
+| verification and completion | DARCI Registry | no-reply@darciregistry.com | support@darciregistry.com | Product + Ops |
+| billing and payment request | DARCI Billing | billing@darciregistry.com | support@darciregistry.com | Product + Finance |
 
-Pending approvals:
+Approved:
 
-1. Confirm production domain.
-2. Confirm staging subdomain.
-3. Confirm billing sender alias.
+1. Production domain: darciregistry.com
+2. Staging domain: darciregistry.com (staging.darciregistry.com deferred — requires paid Resend plan)
+3. Billing sender: billing@darciregistry.com, all others no-reply@darciregistry.com
 
 ## Rollout Ownership and Escalation
 
@@ -57,12 +57,12 @@ Pending approvals:
 
 ## Phase 0 Exit Checklist
 
-- [ ] Domain and subdomain strategy approved.
-- [ ] Sender identity matrix approved.
-- [ ] Rollout owner table approved.
-- [ ] Escalation path approved.
-- [ ] Non-goals acknowledged.
+- [x] Domain and subdomain strategy approved.
+- [x] Sender identity matrix approved.
+- [x] Rollout owner table approved.
+- [x] Escalation path approved.
+- [x] Non-goals acknowledged.
 
 ## Immediate Next Action
 
-Once checklist is approved, implement Phase 1 domain setup and add required backend environment variables in a dedicated config pass before adapter coding.
+Scope lock is complete. Remaining work has moved to focused tests, rollout controls, and incident/runbook documentation.

@@ -110,18 +110,24 @@ Delivered:
 
 1. `backend/src/services/notificationOutboxService.ts` now executes due notification jobs on top of `notification_jobs`, `notification_deliveries`, and `outbound_message_events`.
 2. `POST /internal/notification-jobs/run-due` and `POST /internal/notification-deliveries/{id}/events` are mounted for service-role worker execution, retry-state advancement, and provider-event ingestion.
-3. `GET /admin/notification-jobs` and `GET /admin/notification-jobs/{id}` are mounted for operator observability before any ops UI cutover.
-4. Email and SMS execution now sit behind a provider-adapter boundary, with the internal adapter keeping Track 4 unblocked until a real outbound vendor is selected.
-5. Focused unit and integration coverage plus OpenAPI updates shipped with the new outbox runtime.
+3. `GET /admin/notification-jobs`, `GET /admin/notification-jobs/metrics`, and `GET /admin/notification-jobs/{id}` are mounted for operator observability before any ops UI cutover.
+4. `GET /admin/notification-templates`, `GET /admin/notification-templates/{id}`, `PATCH /admin/notification-templates/{id}`, and `POST /admin/notification-templates/{id}/preview` are mounted for notification-template operator tooling.
+5. Email execution now uses the Resend adapter in staging and production while local fallback remains on the internal adapter.
+6. `POST /webhooks/resend` is mounted for verified provider webhook ingestion back into the delivery ledger.
+7. Focused OpenAPI updates shipped with the expanded notification runtime.
 
 Primary backend surfaces:
 
 1. `backend/src/services/notificationService.ts`
 2. `backend/src/services/notificationOutboxService.ts`
-3. `backend/src/controllers/notificationInternalController.ts`
-4. `backend/src/controllers/notificationAdminController.ts`
-5. `backend/src/routes/internal.ts`
-6. `backend/src/routes/admin.ts`
+3. `backend/src/services/notificationTemplateRenderService.ts`
+4. `backend/src/controllers/notificationInternalController.ts`
+5. `backend/src/controllers/notificationAdminController.ts`
+6. `backend/src/controllers/notificationTemplateAdminController.ts`
+7. `backend/src/controllers/notificationWebhookController.ts`
+8. `backend/src/routes/internal.ts`
+9. `backend/src/routes/admin.ts`
+10. `backend/src/routes/webhooks.ts`
 
 Exit signal:
 

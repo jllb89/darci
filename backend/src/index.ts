@@ -16,6 +16,7 @@ import ledgerRoutes from "./routes/ledger";
 import requestsRoutes from "./routes/requests";
 import verificationRoutes from "./routes/verification";
 import verifyRoutes from "./routes/verify";
+import webhooksRoutes from "./routes/webhooks";
 import dashboardRoutes from "./routes/dashboard";
 import rulesRoutes from "./routes/rules";
 import usersRoutes from "./routes/users";
@@ -26,6 +27,9 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 const allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
+  ...(process.env.CORS_ALLOWED_ORIGINS
+    ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : []),
 ];
 
 app.use(
@@ -35,6 +39,8 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+app.use("/webhooks", webhooksRoutes);
 
 app.use(express.json());
 

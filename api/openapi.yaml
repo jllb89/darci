@@ -499,6 +499,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /admin/notification-jobs/metrics:
+    get:
+      summary: Get notification job metrics
+      description: Returns aggregate notification job and delivery metrics over a bounded time window for admin observability dashboards.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: windowHours
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 24
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationJobsMetricsResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /admin/notification-jobs/{id}:
     get:
       summary: Get notification job detail
@@ -519,6 +559,210 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationJobDetailResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notification-templates:
+    get:
+      summary: List notification templates
+      description: Lists notification template rows from the seeded and operator-edited catalog, optionally filtered by channel, locale, key, and active state.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: query
+          name: channel
+          required: false
+          schema:
+            type: string
+            enum:
+              - email
+              - sms
+              - in_app
+        - in: query
+          name: locale
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: templateKey
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: includeInactive
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTemplateListResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notification-templates/{id}:
+    get:
+      summary: Get notification template detail
+      description: Fetches a single notification template row for admin review and editing.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTemplateResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update notification template
+      description: Partially updates DB-backed notification template content and activation fields without changing template identity keys.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationTemplateUpdateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTemplateResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notification-templates/{id}/preview:
+    post:
+      summary: Preview notification template
+      description: Renders a notification template server-side using the same interpolation and markup path as runtime delivery. Optional unsaved overrides can be supplied before saving.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationTemplatePreviewRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationTemplatePreviewResponse"
         "400":
           description: Bad request
           content:
@@ -1709,6 +1953,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /webhooks/resend:
+    post:
+      summary: Receive Resend delivery webhook
+      description: Verifies Resend Svix signatures, maps provider delivery events to the normalized outbound event model, and reconciles notification delivery and job state by provider message id.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendWebhookResponse"
+        "202":
+          description: Accepted but ignored because the event was unsupported or no matching delivery was found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResendWebhookResponse"
+        "400":
+          description: Bad request or invalid webhook signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /internal/generation-runs/claim-next:
     post:
       summary: Claim next queued generation run
@@ -1900,7 +2181,7 @@ paths:
   /internal/notification-jobs/run-due:
     post:
       summary: Run due notification jobs
-      description: Claims and executes due notification outbox jobs through the configured internal provider adapter boundary.
+      description: Claims and executes due notification outbox jobs through the configured provider adapter boundary.
       x-roles:
         - service_role
       requestBody:
@@ -8289,6 +8570,7 @@ components:
             - opened
             - clicked
             - accepted
+            - suppressed
             - rejected
             - unsubscribed
             - rendered
@@ -8329,6 +8611,50 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NotificationOutboundEvent"
+    NotificationStatusCounts:
+      type: object
+      additionalProperties:
+        type: integer
+    NotificationChannelCounts:
+      type: object
+      additionalProperties:
+        type: integer
+    NotificationJobMetricsSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        byStatus:
+          $ref: "#/components/schemas/NotificationStatusCounts"
+        byChannel:
+          $ref: "#/components/schemas/NotificationChannelCounts"
+        inviteJobs:
+          type: integer
+        inviteJobsByStatus:
+          $ref: "#/components/schemas/NotificationStatusCounts"
+    NotificationDeliveryMetricsSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        byStatus:
+          $ref: "#/components/schemas/NotificationStatusCounts"
+        inviteDeliveries:
+          type: integer
+        inviteDeliveriesByStatus:
+          $ref: "#/components/schemas/NotificationStatusCounts"
+    NotificationJobsMetricsResponse:
+      type: object
+      properties:
+        windowHours:
+          type: integer
+        generatedAt:
+          type: string
+          format: date-time
+        jobs:
+          $ref: "#/components/schemas/NotificationJobMetricsSummary"
+        deliveries:
+          $ref: "#/components/schemas/NotificationDeliveryMetricsSummary"
     RunDueNotificationJobsRequest:
       type: object
       properties:
@@ -8409,9 +8735,13 @@ components:
             - opened
             - clicked
             - accepted
+            - suppressed
             - rejected
             - unsubscribed
             - rendered
+        providerMessageId:
+          type: string
+          nullable: true
         providerEventId:
           type: string
           nullable: true
@@ -8458,6 +8788,21 @@ components:
             - clicked
             - accepted
             - suppressed
+    ResendWebhookResponse:
+      type: object
+      properties:
+        received:
+          type: boolean
+        ignored:
+          type: boolean
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        result:
+          allOf:
+            - $ref: "#/components/schemas/NotificationDeliveryEventResponse"
+          nullable: true
     EnforceMeetingArtifactRetentionRequest:
       type: object
       properties:
@@ -8650,6 +8995,180 @@ components:
           minimum: 0
         isActive:
           type: boolean
+    NotificationTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        templateKey:
+          type: string
+        templateVersion:
+          type: string
+        locale:
+          type: string
+        channel:
+          type: string
+          enum:
+            - email
+            - sms
+            - in_app
+        templateKind:
+          type: string
+        audienceScope:
+          type: string
+        triggerEvent:
+          type: string
+          nullable: true
+        inviteKind:
+          type: string
+          nullable: true
+        subjectTemplate:
+          type: string
+          nullable: true
+        bodyTemplate:
+          type: string
+        bodyFormat:
+          type: string
+          enum:
+            - text
+            - markdown
+            - html
+        variablesSchema:
+          type: object
+          additionalProperties: true
+        isActive:
+          type: boolean
+        sourceReference:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NotificationTemplateResponse:
+      type: object
+      properties:
+        template:
+          $ref: "#/components/schemas/NotificationTemplate"
+    NotificationTemplateListResponse:
+      type: object
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationTemplate"
+    NotificationTemplateVariablesSchema:
+      type: object
+      additionalProperties: true
+      properties:
+        required:
+          type: array
+          items:
+            type: string
+        optional:
+          type: array
+          items:
+            type: string
+    NotificationTemplateUpdateRequest:
+      type: object
+      properties:
+        subjectTemplate:
+          type: string
+          nullable: true
+          minLength: 1
+        bodyTemplate:
+          type: string
+          minLength: 1
+        bodyFormat:
+          type: string
+          enum:
+            - text
+            - markdown
+            - html
+        variablesSchema:
+          $ref: "#/components/schemas/NotificationTemplateVariablesSchema"
+        isActive:
+          type: boolean
+        sourceReference:
+          type: string
+          nullable: true
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties: true
+    NotificationTemplatePreviewRequest:
+      type: object
+      properties:
+        subjectTemplate:
+          type: string
+          nullable: true
+          minLength: 1
+        bodyTemplate:
+          type: string
+          minLength: 1
+        bodyFormat:
+          type: string
+          enum:
+            - text
+            - markdown
+            - html
+        payload:
+          type: object
+          additionalProperties: true
+        recipientEmail:
+          type: string
+          format: email
+          nullable: true
+        recipientDisplayName:
+          type: string
+          nullable: true
+          minLength: 1
+    NotificationTemplatePreview:
+      type: object
+      properties:
+        templateId:
+          type: string
+          format: uuid
+        templateKey:
+          type: string
+        templateVersion:
+          type: string
+        locale:
+          type: string
+        channel:
+          type: string
+          enum:
+            - email
+            - sms
+            - in_app
+        from:
+          type: string
+        replyTo:
+          type: string
+        to:
+          type: string
+          nullable: true
+        subject:
+          type: string
+        html:
+          type: string
+        text:
+          type: string
+        missingVariables:
+          type: array
+          items:
+            type: string
+    NotificationTemplatePreviewResponse:
+      type: object
+      properties:
+        preview:
+          $ref: "#/components/schemas/NotificationTemplatePreview"
     PoaRequirementResponse:
       type: object
       properties:

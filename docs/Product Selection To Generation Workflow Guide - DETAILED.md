@@ -46,7 +46,9 @@ The current system works like this:
 19. `GET /verify/{idn}` now serves the persisted public verification result using anchored-proof semantics and logs verification checks,  
 20. the surrounding platform now includes live Phase 1 through Phase 3 foundations for multi-role identity, billing/entitlements, invites, and notification outbox state,
 21. invite issuance, resend, revoke, public validate, and public claim runtime are now mounted end to end,
-22. Track 6 hardening now enforces meeting-artifact retention lifecycle rules and tighter storage-policy coverage, with a service-role retention endpoint for operational cleanup.
+22. admin operators can now inspect notification job metrics and manage DB-backed notification templates through list, detail, update, and preview endpoints,
+23. notification preview now runs through the same server-side interpolation and HTML-render path used by live email delivery,
+24. Track 6 hardening now enforces meeting-artifact retention lifecycle rules and tighter storage-policy coverage, with a service-role retention endpoint for operational cleanup.
 
 The main things still missing are frontend cutover to the real workspace APIs, payment execution on top of the Phase 2 billing schema, broader generic workspace UI adoption, a dedicated normalized IDN record, and replacement of the current stubbed ledger provider with a real external integration.
 
@@ -83,7 +85,10 @@ If you only want the shortest reading list, start here:
 27. `backend/src/services/meetingService.ts`  
 28. `backend/src/controllers/meetingInternalController.ts`  
 29. `backend/src/routes/internal.ts`  
-30. `api/openapi.yaml`
+30. `backend/src/controllers/notificationTemplateAdminController.ts`  
+31. `backend/src/services/notificationTemplateAdminService.ts`  
+32. `backend/src/services/notificationTemplateRenderService.ts`  
+33. `api/openapi.yaml`
 
 ## Database Tables In The Current Flow
 
@@ -947,9 +952,11 @@ What exists now:
 3. Phase 3 invite, token, claim, notification, delivery, preference, and template tables are live on staging,  
 4. the seeded Phase 3 template catalog now covers 36 notification templates, including review, signing, notarization, meeting, verification, and client-payment scenarios,  
 5. mounted review, signing, submit-notarization, invite issuance, invite resend, and code-delivery paths now enqueue Phase 3 notification jobs and delivery/event records,  
-6. authenticated invite list, create, resend, and revoke APIs plus public validate and claim APIs are now mounted end to end on top of the Phase 3 schema,  
-7. Track 6 hardening now adds retention enforcement for expired meeting artifacts and tighter storage policies for `meeting-evidence` and `illuminotary-assets`,  
-8. Stripe execution and client-payment settlement still remain future work on top of the already-landed schema.
+6. the live email runtime now renders `subject_template` and `body_template` directly from `notification_templates`, converts markdown server-side, and sends through Resend in staging and production,  
+7. admin notification endpoints now expose job metrics plus template list, detail, partial update, and unsaved preview rendering for future operator tooling,  
+8. authenticated invite list, create, resend, and revoke APIs plus public validate and claim APIs are now mounted end to end on top of the Phase 3 schema,  
+9. Track 6 hardening now adds retention enforcement for expired meeting artifacts and tighter storage policies for `meeting-evidence` and `illuminotary-assets`,  
+10. Stripe execution and client-payment settlement still remain future work on top of the already-landed schema.
 
 ## 2026-04-23 Operational Update
 
@@ -962,8 +969,10 @@ What changed:
 1. Track 5 invite services, controllers, routes, tests, OpenAPI, and workflow docs were completed and are now the live backend path for issuer-side invite management and recipient claim flows,  
 2. Track 6 hardening landed through `supabase/migrations/20260423103000_add_track6_phase7_hardening.sql`, plus the service-role endpoint `POST /internal/meeting-artifacts/enforce-retention`,  
 3. the latest migration was committed and pushed separately, and remote migration state was reconciled so staging now matches local migration history, including `20260421110000_add_phase6_jurisdiction_finalization_config.sql` and `20260423103000_add_track6_phase7_hardening.sql`,  
-4. the staging smoke checklist for Phase 4, Phase 5, and Phase 6 was rerun successfully after migration sync,  
-5. focused API sanity coverage also passed for verification, meeting completion, invite lifecycle, and retention enforcement slices.
+4. Resend is now the live email provider path, and runtime delivery renders directly from database template rows instead of hardcoded service copy,  
+5. admin notification template list, detail, update, and preview APIs are now mounted and documented for future dashboard work,  
+6. the staging smoke checklist for Phase 4, Phase 5, and Phase 6 was rerun successfully after migration sync,  
+7. focused API sanity coverage also passed for verification, meeting completion, invite lifecycle, and retention enforcement slices.
 
 What this means now:
 

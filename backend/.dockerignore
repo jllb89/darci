@@ -1,0 +1,32 @@
+# Backend .dockerignore (build context: repo root)
+# Excludes everything we don't need to build the backend/worker images
+
+# VCS
+.git
+.gitignore
+
+# Other workspace apps (not needed for backend build)
+apps/
+mobile/
+
+# Docs and scripts
+docs/
+scripts/
+supabase/
+linear/
+*.md
+*.txt
+
+# Root-level env files (secrets are injected via AWS Secrets Manager at runtime)
+.env*
+
+# Backend-specific ignores
+backend/node_modules
+backend/dist
+backend/.env*
+backend/coverage
+backend/__tests__
+
+# Types package ignores
+packages/types/node_modules
+packages/types/dist

@@ -1,0 +1,28 @@
+# Web .dockerignore (build context: repo root)
+# Excludes everything we don't need to build the Next.js web image
+
+# VCS
+.git
+.gitignore
+
+# Other workspace apps (not needed for web build)
+backend/
+packages/
+mobile/
+
+# Docs and scripts
+docs/
+scripts/
+supabase/
+linear/
+api/
+*.md
+*.txt
+
+# Root-level env files
+.env*
+
+# Web-specific ignores
+node_modules
+.next
+coverage

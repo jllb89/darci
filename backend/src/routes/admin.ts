@@ -11,6 +11,12 @@ import {
   listNotificationJobsAdmin,
 } from "../controllers/notificationAdminController";
 import {
+  getNotificationTemplateAdmin,
+  listNotificationTemplatesAdmin,
+  previewNotificationTemplateAdmin,
+  updateNotificationTemplateAdmin,
+} from "../controllers/notificationTemplateAdminController";
+import {
   createTemplateBindingRuleAdmin,
   deactivateTemplateBindingRuleAdmin,
   listTemplateBindingRulesAdmin,
@@ -60,6 +66,30 @@ router.get(
   "/notification-jobs/:id",
   requireRole(["admin", "service_role"]),
   getNotificationJobDetailAdmin,
+);
+
+router.get(
+  "/notification-templates",
+  requireRole(["admin", "service_role"]),
+  listNotificationTemplatesAdmin,
+);
+
+router.get(
+  "/notification-templates/:id",
+  requireRole(["admin", "service_role"]),
+  getNotificationTemplateAdmin,
+);
+
+router.patch(
+  "/notification-templates/:id",
+  requireRole(["admin", "service_role"]),
+  updateNotificationTemplateAdmin,
+);
+
+router.post(
+  "/notification-templates/:id/preview",
+  requireRole(["admin", "service_role"]),
+  previewNotificationTemplateAdmin,
 );
 
 router.get(

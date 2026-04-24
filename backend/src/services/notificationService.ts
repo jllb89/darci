@@ -293,6 +293,12 @@ const insertNotificationJob = async (input: {
   return data as NotificationJobRecord;
 };
 
+const resolveEmailProvider = (): string => {
+  const configured = process.env.NOTIFICATION_PROVIDER?.trim().toLowerCase();
+  if (configured === "resend") return "resend";
+  return "internal";
+};
+
 const insertNotificationDeliveries = async (input: {
   jobId: string;
   channel: NotificationChannel;
@@ -302,6 +308,7 @@ const insertNotificationDeliveries = async (input: {
   const queuedAt = new Date().toISOString();
   const deliveryStatus = input.channel === "in_app" ? "delivered" : "queued";
   const eventType = input.channel === "in_app" ? "delivered" : "queued";
+  const emailProvider = input.channel === "email" ? resolveEmailProvider() : "internal";
 
   const deliveriesToInsert = input.recipients.map((recipient, index) => ({
     notification_job_id: input.jobId,
@@ -309,7 +316,7 @@ const insertNotificationDeliveries = async (input: {
     channel: input.channel,
     recipient_address: input.channel === "in_app" ? null : recipient.email?.trim() ?? null,
     recipient_display_name: recipient.displayName ?? null,
-    provider: "internal",
+    provider: emailProvider,
     status: deliveryStatus,
     attempt_number: 1,
     queued_at: queuedAt,
@@ -340,7 +347,7 @@ const insertNotificationDeliveries = async (input: {
         deliveries.map((delivery) => ({
           notification_delivery_id: delivery.id,
           event_type: eventType,
-          provider: "internal",
+          provider: emailProvider,
           event_at: queuedAt,
           payload: {
             templateKey: input.templateKey,

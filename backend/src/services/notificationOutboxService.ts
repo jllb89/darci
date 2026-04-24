@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
+import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
+import { renderNotificationTemplate } from "./notificationTemplateRenderService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -49,6 +51,7 @@ export type OutboundMessageEventType =
   | "opened"
   | "clicked"
   | "accepted"
+  | "suppressed"
   | "rejected"
   | "unsubscribed"
   | "rendered";
@@ -60,6 +63,10 @@ type NotificationTemplateRecord = {
   template_key: string;
   channel: NotificationChannel;
   trigger_event: string | null;
+  subject_template: string | null;
+  body_template: string | null;
+  body_format: string | null;
+  audience_scope: string | null;
 };
 
 type NotificationJobRecord = {
@@ -371,6 +378,7 @@ const eventTypeToDeliveryStatus: Partial<
   opened: "opened",
   clicked: "clicked",
   accepted: "accepted",
+  suppressed: "suppressed",
   rejected: "failed",
   unsubscribed: "suppressed",
 };
@@ -676,9 +684,132 @@ const internalProviderAdapter: NotificationProviderAdapter = {
   },
 };
 
+const buildResendAdapter = (): NotificationProviderAdapter => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    throw new NotificationProviderDispatchError(
+      "provider_misconfigured",
+      "RESEND_API_KEY is not set",
+    );
+  }
+
+  const resend = new Resend(apiKey);
+
+  return {
+    provider: "resend",
+    async send(input) {
+      const recipientEmail = input.delivery.recipient_address?.trim();
+      if (!recipientEmail) {
+        throw new NotificationProviderDispatchError(
+          "missing_recipient_address",
+          "Delivery has no recipient_address for Resend send",
+        );
+      }
+
+      if (!input.template) {
+        throw new NotificationProviderDispatchError(
+          "missing_template",
+          "Resend adapter requires a resolved notification template",
+        );
+      }
+
+      const { template } = input;
+
+      if (!template.subject_template || !template.body_template) {
+        throw new NotificationProviderDispatchError(
+          "template_missing_content",
+          `Template ${template.template_key} is missing subject_template or body_template`,
+        );
+      }
+
+      const payload = input.job.payload_json as Record<string, unknown>;
+
+      const rendered = renderNotificationTemplate({
+        template: {
+          templateKey: template.template_key,
+          audienceScope: template.audience_scope,
+          subjectTemplate: template.subject_template,
+          bodyTemplate: template.body_template,
+          bodyFormat:
+            template.body_format === "text" ||
+            template.body_format === "markdown" ||
+            template.body_format === "html"
+              ? template.body_format
+              : null,
+        },
+        payload,
+        recipientEmail,
+        recipientDisplayName: input.delivery.recipient_display_name,
+      });
+
+      const { data, error } = await resend.emails.send({
+        from: rendered.from,
+        to: rendered.to ?? recipientEmail,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        replyTo: rendered.replyTo,
+        tags: [
+          { name: "template_key", value: template.template_key },
+          { name: "job_id", value: input.job.id },
+          { name: "delivery_id", value: input.delivery.id },
+        ],
+      });
+
+      if (error || !data) {
+        throw new NotificationProviderDispatchError(
+          "resend_api_error",
+          error?.message ?? "Resend returned no data",
+        );
+      }
+
+      return {
+        provider: "resend",
+        providerMessageId: data.id,
+        deliveryStatus: "sent",
+        metadata: {
+          resendMessageId: data.id,
+          templateKey: template.template_key,
+          workerId: input.workerId ?? null,
+        },
+        events: [
+          {
+            eventType: "sent",
+            eventAt: input.now,
+            payload: {
+              recipientAddress: recipientEmail,
+              recipientDisplayName: input.delivery.recipient_display_name ?? null,
+              resendMessageId: data.id,
+            },
+          },
+        ],
+      };
+    },
+  };
+};
+
+// Cache the adapter instance to avoid reconstructing on every delivery.
+// The API key is read once at first use; a server restart is required to
+// pick up a key rotation.
+let _resendAdapter: NotificationProviderAdapter | null = null;
+const getResendAdapter = (): NotificationProviderAdapter => {
+  if (!_resendAdapter) {
+    _resendAdapter = buildResendAdapter();
+  }
+  return _resendAdapter;
+};
+
+// ---------------------------------------------------------------------------
+// Provider resolver
+// ---------------------------------------------------------------------------
+
 const resolveProviderAdapter = (delivery: NotificationDeliveryRecord) => {
   if (delivery.provider === "internal") {
     return internalProviderAdapter;
+  }
+
+  if (delivery.provider === "resend") {
+    return getResendAdapter();
   }
 
   throw new NotificationProviderDispatchError(
@@ -694,7 +825,7 @@ const getNotificationTemplatesByIds = async (templateIds: string[]) => {
 
   const { data, error } = await supabaseAdmin
     .from("notification_templates")
-    .select("id, template_key, channel, trigger_event")
+    .select("id, template_key, channel, trigger_event, subject_template, body_template, body_format, audience_scope")
     .in("id", templateIds);
 
   if (error) {
@@ -1190,6 +1321,7 @@ export const recordNotificationDeliveryEvent = async (input: {
   deliveryId: string;
   provider: NotificationProviderName;
   eventType: OutboundMessageEventType;
+  providerMessageId?: string | null | undefined;
   providerEventId?: string | null | undefined;
   eventAt?: string | null | undefined;
   payload?: JsonObject | undefined;
@@ -1235,7 +1367,7 @@ export const recordNotificationDeliveryEvent = async (input: {
   const updatedDelivery = await updateNotificationDelivery(input.deliveryId, {
     ...patch,
     provider: input.provider,
-    provider_message_id: input.providerEventId ?? delivery.provider_message_id,
+    provider_message_id: input.providerMessageId ?? delivery.provider_message_id,
     metadata: {
       ...objectOrEmpty(delivery.metadata),
       ...objectOrEmpty(input.metadata),
@@ -1265,6 +1397,47 @@ export const recordNotificationDeliveryEvent = async (input: {
     deliveryId: updatedDelivery.id,
     deliveryStatus: updatedDelivery.status,
   };
+};
+
+export const recordNotificationDeliveryEventByProviderMessageId = async (input: {
+  provider: NotificationProviderName;
+  providerMessageId: string;
+  eventType: OutboundMessageEventType;
+  providerEventId?: string | null | undefined;
+  eventAt?: string | null | undefined;
+  payload?: JsonObject | undefined;
+  metadata?: JsonObject | undefined;
+}) => {
+  assertSupabaseConfigured();
+
+  const { data, error } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select(notificationDeliverySelect)
+    .eq("provider", input.provider)
+    .eq("provider_message_id", input.providerMessageId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  const delivery = (data as NotificationDeliveryRecord | null) ?? null;
+  if (!delivery) {
+    return null;
+  }
+
+  return recordNotificationDeliveryEvent({
+    deliveryId: delivery.id,
+    provider: input.provider,
+    providerMessageId: input.providerMessageId,
+    providerEventId: input.providerEventId,
+    eventType: input.eventType,
+    eventAt: input.eventAt,
+    payload: input.payload,
+    metadata: input.metadata,
+  });
 };
 
 export const listNotificationJobs = async (input: {

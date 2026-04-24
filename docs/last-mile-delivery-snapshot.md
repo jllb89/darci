@@ -153,13 +153,15 @@ Completed:
 
 1. `backend/src/services/notificationOutboxService.ts` now executes due notification jobs instead of leaving notification rows as enqueue-only ledger state.
 2. `POST /internal/notification-jobs/run-due` and `POST /internal/notification-deliveries/{id}/events` are mounted for service-role worker execution and generic provider-event ingestion.
-3. `GET /admin/notification-jobs` and `GET /admin/notification-jobs/{id}` are mounted for operator observability over jobs, deliveries, and outbound events.
-4. Retry scheduling and failure handling now run against the persisted job and delivery attempt model already present in Phase 3.
-5. The notification runtime now uses an adapter boundary for outbound execution, with the internal adapter keeping this track unblocked before a real email or SMS vendor is selected.
+3. `GET /admin/notification-jobs`, `GET /admin/notification-jobs/metrics`, and `GET /admin/notification-jobs/{id}` are mounted for operator observability over jobs, deliveries, aggregates, and outbound events.
+4. `GET /admin/notification-templates`, `GET /admin/notification-templates/{id}`, `PATCH /admin/notification-templates/{id}`, and `POST /admin/notification-templates/{id}/preview` are mounted for future admin-dashboard template management.
+5. Retry scheduling and failure handling now run against the persisted job and delivery attempt model already present in Phase 3.
+6. The notification runtime now renders subject and body content from `notification_templates` in the database and sends email through the Resend adapter in staging and production.
+7. `POST /webhooks/resend` is mounted before auth and before JSON parsing so verified provider delivery events can reconcile back into delivery and job state.
 
 Deferred provider follow-up, not counted as Track 4 remaining work:
 
-1. swap the internal notification adapter for a real external email or SMS provider when owner input is finalized.
+1. add focused unit and integration coverage for webhook mapping and duplicate-event handling.
 
 ### Track 5: Invite Issuance, Resend, Revoke, And Claim Runtime
 

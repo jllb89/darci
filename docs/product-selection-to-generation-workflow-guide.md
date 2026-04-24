@@ -20,7 +20,8 @@ It focuses on what is implemented today, what has been completed across Phases 1
 8. the illuminotarization workflow now supports code-based access, review decisions, meeting scheduling, evidence capture, and downstream closeout,
 9. the final document can now be hashed, anchored to the ledger, and verified publicly by its IDN,
 10. issuer-side invite lifecycle APIs and recipient-side public claim flows are now mounted,
-11. meeting-artifact retention enforcement and tighter storage-policy hardening are now in place.
+11. admin operators can now inspect notification job metrics, edit DB-backed notification templates, and preview interpolated output server-side before saving,
+12. meeting-artifact retention enforcement and tighter storage-policy hardening are now in place.
 
 ## Current End-To-End Flow
 
@@ -59,7 +60,9 @@ It focuses on what is implemented today, what has been completed across Phases 1
 1. invite, token, claim, delivery, preference, and outbound-message models are now in place,
 2. the platform now has a seeded notification catalog covering the main workflow milestones,
 3. review, signing, notarization, invite issuance, and code-delivery paths already write into the notification outbox,
-4. authenticated invite list, create, resend, and revoke APIs plus public validate and claim flows are now implemented.
+4. the live email runtime now renders subjects and bodies from `notification_templates` in the database and delivers email through Resend in staging and production,
+5. admin notification endpoints now expose job lists, metrics, template list/detail/update, and server-side preview for future dashboard tooling,
+6. authenticated invite list, create, resend, and revoke APIs plus public validate and claim flows are now implemented.
 
 ### Phase 4: Illuminotarization Workflow
 
@@ -110,12 +113,15 @@ It focuses on what is implemented today, what has been completed across Phases 1
 1. frontend cutover to the real workspace APIs, including the invite and downstream operational surfaces,
 2. payment execution on top of the live billing and entitlement foundation,
 3. broader UI rollout beyond the current operational start, review, and sign surfaces,
-4. real provider integrations where the backend still uses stubbed contracts, especially ledger anchoring.
+4. delivery-provider webhook ingestion and bounce/complaint synchronization back into outbound delivery events,
+5. real provider integrations where the backend still uses stubbed contracts, especially ledger anchoring.
 
 ## 2026-04-23 Status Update
 
 1. Track 5 invite runtime is complete and mounted in the API, with OpenAPI and focused test coverage in place,
 2. Track 6 hardening is complete, including the latest migration and retention-enforcement endpoint,
 3. staging migration state was reconciled so local and remote histories now match,
-4. the smoke checklist for Phase 4, Phase 5, and Phase 6 was rerun successfully,
-5. the backend-first roadmap is now complete through Track 6.
+4. Resend is now wired as the live email provider with DB-backed template rendering instead of hardcoded copy in services,
+5. admin notification template list, edit, and preview endpoints are now mounted for the future dashboard,
+6. the smoke checklist for Phase 4, Phase 5, and Phase 6 was rerun successfully,
+7. the backend-first roadmap is now complete through Track 6.
