@@ -38,7 +38,7 @@ Staging has been provisioned in AWS account `427057633951`, region `us-east-1`.
 - Create DNS records for `app.staging.darci.app` and `api.staging.darci.app` pointing to the ALB.
 - Request/validate an ACM certificate and switch the ALB listener to HTTPS.
 - Add the Resend webhook endpoint after HTTPS is live: `https://api.staging.darci.app/webhooks/resend`.
-- Add CI/CD so future pushes rebuild and redeploy automatically.
+- Commit and push the Phase 5 workflow files so GitHub Actions starts rebuilding and redeploying future pushes automatically.
 
 ---
 
@@ -298,38 +298,44 @@ Note: `REDIS_URL` points to the ElastiCache endpoint provisioned in this phase.
 
 ---
 
-### Phase 5 — CI/CD Pipeline (Agent can do)
+### Phase 5 — CI/CD Pipeline (Staging prepared)
 
-**Time estimate:** 1 hour  
-**Who:** Agent writes `.github/workflows/deploy.yml`; you add AWS credentials to GitHub secrets
+**Who:** Agent created the workflow and AWS/GitHub wiring; you approve committing/pushing the workflow files
 
-**GitHub Secrets needed (you add these once):**
-- `AWS_ACCOUNT_ID`
-- `AWS_REGION` (e.g. `us-east-1`)
-- `STAGING_NEXT_PUBLIC_API_BASE_URL` (e.g. `https://api.staging.darci.app`)
-- `PROD_NEXT_PUBLIC_API_BASE_URL` (e.g. `https://api.darci.app`)
+The staging deploy workflow is defined in `.github/workflows/deploy-staging.yml` and triggers on:
+- push to `master`
+- manual `workflow_dispatch`
 
-Authentication uses **GitHub OIDC → AWS IAM Role** — no static AWS access keys stored in GitHub. The agent will provide the IAM role trust policy.
+Authentication uses **GitHub OIDC → AWS IAM Role** — no static AWS access keys are stored in GitHub.
+
+**AWS/GitHub setup completed:**
+- IAM OIDC provider: `token.actions.githubusercontent.com`
+- IAM role: `arn:aws:iam::427057633951:role/darci-github-actions-staging-deploy-role`
+- Repo variables set in `jllb89/darci`:
+  - `AWS_ACCOUNT_ID=427057633951`
+  - `AWS_REGION=us-east-1`
+  - `AWS_DEPLOY_ROLE_ARN=arn:aws:iam::427057633951:role/darci-github-actions-staging-deploy-role`
+  - `STAGING_NEXT_PUBLIC_API_BASE_URL=http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com`
+  - `STAGING_HEALTH_URL=http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com/health`
+
+The temporary ALB API base works because the staging listener now routes the main API path prefixes on the bare ALB hostname to the API target group. After DNS and HTTPS are complete, update the two staging URL repo variables to use `https://api.staging.darci.app`.
 
 **Deploy workflow logic:**
 
 ```
-On push to main:
+On push to master:
   1. Build all 3 Docker images
   2. Push to ECR (tagged with git SHA + "staging-latest")
-  3. Update STAGING ECS services (force new deployment)
+  3. Force new deployments for all STAGING ECS services
   4. Wait for services to stabilize
-
-On push of tag matching v*.*.* :
-  1. Pull the staging images already built for that commit
-  2. Retag as production
-  3. Manual approval gate (GitHub Environment protection rule)
-  4. Update PRODUCTION ECS services
+  5. Smoke test the public API health URL
 ```
 
-This means production deploys the **exact same image** that ran in staging — no separate production build.
+Production CI/CD should be added after production ECS, ALB, Redis, and Secrets Manager resources exist. It should use a separate production deploy role and GitHub Environment approval gate.
 
-**Also fixes the existing CI bug:** `working-directory: web` → `working-directory: apps/web` in `.github/workflows/ci.yml`.
+**Current activation step:** commit and push `.github/workflows/deploy-staging.yml` plus the `.github/workflows/ci.yml` path fix.
+
+**Also fixed the existing CI bug:** `working-directory: web` → `working-directory: apps/web` in `.github/workflows/ci.yml`.
 
 ---
 

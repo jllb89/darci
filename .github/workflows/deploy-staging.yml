@@ -1,0 +1,111 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+  ECS_CLUSTER: darci-staging
+  API_SERVICE: darci-staging-api
+  WORKER_SERVICE: darci-staging-worker
+  WEB_SERVICE: darci-staging-web
+  STAGING_NEXT_PUBLIC_API_BASE_URL: ${{ vars.STAGING_NEXT_PUBLIC_API_BASE_URL }}
+  STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL }}
+
+jobs:
+  deploy:
+    name: Build, Push, and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check required configuration
+        run: |
+          missing=0
+          for name in AWS_ACCOUNT_ID AWS_REGION AWS_DEPLOY_ROLE_ARN STAGING_NEXT_PUBLIC_API_BASE_URL STAGING_HEALTH_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name repository variable is required"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set image tags
+        run: |
+          echo "ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=staging-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            -f backend/Dockerfile \
+            -t "$ECR_REGISTRY/darci-api:staging-latest" \
+            -t "$ECR_REGISTRY/darci-api:$IMAGE_TAG" \
+            --push \
+            .
+
+      - name: Build and push worker image
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            -f backend/Dockerfile.worker \
+            -t "$ECR_REGISTRY/darci-worker:staging-latest" \
+            -t "$ECR_REGISTRY/darci-worker:$IMAGE_TAG" \
+            --push \
+            .
+
+      - name: Build and push web image
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            -f apps/web/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_BASE_URL="$STAGING_NEXT_PUBLIC_API_BASE_URL" \
+            -t "$ECR_REGISTRY/darci-web:staging-latest" \
+            -t "$ECR_REGISTRY/darci-web:$IMAGE_TAG" \
+            --push \
+            .
+
+      - name: Force ECS deployments
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$API_SERVICE" --force-new-deployment >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WORKER_SERVICE" --force-new-deployment >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WEB_SERVICE" --force-new-deployment >/dev/null
+
+      - name: Wait for ECS stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$API_SERVICE" "$WORKER_SERVICE" "$WEB_SERVICE"
+
+      - name: Smoke test API health
+        run: |
+          curl --fail --show-error --silent --max-time 20 "$STAGING_HEALTH_URL"
+          echo
