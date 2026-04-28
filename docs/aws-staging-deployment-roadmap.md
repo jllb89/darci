@@ -1,6 +1,6 @@
 # AWS Deployment Roadmap — Staging & Production
 
-**Status:** Staging deployed — April 28, 2026  
+**Status:** Staging deployed and CDN-accelerated — April 28, 2026  
 **Goal:** Deploy the full DARCi stack to AWS with staging and production environments, using a container-based architecture and AWS-managed runtime configuration.
 
 ---
@@ -11,14 +11,16 @@ Staging has been provisioned in AWS account `427057633951`, region `us-east-1`.
 
 **Live endpoints:**
 - ALB DNS: `darci-staging-alb-844336327.us-east-1.elb.amazonaws.com`
-- Web app: `http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com/`
-- API health: `http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com/health`
-- API host rule: `api.staging.darci.app` routes all paths to the API once DNS points at the ALB
+- Web app: `https://app.staging.darciregistry.com/`
+- API health: `https://api.staging.darciregistry.com/health`
+- API host rule: `api.staging.darciregistry.com` routes all paths to the API
+- Web origin host: `origin-app.staging.darciregistry.com` routes to the ALB for CloudFront origin fetches
 
 **AWS resources created:**
 - ECS cluster: `darci-staging`
 - ECS services: `darci-staging-web`, `darci-staging-api`, `darci-staging-worker`
 - ALB: `darci-staging-alb`
+- CloudFront distribution: `E2A4F9BGQ62RUJ` (`d7j386nux7shj.cloudfront.net`)
 - Target groups: `darci-staging-web-tg`, `darci-staging-api-tg`
 - ECR repositories: `darci-web`, `darci-api`, `darci-worker`
 - Secrets Manager secret: `/darci/staging/app`
@@ -32,13 +34,13 @@ Staging has been provisioned in AWS account `427057633951`, region `us-east-1`.
 **Resolved staging blockers:**
 - Added `SUPABASE_ANON_KEY` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `/darci/staging/app` so the API no longer exits with `supabaseKey is required`.
 - Updated the BullMQ Redis connection to use `maxRetriesPerRequest: null` so the worker can start on ECS.
+- Updated BullMQ queue and worker prefixes to `{darci}:bull` so Redis serverless/cluster keys share a hash slot and the worker does not spin on `CROSSSLOT` errors.
 - Updated OpenAPI spec path resolution so the API can load `api/openapi.yaml` in both local builds and the Docker runtime layout.
+- Put the staging web app behind CloudFront and reduced the public image payload from tens of MB to about 604 KB total.
 
 **Remaining manual steps:**
-- Create DNS records for `app.staging.darci.app` and `api.staging.darci.app` pointing to the ALB.
-- Request/validate an ACM certificate and switch the ALB listener to HTTPS.
-- Add the Resend webhook endpoint after HTTPS is live: `https://api.staging.darci.app/webhooks/resend`.
-- Commit and push the Phase 5 workflow files so GitHub Actions starts rebuilding and redeploying future pushes automatically.
+- Add the Resend webhook endpoint: `https://api.staging.darciregistry.com/webhooks/resend`.
+- Configure production DNS/TLS when production infrastructure exists.
 
 ---
 
@@ -82,11 +84,13 @@ Staging has been provisioned in AWS account `427057633951`, region `us-east-1`.
           │   /darci/staging/*           │
           │   /darci/production/*        │
           │                              │
-          │  ALB → Route53 + ACM TLS     │
-          │   api.staging.darci.app      │
-          │   app.staging.darci.app      │
-          │   api.darci.app              │
-          │   app.darci.app              │
+          │  Route53 + ACM TLS           │
+          │   CloudFront → web origin    │
+          │   ALB → API/web origins      │
+          │   api.staging.darciregistry.com │
+          │   app.staging.darciregistry.com │
+          │   api.darciregistry.com         │
+          │   app.darciregistry.com         │
           └──────────────────────────────┘
 ```
 
@@ -116,7 +120,7 @@ Deployment prep required a few small backend runtime fixes: env-configured CORS 
 Completed fixes:
 - `backend/src/index.ts` reads `CORS_ALLOWED_ORIGINS` while preserving localhost for local dev.
 - Resend webhooks mount before `express.json()` so signature verification receives the raw body.
-- `backend/src/worker/queues.ts` creates the Redis connection with `maxRetriesPerRequest: null` for BullMQ worker compatibility.
+- `backend/src/worker/queues.ts` creates the Redis connection with `maxRetriesPerRequest: null` and a `{darci}:bull` prefix for BullMQ compatibility with Redis serverless/cluster key slots.
 - `backend/src/index.ts` resolves `api/openapi.yaml` from both repo and Docker runtime layouts.
 - `backend/.env.example` documents `SUPABASE_ANON_KEY`.
 
@@ -229,8 +233,8 @@ CORS_ALLOWED_ORIGINS       ← new (from Phase 0 fix)
 
 **`CORS_ALLOWED_ORIGINS` values to set:**
 
-- Staging: `https://app.staging.darci.app`  
-- Production: `https://app.darci.app`
+- Staging: `https://app.staging.darciregistry.com`  
+- Production: `https://app.darciregistry.com`
 
 (Use your actual domain once set up in Phase 4.)
 
@@ -315,10 +319,10 @@ Authentication uses **GitHub OIDC → AWS IAM Role** — no static AWS access ke
   - `AWS_ACCOUNT_ID=427057633951`
   - `AWS_REGION=us-east-1`
   - `AWS_DEPLOY_ROLE_ARN=arn:aws:iam::427057633951:role/darci-github-actions-staging-deploy-role`
-  - `STAGING_NEXT_PUBLIC_API_BASE_URL=http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com`
-  - `STAGING_HEALTH_URL=http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com/health`
+  - `STAGING_NEXT_PUBLIC_API_BASE_URL=https://api.staging.darciregistry.com`
+  - `STAGING_HEALTH_URL=https://api.staging.darciregistry.com/health`
 
-The temporary ALB API base works because the staging listener now routes the main API path prefixes on the bare ALB hostname to the API target group. After DNS and HTTPS are complete, update the two staging URL repo variables to use `https://api.staging.darci.app`.
+Staging GitHub Actions variables now use `https://api.staging.darciregistry.com`; the web bundle must be rebuilt any time this public API base changes.
 
 **Deploy workflow logic:**
 
@@ -339,19 +343,36 @@ Production CI/CD should be added after production ECS, ALB, Redis, and Secrets M
 
 ---
 
-### Phase 6 — DNS & TLS (You do this)
+### Phase 6 — DNS & TLS (Complete for staging)
 
-**Time estimate:** 30 minutes (+ propagation time)  
-**Who:** You in Route53 + ACM
+**Who:** You updated Namecheap nameservers; Agent configured Route53, ACM, and ALB
 
-1. **Request ACM certificate** for `*.staging.darci.app` and `*.darci.app` (wildcard covers all subdomains)
-2. **Validate via DNS** — ACM provides CNAME records to add to Route53
-3. **Create Route53 A records** pointing to ALB:
-   - `api.staging.darci.app` → ALB DNS name (staging)
-   - `app.staging.darci.app` → ALB DNS name (staging)
-   - `api.darci.app` → ALB DNS name (production)
-   - `app.darci.app` → ALB DNS name (production)
-4. Update `CORS_ALLOWED_ORIGINS` in Secrets Manager once real domains are known
+Staging DNS/TLS/CDN is complete:
+- Namecheap delegates `darciregistry.com` DNS to Route53.
+- Route53 hosted zone: `Z03508472C5CZF8ISWFHX`.
+- ACM certificate: `arn:aws:acm:us-east-1:427057633951:certificate/f3b8a22d-3810-4300-850c-a4a4743e6685`.
+- `api.staging.darciregistry.com` aliases to the staging ALB.
+- `origin-app.staging.darciregistry.com` aliases to the staging ALB for CloudFront origin traffic.
+- `app.staging.darciregistry.com` aliases to CloudFront distribution `E2A4F9BGQ62RUJ`.
+- CloudFront caches static assets under `/_next/static/*`, `/images/*`, `/fonts/*`, and `/icons/*`.
+- ALB HTTPS listener on `:443` uses the ACM certificate.
+- ALB HTTP listener on `:80` redirects to HTTPS.
+- API and worker task definitions use `https://api.staging.darciregistry.com` and `https://app.staging.darciregistry.com`.
+- `/darci/staging/app` has `CORS_ALLOWED_ORIGINS=https://app.staging.darciregistry.com`.
+
+Verified endpoints:
+- `https://api.staging.darciregistry.com/health`
+- `https://app.staging.darciregistry.com/`
+
+Performance fixes applied during staging hardening:
+- Optimized large WebP homepage assets in `apps/web/public/images`.
+- Added long-lived cache headers for public images, fonts, and icons.
+- Disabled automatic sidebar prefetching for heavy app routes.
+- Added CloudFront in front of the web service because direct ALB delivery was slow from client networks.
+
+Production DNS/TLS should use the same pattern when production AWS resources are ready:
+- `api.darciregistry.com`
+- `app.darciregistry.com`
 
 ---
 
@@ -362,7 +383,7 @@ Production CI/CD should be added after production ECS, ALB, Redis, and Secrets M
 **Prerequisites:** Phase 6 complete (staging API has a public HTTPS URL)
 
 1. Go to Resend dashboard → **Webhooks** → **Add endpoint**
-2. URL: `https://api.staging.darci.app/webhooks/resend`
+2. URL: `https://api.staging.darciregistry.com/webhooks/resend`
 3. Subscribe to events: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.complained`, `email.bounced`, `email.opened`, `email.clicked`
 4. Copy the **signing secret** Resend provides
 5. Update `RESEND_WEBHOOK_SECRET` in Secrets Manager (`/darci/staging/app`) with this value

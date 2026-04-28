@@ -297,6 +297,7 @@ export default function AppSidebar({
                         : "text-Color-Neutral hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
                     }`}
                     href={item.href}
+                    prefetch={false}
                   >
                     <span className="text-current">{renderNavIcon(item.icon)}</span>
                     {item.label}
@@ -369,6 +370,7 @@ export default function AppSidebar({
                 <Link
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
                   href="/app/billing"
+                  prefetch={false}
                 >
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
                     <path
@@ -385,6 +387,7 @@ export default function AppSidebar({
                 <Link
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
                   href={config.settingsHref}
+                  prefetch={false}
                 >
                   <span className="text-current">{renderNavIcon("settings")}</span>
                   Settings
@@ -425,6 +428,7 @@ export default function AppSidebar({
                       : "text-Color-Neutral hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
                   }`}
                   href={config.settingsHref}
+                  prefetch={false}
                 >
                   <span className="text-current">{renderNavIcon("settings")}</span>
                 </Link>
@@ -435,6 +439,7 @@ export default function AppSidebar({
               <Link
                 className="ml-auto inline-flex items-center gap-1.5 bg-Green px-3 py-2 text-right text-[13px] font-display font-normal text-Color-Neutral-Darkest transition-colors duration-200 ease-in-out hover:bg-Green-secondary"
                 href={config.newDocumentHref}
+                prefetch={false}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
                   <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.5" />

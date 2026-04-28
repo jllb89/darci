@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { connection } from "./queues";
+import { bullMqPrefix, connection } from "./queues";
 import { processDocumentGenerationRun } from "../services/documentGenerationRenderService";
 import { hashDocument } from "../services/hashingService";
 import { anchorToLedger } from "../services/ledgerService";
@@ -32,6 +32,8 @@ const workers: Array<Worker<HashingJobData | LedgerJobData | WebhookJobData | Ge
 if (!redisConnection) {
   console.warn("REDIS_URL is not set; background workers are disabled.");
 } else {
+  const workerOptions = { connection: redisConnection, prefix: bullMqPrefix };
+
   workers.push(
     new Worker<HashingJobData>(
       "hashing",
@@ -46,7 +48,7 @@ if (!redisConnection) {
           idn,
         };
       },
-      { connection: redisConnection },
+      workerOptions,
     ) as Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>,
   );
 
@@ -65,7 +67,7 @@ if (!redisConnection) {
           status: result.status,
         };
       },
-      { connection: redisConnection },
+      workerOptions,
     ) as Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>,
   );
 
@@ -82,7 +84,7 @@ if (!redisConnection) {
           status: result.status,
         };
       },
-      { connection: redisConnection },
+      workerOptions,
     ) as Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>,
   );
 
@@ -95,7 +97,7 @@ if (!redisConnection) {
           rendererJobId: `${job.queueName}:${String(job.id ?? job.data.runId)}`,
         });
       },
-      { connection: redisConnection },
+      workerOptions,
     ) as Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>,
   );
 }
