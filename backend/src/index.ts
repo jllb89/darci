@@ -1,5 +1,6 @@
 import "./instrument";
 import express, { Request, Response, NextFunction } from "express";
+import fs from "fs";
 import path from "path";
 import * as Sentry from "@sentry/node";
 import cors from "cors";
@@ -59,7 +60,16 @@ if (isDevelopment) {
   });
 }
 
-const openapiPath = path.resolve(__dirname, "../../api/openapi.yaml");
+const openapiPath = [
+  process.env.OPENAPI_PATH,
+  path.resolve(__dirname, "../../api/openapi.yaml"),
+  path.resolve(process.cwd(), "api/openapi.yaml"),
+].find((candidate): candidate is string => Boolean(candidate && fs.existsSync(candidate)));
+
+if (!openapiPath) {
+  throw new Error("OpenAPI spec not found. Set OPENAPI_PATH or include api/openapi.yaml in the runtime image.");
+}
+
 const openapiSpec = YAML.load(openapiPath);
 
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));

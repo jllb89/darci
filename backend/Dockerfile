@@ -29,8 +29,7 @@ COPY --from=builder /app/backend/dist ./dist
 COPY --from=builder /app/backend/node_modules ./node_modules
 COPY --from=builder /app/backend/package.json ./package.json
 
-# Copy the OpenAPI spec — resolved at runtime as ../../api/openapi.yaml from dist/
-# i.e. /app/dist -> /app/api/openapi.yaml
+# Copy the OpenAPI spec for the runtime image.
 COPY api/openapi.yaml ./api/openapi.yaml
 
 EXPOSE 4000

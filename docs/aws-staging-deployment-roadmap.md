@@ -1,7 +1,44 @@
 # AWS Deployment Roadmap — Staging & Production
 
-**Status:** Draft — April 2026  
-**Goal:** Deploy the full DARCi stack to AWS with staging and production environments, using a container-based architecture that requires zero changes to existing application code.
+**Status:** Staging deployed — April 28, 2026  
+**Goal:** Deploy the full DARCi stack to AWS with staging and production environments, using a container-based architecture and AWS-managed runtime configuration.
+
+---
+
+## Current Staging State
+
+Staging has been provisioned in AWS account `427057633951`, region `us-east-1`.
+
+**Live endpoints:**
+- ALB DNS: `darci-staging-alb-844336327.us-east-1.elb.amazonaws.com`
+- Web app: `http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com/`
+- API health: `http://darci-staging-alb-844336327.us-east-1.elb.amazonaws.com/health`
+- API host rule: `api.staging.darci.app` routes all paths to the API once DNS points at the ALB
+
+**AWS resources created:**
+- ECS cluster: `darci-staging`
+- ECS services: `darci-staging-web`, `darci-staging-api`, `darci-staging-worker`
+- ALB: `darci-staging-alb`
+- Target groups: `darci-staging-web-tg`, `darci-staging-api-tg`
+- ECR repositories: `darci-web`, `darci-api`, `darci-worker`
+- Secrets Manager secret: `/darci/staging/app`
+- Redis endpoint: `darci-staging-redis-xqocue.serverless.use1.cache.amazonaws.com:6379`
+
+**Verified deployment status:**
+- Web service: running `1/1`, ALB target healthy
+- API service: running `1/1`, ALB target healthy, `/health` returns `{"status":"ok"}`
+- Worker service: running `1/1`
+
+**Resolved staging blockers:**
+- Added `SUPABASE_ANON_KEY` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `/darci/staging/app` so the API no longer exits with `supabaseKey is required`.
+- Updated the BullMQ Redis connection to use `maxRetriesPerRequest: null` so the worker can start on ECS.
+- Updated OpenAPI spec path resolution so the API can load `api/openapi.yaml` in both local builds and the Docker runtime layout.
+
+**Remaining manual steps:**
+- Create DNS records for `app.staging.darci.app` and `api.staging.darci.app` pointing to the ALB.
+- Request/validate an ACM certificate and switch the ALB listener to HTTPS.
+- Add the Resend webhook endpoint after HTTPS is live: `https://api.staging.darci.app/webhooks/resend`.
+- Add CI/CD so future pushes rebuild and redeploy automatically.
 
 ---
 
@@ -61,27 +98,27 @@
 
 ## What Does NOT Change
 
-- Application source code — zero modifications required
-- Environment variable names — same names already in `.env.staging` / `.env.production`
+- Environment variable names — ECS uses the same names already in `.env.staging` / `.env.production`
 - Supabase setup — already configured and running
+- Resend setup — unchanged until webhook activation after HTTPS is live
 - Local development workflow — `.env.staging` continues to work on local machine
 
-The only change to existing files: **CORS origins** must accept env-configured values alongside the hardcoded localhost entries. This is a 3-line patch to `backend/src/index.ts` and is the single required code change before containers will work.
+Deployment prep required a few small backend runtime fixes: env-configured CORS origins, raw-body webhook routing, BullMQ-compatible Redis options, and Docker-safe OpenAPI spec resolution.
 
 ---
 
 ## Phases
 
-### Phase 0 — One Required Code Fix (Agent can do)
+### Phase 0 — Required Runtime Fixes (Complete)
 
-**Time estimate:** 10 minutes  
 **Who:** Agent
 
-The CORS config in `backend/src/index.ts` is hardcoded to `localhost`. Browsers will block all frontend↔API traffic in staging and production without this fix.
-
-**Change:** extend `allowedOrigins` to read from a `CORS_ALLOWED_ORIGINS` env var, falling back to localhost for local dev. No other behavior changes.
-
-After this, add `CORS_ALLOWED_ORIGINS` to `backend/.env.example` and to the Secrets Manager setup in Phase 2.
+Completed fixes:
+- `backend/src/index.ts` reads `CORS_ALLOWED_ORIGINS` while preserving localhost for local dev.
+- Resend webhooks mount before `express.json()` so signature verification receives the raw body.
+- `backend/src/worker/queues.ts` creates the Redis connection with `maxRetriesPerRequest: null` for BullMQ worker compatibility.
+- `backend/src/index.ts` resolves `api/openapi.yaml` from both repo and Docker runtime layouts.
+- `backend/.env.example` documents `SUPABASE_ANON_KEY`.
 
 ---
 
@@ -201,25 +238,24 @@ CORS_ALLOWED_ORIGINS       ← new (from Phase 0 fix)
 
 ---
 
-### Phase 3 — ECR Repositories (Agent can do via IaC)
+### Phase 3 — ECR Repositories (Complete)
 
 **Time estimate:** 15 minutes  
 **Who:** Agent writes; you run one CLI command
 
-Create three ECR repositories. This is a one-time setup. The agent will provide a CloudFormation or CDK stack, or you can create them manually via AWS Console:
+Create three ECR repositories. This is a one-time setup. The staging repositories have been created in `us-east-1`:
 
-- `darci-api`
-- `darci-worker`
-- `darci-web`
+- `427057633951.dkr.ecr.us-east-1.amazonaws.com/darci-api`
+- `427057633951.dkr.ecr.us-east-1.amazonaws.com/darci-worker`
+- `427057633951.dkr.ecr.us-east-1.amazonaws.com/darci-web`
 
 Enable image scanning and tag immutability for production repos.
 
 ---
 
-### Phase 4 — ECS Fargate Infrastructure (Agent can do via IaC)
+### Phase 4 — ECS Fargate Infrastructure (Complete for staging)
 
-**Time estimate:** 2–3 hours to write; 20 minutes to deploy  
-**Who:** Agent writes CloudFormation/CDK; you deploy via `aws cloudformation deploy` or CDK CLI
+**Who:** Agent executed via AWS CLI for staging
 
 **Resources to provision per environment** (staging and production run the same template, parameterized by environment name):
 

@@ -1,0 +1,46 @@
+# Docker build context hygiene for repo-root builds
+
+# VCS and editor metadata
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Never send local secrets into Docker builds
+.env
+.env.*
+*.env
+
+# Dependencies and generated output
+node_modules
+**/node_modules
+backend/dist
+apps/web/.next
+apps/web/out
+coverage
+**/coverage
+
+# Local/dev artifacts
+*.log
+*.tgz
+*.swp
+*.swo
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Workspace areas not needed by API/worker/web Docker builds
+docs
+mobile
+linear
+supabase
+scripts
+notes.md
+commands.txt
+progress-tests.md
+ROADMAP.md
+ISSUES.md
+client-summary-trust-idn-schemas.md
+trust & idn roadmap.md
