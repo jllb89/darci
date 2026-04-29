@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
 });
 
-import { deriveDocumentSigningTemplateKey } from "../../src/services/documentInviteService";
+import {
+  deriveDocumentSigningTemplateKey,
+  resolveDocumentInviteEmailProvider,
+} from "../../src/services/documentInviteService";
 import {
   canClaimInviteToken,
   createInviteAccessToken,
@@ -13,6 +16,10 @@ import {
 } from "../../src/services/inviteClaimService";
 
 describe("invite runtime helpers", () => {
+  afterEach(() => {
+    delete process.env.NOTIFICATION_PROVIDER;
+  });
+
   it("uses the signup-required template when the recipient has no account yet", () => {
     expect(
       deriveDocumentSigningTemplateKey({
@@ -31,6 +38,16 @@ describe("invite runtime helpers", () => {
         claimMode: "required_signup",
       }),
     ).toBe("signer_reminder_email");
+  });
+
+  it("routes invite email deliveries through Resend only when explicitly enabled", () => {
+    expect(resolveDocumentInviteEmailProvider()).toBe("internal");
+
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    expect(resolveDocumentInviteEmailProvider()).toBe("resend");
+
+    process.env.NOTIFICATION_PROVIDER = "internal";
+    expect(resolveDocumentInviteEmailProvider()).toBe("internal");
   });
 
   it("creates stable token hashes and opaque access tokens", () => {

@@ -933,6 +933,15 @@ const insertOutboundEvents = async (
     .select(outboundEventSelect);
 
   if (error) {
+    const errorCode =
+      typeof error === "object" && error !== null && "code" in error
+        ? ((error as { code?: string }).code ?? null)
+        : null;
+
+    if (errorCode === "23505") {
+      return [] as OutboundMessageEventRecord[];
+    }
+
     throw new NotificationOutboxServiceError(500, error.message);
   }
 
@@ -1202,7 +1211,7 @@ const processClaimedNotificationJob = async (input: {
           createOutboundEventInsert({
             deliveryId: delivery.id,
             provider: dispatch.provider,
-            providerEventId: dispatch.providerMessageId,
+            providerEventId: null,
             eventType: event.eventType,
             eventAt: event.eventAt,
             payload: event.payload,
@@ -1629,4 +1638,8 @@ export const getNotificationJobsMetrics = async (input?: {
 export const __testUtils = {
   summarizeDeliveryCounts,
   computeNotificationJobsMetrics,
+  buildResendAdapter,
+  resetResendAdapterCache: () => {
+    _resendAdapter = null;
+  },
 };

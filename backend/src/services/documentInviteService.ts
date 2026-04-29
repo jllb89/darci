@@ -522,6 +522,11 @@ export const deriveDocumentSigningTemplateKey = (input: {
   return "signer_invitation_email";
 };
 
+export const resolveDocumentInviteEmailProvider = () => {
+  const configured = process.env.NOTIFICATION_PROVIDER?.trim().toLowerCase();
+  return configured === "resend" ? "resend" : "internal";
+};
+
 const getUserById = async (userId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
@@ -847,6 +852,7 @@ const queueInviteNotification = async (input: {
   }
 
   const queuedAt = new Date().toISOString();
+  const provider = resolveDocumentInviteEmailProvider();
   const { data: jobData, error: jobError } = await supabaseAdmin
     .from("notification_jobs")
     .insert({
@@ -882,7 +888,7 @@ const queueInviteNotification = async (input: {
       channel: template.channel,
       recipient_address: input.recipientAddress,
       recipient_display_name: input.recipientDisplayName,
-      provider: "internal",
+      provider,
       status: "queued",
       attempt_number: 1,
       queued_at: queuedAt,
@@ -904,7 +910,7 @@ const queueInviteNotification = async (input: {
     .insert({
       notification_delivery_id: (deliveryData as NotificationDeliveryRow).id,
       event_type: "queued",
-      provider: "internal",
+      provider,
       event_at: queuedAt,
       payload: {},
       metadata: {

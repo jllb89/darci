@@ -1,0 +1,552 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const resendMocks = vi.hoisted(() => ({
+  sendEmailMock: vi.fn(),
+  verifyWebhookMock: vi.fn(),
+}));
+
+vi.mock("resend", () => ({
+  Resend: vi.fn().mockImplementation(() => ({
+    emails: {
+      send: resendMocks.sendEmailMock,
+    },
+    webhooks: {
+      verify: resendMocks.verifyWebhookMock,
+    },
+  })),
+}));
+
+const supabaseMocks = vi.hoisted(() => ({
+  client: {
+    from: vi.fn(),
+  },
+  state: {
+    notification_jobs: [] as any[],
+    notification_deliveries: [] as any[],
+    notification_templates: [] as any[],
+    outbound_message_events: [] as any[],
+    nextEventId: 1,
+  },
+}));
+
+vi.mock("@supabase/supabase-js", () => ({
+  createClient: vi.fn(() => supabaseMocks.client),
+}));
+
+import {
+  __testUtils,
+  recordNotificationDeliveryEvent,
+  runDueNotificationJobs,
+} from "../../src/services/notificationOutboxService";
+
+type Filter =
+  | { kind: "eq"; field: string; value: unknown }
+  | { kind: "in"; field: string; values: unknown[] }
+  | { kind: "lte"; field: string; value: unknown }
+  | { kind: "gte"; field: string; value: unknown };
+
+type OrderBy = {
+  field: string;
+  ascending: boolean;
+};
+
+const nowIso = "2026-04-29T12:00:00.000Z";
+
+class FakeSupabaseQueryBuilder {
+  private action: "select" | "insert" | "update" = "select";
+  private filters: Filter[] = [];
+  private orders: OrderBy[] = [];
+  private limitCount: number | null = null;
+  private patch: Record<string, unknown> = {};
+  private rowsToInsert: Record<string, unknown>[] = [];
+
+  constructor(private readonly table: keyof typeof supabaseMocks.state) {}
+
+  select() {
+    return this;
+  }
+
+  update(patch: Record<string, unknown>) {
+    this.action = "update";
+    this.patch = patch;
+    return this;
+  }
+
+  insert(rows: Record<string, unknown> | Record<string, unknown>[]) {
+    this.action = "insert";
+    this.rowsToInsert = Array.isArray(rows) ? rows : [rows];
+    return this;
+  }
+
+  eq(field: string, value: unknown) {
+    this.filters.push({ kind: "eq", field, value });
+    return this;
+  }
+
+  in(field: string, values: unknown[]) {
+    this.filters.push({ kind: "in", field, values });
+    return this;
+  }
+
+  lte(field: string, value: unknown) {
+    this.filters.push({ kind: "lte", field, value });
+    return this;
+  }
+
+  gte(field: string, value: unknown) {
+    this.filters.push({ kind: "gte", field, value });
+    return this;
+  }
+
+  order(field: string, options?: { ascending?: boolean }) {
+    this.orders.push({ field, ascending: options?.ascending !== false });
+    return this;
+  }
+
+  limit(count: number) {
+    this.limitCount = count;
+    return this;
+  }
+
+  maybeSingle() {
+    const result = this.execute();
+    if (result.error) {
+      return Promise.resolve(result);
+    }
+
+    return Promise.resolve({ data: result.data[0] ?? null, error: null });
+  }
+
+  single() {
+    const result = this.execute();
+    if (result.error) {
+      return Promise.resolve(result);
+    }
+
+    return Promise.resolve({ data: result.data[0] ?? null, error: null });
+  }
+
+  then<TResult1 = unknown, TResult2 = never>(
+    onfulfilled?: ((value: { data: any[]; error: any; count?: number | null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ) {
+    return Promise.resolve(this.execute()).then(onfulfilled, onrejected);
+  }
+
+  private execute() {
+    if (this.action === "insert") {
+      return this.executeInsert();
+    }
+
+    if (this.action === "update") {
+      const rows = this.applyFilters(this.tableRows());
+      for (const row of rows) {
+        Object.assign(row, this.patch);
+      }
+      return { data: rows, error: null, count: rows.length };
+    }
+
+    let rows = this.applyFilters(this.tableRows());
+    rows = this.applyOrdering(rows);
+    if (this.limitCount !== null) {
+      rows = rows.slice(0, this.limitCount);
+    }
+
+    return { data: rows, error: null, count: rows.length };
+  }
+
+  private executeInsert() {
+    if (this.table === "outbound_message_events") {
+      const existingKeys = new Set(
+        supabaseMocks.state.outbound_message_events
+          .filter((event) => event.provider_event_id)
+          .map((event) => `${event.provider}:${event.provider_event_id}`),
+      );
+      const nextKeys = new Set<string>();
+
+      for (const row of this.rowsToInsert) {
+        const providerEventId = row.provider_event_id;
+        if (!providerEventId) {
+          continue;
+        }
+
+        const key = `${row.provider}:${providerEventId}`;
+        if (existingKeys.has(key) || nextKeys.has(key)) {
+          return {
+            data: null,
+            error: {
+              code: "23505",
+              message: "duplicate key value violates unique constraint ux_outbound_message_events_provider_event",
+            },
+          };
+        }
+
+        nextKeys.add(key);
+      }
+    }
+
+    const insertedRows = this.rowsToInsert.map((row) => ({
+      id:
+        row.id ??
+        (this.table === "outbound_message_events"
+          ? `event-${supabaseMocks.state.nextEventId++}`
+          : `${this.table}-${Date.now()}`),
+      created_at: row.created_at ?? nowIso,
+      updated_at: row.updated_at ?? nowIso,
+      ...row,
+    }));
+
+    this.tableRows().push(...insertedRows);
+    return { data: insertedRows, error: null, count: insertedRows.length };
+  }
+
+  private tableRows() {
+    return supabaseMocks.state[this.table] as any[];
+  }
+
+  private applyFilters(rows: any[]) {
+    return rows.filter((row) =>
+      this.filters.every((filter) => {
+        const value = row[filter.field];
+
+        if (filter.kind === "eq") {
+          return value === filter.value;
+        }
+
+        if (filter.kind === "in") {
+          return filter.values.includes(value);
+        }
+
+        if (filter.kind === "lte") {
+          return String(value) <= String(filter.value);
+        }
+
+        return String(value) >= String(filter.value);
+      }),
+    );
+  }
+
+  private applyOrdering(rows: any[]) {
+    return [...rows].sort((left, right) => {
+      for (const order of this.orders) {
+        const leftValue = String(left[order.field] ?? "");
+        const rightValue = String(right[order.field] ?? "");
+        if (leftValue === rightValue) {
+          continue;
+        }
+
+        const direction = order.ascending ? 1 : -1;
+        return leftValue < rightValue ? -direction : direction;
+      }
+
+      return 0;
+    });
+  }
+}
+
+const buildJob = (overrides: Record<string, unknown> = {}) => ({
+  id: "job-1",
+  template_id: "template-1",
+  invite_id: null,
+  document_id: "doc-1",
+  billing_payment_request_id: null,
+  notarization_request_id: null,
+  requested_by_user_id: "user-1",
+  job_kind: "transactional",
+  channel: "email",
+  status: "queued",
+  priority: "normal",
+  dedupe_key: "job:doc-1",
+  scheduled_for: "2026-04-29T11:00:00.000Z",
+  processing_started_at: null,
+  completed_at: null,
+  canceled_at: null,
+  last_attempt_at: null,
+  attempt_count: 0,
+  payload_json: { recipientName: "Casey", ctaUrl: "https://app.example.test/review" },
+  metadata: {},
+  created_at: "2026-04-29T10:00:00.000Z",
+  updated_at: "2026-04-29T10:00:00.000Z",
+  ...overrides,
+});
+
+const buildDelivery = (overrides: Record<string, unknown> = {}) => ({
+  id: "delivery-1",
+  notification_job_id: "job-1",
+  invite_recipient_id: null,
+  target_user_id: "user-1",
+  channel: "email",
+  recipient_address: "casey@example.com",
+  recipient_display_name: "Casey Signer",
+  provider: "resend",
+  provider_message_id: null,
+  status: "queued",
+  attempt_number: 1,
+  queued_at: "2026-04-29T11:00:00.000Z",
+  sent_at: null,
+  delivered_at: null,
+  failed_at: null,
+  bounced_at: null,
+  opened_at: null,
+  clicked_at: null,
+  accepted_at: null,
+  error_code: null,
+  error_message: null,
+  metadata: {},
+  created_at: "2026-04-29T11:00:00.000Z",
+  updated_at: "2026-04-29T11:00:00.000Z",
+  ...overrides,
+});
+
+const buildTemplate = (overrides: Record<string, unknown> = {}) => ({
+  id: "template-1",
+  template_key: "document_ready_for_review_email",
+  channel: "email",
+  trigger_event: "document_ready_for_review",
+  subject_template: "Ready for {{recipientName}}",
+  body_template: "Hi {{recipientName}}, review here: {{ctaUrl}}",
+  body_format: "markdown",
+  audience_scope: "member",
+  ...overrides,
+});
+
+const seedOutbox = (overrides?: {
+  job?: Record<string, unknown>;
+  delivery?: Record<string, unknown>;
+  template?: Record<string, unknown>;
+}) => {
+  supabaseMocks.state.notification_jobs.push(buildJob(overrides?.job));
+  supabaseMocks.state.notification_deliveries.push(buildDelivery(overrides?.delivery));
+  supabaseMocks.state.notification_templates.push(buildTemplate(overrides?.template));
+};
+
+describe("notification outbox Resend runtime", () => {
+  beforeEach(() => {
+    process.env.RESEND_API_KEY = "re_test_key";
+    process.env.NOTIFICATION_OUTBOX_RETRY_BASE_SECONDS = "300";
+    resendMocks.sendEmailMock.mockReset();
+    resendMocks.verifyWebhookMock.mockReset();
+    __testUtils.resetResendAdapterCache();
+
+    supabaseMocks.state.notification_jobs = [];
+    supabaseMocks.state.notification_deliveries = [];
+    supabaseMocks.state.notification_templates = [];
+    supabaseMocks.state.outbound_message_events = [];
+    supabaseMocks.state.nextEventId = 1;
+    supabaseMocks.client.from.mockReset();
+    supabaseMocks.client.from.mockImplementation(
+      (table: keyof typeof supabaseMocks.state) => new FakeSupabaseQueryBuilder(table),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.RESEND_API_KEY;
+    delete process.env.NOTIFICATION_OUTBOX_RETRY_BASE_SECONDS;
+  });
+
+  it("maps a queued email delivery to the Resend send API and provider message id", async () => {
+    resendMocks.sendEmailMock.mockResolvedValue({
+      data: { id: "resend-msg-1" },
+      error: null,
+    });
+
+    const adapter = __testUtils.buildResendAdapter();
+    const result = await adapter.send({
+      job: buildJob(),
+      delivery: buildDelivery(),
+      template: buildTemplate(),
+      workerId: "worker-1",
+      now: nowIso,
+    } as any);
+
+    expect(resendMocks.sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "DARCI Signatures <no-reply@darciregistry.com>",
+        to: "Casey Signer <casey@example.com>",
+        subject: "Ready for Casey",
+        text: "Hi Casey, review here: https://app.example.test/review",
+        replyTo: "support@darciregistry.com",
+        tags: [
+          { name: "template_key", value: "document_ready_for_review_email" },
+          { name: "job_id", value: "job-1" },
+          { name: "delivery_id", value: "delivery-1" },
+        ],
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "resend",
+        providerMessageId: "resend-msg-1",
+        deliveryStatus: "sent",
+      }),
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({
+        eventType: "sent",
+        eventAt: nowIso,
+        payload: expect.objectContaining({ resendMessageId: "resend-msg-1" }),
+      }),
+    ]);
+  });
+
+  it("surfaces Resend API failures as dispatch errors", async () => {
+    resendMocks.sendEmailMock.mockResolvedValue({
+      data: null,
+      error: { message: "Resend API unavailable" },
+    });
+
+    const adapter = __testUtils.buildResendAdapter();
+
+    await expect(
+      adapter.send({
+        job: buildJob(),
+        delivery: buildDelivery(),
+        template: buildTemplate(),
+        workerId: "worker-1",
+        now: nowIso,
+      } as any),
+    ).rejects.toMatchObject({
+      name: "NotificationProviderDispatchError",
+      code: "resend_api_error",
+      message: "Resend API unavailable",
+    });
+  });
+
+  it("runs due Resend deliveries and leaves webhook completion to lifecycle events", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox();
+    resendMocks.sendEmailMock.mockResolvedValue({
+      data: { id: "resend-msg-1" },
+      error: null,
+    });
+
+    const result = await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        scannedCount: 1,
+        claimedCount: 1,
+        processedCount: 1,
+      }),
+    );
+    expect(result.jobs[0]).toEqual(
+      expect.objectContaining({
+        jobId: "job-1",
+        status: "sent",
+        attemptedDeliveryCount: 1,
+        deliveredCount: 0,
+        failedCount: 0,
+        completedAt: null,
+      }),
+    );
+    expect(supabaseMocks.state.notification_deliveries[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        provider: "resend",
+        provider_message_id: "resend-msg-1",
+        sent_at: nowIso,
+        failed_at: null,
+      }),
+    );
+    expect(supabaseMocks.state.outbound_message_events).toEqual([
+      expect.objectContaining({
+        notification_delivery_id: "delivery-1",
+        event_type: "sent",
+        provider: "resend",
+        provider_event_id: null,
+      }),
+    ]);
+  });
+
+  it("schedules a retry when Resend dispatch fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox();
+    resendMocks.sendEmailMock.mockResolvedValue({
+      data: null,
+      error: { message: "Resend temporarily unavailable" },
+    });
+
+    const result = await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(result.jobs[0]).toEqual(
+      expect.objectContaining({
+        jobId: "job-1",
+        status: "scheduled",
+        attemptedDeliveryCount: 1,
+        deliveredCount: 0,
+        failedCount: 1,
+        scheduledFor: "2026-04-29T12:05:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.notification_deliveries[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        error_code: "resend_api_error",
+        error_message: "Resend temporarily unavailable",
+        failed_at: nowIso,
+      }),
+    );
+    expect(supabaseMocks.state.outbound_message_events).toEqual([
+      expect.objectContaining({
+        event_type: "failed",
+        provider: "resend",
+        payload: expect.objectContaining({ errorCode: "resend_api_error" }),
+      }),
+    ]);
+  });
+
+  it("treats duplicate provider webhook event ids as idempotent", async () => {
+    seedOutbox({
+      job: {
+        status: "sent",
+        attempt_count: 1,
+        last_attempt_at: nowIso,
+      },
+      delivery: {
+        status: "sent",
+        provider_message_id: "resend-msg-1",
+        sent_at: nowIso,
+      },
+    });
+
+    const firstResult = await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-event-1",
+      eventType: "delivered",
+      eventAt: "2026-04-29T12:03:00.000Z",
+      payload: { resendType: "email.delivered" },
+      metadata: { source: "resend_webhook" },
+    });
+    const secondResult = await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-event-1",
+      eventType: "delivered",
+      eventAt: "2026-04-29T12:03:00.000Z",
+      payload: { resendType: "email.delivered" },
+      metadata: { source: "resend_webhook" },
+    });
+
+    expect(firstResult).toEqual(
+      expect.objectContaining({
+        jobStatus: "completed",
+        deliveryStatus: "delivered",
+      }),
+    );
+    expect(secondResult).toEqual(firstResult);
+    expect(supabaseMocks.state.outbound_message_events).toHaveLength(1);
+    expect(supabaseMocks.state.outbound_message_events[0]).toEqual(
+      expect.objectContaining({
+        provider: "resend",
+        provider_event_id: "svix-event-1",
+        event_type: "delivered",
+      }),
+    );
+  });
+});
