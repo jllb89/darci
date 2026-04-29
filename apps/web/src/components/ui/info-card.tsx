@@ -266,7 +266,6 @@ const InfoCardMedia = ({
 }: InfoCardMediaProps) => {
   const { isHovered } = useContext(InfoCardContext);
   const { setAllImagesLoaded } = useContext(InfoCardImageContext);
-  const [isOverflowVisible, setIsOverflowVisible] = useState(false);
   const loadedMedia = useRef(new Set<string>());
 
   const handleMediaLoad = (mediaSrc: string) => {
@@ -277,12 +276,8 @@ const InfoCardMedia = ({
     }
   };
 
-  const processedMedia = useMemo(
-    () => media.map((item) => ({ ...item, type: item.type ?? "image" })),
-    [media],
-  );
-
-  const displayMedia = useMemo(() => processedMedia.slice(0, 3), [processedMedia]);
+  const processedMedia = media.map((item) => ({ ...item, type: item.type ?? "image" }));
+  const displayMedia = processedMedia.slice(0, 3);
 
   useEffect(() => {
     if (media.length > 0) {
@@ -293,24 +288,6 @@ const InfoCardMedia = ({
 
     setAllImagesLoaded(true);
   }, [media.length, setAllImagesLoaded]);
-
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    if (isHovered) {
-      timeoutId = setTimeout(() => {
-        setIsOverflowVisible(true);
-      }, 100);
-    } else {
-      setIsOverflowVisible(false);
-    }
-
-    return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [isHovered]);
 
   const mediaCount = displayMedia.length;
 
@@ -362,7 +339,7 @@ const InfoCardMedia = ({
         animate={{
           height: media.length > 0 ? (isHovered ? expandHeight : shrinkHeight) : "auto",
         }}
-        style={{ overflow: isOverflowVisible ? "visible" : "hidden" }}
+        style={{ overflow: isHovered ? "visible" : "hidden" }}
         transition={{
           type: "spring",
           stiffness: 300,

@@ -2116,7 +2116,8 @@ const createGenerationRunsForDocument = async (input: {
   const extractionPayload = await buildMemberFormDocumentExtractionPayload(
     rulesResult.contract,
   );
-  const existingRuns = await listDocumentGenerationRunsFromDb(input.document.id);
+  const existingRunsResult = await listDocumentGenerationRunsFromDb(input.document.id);
+  const existingRuns = Array.isArray(existingRunsResult) ? existingRunsResult : [];
   const latestRunByOutputKey = new Map<string, DocumentGenerationRunRecord>();
   const cutoffTimestamp = input.reuseSatisfiedRunsCreatedAfter
     ? toTimestamp(input.reuseSatisfiedRunsCreatedAfter)

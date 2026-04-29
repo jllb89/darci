@@ -32,7 +32,7 @@ yarn-debug.log*
 pnpm-debug.log*
 
 # Workspace areas not needed by API/worker/web Docker builds
-docs
+docs/*
 mobile
 linear
 supabase
@@ -44,3 +44,8 @@ ROADMAP.md
 ISSUES.md
 client-summary-trust-idn-schemas.md
 trust & idn roadmap.md
+
+# Runtime template sources required by backend PDF rendering.
+!docs/CA DDPOA.md
+!docs/CA - DARCi Trust Registration Amendment (APE 260305) (1).md
+!docs/CA - DARCi Trust Certification (APE 260305).md

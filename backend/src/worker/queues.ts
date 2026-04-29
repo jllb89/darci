@@ -1,7 +1,10 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 
-const redisUrl = process.env.REDIS_URL;
+const redisQueuesDisabled =
+  process.env.DISABLE_REDIS_QUEUES === "true" ||
+  process.env.DISABLE_REDIS_QUEUES === "1";
+const redisUrl = redisQueuesDisabled ? undefined : process.env.REDIS_URL;
 export const bullMqPrefix = process.env.BULLMQ_KEY_PREFIX ?? "{darci}:bull";
 
 export const connection = redisUrl

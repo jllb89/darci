@@ -38,7 +38,7 @@ describe("auth middleware", () => {
     expect(response.body.error).toBe("forbidden");
   });
 
-  it("allows notary role for notary endpoints", async () => {
+  it("allows notary role through notary endpoint authorization", async () => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     const token = signToken({
       sub: "notary-1",
@@ -49,6 +49,7 @@ describe("auth middleware", () => {
       .post("/notary/requests/req-1/sign")
       .set("Authorization", `Bearer ${token}`);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(501);
+    expect(response.body.error).toBe("not_implemented");
   });
 });

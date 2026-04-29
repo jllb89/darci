@@ -11,6 +11,14 @@ const mocks = vi.hoisted(() => ({
   updateDocumentMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   enqueueWebhookMock: vi.fn(),
+  createIlluminotarizationWorkflowMock: vi.fn(),
+  createIlluminotarizationWorkflowDocumentMock: vi.fn(),
+  createIlluminotarizationWorkflowStatusHistoryEntryMock: vi.fn(),
+  transitionIlluminotarizationWorkflowStatusMock: vi.fn(),
+  upsertIlluminotarizationWorkflowAssignmentMock: vi.fn(),
+  createCodeDeliveryRecordMock: vi.fn(),
+  queueNotaryNextStepNotificationMock: vi.fn(),
+  queueNotarizationSubmissionConfirmationNotificationMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -29,6 +37,36 @@ vi.mock("../../src/services/auditService", () => ({
 vi.mock("../../src/worker/jobs", () => ({
   enqueueWebhook: mocks.enqueueWebhookMock,
 }));
+
+vi.mock("../../src/services/illuminotarizationWorkflowService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/illuminotarizationWorkflowService")>(
+    "../../src/services/illuminotarizationWorkflowService",
+  );
+
+  return {
+    ...actual,
+    createIlluminotarizationWorkflow: mocks.createIlluminotarizationWorkflowMock,
+    createIlluminotarizationWorkflowDocument: mocks.createIlluminotarizationWorkflowDocumentMock,
+    createIlluminotarizationWorkflowStatusHistoryEntry:
+      mocks.createIlluminotarizationWorkflowStatusHistoryEntryMock,
+    transitionIlluminotarizationWorkflowStatus: mocks.transitionIlluminotarizationWorkflowStatusMock,
+    upsertIlluminotarizationWorkflowAssignment: mocks.upsertIlluminotarizationWorkflowAssignmentMock,
+    createCodeDeliveryRecord: mocks.createCodeDeliveryRecordMock,
+  };
+});
+
+vi.mock("../../src/services/notificationService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/notificationService")>(
+    "../../src/services/notificationService",
+  );
+
+  return {
+    ...actual,
+    queueNotaryNextStepNotification: mocks.queueNotaryNextStepNotificationMock,
+    queueNotarizationSubmissionConfirmationNotification:
+      mocks.queueNotarizationSubmissionConfirmationNotificationMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -66,6 +104,15 @@ const postWithLog = async (
   return response;
 };
 
+const workflowRecord = {
+  id: "workflow-1",
+  workflow_kind: "notarization",
+  status: "submitted",
+  selected_notary_user_id: null,
+  assigned_notary_user_id: null,
+  current_legacy_request_id: null,
+};
+
 describe("submit notarization", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
@@ -78,6 +125,26 @@ describe("submit notarization", () => {
     mocks.updateDocumentMock.mockReset();
     mocks.recordAuditEventMock.mockReset();
     mocks.enqueueWebhookMock.mockReset();
+    mocks.createIlluminotarizationWorkflowMock.mockReset();
+    mocks.createIlluminotarizationWorkflowDocumentMock.mockReset();
+    mocks.createIlluminotarizationWorkflowStatusHistoryEntryMock.mockReset();
+    mocks.transitionIlluminotarizationWorkflowStatusMock.mockReset();
+    mocks.upsertIlluminotarizationWorkflowAssignmentMock.mockReset();
+    mocks.createCodeDeliveryRecordMock.mockReset();
+    mocks.queueNotaryNextStepNotificationMock.mockReset();
+    mocks.queueNotarizationSubmissionConfirmationNotificationMock.mockReset();
+    mocks.createIlluminotarizationWorkflowMock.mockResolvedValue(workflowRecord);
+    mocks.createIlluminotarizationWorkflowDocumentMock.mockResolvedValue(null);
+    mocks.createIlluminotarizationWorkflowStatusHistoryEntryMock.mockResolvedValue(null);
+    mocks.transitionIlluminotarizationWorkflowStatusMock.mockResolvedValue({
+      ...workflowRecord,
+      status: "code_delivered",
+      current_legacy_request_id: "req-1",
+    });
+    mocks.upsertIlluminotarizationWorkflowAssignmentMock.mockResolvedValue(null);
+    mocks.createCodeDeliveryRecordMock.mockResolvedValue(null);
+    mocks.queueNotaryNextStepNotificationMock.mockResolvedValue({ jobId: "job-1" });
+    mocks.queueNotarizationSubmissionConfirmationNotificationMock.mockResolvedValue({ jobId: "job-2" });
   });
 
   afterEach(() => {

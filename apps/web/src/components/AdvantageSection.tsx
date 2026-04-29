@@ -6,7 +6,7 @@ const advantageItems = [
   {
     index: "01",
     label: "Notarize",
-    title: "In hours, not days",
+    title: "Digital original",
     description:
       "Members get documents notarized in hours instead of days. Notaries handle more work without burning out.",
     image: "/images/advantages/a1.webp",

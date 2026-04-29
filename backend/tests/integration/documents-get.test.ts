@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   buildMemberFormDocumentExtractionPayloadMock: vi.fn(),
   syncDocumentPartiesFromCanonicalAnswersMock: vi.fn(),
   prepareGenerationRunMock: vi.fn(),
+  enqueueDocumentGenerationRunMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   buildDocumentWorkspaceSummaryMock: vi.fn(),
   buildDocumentWorkspaceSummariesMock: vi.fn(),
@@ -128,6 +129,10 @@ vi.mock("../../src/services/documentGenerationService", () => ({
     metadata: signer.metadata ?? {},
     createdAt: signer.created_at,
   }),
+}));
+
+vi.mock("../../src/worker/jobs", () => ({
+  enqueueDocumentGenerationRun: mocks.enqueueDocumentGenerationRunMock,
 }));
 
 vi.mock("../../src/services/memberFormValidationService", async () => {
@@ -256,6 +261,7 @@ describe("GET documents endpoints", () => {
     mocks.buildMemberFormDocumentExtractionPayloadMock.mockReset();
     mocks.syncDocumentPartiesFromCanonicalAnswersMock.mockReset();
     mocks.prepareGenerationRunMock.mockReset();
+    mocks.enqueueDocumentGenerationRunMock.mockReset();
     mocks.buildDocumentWorkspaceSummaryMock.mockReset();
     mocks.buildDocumentWorkspaceSummariesMock.mockReset();
     mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
@@ -1527,6 +1533,7 @@ describe("GET documents endpoints", () => {
       error_message: null,
       created_at: "2026-03-05T00:20:00.000Z",
     });
+    mocks.enqueueDocumentGenerationRunMock.mockResolvedValue("job-1");
     mocks.getActiveTemplateArtifactMock.mockResolvedValue({
       id: "artifact-1",
       template_key: "ca_poa_general",
@@ -1919,7 +1926,7 @@ describe("GET documents endpoints", () => {
           x: 72,
           y: 160,
           width: 240,
-          height: 36,
+          height: 40,
           required: true,
         },
       ],

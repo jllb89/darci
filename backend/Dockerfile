@@ -32,5 +32,8 @@ COPY --from=builder /app/backend/package.json ./package.json
 # Copy the OpenAPI spec for the runtime image.
 COPY api/openapi.yaml ./api/openapi.yaml
 
+# Copy template sources referenced by template_artifacts.artifact_metadata.localTemplatePath.
+COPY docs /docs
+
 EXPOSE 4000
 CMD ["node", "dist/index.js"]

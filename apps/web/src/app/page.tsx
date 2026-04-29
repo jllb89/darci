@@ -24,11 +24,11 @@ export default function Home() {
                   className="font-display"
                   style={{
                     color: "#ffffff",
-                    fontSize: "5.25rem",
-                    fontStyle: "normal",
+                    fontSize: "3rem",
+                    fontStyle: "light",
                     fontWeight: 400,
                     lineHeight: "120%",
-                    letterSpacing: "-0.1575rem",
+                    /* letterSpacing: "-0.1575rem", */
                   }}
                 >
                   Introducing illuminotarization: Notarization that moves at your speed.
@@ -60,9 +60,7 @@ export default function Home() {
               </div>
               <div className="flex-1 flex flex-col justify-end">
                 <div className="text-Color-White text-body-400">
-                  DARCI combines in-person IPEN acknowledgment with fully digital
-                  workflows. Create, sign, verify, and anchor documents without the
-                  wait.
+                  Notarization simplified. Create, sign, verify, and authenticate documents without the wait.
                 </div>
               </div>
             </div>
@@ -80,7 +78,7 @@ export default function Home() {
                   className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]"
                   style={{ letterSpacing: "-0.1rem" }}
                 >
-                  The mechanics that make notarization work
+                  The mechanics that make illuminotarization work.
                 </div>
               </div>
               <div className="flex-1 text-Color-Scheme-1-Text text-body-400">
@@ -93,8 +91,8 @@ export default function Home() {
               <div className="flex flex-col border-t border-Color-Scheme-1-Border lg:flex-row">
                 {[
                   {
-                    title: "Minutes instead of days",
-                    body: "Template to sealed document in one sitting",
+                    title: "Digital original",
+                    body: "No paper, printer, pens, or scans.",
                   },
                   {
                     title: "Send codes, not files",
@@ -105,8 +103,8 @@ export default function Home() {
                     body: "Public endpoint confirms authenticity in seconds",
                   },
                   {
-                    title: "In-person notary seals the record",
-                    body: "Licensed notary confirms identity and intent",
+                    title: "Illuminotary seals the record",
+                    body: "Commissioned notary confirms identity and intent.",
                   },
                 ].map((item, index) => (
                   <div
@@ -164,12 +162,12 @@ export default function Home() {
           <div className="relative mx-auto flex w-full max-w-[1280px] flex-col gap-12 lg:flex-row lg:gap-20">
             <div className="flex-1">
               <div className="text-Color-White text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                Ready to notarize faster?
+                Ready to illuminotarize?
               </div>
             </div>
             <div className="flex-1 space-y-8">
               <div className="text-Color-White text-base font-regular font-sans leading-6">
-                Select one of our templates and see how DARCI moves at your speed.
+                Select one of our products and see how DARCI moves at your speed.
               </div>
               <div className="flex flex-wrap items-start gap-4">
                 <div
@@ -196,13 +194,13 @@ export default function Home() {
                   Workflow
                 </div>
                 <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                  Moves that get you verified.
+                  The illuminotary digital experience.
                 </div>
               </div>
               <div className="flex-1 space-y-6">
                 {[
                   {
-                    title: "Choose your template or upload",
+                    title: "Choose your product or upload your documents",
                     body: "Start from scratch or use what fits",
                   },
                   {
@@ -214,9 +212,9 @@ export default function Home() {
                     body: "The notary needs this before they can proceed",
                   },
                   {
-                    title: "Verification made public",
+                    title: "Authentication made public",
                     body:
-                      "Your notarized document gets a unique ID that anyone can check anytime. No special access required, no middleman needed.",
+                      "By anyone, anywhere, and anytime.",
                   },
                 ].map((step, index) => (
                   <div key={step.title} className="flex gap-10">
@@ -284,7 +282,7 @@ export default function Home() {
           <div className="relative mx-auto flex w-full max-w-[1280px] flex-col gap-12 lg:flex-row lg:gap-20">
             <div className="flex-1">
               <div className="text-Color-White text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                Your notary work starts now
+                Your illuminotary work starts now
               </div>
             </div>
             <div className="flex-1 space-y-8">
@@ -428,7 +426,7 @@ export default function Home() {
                     "Yes. DARCI meets all legal standards for digital notarization and document verification. We handle IDN assignment, watermarking, sealing, and hashing to ensure compliance at every step. Your documents hold the same legal weight as traditional notarized records.",
                 },
                 {
-                  question: "How long does notarization take?",
+                  question: "How long does illuminotarization take?",
                   answer:
                     "The in-person acknowledgment takes minutes. Once you meet with a notary, the digital workflow completes in seconds. Most documents are fully verified and anchored within hours, not days.",
                 },
@@ -458,12 +456,18 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="w-full bg-Color-Neutral-Darkest px-6 py-20 md:px-16">
+        <div className="w-full bg-black px-6 py-16 md:px-16">
           <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-20">
             <div className="flex flex-col gap-12 lg:flex-row lg:gap-32">
-              <div className="flex-1" />
+              <div className="flex flex-1 items-start">
+                <img
+                  src="/icons/navbar/darci_white.svg"
+                  alt="DARCI"
+                  className="h-5 w-auto"
+                />
+              </div>
               <div className="flex flex-1 flex-col gap-4">
-                <div className="text-Color-Scheme-2-Text text-base font-medium font-sans leading-6">
+                <div className="font-sans text-xs font-light leading-5 text-white/80">
                   Product
                 </div>
                 {[
@@ -473,60 +477,60 @@ export default function Home() {
                   "Security",
                   "Company",
                 ].map((item) => (
-                  <div key={item} className="text-Color-Scheme-2-Text text-sm font-medium font-sans leading-6">
+                  <div key={item} className="font-sans text-xs font-light leading-5 text-white/60">
                     {item}
                   </div>
                 ))}
               </div>
               <div className="flex flex-1 flex-col gap-4">
-                <div className="text-Color-Scheme-2-Text text-base font-medium font-sans leading-6">
+                <div className="font-sans text-xs font-light leading-5 text-white/80">
                   About
                 </div>
                 {[
                   "Blog",
                   "Contact",
                 ].map((item) => (
-                  <div key={item} className="text-Color-Scheme-2-Text text-sm font-medium font-sans leading-6">
+                  <div key={item} className="font-sans text-xs font-light leading-5 text-white/60">
                     {item}
                   </div>
                 ))}
               </div>
               <div className="flex flex-1 flex-col gap-4">
-                <div className="text-Color-Scheme-2-Text text-base font-medium font-sans leading-6">
+                <div className="font-sans text-xs font-light leading-5 text-white/80">
                   Guides
                 </div>
                 {[
                   "Support",
                   "Legal",
                 ].map((item) => (
-                  <div key={item} className="text-Color-Scheme-2-Text text-sm font-medium font-sans leading-6">
+                  <div key={item} className="font-sans text-xs font-light leading-5 text-white/60">
                     {item}
                   </div>
                 ))}
               </div>
               <div className="w-full max-w-sm space-y-6">
                 <div className="space-y-4">
-                  <div className="text-Color-Scheme-2-Text text-base font-medium font-sans leading-6">
+                  <div className="font-sans text-xs font-light leading-5 text-white/80">
                     Updates
                   </div>
-                  <div className="text-Color-Scheme-2-Text text-sm font-medium font-sans leading-6">
+                  <div className="font-sans text-xs font-light leading-5 text-white/60">
                     Get notified when we release new features and improvements.
                   </div>
                 </div>
                 <div className="space-y-3">
                   <div className="flex flex-col gap-4 sm:flex-row">
-                    <div className="flex-1 bg-Color-Neutral-Darker p-3">
-                      <div className="text-Color-Neutral text-sm font-medium font-sans leading-6">
+                    <div className="flex-1 bg-white/10 p-3">
+                      <div className="font-sans text-xs font-light leading-5 text-white/45">
                         your@email.com
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 bg-Color-Neutral-Darker px-6 py-3">
-                      <div className="text-Color-White text-sm font-medium font-sans leading-6">
+                    <div className="flex items-center gap-2 bg-white px-5 py-3">
+                      <div className="font-sans text-xs font-normal leading-5 text-black">
                         Subscribe
                       </div>
                     </div>
                   </div>
-                  <div className="text-Color-Scheme-2-Text text-xs font-medium font-sans leading-5">
+                  <div className="font-sans text-xs font-light leading-5 text-white/50">
                     By subscribing you agree to our Privacy Policy and consent to
                     receive updates from DARCI.
                   </div>
@@ -534,9 +538,8 @@ export default function Home() {
               </div>
             </div>
             <div className="space-y-8">
-              <div className="h-px w-full outline outline-1 outline-offset-[-0.5px] outline-Color-Scheme-1-Border/20" />
               <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-6 text-Color-Scheme-2-Text text-sm font-medium font-sans leading-6 lg:flex-row">
+                <div className="flex flex-col gap-6 font-sans text-xs font-light leading-5 text-white/55 lg:flex-row">
                   <span>© 2024 DARCI. All rights reserved.</span>
                   <div className="flex flex-wrap gap-6">
                     <span className="underline">Privacy Policy</span>
@@ -545,9 +548,15 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  {[1, 2, 3, 4, 5].map((item) => (
-                    <div key={item} className="relative h-6 w-6 overflow-hidden">
-                      <div className="absolute left-[2px] top-[2.24px] h-5 w-5 bg-Color-Scheme-2-Text" />
+                  {[
+                    { label: "Facebook", src: "/footer/Facebook.svg" },
+                    { label: "Instagram", src: "/footer/Instagram.svg" },
+                    { label: "LinkedIn", src: "/footer/LinkedIn.svg" },
+                    { label: "X", src: "/footer/X.svg" },
+                    { label: "YouTube", src: "/footer/Youtube.svg" },
+                  ].map((item) => (
+                    <div key={item.label} className="flex h-6 w-6 items-center justify-center opacity-70">
+                      <img src={item.src} alt={item.label} className="h-5 w-5" />
                     </div>
                   ))}
                 </div>

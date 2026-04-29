@@ -333,7 +333,7 @@ export const buildMockFormValues = (
   memberForm: StartMemberFormContract,
   options: BuildMockFormValuesOptions,
 ): Record<string, StartFormValue> => {
-  let nextValues: Record<string, StartFormValue> = buildInitialMemberFormValues(memberForm, {
+  const nextValues: Record<string, StartFormValue> = buildInitialMemberFormValues(memberForm, {
     jurisdictionCode: options.jurisdictionCode,
     jurisdictionLabel: options.jurisdictionLabel,
   });

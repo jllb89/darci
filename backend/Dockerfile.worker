@@ -26,4 +26,7 @@ COPY --from=builder /app/backend/dist ./dist
 COPY --from=builder /app/backend/node_modules ./node_modules
 COPY --from=builder /app/backend/package.json ./package.json
 
+# Copy template sources referenced by template_artifacts.artifact_metadata.localTemplatePath.
+COPY docs /docs
+
 CMD ["node", "dist/worker/index.js"]

@@ -9,6 +9,14 @@ const mocks = vi.hoisted(() => ({
   updateNotarizationCodeMock: vi.fn(),
   updateNotarizationRequestMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
+  getIlluminotarizationWorkflowByIdMock: vi.fn(),
+  getIlluminotarizationWorkflowByLegacyRequestIdMock: vi.fn(),
+  getLatestCodeDeliveryForCodeMock: vi.fn(),
+  markCodeDeliveriesConsumedMock: vi.fn(),
+  recordAccessCodeAttemptMock: vi.fn(),
+  transitionIlluminotarizationWorkflowStatusMock: vi.fn(),
+  upsertIlluminotarizationWorkflowAssignmentMock: vi.fn(),
+  queueNotaryRequestClaimedNotificationMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -22,6 +30,35 @@ vi.mock("../../src/services/documentService", () => ({
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
 }));
+
+vi.mock("../../src/services/illuminotarizationWorkflowService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/illuminotarizationWorkflowService")>(
+    "../../src/services/illuminotarizationWorkflowService",
+  );
+
+  return {
+    ...actual,
+    getIlluminotarizationWorkflowById: mocks.getIlluminotarizationWorkflowByIdMock,
+    getIlluminotarizationWorkflowByLegacyRequestId:
+      mocks.getIlluminotarizationWorkflowByLegacyRequestIdMock,
+    getLatestCodeDeliveryForCode: mocks.getLatestCodeDeliveryForCodeMock,
+    markCodeDeliveriesConsumed: mocks.markCodeDeliveriesConsumedMock,
+    recordAccessCodeAttempt: mocks.recordAccessCodeAttemptMock,
+    transitionIlluminotarizationWorkflowStatus: mocks.transitionIlluminotarizationWorkflowStatusMock,
+    upsertIlluminotarizationWorkflowAssignment: mocks.upsertIlluminotarizationWorkflowAssignmentMock,
+  };
+});
+
+vi.mock("../../src/services/notificationService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/notificationService")>(
+    "../../src/services/notificationService",
+  );
+
+  return {
+    ...actual,
+    queueNotaryRequestClaimedNotification: mocks.queueNotaryRequestClaimedNotificationMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -69,6 +106,22 @@ describe("POST /notary/code/resolve", () => {
     mocks.updateNotarizationCodeMock.mockReset();
     mocks.updateNotarizationRequestMock.mockReset();
     mocks.recordAuditEventMock.mockReset();
+    mocks.getIlluminotarizationWorkflowByIdMock.mockReset();
+    mocks.getIlluminotarizationWorkflowByLegacyRequestIdMock.mockReset();
+    mocks.getLatestCodeDeliveryForCodeMock.mockReset();
+    mocks.markCodeDeliveriesConsumedMock.mockReset();
+    mocks.recordAccessCodeAttemptMock.mockReset();
+    mocks.transitionIlluminotarizationWorkflowStatusMock.mockReset();
+    mocks.upsertIlluminotarizationWorkflowAssignmentMock.mockReset();
+    mocks.queueNotaryRequestClaimedNotificationMock.mockReset();
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue(null);
+    mocks.getIlluminotarizationWorkflowByLegacyRequestIdMock.mockResolvedValue(null);
+    mocks.getLatestCodeDeliveryForCodeMock.mockResolvedValue(null);
+    mocks.markCodeDeliveriesConsumedMock.mockResolvedValue(null);
+    mocks.recordAccessCodeAttemptMock.mockResolvedValue(null);
+    mocks.transitionIlluminotarizationWorkflowStatusMock.mockResolvedValue(null);
+    mocks.upsertIlluminotarizationWorkflowAssignmentMock.mockResolvedValue(null);
+    mocks.queueNotaryRequestClaimedNotificationMock.mockResolvedValue({ jobId: "job-1" });
   });
 
   it("resolves code and assigns notary", async () => {
@@ -133,6 +186,7 @@ describe("POST /notary/code/resolve", () => {
         status: "consumed",
         expiresAt: "2099-03-05T00:30:00.000Z",
       },
+      workflow: null,
     });
     expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(3);
   });

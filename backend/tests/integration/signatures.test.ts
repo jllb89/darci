@@ -5,28 +5,60 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
+  listDocumentSystemValuesMock: vi.fn(),
+  listDocumentVersionsMock: vi.fn(),
+  listDocumentGenerationRunsMock: vi.fn(),
+  listDocumentSignaturesMock: vi.fn(),
+  listDocumentOutputSignersMock: vi.fn(),
+  getDocumentOutputSignerByIdMock: vi.fn(),
+  isDocumentIntakeLockedMock: vi.fn(),
   createSignatureRecordMock: vi.fn(),
   getSignatureByIdMock: vi.fn(),
+  updateSignatureRecordMock: vi.fn(),
   createSignatureUploadUrlMock: vi.fn(),
+  createDocumentDownloadUrlMock: vi.fn(),
+  createSignatureDownloadUrlMock: vi.fn(),
   getSignatureObjectMetadataMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
+  applySignatureCaptureToDocumentOutputMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
   getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
+  listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
+  listDocumentVersions: mocks.listDocumentVersionsMock,
+  listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
+  listDocumentSignatures: mocks.listDocumentSignaturesMock,
+  listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
+  getDocumentOutputSignerById: mocks.getDocumentOutputSignerByIdMock,
+  isDocumentIntakeLocked: mocks.isDocumentIntakeLockedMock,
   createSignatureRecord: mocks.createSignatureRecordMock,
   getSignatureById: mocks.getSignatureByIdMock,
+  updateSignatureRecord: mocks.updateSignatureRecordMock,
 }));
 
 vi.mock("../../src/services/storageService", () => ({
+  createDocumentDownloadUrl: mocks.createDocumentDownloadUrlMock,
   createSignatureUploadUrl: mocks.createSignatureUploadUrlMock,
+  createSignatureDownloadUrl: mocks.createSignatureDownloadUrlMock,
   getSignatureObjectMetadata: mocks.getSignatureObjectMetadataMock,
 }));
 
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
 }));
+
+vi.mock("../../src/services/documentGenerationRenderService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/documentGenerationRenderService")>(
+    "../../src/services/documentGenerationRenderService",
+  );
+
+  return {
+    ...actual,
+    applySignatureCaptureToDocumentOutput: mocks.applySignatureCaptureToDocumentOutputMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -65,16 +97,94 @@ const postWithLog = async (
   return response;
 };
 
+const generationRunId = "run-1";
+const outputSignerId = "signer-1";
+const signatureTargetPayload = {
+  generationRunId,
+  outputSignerId,
+};
+const outputBundle = [
+  {
+    outputKey: "trust_rrr",
+    outputLabel: "Trust RRR",
+    sortOrder: 0,
+  },
+];
+const signerRecord = {
+  id: outputSignerId,
+  generation_run_id: generationRunId,
+  output_key: "trust_rrr",
+  document_key: "trust_rrr",
+  party_name: "Owner One",
+  party_role: "grantor",
+  obligation_type: "signer",
+  is_required: true,
+  signing_group: null,
+  sort_order: 0,
+  metadata: {},
+};
+
 describe("member signature capture", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     mocks.getDocumentByIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
+    mocks.listDocumentSystemValuesMock.mockReset();
+    mocks.listDocumentVersionsMock.mockReset();
+    mocks.listDocumentGenerationRunsMock.mockReset();
+    mocks.listDocumentSignaturesMock.mockReset();
+    mocks.listDocumentOutputSignersMock.mockReset();
+    mocks.getDocumentOutputSignerByIdMock.mockReset();
+    mocks.isDocumentIntakeLockedMock.mockReset();
     mocks.createSignatureRecordMock.mockReset();
     mocks.getSignatureByIdMock.mockReset();
+    mocks.updateSignatureRecordMock.mockReset();
     mocks.createSignatureUploadUrlMock.mockReset();
+    mocks.createDocumentDownloadUrlMock.mockReset();
+    mocks.createSignatureDownloadUrlMock.mockReset();
     mocks.getSignatureObjectMetadataMock.mockReset();
     mocks.recordAuditEventMock.mockReset();
+    mocks.applySignatureCaptureToDocumentOutputMock.mockReset();
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([
+      {
+        system_key: "review_approval",
+        value_json: {
+          approvedAt: "2026-03-05T00:00:00.000Z",
+          approvedOutputKeys: ["trust_rrr"],
+        },
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "version-1",
+        generation_run_id: generationRunId,
+        version: 1,
+        file_name: "trust_rrr.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 2048,
+        storage_path: "generated/trust_rrr.pdf",
+        is_final: false,
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: generationRunId,
+        output_key: "trust_rrr",
+        status: "rendered",
+        document_version_id: "version-1",
+        blocking_requirements_json: [],
+        error_message: null,
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([signerRecord]);
+    mocks.getDocumentOutputSignerByIdMock.mockResolvedValue(signerRecord);
+    mocks.isDocumentIntakeLockedMock.mockReturnValue(true);
+    mocks.createDocumentDownloadUrlMock.mockResolvedValue({ signedUrl: "https://download.example.com" });
+    mocks.createSignatureDownloadUrlMock.mockResolvedValue({ signedUrl: "https://signature.example.com" });
+    mocks.applySignatureCaptureToDocumentOutputMock.mockResolvedValue(null);
   });
 
   it("requests a signature upload", async () => {
@@ -86,14 +196,25 @@ describe("member signature capture", () => {
       document_type: "generic",
       jurisdiction: "US-OH",
       created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.createSignatureRecordMock.mockResolvedValue({
       id: "sig-1",
       document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
       signer_id: "owner-1",
-      signature_type: "member",
+      capture_method: "upload",
       storage_path: "signatures/doc-1/sig-1.png",
+      status: "upload_pending",
+      mime_type: "image/png",
+      size_bytes: 1024,
+      typed_value: null,
+      typed_kind: null,
+      captured_at: null,
       created_at: "2026-03-05T00:00:10.000Z",
     });
     mocks.createSignatureUploadUrlMock.mockResolvedValue({
@@ -111,6 +232,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/request",
       {
+        ...signatureTargetPayload,
         fileName: "sig.png",
         fileSize: 1024,
         mimeType: "image/png",
@@ -132,6 +254,9 @@ describe("member signature capture", () => {
       document_type: "generic",
       jurisdiction: "US-OH",
       created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
 
@@ -143,6 +268,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/request",
       {
+        ...signatureTargetPayload,
         fileName: "sig.png",
         fileSize: 1024,
         mimeType: "image/png",
@@ -166,6 +292,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/request",
       {
+        ...signatureTargetPayload,
         fileName: "sig.pdf",
         fileSize: 1024,
         mimeType: "application/pdf",
@@ -186,6 +313,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/request",
       {
+        ...signatureTargetPayload,
         fileName: "sig.png",
         fileSize: 6 * 1024 * 1024,
         mimeType: "image/png",
@@ -206,14 +334,41 @@ describe("member signature capture", () => {
       document_type: "generic",
       jurisdiction: "US-OH",
       created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.getSignatureByIdMock.mockResolvedValue({
       id: "sig-1",
       document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
       signer_id: "owner-1",
-      signature_type: "member",
+      capture_method: "upload",
       storage_path: "signatures/doc-1/sig-1.png",
+      status: "upload_pending",
+      mime_type: "image/png",
+      size_bytes: 1024,
+      typed_value: null,
+      typed_kind: null,
+      captured_at: null,
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.updateSignatureRecordMock.mockResolvedValue({
+      id: "sig-1",
+      document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
+      signer_id: "owner-1",
+      capture_method: "upload",
+      storage_path: "signatures/doc-1/sig-1.png",
+      status: "captured",
+      mime_type: "image/png",
+      size_bytes: 1024,
+      typed_value: null,
+      typed_kind: null,
+      captured_at: "2026-03-05T00:00:20.000Z",
       created_at: "2026-03-05T00:00:10.000Z",
     });
     mocks.getSignatureObjectMetadataMock.mockResolvedValue({
@@ -229,6 +384,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/finalize",
       {
+        ...signatureTargetPayload,
         signatureId: "sig-1",
       },
       "finalizes signature upload",
@@ -248,14 +404,25 @@ describe("member signature capture", () => {
       document_type: "generic",
       jurisdiction: "US-OH",
       created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.getSignatureByIdMock.mockResolvedValue({
       id: "sig-1",
       document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
       signer_id: "owner-1",
-      signature_type: "member",
+      capture_method: "upload",
       storage_path: "signatures/doc-1/sig-1.png",
+      status: "upload_pending",
+      mime_type: "image/png",
+      size_bytes: 1024,
+      typed_value: null,
+      typed_kind: null,
+      captured_at: null,
       created_at: "2026-03-05T00:00:10.000Z",
     });
     mocks.getSignatureObjectMetadataMock.mockResolvedValue(null);
@@ -268,6 +435,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/finalize",
       {
+        ...signatureTargetPayload,
         signatureId: "sig-1",
       },
       "rejects missing signature upload",
@@ -286,14 +454,25 @@ describe("member signature capture", () => {
       document_type: "generic",
       jurisdiction: "US-OH",
       created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.getSignatureByIdMock.mockResolvedValue({
       id: "sig-1",
       document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
       signer_id: "owner-1",
-      signature_type: "member",
+      capture_method: "upload",
       storage_path: "signatures/doc-1/sig-1.png",
+      status: "upload_pending",
+      mime_type: "application/pdf",
+      size_bytes: 1024,
+      typed_value: null,
+      typed_kind: null,
+      captured_at: null,
       created_at: "2026-03-05T00:00:10.000Z",
     });
     mocks.getSignatureObjectMetadataMock.mockResolvedValue({
@@ -309,6 +488,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/finalize",
       {
+        ...signatureTargetPayload,
         signatureId: "sig-1",
       },
       "rejects invalid signature mime type on finalize",
@@ -327,14 +507,25 @@ describe("member signature capture", () => {
       document_type: "generic",
       jurisdiction: "US-OH",
       created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.getSignatureByIdMock.mockResolvedValue({
       id: "sig-1",
       document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
       signer_id: "owner-1",
-      signature_type: "member",
+      capture_method: "upload",
       storage_path: "signatures/doc-1/sig-1.png",
+      status: "upload_pending",
+      mime_type: "image/png",
+      size_bytes: 6 * 1024 * 1024,
+      typed_value: null,
+      typed_kind: null,
+      captured_at: null,
       created_at: "2026-03-05T00:00:10.000Z",
     });
     mocks.getSignatureObjectMetadataMock.mockResolvedValue({
@@ -350,6 +541,7 @@ describe("member signature capture", () => {
     const response = await postWithLog(
       "/documents/doc-1/signatures/finalize",
       {
+        ...signatureTargetPayload,
         signatureId: "sig-1",
       },
       "rejects oversized signature on finalize",

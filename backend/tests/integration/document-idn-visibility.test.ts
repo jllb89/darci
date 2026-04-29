@@ -6,12 +6,19 @@ const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   listDocumentsMock: vi.fn(),
+  buildDocumentWorkspaceSummariesMock: vi.fn(),
+  buildDocumentWorkspaceSummaryMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
   getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
   listDocuments: mocks.listDocumentsMock,
+}));
+
+vi.mock("../../src/services/documentWorkspaceReadModelService", () => ({
+  buildDocumentWorkspaceSummaries: mocks.buildDocumentWorkspaceSummariesMock,
+  buildDocumentWorkspaceSummary: mocks.buildDocumentWorkspaceSummaryMock,
 }));
 
 import { app } from "../../src/index";
@@ -34,6 +41,10 @@ describe("document IDN visibility", () => {
     mocks.getDocumentByIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.listDocumentsMock.mockReset();
+    mocks.buildDocumentWorkspaceSummariesMock.mockReset();
+    mocks.buildDocumentWorkspaceSummaryMock.mockReset();
+    mocks.buildDocumentWorkspaceSummariesMock.mockResolvedValue(new Map());
+    mocks.buildDocumentWorkspaceSummaryMock.mockResolvedValue(null);
   });
 
   it("hides IDN in member document lists until post-sign stages", async () => {
