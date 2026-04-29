@@ -31,7 +31,7 @@ export default function Home() {
                     letterSpacing: "-0.1575rem",
                   }}
                 >
-                  Notarization that moves at your speed
+                  Introducing illuminotarization: Notarization that moves at your speed.
                 </div>
                 <div className="flex flex-wrap items-start gap-4">
                   <div
