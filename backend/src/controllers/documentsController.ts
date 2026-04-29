@@ -149,6 +149,7 @@ const UPLOADED_DOCUMENT_DOCUMENT_KEY = "uploaded_document";
 const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_VERSION = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_HASH = "uploaded_pdf";
+const RENDERING_RUN_STALE_AFTER_MS = 5 * 60 * 1000;
 
 const documentPartyRoles = [
   "principal",
@@ -190,6 +191,10 @@ type ReviewOutputResponse = {
   createdAt: string;
   downloadUrl: string;
   isFinal: boolean;
+};
+
+type ReadyReviewOutput = Omit<ReviewOutputResponse, "downloadUrl"> & {
+  storagePath: string;
 };
 
 type PendingReviewOutputResponse = {
@@ -1376,6 +1381,167 @@ const isSatisfiedReviewRunStatus = (status: DocumentGenerationRunRecord["status"
   return status === "queued" || status === "rendering" || status === "rendered";
 };
 
+const isStaleRenderingReviewRun = (run: DocumentGenerationRunRecord | null) => {
+  if (!run || run.status !== "rendering") {
+    return false;
+  }
+
+  const startedTimestamp = toTimestamp(run.started_at ?? run.created_at);
+  return (
+    startedTimestamp > 0 &&
+    Date.now() - startedTimestamp >= RENDERING_RUN_STALE_AFTER_MS
+  );
+};
+
+const isRetryableReviewRun = (run: DocumentGenerationRunRecord | null) => {
+  if (!run) {
+    return false;
+  }
+
+  return isRetryableReviewRunStatus(run.status) || isStaleRenderingReviewRun(run);
+};
+
+const isReusableReviewRun = (run: DocumentGenerationRunRecord) => {
+  return isSatisfiedReviewRunStatus(run.status) && !isStaleRenderingReviewRun(run);
+};
+
+const mapReadyReviewOutputToPending = (
+  output: ReadyReviewOutput,
+  status: string,
+  errorMessage: string | null,
+): PendingReviewOutputResponse => ({
+  outputKey: output.outputKey,
+  outputLabel: output.outputLabel,
+  status,
+  errorMessage,
+  versionId: output.versionId,
+  mimeType: output.mimeType,
+  blockers: [],
+});
+
+const signReadyReviewOutput = async (
+  documentId: string,
+  output: ReadyReviewOutput,
+) => {
+  try {
+    const download = await createDocumentDownloadUrl(output.storagePath);
+
+    return {
+      readyOutput: output,
+      output: {
+        outputKey: output.outputKey,
+        outputLabel: output.outputLabel,
+        versionId: output.versionId,
+        generationRunId: output.generationRunId,
+        version: output.version,
+        fileName: output.fileName,
+        mimeType: output.mimeType,
+        sizeBytes: output.sizeBytes,
+        createdAt: output.createdAt,
+        isFinal: output.isFinal,
+        downloadUrl: download.signedUrl,
+      } satisfies ReviewOutputResponse,
+      pendingOutput: null,
+    };
+  } catch (error) {
+    logDocumentTrace("review.download_url_unavailable", {
+      documentId,
+      outputKey: output.outputKey,
+      versionId: output.versionId,
+      storagePath: output.storagePath,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      readyOutput: output,
+      output: null,
+      pendingOutput: mapReadyReviewOutputToPending(
+        output,
+        "download_unavailable",
+        "Secure preview link is temporarily unavailable. DARCi will retry automatically.",
+      ),
+    };
+  }
+};
+
+const signReadyReviewOutputs = async (input: {
+  documentId: string;
+  readyOutputs: ReadyReviewOutput[];
+  holdUntilBundleReady: boolean;
+}) => {
+  if (input.holdUntilBundleReady) {
+    return {
+      outputs: [],
+      pendingOutputs: input.readyOutputs.map((output) =>
+        mapReadyReviewOutputToPending(output, "rendered", null),
+      ),
+    };
+  }
+
+  const results = await Promise.all(
+    input.readyOutputs.map((output) => signReadyReviewOutput(input.documentId, output)),
+  );
+  const hasDownloadFailure = results.some((result) => result.pendingOutput);
+
+  if (!hasDownloadFailure) {
+    return {
+      outputs: results
+        .map((result) => result.output)
+        .filter((output): output is ReviewOutputResponse => Boolean(output)),
+      pendingOutputs: [],
+    };
+  }
+
+  if (input.readyOutputs.length > 1) {
+    return {
+      outputs: [],
+      pendingOutputs: results.map((result) =>
+        result.pendingOutput ??
+        mapReadyReviewOutputToPending(result.readyOutput, "rendered", null),
+      ),
+    };
+  }
+
+  return {
+    outputs: [],
+    pendingOutputs: results
+      .map((result) => result.pendingOutput)
+      .filter((output): output is PendingReviewOutputResponse => Boolean(output)),
+  };
+};
+
+const sortReviewOutputs = (
+  outputs: ReviewOutputResponse[],
+  outputBundle: ParsedOutputBundleEntry[],
+) => {
+  outputs.sort((left, right) => {
+    const visibleLeft = outputBundle.find((output) => output.outputKey === left.outputKey);
+    const visibleRight = outputBundle.find((output) => output.outputKey === right.outputKey);
+    const leftOrder = visibleLeft?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = visibleRight?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
+    return toTimestamp(right.createdAt) - toTimestamp(left.createdAt);
+  });
+};
+
+const sortPendingReviewOutputs = (
+  outputs: PendingReviewOutputResponse[],
+  outputBundle: ParsedOutputBundleEntry[],
+) => {
+  outputs.sort((left, right) => {
+    const visibleLeft = outputBundle.find((output) => output.outputKey === left.outputKey);
+    const visibleRight = outputBundle.find((output) => output.outputKey === right.outputKey);
+    const leftOrder = visibleLeft?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = visibleRight?.sortOrder ?? Number.MAX_SAFE_INTEGER;
+
+    return leftOrder - rightOrder;
+  });
+};
+
 const buildDocumentReviewState = async (input: {
   document: DocumentRecord;
   viewerRole?: string | null;
@@ -1394,7 +1560,7 @@ const buildDocumentReviewState = async (input: {
     systemValues.find((value) => value.system_key === "review_approval")?.value_json,
   );
   const visibleOutputs = resolveVisibleReviewOutputs(input.document, input.viewerRole);
-  const readyOutputs: Array<Omit<ReviewOutputResponse, "downloadUrl"> & { storagePath: string }> = [];
+  const readyOutputs: ReadyReviewOutput[] = [];
   const pendingOutputs: PendingReviewOutputResponse[] = [];
 
   if (visibleOutputs.length === 0) {
@@ -1451,6 +1617,9 @@ const buildDocumentReviewState = async (input: {
       const blockers = mapBlockingRequirementsResponse(
         latestRun?.blocking_requirements_json,
       );
+      const staleRenderingMessage = isStaleRenderingReviewRun(latestRun)
+        ? "Rendering is taking longer than expected. DARCi is retrying this output."
+        : null;
 
       pendingOutputs.push({
         outputKey: output.outputKey,
@@ -1459,6 +1628,7 @@ const buildDocumentReviewState = async (input: {
         errorMessage:
           unsupportedFormatMessage ??
           latestRun?.error_message ??
+          staleRenderingMessage ??
           blockers.find((blocker) => blocker.blocking)?.message ??
           null,
         versionId: latestVersion?.id ?? latestRun?.document_version_id ?? null,
@@ -1468,37 +1638,16 @@ const buildDocumentReviewState = async (input: {
     }
   }
 
-  const outputs = await Promise.all(
-    readyOutputs.map(async (output) => {
-      const download = await createDocumentDownloadUrl(output.storagePath);
-      return {
-        outputKey: output.outputKey,
-        outputLabel: output.outputLabel,
-        versionId: output.versionId,
-        generationRunId: output.generationRunId,
-        version: output.version,
-        fileName: output.fileName,
-        mimeType: output.mimeType,
-        sizeBytes: output.sizeBytes,
-        createdAt: output.createdAt,
-        isFinal: output.isFinal,
-        downloadUrl: download.signedUrl,
-      } satisfies ReviewOutputResponse;
-    }),
-  );
-
-  outputs.sort((left, right) => {
-    const visibleLeft = visibleOutputs.find((output) => output.outputKey === left.outputKey);
-    const visibleRight = visibleOutputs.find((output) => output.outputKey === right.outputKey);
-    const leftOrder = visibleLeft?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = visibleRight?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-
-    return toTimestamp(right.createdAt) - toTimestamp(left.createdAt);
+  const signedReadyOutputs = await signReadyReviewOutputs({
+    documentId: input.document.id,
+    readyOutputs,
+    holdUntilBundleReady: visibleOutputs.length > 1 && pendingOutputs.length > 0,
   });
+  const outputs = signedReadyOutputs.outputs;
+
+  pendingOutputs.push(...signedReadyOutputs.pendingOutputs);
+  sortReviewOutputs(outputs, visibleOutputs);
+  sortPendingReviewOutputs(pendingOutputs, visibleOutputs);
 
   const missingOutputKeys = visibleOutputs
     .filter((output) => {
@@ -1521,7 +1670,7 @@ const buildDocumentReviewState = async (input: {
         return true;
       }
 
-      return isRetryableReviewRunStatus(latestRun.status);
+      return isRetryableReviewRun(latestRun);
     })
     .map((output) => output.outputKey);
   const requiresGeneration =
@@ -1701,7 +1850,7 @@ const buildDocumentSigningState = async (input: {
       (approvedAtTimestamp === 0 || toTimestamp(run.created_at) >= approvedAtTimestamp)
     );
   });
-  const readyOutputs: Array<Omit<ReviewOutputResponse, "downloadUrl"> & { storagePath: string }> = [];
+  const readyOutputs: ReadyReviewOutput[] = [];
   const pendingOutputs: PendingReviewOutputResponse[] = [];
   const latestRunsByOutputKey = new Map<string, DocumentGenerationRunRecord>();
 
@@ -1741,6 +1890,9 @@ const buildDocumentSigningState = async (input: {
     const blockers = mapBlockingRequirementsResponse(
       latestRun?.blocking_requirements_json,
     );
+    const staleRenderingMessage = isStaleRenderingReviewRun(latestRun)
+      ? "Rendering is taking longer than expected. DARCi is retrying this output."
+      : null;
 
     pendingOutputs.push({
       outputKey: output.outputKey,
@@ -1749,6 +1901,7 @@ const buildDocumentSigningState = async (input: {
       errorMessage:
         unsupportedFormatMessage ??
         latestRun?.error_message ??
+        staleRenderingMessage ??
         blockers.find((blocker) => blocker.blocking)?.message ??
         null,
       versionId: latestVersion?.id ?? latestRun?.document_version_id ?? null,
@@ -1757,38 +1910,16 @@ const buildDocumentSigningState = async (input: {
     });
   }
 
-  const outputs = await Promise.all(
-    readyOutputs.map(async (output) => {
-      const download = await createDocumentDownloadUrl(output.storagePath);
-
-      return {
-        outputKey: output.outputKey,
-        outputLabel: output.outputLabel,
-        versionId: output.versionId,
-        generationRunId: output.generationRunId,
-        version: output.version,
-        fileName: output.fileName,
-        mimeType: output.mimeType,
-        sizeBytes: output.sizeBytes,
-        createdAt: output.createdAt,
-        isFinal: output.isFinal,
-        downloadUrl: download.signedUrl,
-      } satisfies ReviewOutputResponse;
-    }),
-  );
-
-  outputs.sort((left, right) => {
-    const leftOutput = outputBundle.find((output) => output.outputKey === left.outputKey);
-    const rightOutput = outputBundle.find((output) => output.outputKey === right.outputKey);
-    const leftOrder = leftOutput?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = rightOutput?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-
-    return toTimestamp(right.createdAt) - toTimestamp(left.createdAt);
+  const signedReadyOutputs = await signReadyReviewOutputs({
+    documentId: input.document.id,
+    readyOutputs,
+    holdUntilBundleReady: outputBundle.length > 1 && pendingOutputs.length > 0,
   });
+  const outputs = signedReadyOutputs.outputs;
+
+  pendingOutputs.push(...signedReadyOutputs.pendingOutputs);
+  sortReviewOutputs(outputs, outputBundle);
+  sortPendingReviewOutputs(pendingOutputs, outputBundle);
 
   const missingOutputKeys = outputBundle
     .filter((output) => {
@@ -1812,7 +1943,7 @@ const buildDocumentSigningState = async (input: {
         return true;
       }
 
-      return isRetryableReviewRunStatus(latestRun.status);
+      return isRetryableReviewRun(latestRun);
     })
     .map((output) => output.outputKey);
   const requiresGeneration =
@@ -2144,7 +2275,7 @@ const createGenerationRunsForDocument = async (input: {
     if (
       existingRun &&
       existingRun.intake_revision === draft.revision &&
-      isSatisfiedReviewRunStatus(existingRun.status)
+      isReusableReviewRun(existingRun)
     ) {
       runs.push(existingRun);
       continue;
@@ -2201,7 +2332,11 @@ const createGenerationRunsForDocument = async (input: {
       canonicalAnswers: draft.canonical_answers_json,
     };
 
-    const run = existingRun && existingRun.intake_revision === draft.revision
+    const shouldUpdateExistingRun =
+      existingRun &&
+      existingRun.intake_revision === draft.revision &&
+      !isStaleRenderingReviewRun(existingRun);
+    const run = shouldUpdateExistingRun
       ? await updateDocumentGenerationRun(existingRun.id, {
           template_artifact_id: templateArtifact?.id ?? null,
           payload_json: runPayload,

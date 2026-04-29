@@ -124,6 +124,8 @@ const formatStatusLabel = (value: string) => {
       return "Canceled";
     case "unsupported_format":
       return "Needs PDF rerender";
+    case "download_unavailable":
+      return "Preparing secure link";
     case "not_started":
       return "Waiting to start";
     default:
@@ -139,7 +141,7 @@ const getStatusTextClasses = (value: string) => {
     return "text-red-700";
   }
 
-  if (value === "unsupported_format") {
+  if (value === "unsupported_format" || value === "download_unavailable") {
     return "text-amber-800";
   }
 
@@ -168,7 +170,12 @@ const isBlockedStatus = (value: string) => {
 };
 
 const isActiveGenerationStatus = (value: string) => {
-  return value === "queued" || value === "rendering" || value === "not_started";
+  return (
+    value === "queued" ||
+    value === "rendering" ||
+    value === "not_started" ||
+    value === "download_unavailable"
+  );
 };
 
 const formatProductFlowModeLabel = (value: string | null | undefined) => {

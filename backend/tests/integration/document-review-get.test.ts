@@ -230,6 +230,264 @@ describe("document review payload", () => {
     expect(response.body.review.pendingOutputs).toHaveLength(2);
   });
 
+  it("holds member-visible bundle outputs until every review PDF is ready", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: null,
+      status: "pending_review",
+      document_type: "trust_bundle",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "trust_rrr",
+          outputLabel: "Trust Registration Amendment",
+          isRequired: true,
+          sortOrder: 10,
+          metadata: {},
+        },
+        {
+          outputKey: "poa_document",
+          outputLabel: "Power of Attorney",
+          isRequired: true,
+          sortOrder: 20,
+          metadata: {},
+        },
+      ],
+      intake_status: "submitted",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-poa",
+        document_id: "doc-1",
+        output_key: "poa_document",
+        status: "rendering",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+      {
+        id: "run-rrr",
+        document_id: "doc-1",
+        output_key: "trust_rrr",
+        status: "rendered",
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-rrr",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "owner-1/doc-1/generated/run-rrr/trust-rrr.pdf",
+        file_name: "trust-rrr.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1800,
+        is_final: false,
+        generation_run_id: "run-rrr",
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/review")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.review.state).toBe("generating");
+    expect(response.body.review.allVisibleOutputsReady).toBe(false);
+    expect(response.body.review.canApprove).toBe(false);
+    expect(response.body.review.outputs).toEqual([]);
+    expect(response.body.review.pendingOutputs).toEqual([
+      expect.objectContaining({
+        outputKey: "trust_rrr",
+        status: "rendered",
+      }),
+      expect.objectContaining({
+        outputKey: "poa_document",
+        status: "rendering",
+      }),
+    ]);
+    expect(mocks.createDocumentDownloadUrlMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps review polling when storage cannot create a signed download URL", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: null,
+      status: "pending_review",
+      document_type: "trust_bundle",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "trust_rrr",
+          outputLabel: "Trust Registration Amendment",
+          isRequired: true,
+          sortOrder: 10,
+          metadata: {},
+        },
+        {
+          outputKey: "poa_document",
+          outputLabel: "Power of Attorney",
+          isRequired: true,
+          sortOrder: 20,
+          metadata: {},
+        },
+      ],
+      intake_status: "submitted",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-poa",
+        document_id: "doc-1",
+        output_key: "poa_document",
+        status: "rendered",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+      {
+        id: "run-rrr",
+        document_id: "doc-1",
+        output_key: "trust_rrr",
+        status: "rendered",
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-rrr",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "owner-1/doc-1/generated/run-rrr/trust-rrr.pdf",
+        file_name: "trust-rrr.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1800,
+        is_final: false,
+        generation_run_id: "run-rrr",
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+      {
+        id: "ver-poa",
+        document_id: "doc-1",
+        version: 2,
+        storage_path: "owner-1/doc-1/generated/run-poa/poa.pdf",
+        file_name: "poa.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1900,
+        is_final: false,
+        generation_run_id: "run-poa",
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+    ]);
+    mocks.createDocumentDownloadUrlMock.mockImplementation(async (storagePath: string) => {
+      if (storagePath.includes("poa.pdf")) {
+        throw new Error("Service Unavailable");
+      }
+
+      return {
+        bucket: "documents",
+        path: storagePath,
+        signedUrl: `https://example.test/${encodeURIComponent(storagePath)}`,
+        expiresInSeconds: 3600,
+      };
+    });
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/review")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.review.state).toBe("generating");
+    expect(response.body.review.outputs).toEqual([]);
+    expect(response.body.review.pendingOutputs).toEqual([
+      expect.objectContaining({
+        outputKey: "trust_rrr",
+        status: "rendered",
+      }),
+      expect.objectContaining({
+        outputKey: "poa_document",
+        status: "download_unavailable",
+        errorMessage: "Secure preview link is temporarily unavailable. DARCi will retry automatically.",
+      }),
+    ]);
+    expect(mocks.createDocumentDownloadUrlMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks stale rendering outputs as missing so review generation can retry", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: null,
+      status: "pending_review",
+      document_type: "trust_bundle",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "poa_document",
+          outputLabel: "Power of Attorney",
+          isRequired: true,
+          sortOrder: 10,
+          metadata: {},
+        },
+      ],
+      intake_status: "submitted",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-poa",
+        document_id: "doc-1",
+        output_key: "poa_document",
+        status: "rendering",
+        started_at: "2026-03-05T00:00:00.000Z",
+        created_at: "2026-03-05T00:00:00.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/review")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.review.requiresGeneration).toBe(true);
+    expect(response.body.review.missingOutputKeys).toEqual(["poa_document"]);
+    expect(response.body.review.pendingOutputs).toEqual([
+      expect.objectContaining({
+        outputKey: "poa_document",
+        status: "rendering",
+        errorMessage: "Rendering is taking longer than expected. DARCi is retrying this output.",
+      }),
+    ]);
+  });
+
   it("treats blocked visible outputs as retryable review generation work", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
