@@ -14,6 +14,7 @@ import {
   type InviteTokenStatus,
 } from "./inviteClaimService";
 import { recordAuditEvent } from "./auditService";
+import { resolveEmailNotificationProvider } from "./notificationProviderPolicy";
 import type { RequestRole } from "./userRoleService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -522,9 +523,12 @@ export const deriveDocumentSigningTemplateKey = (input: {
   return "signer_invitation_email";
 };
 
-export const resolveDocumentInviteEmailProvider = () => {
-  const configured = process.env.NOTIFICATION_PROVIDER?.trim().toLowerCase();
-  return configured === "resend" ? "resend" : "internal";
+export const resolveDocumentInviteEmailProvider = (input?: {
+  rolloutKey?: string | null | undefined;
+}) => {
+  return resolveEmailNotificationProvider({
+    rolloutKey: input?.rolloutKey,
+  }).provider;
 };
 
 const getUserById = async (userId: string) => {
@@ -852,7 +856,13 @@ const queueInviteNotification = async (input: {
   }
 
   const queuedAt = new Date().toISOString();
-  const provider = resolveDocumentInviteEmailProvider();
+  const provider = resolveDocumentInviteEmailProvider({
+    rolloutKey:
+      input.targetUserId ??
+      input.recipientAddress?.trim().toLowerCase() ??
+      input.inviteRecipientId ??
+      input.inviteId,
+  });
   const { data: jobData, error: jobError } = await supabaseAdmin
     .from("notification_jobs")
     .insert({

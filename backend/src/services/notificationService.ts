@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolveEmailNotificationProvider } from "./notificationProviderPolicy";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -31,6 +32,7 @@ type NotificationJobRecord = {
 
 type NotificationDeliveryRecord = {
   id: string;
+  provider: string | null;
 };
 
 type NotificationUserRecord = {
@@ -293,12 +295,6 @@ const insertNotificationJob = async (input: {
   return data as NotificationJobRecord;
 };
 
-const resolveEmailProvider = (): string => {
-  const configured = process.env.NOTIFICATION_PROVIDER?.trim().toLowerCase();
-  if (configured === "resend") return "resend";
-  return "internal";
-};
-
 const insertNotificationDeliveries = async (input: {
   jobId: string;
   channel: NotificationChannel;
@@ -308,7 +304,6 @@ const insertNotificationDeliveries = async (input: {
   const queuedAt = new Date().toISOString();
   const deliveryStatus = input.channel === "in_app" ? "delivered" : "queued";
   const eventType = input.channel === "in_app" ? "delivered" : "queued";
-  const emailProvider = input.channel === "email" ? resolveEmailProvider() : "internal";
 
   const deliveriesToInsert = input.recipients.map((recipient, index) => ({
     notification_job_id: input.jobId,
@@ -316,7 +311,15 @@ const insertNotificationDeliveries = async (input: {
     channel: input.channel,
     recipient_address: input.channel === "in_app" ? null : recipient.email?.trim() ?? null,
     recipient_display_name: recipient.displayName ?? null,
-    provider: emailProvider,
+    provider:
+      input.channel === "email"
+        ? resolveEmailNotificationProvider({
+            rolloutKey:
+              recipient.targetUserId ??
+              recipient.email?.trim().toLowerCase() ??
+              `${input.jobId}:${index}`,
+          }).provider
+        : "internal",
     status: deliveryStatus,
     attempt_number: 1,
     queued_at: queuedAt,
@@ -333,7 +336,7 @@ const insertNotificationDeliveries = async (input: {
   const { data, error } = await supabaseAdmin
     .from("notification_deliveries")
     .insert(deliveriesToInsert)
-    .select("id");
+    .select("id, provider");
 
   if (error) {
     throw new Error(error.message);
@@ -347,7 +350,7 @@ const insertNotificationDeliveries = async (input: {
         deliveries.map((delivery) => ({
           notification_delivery_id: delivery.id,
           event_type: eventType,
-          provider: emailProvider,
+          provider: delivery.provider ?? "internal",
           event_at: queuedAt,
           payload: {
             templateKey: input.templateKey,

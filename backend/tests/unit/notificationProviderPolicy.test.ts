@@ -1,0 +1,117 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resolveEmailNotificationProvider } from "../../src/services/notificationProviderPolicy";
+
+const providerEnvKeys = [
+  "NOTIFICATION_PROVIDER",
+  "NOTIFICATION_PROVIDER_RESEND_ENABLED",
+  "NOTIFICATION_RESEND_ENABLED",
+  "NOTIFICATION_PROVIDER_ALLOWED_ENVS",
+  "NOTIFICATION_RESEND_ALLOWED_ENVS",
+  "NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT",
+  "NOTIFICATION_RESEND_ROLLOUT_PERCENT",
+  "APP_ENV",
+  "DARCI_ENV",
+] as const;
+
+const originalProviderEnv = new Map(
+  providerEnvKeys.map((key) => [key, process.env[key]]),
+);
+
+const clearProviderEnv = () => {
+  providerEnvKeys.forEach((key) => {
+    delete process.env[key];
+  });
+};
+
+const restoreProviderEnv = () => {
+  providerEnvKeys.forEach((key) => {
+    const originalValue = originalProviderEnv.get(key);
+    if (originalValue === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = originalValue;
+    }
+  });
+};
+
+describe("email notification provider policy", () => {
+  beforeEach(() => {
+    clearProviderEnv();
+  });
+
+  afterEach(() => {
+    restoreProviderEnv();
+  });
+
+  it("defaults to the internal provider", () => {
+    const resolution = resolveEmailNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("provider_not_resend");
+  });
+
+  it("uses Resend when explicitly configured with a full rollout", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+
+    const resolution = resolveEmailNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("resend");
+    expect(resolution.reason).toBe("rollout_percent_full");
+  });
+
+  it("supports an emergency Resend disable flag", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    process.env.NOTIFICATION_PROVIDER_RESEND_ENABLED = "false";
+
+    const resolution = resolveEmailNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("resend_disabled");
+  });
+
+  it("limits Resend to allowed environments when configured", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    process.env.APP_ENV = "production";
+    process.env.NOTIFICATION_PROVIDER_ALLOWED_ENVS = "staging";
+
+    const resolution = resolveEmailNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("environment_not_allowed");
+  });
+
+  it("honors a zero percent rollout", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    process.env.NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT = "0";
+
+    const resolution = resolveEmailNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("rollout_percent_zero");
+  });
+
+  it("requires a rollout key for partial rollouts", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    process.env.NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT = "50";
+
+    const resolution = resolveEmailNotificationProvider();
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("rollout_key_missing");
+  });
+
+  it("selects partial rollout traffic deterministically", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    process.env.NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT = "50";
+
+    const selected = resolveEmailNotificationProvider({ rolloutKey: "user-0" });
+    const notSelected = resolveEmailNotificationProvider({ rolloutKey: "alpha" });
+    const selectedAgain = resolveEmailNotificationProvider({ rolloutKey: "user-0" });
+
+    expect(selected.provider).toBe("resend");
+    expect(selected.reason).toBe("rollout_key_selected");
+    expect(selectedAgain.provider).toBe(selected.provider);
+    expect(notSelected.provider).toBe("internal");
+    expect(notSelected.reason).toBe("rollout_key_not_selected");
+  });
+});

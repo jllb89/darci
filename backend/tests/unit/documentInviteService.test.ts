@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
@@ -15,9 +15,44 @@ import {
   hashInviteToken,
 } from "../../src/services/inviteClaimService";
 
+const providerEnvKeys = [
+  "NOTIFICATION_PROVIDER",
+  "NOTIFICATION_PROVIDER_RESEND_ENABLED",
+  "NOTIFICATION_RESEND_ENABLED",
+  "NOTIFICATION_PROVIDER_ALLOWED_ENVS",
+  "NOTIFICATION_RESEND_ALLOWED_ENVS",
+  "NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT",
+  "NOTIFICATION_RESEND_ROLLOUT_PERCENT",
+] as const;
+
+const originalProviderEnv = new Map(
+  providerEnvKeys.map((key) => [key, process.env[key]]),
+);
+
+const clearProviderEnv = () => {
+  providerEnvKeys.forEach((key) => {
+    delete process.env[key];
+  });
+};
+
+const restoreProviderEnv = () => {
+  providerEnvKeys.forEach((key) => {
+    const originalValue = originalProviderEnv.get(key);
+    if (originalValue === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = originalValue;
+    }
+  });
+};
+
 describe("invite runtime helpers", () => {
+  beforeEach(() => {
+    clearProviderEnv();
+  });
+
   afterEach(() => {
-    delete process.env.NOTIFICATION_PROVIDER;
+    restoreProviderEnv();
   });
 
   it("uses the signup-required template when the recipient has no account yet", () => {
@@ -48,6 +83,14 @@ describe("invite runtime helpers", () => {
 
     process.env.NOTIFICATION_PROVIDER = "internal";
     expect(resolveDocumentInviteEmailProvider()).toBe("internal");
+  });
+
+  it("uses the shared rollout policy for invite email deliveries", () => {
+    process.env.NOTIFICATION_PROVIDER = "resend";
+    process.env.NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT = "50";
+
+    expect(resolveDocumentInviteEmailProvider({ rolloutKey: "user-0" })).toBe("resend");
+    expect(resolveDocumentInviteEmailProvider({ rolloutKey: "alpha" })).toBe("internal");
   });
 
   it("creates stable token hashes and opaque access tokens", () => {

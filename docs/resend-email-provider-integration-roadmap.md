@@ -15,7 +15,8 @@ Move DARCI notification delivery from the internal adapter to production-grade e
 5. Phase 4 template rendering is complete through DB-backed server rendering and admin preview.
 6. Phase 5 observability and contract completion is materially complete.
 7. Phase 6 test coverage is complete.
-8. Remaining implementation work is now centered on rollout controls and incident/runbook coverage.
+8. Phase 7 rollout controls and Phase 8 incident/runbook coverage are complete.
+9. Remaining work is operational rollout: keep staging stable, then run the production canary under the documented controls.
 
 ## Scope
 
@@ -250,12 +251,32 @@ Exit criteria:
 
 Current status:
 
-1. Still open.
-2. Environment-driven provider selection exists, but formal rollout gating and canary policy are not yet documented or enforced.
+1. Complete as of 2026-04-29.
+2. Shared provider policy now gates Resend by configured provider, optional environment allow-list, optional emergency enable flag, and rollout percentage.
+3. Runtime notification deliveries and document invite deliveries both resolve their provider through the shared policy before rows are queued.
+4. Focused unit coverage verifies default internal fallback, full Resend enablement, emergency disable, environment gating, zero percent rollout, missing canary keys, and deterministic partial rollout selection.
+
+Rollout controls:
+
+1. Set `NOTIFICATION_PROVIDER=resend` to allow the Resend adapter to be selected. Any other value falls back to `internal`.
+2. Set `NOTIFICATION_PROVIDER_ALLOWED_ENVS=staging` for staging-only enablement, or `staging,production` once production canary begins. `NOTIFICATION_RESEND_ALLOWED_ENVS` is supported as an alias.
+3. Set `NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT=100` for full rollout, `0` for full internal fallback, or a canary value such as `5` or `10` for production. `NOTIFICATION_RESEND_ROLLOUT_PERCENT` is supported as an alias.
+4. Set `NOTIFICATION_PROVIDER_RESEND_ENABLED=false` for an emergency off switch without changing the main provider value. `NOTIFICATION_RESEND_ENABLED` is supported as an alias.
+5. Rollback path: set `NOTIFICATION_PROVIDER=internal` or `NOTIFICATION_PROVIDER_RESEND_ENABLED=false`, then force a fresh API and worker deployment so the task environment is reloaded.
+
+Production canary policy:
+
+1. Start production at `NOTIFICATION_PROVIDER_ALLOWED_ENVS=staging,production` and `NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT=5`.
+2. Promote to 25%, 50%, and 100% only after one normal traffic window without elevated send failures, webhook lag, bounces, or complaints.
+3. Roll back immediately if send failures exceed the internal baseline, webhook reconciliation lags beyond the retry window, complaint rate increases materially, or user-visible invite/signing delivery issues appear.
 
 ## Phase 8: Runbook and Incident Response
 
 Duration: 0.5 day
+
+Execution artifact:
+
+1. docs/resend-email-incident-runbook.md
 
 Tasks:
 
@@ -270,8 +291,10 @@ Exit criteria:
 
 Current status:
 
-1. Still open.
-2. Operational instructions are partially captured across docs but not yet consolidated into a runbook.
+1. Complete as of 2026-04-29.
+2. `docs/resend-email-incident-runbook.md` now documents first response, rollback controls, reconciliation flow, SQL checks, incident playbooks, recovery verification, and staging smoke steps.
+3. Covered incident classes include Resend API outage, webhook lag or failure, bounce spike, complaint spike, DNS or sender-domain regression, and template rendering or payload regression.
+4. Recovery guidance preserves existing outbox state and uses provider fallback for newly queued deliveries.
 
 ## Definition of Done
 
@@ -285,12 +308,13 @@ Current status:
 
 ## Recommended Execution Order From Here
 
-1. Phase 7
-2. Phase 8
+1. Deploy Phase 7 and Phase 8 changes to staging.
+2. Keep staging at full Resend rollout while monitoring webhook reconciliation and failed deliveries.
+3. Start production canary at the documented percentage only after staging is stable.
 
 ## Immediate Next Step
 
-Define and verify rollout controls, including staging enablement, rollback to `NOTIFICATION_PROVIDER=internal`, and the production canary policy.
+After deployment, verify staging with a real outbox-backed invite or notification, then confirm the delivery row, Resend message id, and webhook event ledger reconcile end to end.
 
 ## Webhook Activation Checklist (Operator)
 
