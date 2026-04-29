@@ -432,22 +432,33 @@ const formatExecutionDateForField = (value: string | null | undefined) => {
 const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
   const metadata = getArtifactMetadata(artifact);
   const localTemplatePath = asTrimmedString(metadata.localTemplatePath);
-  if (!localTemplatePath) {
-    return null;
+  if (localTemplatePath) {
+    const candidatePaths = path.isAbsolute(localTemplatePath)
+      ? [localTemplatePath]
+      : [
+          path.resolve(process.cwd(), localTemplatePath),
+          path.resolve(process.cwd(), "..", localTemplatePath),
+        ];
+
+    for (const candidatePath of new Set(candidatePaths)) {
+      try {
+        return await readFile(candidatePath, "utf8");
+      } catch {
+        continue;
+      }
+    }
   }
 
-  const candidatePaths = path.isAbsolute(localTemplatePath)
-    ? [localTemplatePath]
-    : [
-        path.resolve(process.cwd(), localTemplatePath),
-        path.resolve(process.cwd(), "..", localTemplatePath),
-      ];
-
-  for (const candidatePath of new Set(candidatePaths)) {
+  const storageTemplatePath = asTrimmedString(artifact.artifact_storage_path);
+  if (storageTemplatePath) {
     try {
-      return await readFile(candidatePath, "utf8");
+      const sourceBuffer = await downloadDocumentObject(storageTemplatePath);
+      const sourceText = sourceBuffer.toString("utf8");
+      if (sourceText.trim().length > 0) {
+        return sourceText;
+      }
     } catch {
-      continue;
+      // Fallback to null so caller emits the existing renderer error message.
     }
   }
 
