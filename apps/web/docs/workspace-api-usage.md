@@ -129,7 +129,7 @@ Issuer and operator APIs:
 
 Usage notes:
 
-1. If `/app/sign` is opened with an `inviteToken` search param, validate that token first through `GET /invites/public/{token}` before assuming an authenticated document-signing session already exists.
+1. Invite links land on `/app/invite?token={token}`. Validate that token first through `GET /invites/public/{token}` before entering the document-signing session.
 2. Use `invite.status`, `invite.claimMode`, `invite.token.canClaim`, and `invite.latestClaim` from the public validate response as the source of truth for entry gating, signup prompts, and already-claimed messaging.
 3. When a logged-in session exists, pass the normal bearer token to the public invite endpoints so `existing_account_only` invites can be resolved without a second client-side identity check.
 4. Call `POST /invites/public/{token}/claim` when the signer chooses to continue, completes signup, or attaches an existing session to the invite.

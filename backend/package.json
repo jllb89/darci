@@ -14,6 +14,8 @@
     "test:smoke:phase4": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase4-notarization.ts",
     "test:smoke:phase5": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase5-meeting.ts",
     "test:smoke:phase6": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase6-finalization.ts",
+    "notifications:run-due": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/run-notification-outbox.ts",
+    "notifications:run-invites": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/run-notification-outbox.ts --kind=invite --limit=10",
     "test:integration:staging": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
     "test": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run",
     "test:watch": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs"

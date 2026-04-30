@@ -948,12 +948,41 @@ const insertOutboundEvents = async (
   return castValue<OutboundMessageEventRecord[]>(data ?? []);
 };
 
-const listDueNotificationJobs = async (input: { limit: number; now: string }) => {
-  const { data, error } = await supabaseAdmin
+const listDueNotificationJobs = async (input: {
+  limit: number;
+  now: string;
+  jobKind?: string | null | undefined;
+  documentId?: string | null | undefined;
+  notificationJobIds?: string[] | null | undefined;
+}) => {
+  let query = supabaseAdmin
     .from("notification_jobs")
     .select(notificationJobSelect)
     .in("status", Array.from(queueableJobStatuses))
-    .lte("scheduled_for", input.now)
+    .lte("scheduled_for", input.now);
+
+  const jobKind = input.jobKind?.trim() ?? "";
+  if (jobKind) {
+    query = query.eq("job_kind", jobKind);
+  }
+
+  const documentId = input.documentId?.trim() ?? "";
+  if (documentId) {
+    query = query.eq("document_id", documentId);
+  }
+
+  const notificationJobIds = Array.from(
+    new Set(
+      (input.notificationJobIds ?? [])
+        .map((jobId) => jobId.trim())
+        .filter((jobId) => jobId.length > 0),
+    ),
+  );
+  if (notificationJobIds.length > 0) {
+    query = query.in("id", notificationJobIds);
+  }
+
+  const { data, error } = await query
     .order("scheduled_for", { ascending: true })
     .order("created_at", { ascending: true })
     .limit(input.limit);
@@ -1290,12 +1319,21 @@ const processClaimedNotificationJob = async (input: {
 export const runDueNotificationJobs = async (input?: {
   limit?: number | null | undefined;
   workerId?: string | null | undefined;
+  jobKind?: string | null | undefined;
+  documentId?: string | null | undefined;
+  notificationJobIds?: string[] | null | undefined;
 }) => {
   assertSupabaseConfigured();
 
   const limit = Math.min(Math.max(input?.limit ?? 10, 1), 100);
   const now = new Date().toISOString();
-  const dueJobs = await listDueNotificationJobs({ limit, now });
+  const dueJobs = await listDueNotificationJobs({
+    limit,
+    now,
+    jobKind: input?.jobKind,
+    documentId: input?.documentId,
+    notificationJobIds: input?.notificationJobIds,
+  });
   const results: NotificationJobProcessSummary[] = [];
   let claimedCount = 0;
 

@@ -233,6 +233,15 @@ const documentTypeLabels: Record<string, string> = {
   public_instrument: "public instrument",
 };
 
+const partyRoleLabels: Record<string, string> = {
+  principal: "Principal",
+  agent: "Agent",
+  successor_agent: "Successor agent",
+  grantor: "Grantor",
+  trustee: "Trustee",
+  successor_trustee: "Successor trustee",
+};
+
 export type DocumentInviteRecipient = {
   id: string;
   targetUserId: string | null;
@@ -403,6 +412,36 @@ const getDocumentLabel = (document: DocumentRecord) => {
   return "document";
 };
 
+const getDocumentTypeLabel = (document: DocumentRecord) => {
+  const mappedLabel = document.document_type ? documentTypeLabels[document.document_type] : undefined;
+  if (mappedLabel) {
+    return mappedLabel;
+  }
+
+  if (document.document_type) {
+    return humanizeToken(document.document_type);
+  }
+
+  return getDocumentLabel(document);
+};
+
+const getRoleLabel = (input: {
+  partyRole?: string | null | undefined;
+  obligationType?: string | null | undefined;
+}) => {
+  const partyRole = input.partyRole?.trim() ?? "";
+  if (partyRole) {
+    return partyRoleLabels[partyRole] ?? humanizeToken(partyRole);
+  }
+
+  const obligationType = input.obligationType?.trim() ?? "";
+  if (obligationType) {
+    return humanizeToken(obligationType);
+  }
+
+  return "Signer";
+};
+
 const toDisplayName = (user: UserRow | null) => {
   if (!user) {
     return null;
@@ -447,8 +486,8 @@ const getAppBaseUrl = () => {
 };
 
 const buildInviteAccessUrl = (token: string) => {
-  const url = new URL("/app/sign", `${getAppBaseUrl()}/`);
-  url.searchParams.set("inviteToken", token);
+  const url = new URL("/app/invite", `${getAppBaseUrl()}/`);
+  url.searchParams.set("token", token);
   return url.toString();
 };
 
@@ -948,36 +987,46 @@ const createInvitePayload = (input: {
   document: DocumentRecord;
   accessUrl: string;
   expiresAt: string;
+  partyRole?: string | null | undefined;
+  obligationType?: string | null | undefined;
 }) => {
   const requesterName = toDisplayName(input.requester) ?? "DARCi";
   const firstName = toFirstName({
     displayName: input.recipient.display_name,
     email: input.recipient.delivery_address,
   });
+  const documentName = getDocumentLabel(input.document);
+  const documentType = getDocumentTypeLabel(input.document);
+  const roleLabel = getRoleLabel({
+    partyRole: input.partyRole,
+    obligationType: input.obligationType,
+  });
+  const basePayload = {
+    firstName,
+    requesterName,
+    documentName,
+    documentType,
+    roleLabel,
+    expiresAt: input.expiresAt,
+  } satisfies JsonObject;
 
   if (input.templateKey === "signer_signup_required_email") {
     return {
-      firstName,
+      ...basePayload,
       signupUrl: input.accessUrl,
-      documentName: getDocumentLabel(input.document),
     } satisfies JsonObject;
   }
 
   if (input.templateKey === "signer_reminder_email") {
     return {
-      firstName,
-      documentName: getDocumentLabel(input.document),
+      ...basePayload,
       inviteUrl: input.accessUrl,
-      expiresAt: input.expiresAt,
     } satisfies JsonObject;
   }
 
   return {
-    firstName,
-    requesterName,
+    ...basePayload,
     inviteUrl: input.accessUrl,
-    expiresAt: input.expiresAt,
-    documentName: getDocumentLabel(input.document),
   } satisfies JsonObject;
 };
 
@@ -1271,10 +1320,17 @@ export const createDocumentInvite = async (input: {
         document,
         accessUrl,
         expiresAt,
+        partyRole: signer.party_role,
+        obligationType: signer.obligation_type,
       }),
       metadata: {
         inviteId: inviteRow.id,
         issuedAt: createdAt,
+        documentType: getDocumentTypeLabel(document),
+        roleLabel: getRoleLabel({
+          partyRole: signer.party_role,
+          obligationType: signer.obligation_type,
+        }),
       },
     });
   } catch (error) {
@@ -1457,10 +1513,17 @@ export const resendDocumentInvite = async (input: {
       document: context.document,
       accessUrl,
       expiresAt,
+      partyRole: context.detail.partyRole,
+      obligationType: context.detail.obligationType,
     }),
     metadata: {
       inviteId: context.invite.id,
       resend: true,
+      documentType: getDocumentTypeLabel(context.document),
+      roleLabel: getRoleLabel({
+        partyRole: context.detail.partyRole,
+        obligationType: context.detail.obligationType,
+      }),
     },
   });
 

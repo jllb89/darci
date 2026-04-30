@@ -112,6 +112,13 @@ type SigningCompletion = {
   canConfirm: boolean;
 };
 
+type SigningViewerAccess = {
+  kind: "owner" | "admin" | "service_role" | "invited_signer";
+  inviteId: string | null;
+  documentOutputSignerId: string | null;
+  documentPartyId: string | null;
+};
+
 type SigningPayload = {
   document?: {
     id: string;
@@ -135,6 +142,7 @@ type SigningPayload = {
     signatures: SigningSignature[];
     groups: SigningGroup[];
     completion: SigningCompletion;
+    viewerAccess?: SigningViewerAccess;
   };
   message?: string;
 };
@@ -162,6 +170,7 @@ type SignatureResponse = {
     id: string;
     status: string;
   };
+  remainingSignerInvites?: RemainingSignerInviteDispatchResponse | null;
   message?: string;
 };
 
@@ -182,40 +191,19 @@ type SavedSignaturesPayload = {
   message?: string;
 };
 
-type DocumentParty = {
-  id: string;
-  partyRole: string;
-  fullName: string;
-  email: string | null;
-};
-
-type DocumentPartiesPayload = {
-  parties?: DocumentParty[];
-  message?: string;
-};
-
-type InviteListItem = {
-  id: string;
-  documentOutputSignerId: string | null;
-  status: string;
-};
-
-type InviteListPayload = {
-  invites?: InviteListItem[];
-  message?: string;
-};
-
 type InviteDispatchSummary = {
   status: "idle" | "running" | "done" | "partial" | "error";
   message: string | null;
 };
 
-type IntakeDraftPayload = {
-  draft?: {
-    canonicalAnswers?: Record<string, unknown>;
-    answers?: Record<string, unknown>;
-  } | null;
-  message?: string;
+type RemainingSignerInviteDispatchResponse = {
+  trigger?: {
+    shouldQueueInvites?: boolean;
+    blockedReason?: string | null;
+  };
+  invited?: Array<{ documentOutputSignerId: string; recipientEmail: string }>;
+  skipped?: Array<{ documentOutputSignerId: string; reason: string }>;
+  failures?: Array<{ documentOutputSignerId: string; errorMessage: string }>;
 };
 
 type CaptureMode = "upload" | "type" | "draw" | "saved";
@@ -343,113 +331,31 @@ const normalizePartyName = (value: string | null | undefined) => {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 };
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const buildRemainingSignerInviteMessage = (
+  remainingSignerInvites: RemainingSignerInviteDispatchResponse,
+) => {
+  const invitedCount = remainingSignerInvites.invited?.length ?? 0;
+  const skippedCount = remainingSignerInvites.skipped?.filter(
+    (skipped) => skipped.reason !== "creator_obligation",
+  ).length ?? 0;
+  const failureCount = remainingSignerInvites.failures?.length ?? 0;
+  const fragments: string[] = [];
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-};
-
-const parseJsonUnknown = (value: string): unknown => {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
+  if (invitedCount > 0) {
+    fragments.push(`queued ${invitedCount}`);
   }
-};
-
-const extractEmailFromUnknown = (value: unknown): string | null => {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    if (emailPattern.test(trimmed)) {
-      return trimmed;
-    }
-
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      return extractEmailFromUnknown(parseJsonUnknown(trimmed));
-    }
-
-    return null;
+  if (skippedCount > 0) {
+    fragments.push(`skipped ${skippedCount}`);
+  }
+  if (failureCount > 0) {
+    fragments.push(`${failureCount} failed`);
   }
 
-  if (isRecord(value)) {
-    const emailValue = value.email;
-    if (typeof emailValue === "string" && emailPattern.test(emailValue.trim())) {
-      return emailValue.trim();
-    }
-
-    return null;
+  if (fragments.length === 0) {
+    return "Remaining signer invites are already up to date.";
   }
 
-  return null;
-};
-
-const parsePeopleEntries = (value: unknown) => {
-  const entries = Array.isArray(value) ? value : [];
-
-  return entries
-    .map((entry) => {
-      const parsedEntry =
-        typeof entry === "string" && (entry.trim().startsWith("{") || entry.trim().startsWith("["))
-          ? parseJsonUnknown(entry)
-          : entry;
-
-      if (!isRecord(parsedEntry)) {
-        return null;
-      }
-
-      const fullName = typeof parsedEntry.fullName === "string" ? parsedEntry.fullName.trim() : "";
-      const email = extractEmailFromUnknown(parsedEntry.email);
-
-      if (!fullName || !email) {
-        return null;
-      }
-
-      return { fullName, email };
-    })
-    .filter((value): value is { fullName: string; email: string } => value !== null);
-};
-
-const buildCanonicalSignerEmailMap = (canonicalAnswers: Record<string, unknown> | null) => {
-  const emailMap = new Map<string, string>();
-  if (!canonicalAnswers) {
-    return emailMap;
-  }
-
-  const addEntry = (partyRole: string, fullName: string | null, email: string | null) => {
-    const normalizedName = normalizePartyName(fullName);
-    const normalizedEmail = email?.trim() ?? "";
-    if (!normalizedName || !normalizedEmail) {
-      return;
-    }
-
-    emailMap.set(`${partyRole}:${normalizedName}`, normalizedEmail);
-  };
-
-  const principalName = typeof canonicalAnswers.principal_full_name === "string"
-    ? canonicalAnswers.principal_full_name
-    : null;
-  const principalEmail = extractEmailFromUnknown(canonicalAnswers.principal_contact);
-  addEntry("principal", principalName, principalEmail);
-
-  const agentName = typeof canonicalAnswers.agent_full_name === "string"
-    ? canonicalAnswers.agent_full_name
-    : null;
-  const agentEmail = extractEmailFromUnknown(canonicalAnswers.agent_contact);
-  addEntry("agent", agentName, agentEmail);
-
-  for (const trustee of parsePeopleEntries(canonicalAnswers.trustees)) {
-    addEntry("trustee", trustee.fullName, trustee.email);
-  }
-
-  for (const trustee of parsePeopleEntries(canonicalAnswers.successor_trustees)) {
-    addEntry("successor_trustee", trustee.fullName, trustee.email);
-  }
-
-  return emailMap;
+  return `Remaining signer invites: ${fragments.join(", ")}.`;
 };
 
 const getCanvasCoordinates = (
@@ -501,8 +407,32 @@ export default function SignPage() {
     status: "idle",
     message: null,
   });
-  const dispatchedSignerIdsRef = useRef(new Set<string>());
-  const inviteDispatchInFlightRef = useRef(false);
+
+  const applyRemainingSignerInviteDispatchSummary = useCallback(
+    (remainingSignerInvites?: RemainingSignerInviteDispatchResponse | null) => {
+      if (!remainingSignerInvites) {
+        return;
+      }
+
+      const invitedCount = remainingSignerInvites.invited?.length ?? 0;
+      const failureCount = remainingSignerInvites.failures?.length ?? 0;
+      const skippedCount = remainingSignerInvites.skipped?.filter(
+        (skipped) => skipped.reason !== "creator_obligation",
+      ).length ?? 0;
+      const message = buildRemainingSignerInviteMessage(remainingSignerInvites);
+      const status: InviteDispatchSummary["status"] =
+        failureCount > 0 ? "error" : skippedCount > 0 ? "partial" : "done";
+
+      setInviteDispatchSummary({ status, message });
+
+      if (invitedCount > 0) {
+        showToast({ tone: "success", message });
+      } else if (failureCount > 0) {
+        showToast({ tone: "warning", message });
+      }
+    },
+    [showToast],
+  );
 
   const fetchSigning = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -558,13 +488,14 @@ export default function SignPage() {
       status: "idle",
       message: null,
     });
-    dispatchedSignerIdsRef.current.clear();
-    inviteDispatchInFlightRef.current = false;
 
     void fetchSigning();
   }, [accessToken, documentId, fetchSigning]);
 
-  const allSignatures = payload?.signing?.signatures ?? [];
+  const allSignatures = useMemo(
+    () => payload?.signing?.signatures ?? [],
+    [payload?.signing?.signatures],
+  );
   const primarySelfSignature = useMemo(
     () =>
       allSignatures.find((signature) => signature.partyRole === "principal") ??
@@ -805,7 +736,9 @@ export default function SignPage() {
   const typedKind = activeSignature
     ? (typedKinds[activeSignature.outputSignerId] ?? activeSignature.typedKind ?? "name")
     : "name";
+  const isInvitedSigner = payload?.signing?.viewerAccess?.kind === "invited_signer";
   const canFinalizeSigningSet =
+    !isInvitedSigner &&
     hiddenSignatures.length === 0 &&
     payload?.signing?.state !== "confirmed" &&
     Boolean(payload?.signing?.completion.canConfirm);
@@ -816,15 +749,29 @@ export default function SignPage() {
   const selectedSavedSignature = savedSignatures.find(
     (savedSignature) => savedSignature.id === selectedSavedSignatureId,
   ) ?? null;
-  const signingStateLabel = payload?.signing?.state === "confirmed"
-    ? "Signing is confirmed for this document set."
-    : payload?.signing?.state === "preparing"
-      ? "DARCi is preparing the official signing PDF set."
-      : principalSigningComplete
-        ? hiddenSignatures.length > 0
-          ? "Your signature is complete. The remaining signers will be handled in the next workflow step."
-          : "Your signature is complete and the signing set is ready to confirm."
-        : "Only your signature is captured on this page right now.";
+  const signingStateLabel = (() => {
+    if (payload?.signing?.state === "confirmed") {
+      return "Signing is confirmed for this document set.";
+    }
+
+    if (payload?.signing?.state === "preparing") {
+      return "DARCi is preparing the official signing PDF set.";
+    }
+
+    if (isInvitedSigner) {
+      return principalSigningComplete
+        ? "Your assigned signature is complete."
+        : "Complete the signature assigned to you.";
+    }
+
+    if (principalSigningComplete) {
+      return hiddenSignatures.length > 0
+        ? "Your signature is complete. The remaining signers will be handled in the next workflow step."
+        : "Your signature is complete and the signing set is ready to confirm.";
+    }
+
+    return "Only your signature is captured on this page right now.";
+  })();
 
   const clearCanvas = useCallback(() => {
     resetCanvasSurface();
@@ -953,205 +900,6 @@ export default function SignPage() {
     await fetchSigning({ silent: true });
   }, [fetchSigning]);
 
-  const dispatchRemainingSignerInvites = useCallback(async () => {
-    if (!accessToken || !documentId || !payload?.signing) {
-      return;
-    }
-
-    if (payload.signing.state === "confirmed") {
-      return;
-    }
-
-    if (!principalSigningComplete) {
-      return;
-    }
-
-    const pendingHiddenSignatures = hiddenSignatures.filter(
-      (signature) => signature.status !== "captured",
-    );
-    if (pendingHiddenSignatures.length === 0) {
-      return;
-    }
-
-    const undispatchedSignatures = pendingHiddenSignatures.filter(
-      (signature) => !dispatchedSignerIdsRef.current.has(signature.outputSignerId),
-    );
-    if (undispatchedSignatures.length === 0 || inviteDispatchInFlightRef.current) {
-      return;
-    }
-
-    inviteDispatchInFlightRef.current = true;
-    setInviteDispatchSummary({
-      status: "running",
-      message: "Notifying remaining signers...",
-    });
-
-    try {
-      const [draftResponse, partiesResponse, invitesResponse] = await Promise.all([
-        fetchWithTokenRefresh(
-          `${apiBaseUrl}/documents/${documentId}/intake-draft`,
-          accessToken,
-          { cache: "no-store" },
-        ),
-        fetchWithTokenRefresh(
-          `${apiBaseUrl}/documents/${documentId}/parties`,
-          accessToken,
-          { cache: "no-store" },
-        ),
-        fetchWithTokenRefresh(
-          `${apiBaseUrl}/invites?documentId=${encodeURIComponent(documentId)}&limit=100`,
-          accessToken,
-          { cache: "no-store" },
-        ),
-      ]);
-
-      const draftPayload = (await draftResponse.json().catch(() => null)) as
-        | IntakeDraftPayload
-        | null;
-      const canonicalEmailMap = draftResponse.ok
-        ? buildCanonicalSignerEmailMap(draftPayload?.draft?.canonicalAnswers ?? null)
-        : new Map<string, string>();
-
-      const partiesPayload = (await partiesResponse.json().catch(() => null)) as
-        | DocumentPartiesPayload
-        | null;
-      if (!partiesResponse.ok) {
-        throw new Error(partiesPayload?.message ?? "Failed to load document parties.");
-      }
-
-      const invitesPayload = (await invitesResponse.json().catch(() => null)) as
-        | InviteListPayload
-        | null;
-      if (!invitesResponse.ok) {
-        throw new Error(invitesPayload?.message ?? "Failed to load existing invites.");
-      }
-
-      const parties = partiesPayload?.parties ?? [];
-      const existingInviteSignerIds = new Set(
-        (invitesPayload?.invites ?? [])
-          .map((invite) => invite.documentOutputSignerId)
-          .filter((value): value is string => typeof value === "string" && value.length > 0),
-      );
-
-      for (const signerId of existingInviteSignerIds) {
-        dispatchedSignerIdsRef.current.add(signerId);
-      }
-
-      let createdCount = 0;
-      let skippedCount = 0;
-      let missingEmailCount = 0;
-      const missingEmailSignerNames: string[] = [];
-
-      for (const signature of undispatchedSignatures) {
-        if (existingInviteSignerIds.has(signature.outputSignerId)) {
-          skippedCount += 1;
-          continue;
-        }
-
-        const matchingParty = parties.find((party) => {
-          return (
-            normalizePartyName(party.fullName) === normalizePartyName(signature.partyName) &&
-            party.partyRole === signature.partyRole
-          );
-        });
-
-        const canonicalKey = `${signature.partyRole}:${normalizePartyName(signature.partyName)}`;
-        const canonicalEmail = canonicalEmailMap.get(canonicalKey) ?? "";
-        const recipientEmail = canonicalEmail || (matchingParty?.email?.trim() ?? "");
-        if (!recipientEmail) {
-          missingEmailCount += 1;
-          missingEmailSignerNames.push(signature.partyName);
-          continue;
-        }
-
-        const response = await fetchWithTokenRefresh(`${apiBaseUrl}/invites`, accessToken, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            documentId,
-            documentOutputSignerId: signature.outputSignerId,
-            recipientEmail,
-            recipientName: signature.partyName,
-            claimMode: "required_signup",
-            idempotencyKey: `signing-remaining:${documentId}:${signature.outputSignerId}`,
-          }),
-        });
-
-        const createPayload = (await response.json().catch(() => null)) as
-          | { message?: string }
-          | null;
-
-        if (!response.ok) {
-          throw new Error(createPayload?.message ?? "Failed to issue signer invite.");
-        }
-
-        createdCount += 1;
-        dispatchedSignerIdsRef.current.add(signature.outputSignerId);
-      }
-
-      const fragments: string[] = [];
-      if (createdCount > 0) {
-        fragments.push(`sent ${createdCount}`);
-      }
-      if (skippedCount > 0) {
-        fragments.push(`skipped ${skippedCount} already invited`);
-      }
-      if (missingEmailCount > 0) {
-        const uniqueMissingNames = Array.from(new Set(missingEmailSignerNames));
-        const namesPreview = uniqueMissingNames.slice(0, 3).join(", ");
-        const namesSuffix =
-          uniqueMissingNames.length > 3
-            ? ` (+${uniqueMissingNames.length - 3} more)`
-            : "";
-        fragments.push(
-          `${missingEmailCount} missing email (${namesPreview}${namesSuffix})`,
-        );
-      }
-
-      const summaryMessage =
-        fragments.length > 0
-          ? `Remaining signer invites: ${fragments.join(", ")}.`
-          : "Remaining signer invites are already up to date.";
-
-      const summaryStatus: InviteDispatchSummary["status"] =
-        missingEmailCount > 0 || skippedCount > 0 ? "partial" : "done";
-
-      setInviteDispatchSummary({
-        status: summaryStatus,
-        message: summaryMessage,
-      });
-
-      if (createdCount > 0) {
-        showToast({ tone: "success", message: summaryMessage });
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to notify remaining signers.";
-      setInviteDispatchSummary({
-        status: "error",
-        message,
-      });
-      showToast({ tone: "error", message });
-    } finally {
-      inviteDispatchInFlightRef.current = false;
-    }
-  }, [
-    accessToken,
-    documentId,
-    hiddenSignatures,
-    payload?.signing,
-    principalSigningComplete,
-    showToast,
-  ]);
-
-  useEffect(() => {
-    void dispatchRemainingSignerInvites();
-  }, [dispatchRemainingSignerInvites]);
-
   const handleUploadFile = useCallback(
     async (file: File) => {
       if (!accessToken || !documentId || !activeSignature || isSavingCapture) {
@@ -1221,6 +969,7 @@ export default function SignPage() {
           throw new Error(finalizePayload?.message ?? "Failed to finalize signature upload.");
         }
 
+        applyRemainingSignerInviteDispatchSummary(finalizePayload?.remainingSignerInvites);
         showToast({ tone: "success", message: "Uploaded signature saved." });
         await refreshAfterCapture();
         void fetchSavedSignatures();
@@ -1237,6 +986,7 @@ export default function SignPage() {
     [
       accessToken,
       activeSignature,
+      applyRemainingSignerInviteDispatchSummary,
       documentId,
       fetchSavedSignatures,
       isSavingCapture,
@@ -1282,6 +1032,7 @@ export default function SignPage() {
         throw new Error(responsePayload?.message ?? "Failed to save typed signature.");
       }
 
+      applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
       showToast({ tone: "success", message: "Typed signature saved." });
       await refreshAfterCapture();
       void fetchSavedSignatures();
@@ -1296,6 +1047,7 @@ export default function SignPage() {
   }, [
     accessToken,
     activeSignature,
+    applyRemainingSignerInviteDispatchSummary,
     documentId,
     fetchSavedSignatures,
     isSavingCapture,
@@ -1346,6 +1098,7 @@ export default function SignPage() {
         throw new Error(responsePayload?.message ?? "Failed to save drawn signature.");
       }
 
+      applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
       clearCanvas();
       showToast({ tone: "success", message: "Drawn signature saved." });
       await refreshAfterCapture();
@@ -1361,6 +1114,7 @@ export default function SignPage() {
   }, [
     accessToken,
     activeSignature,
+    applyRemainingSignerInviteDispatchSummary,
     buildDrawSignatureDataUrl,
     clearCanvas,
     documentId,
@@ -1415,6 +1169,7 @@ export default function SignPage() {
           throw new Error(responsePayload?.message ?? "Failed to apply saved signature.");
         }
 
+        applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
         showToast({ tone: "success", message: "Saved signature applied." });
         await refreshAfterCapture();
         setSelectedSavedSignatureId(null);
@@ -1430,6 +1185,7 @@ export default function SignPage() {
     [
       accessToken,
       activeSignature,
+      applyRemainingSignerInviteDispatchSummary,
       documentId,
       isSavingCapture,
       refreshAfterCapture,
@@ -1591,7 +1347,9 @@ export default function SignPage() {
             <div className="space-y-2 pb-2">
               <div className="text-2xl font-medium">Sign documents</div>
               <div className="text-sm text-Color-Neutral">
-                {hiddenSignatures.length > 0
+                {isInvitedSigner
+                  ? "Complete the signature assigned to your invitation."
+                  : hiddenSignatures.length > 0
                   ? "Complete your own signature step first. The remaining signers will follow separately."
                   : "Complete your signature on the prepared document set."}
               </div>
@@ -1948,7 +1706,16 @@ export default function SignPage() {
               </div>
             ) : null}
 
-            {payload?.signing?.state === "confirmed" || (principalSigningComplete && hiddenSignatures.length > 0) ? (
+            {isInvitedSigner && principalSigningComplete ? (
+              <div className={`${signCardBaseClass} border-emerald-200 bg-emerald-50`}>
+                <div className="text-sm font-medium text-emerald-800">
+                  Signature saved
+                </div>
+                <div className="mt-3 text-sm leading-6 text-emerald-800/90">
+                  Your assigned signature has been saved on this document.
+                </div>
+              </div>
+            ) : payload?.signing?.state === "confirmed" || (principalSigningComplete && hiddenSignatures.length > 0) ? (
               <div className={`${signCardBaseClass} border-emerald-200 bg-emerald-50`}>
                 <div className="text-sm font-medium text-emerald-800">
                   {payload?.signing?.state === "confirmed"
@@ -1975,7 +1742,7 @@ export default function SignPage() {
                   Complete your own signature first. The remaining signer workflow stays out of view on this page for now.
                 </div>
               </div>
-            ) : (
+            ) : isInvitedSigner ? null : (
               <div className={signCardBaseClass}>
                 <div className="text-sm font-medium text-Color-Scheme-1-Text">Confirm signing set</div>
                 <div className="mt-3 text-sm leading-6 text-Color-Neutral">

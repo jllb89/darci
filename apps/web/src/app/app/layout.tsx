@@ -71,6 +71,7 @@ export default function AppLayout({
   const user = useStoredUser();
   const role: StoredUserRole = user?.role ?? "member";
   const availableRoles = getAvailableRoles(user, role);
+  const isPublicInviteRoute = pathname === "/app/invite";
   const profileName = "Name Placeholder";
   const profileEmail = user?.email ?? "email@example.com";
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -106,10 +107,10 @@ export default function AppLayout({
   }, []);
 
   useEffect(() => {
-    if (hasHydrated && !isAuthorized) {
+    if (hasHydrated && !isAuthorized && !isPublicInviteRoute) {
       router.replace("/start");
     }
-  }, [hasHydrated, isAuthorized, router]);
+  }, [hasHydrated, isAuthorized, isPublicInviteRoute, router]);
 
   useEffect(() => {
     if (!toast) {
@@ -201,6 +202,10 @@ export default function AppLayout({
 
   if (!hasHydrated) {
     return null;
+  }
+
+  if (isPublicInviteRoute) {
+    return <>{children}</>;
   }
 
   if (!isAuthorized) {

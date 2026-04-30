@@ -1,30 +1,57 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { hasStoredSession, setStoredAuth } from "@/lib/auth";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
 
-export default function StartAuthPage() {
-  const [isSignUp, setIsSignUp] = useState(false);
+const sanitizeReturnTo = (value: string | null) => {
+  const candidate = value?.trim() ?? "";
+  if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
+    return "/app";
+  }
+
+  const isAppRoute =
+    candidate === "/app" || candidate.startsWith("/app/") || candidate.startsWith("/app?");
+
+  if (!isAppRoute) {
+    return "/app";
+  }
+
+  return candidate;
+};
+
+function StartAuthPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = sanitizeReturnTo(searchParams.get("returnTo"));
+  const [isSignUp, setIsSignUp] = useState(searchParams.get("mode") === "signup");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     if (hasStoredSession()) {
-      router.replace("/app");
+      router.replace(returnTo);
     }
-  }, [router]);
+  }, [returnTo, router]);
+
+  useEffect(() => {
+    const mode = searchParams.get("mode");
+    if (mode === "signup") {
+      setIsSignUp(true);
+    } else if (mode === "login") {
+      setIsSignUp(false);
+    }
+  }, [searchParams]);
 
   const handleModeToggle = () => {
     setIsSignUp((current) => !current);
@@ -71,7 +98,7 @@ export default function StartAuthPage() {
         user: payload.user,
       });
 
-      router.push("/app");
+      router.push(returnTo);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Request failed");
     } finally {
@@ -102,9 +129,13 @@ export default function StartAuthPage() {
                   {isSignUp ? "Join DARCi" : "Access DARCi"}
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-Color-Neutral">
-                  {isSignUp
-                    ? "Create your account to start notarizing documents."
-                    : "Enter your credentials to begin notarizing documents."}
+                  {returnTo.startsWith("/app/invite")
+                    ? isSignUp
+                      ? "Create your account to continue to the document signature."
+                      : "Sign in to continue to the document signature."
+                    : isSignUp
+                      ? "Create your account to start notarizing documents."
+                      : "Enter your credentials to begin notarizing documents."}
                 </p>
               </div>
 
@@ -251,5 +282,13 @@ export default function StartAuthPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function StartAuthPage() {
+  return (
+    <Suspense fallback={null}>
+      <StartAuthPageContent />
+    </Suspense>
   );
 }

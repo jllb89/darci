@@ -208,7 +208,7 @@ export default function StartDocumentPage() {
   const [isLoadingProductFlowModes, setIsLoadingProductFlowModes] = useState(false);
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
   const [selectedJurisdiction, setSelectedJurisdiction] = useState("");
-  const [isMockDataEnabled, setIsMockDataEnabled] = useState(true);
+  const [isMockDataEnabled, setIsMockDataEnabled] = useState(false);
   const [isActiveSourceVisible, setIsActiveSourceVisible] = useState(false);
 
   const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);

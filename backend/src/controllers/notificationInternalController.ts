@@ -9,6 +9,8 @@ import { sendValidationError } from "../utils/validation";
 
 const runDueNotificationJobsSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(10),
+  jobKind: z.string().trim().min(1).optional(),
+  documentId: z.string().trim().min(1).optional(),
 });
 
 const deliveryParamsSchema = z.object({
@@ -62,6 +64,8 @@ export const runDueNotificationJobsInternal = async (req: Request, res: Response
     const result = await runDueNotificationJobs({
       limit: parsed.data.limit,
       workerId: req.user?.id ?? null,
+      jobKind: parsed.data.jobKind ?? null,
+      documentId: parsed.data.documentId ?? null,
     });
 
     return res.status(200).json(result);

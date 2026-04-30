@@ -237,6 +237,8 @@ export type InvitePublicView = {
   requesterName: string | null;
   claimedUserId: string | null;
   documentLabel: string;
+  documentType: string;
+  roleLabel: string;
   recipients: Array<{
     id: string;
     targetUserId: string | null;
@@ -306,6 +308,15 @@ const documentTypeLabels: Record<string, string> = {
   public_instrument: "public instrument",
 };
 
+const partyRoleLabels: Record<string, string> = {
+  principal: "Principal",
+  agent: "Agent",
+  successor_agent: "Successor agent",
+  grantor: "Grantor",
+  trustee: "Trustee",
+  successor_trustee: "Successor trustee",
+};
+
 const humanizeToken = (value: string) => {
   return value
     .replace(/[_-]+/g, " ")
@@ -337,6 +348,40 @@ const getDocumentLabel = (document: DocumentRow | null) => {
   }
 
   return "document";
+};
+
+const getDocumentTypeLabel = (document: DocumentRow | null) => {
+  if (!document) {
+    return "document";
+  }
+
+  const mappedLabel = document.document_type ? documentTypeLabels[document.document_type] : undefined;
+  if (mappedLabel) {
+    return mappedLabel;
+  }
+
+  if (document.document_type) {
+    return humanizeToken(document.document_type);
+  }
+
+  return getDocumentLabel(document);
+};
+
+const getRoleLabel = (input: {
+  partyRole?: string | null | undefined;
+  obligationType?: string | null | undefined;
+}) => {
+  const partyRole = input.partyRole?.trim() ?? "";
+  if (partyRole) {
+    return partyRoleLabels[partyRole] ?? humanizeToken(partyRole);
+  }
+
+  const obligationType = input.obligationType?.trim() ?? "";
+  if (obligationType) {
+    return humanizeToken(obligationType);
+  }
+
+  return "Signer";
 };
 
 const toDisplayName = (user: UserRow | null) => {
@@ -554,6 +599,11 @@ const mapInvitePublicView = (input: {
     requesterName: toDisplayName(input.requester),
     claimedUserId: input.invite.claimed_user_id,
     documentLabel: getDocumentLabel(input.document),
+    documentType: getDocumentTypeLabel(input.document),
+    roleLabel: getRoleLabel({
+      partyRole: input.invite.party_role_snapshot,
+      obligationType: input.invite.obligation_type_snapshot,
+    }),
     recipients: input.recipients.map((recipient) => ({
       id: recipient.id,
       targetUserId: recipient.target_user_id,

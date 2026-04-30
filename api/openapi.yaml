@@ -6365,11 +6365,136 @@ components:
       properties:
         signature:
           $ref: "#/components/schemas/DocumentSignatureCapture"
+        remainingSignerInvites:
+          allOf:
+            - $ref: "#/components/schemas/RemainingSignerInviteDispatchResponse"
+          nullable: true
     SignatureCaptureResponse:
       type: object
       properties:
         signature:
           $ref: "#/components/schemas/DocumentSignatureCapture"
+        remainingSignerInvites:
+          allOf:
+            - $ref: "#/components/schemas/RemainingSignerInviteDispatchResponse"
+          nullable: true
+    RemainingSignerInviteDispatchTrigger:
+      type: object
+      properties:
+        actorIsDocumentOwner:
+          type: boolean
+        creatorResolutionStrategy:
+          type: string
+        creatorPartyIds:
+          type: array
+          items:
+            type: string
+        creatorOutputSignerIds:
+          type: array
+          items:
+            type: string
+        completedOutputSignerId:
+          type: string
+          nullable: true
+        completedOutputSignerIsCreator:
+          type: boolean
+        creatorSigningCompleteBefore:
+          type: boolean
+        creatorSigningCompleteAfter:
+          type: boolean
+        creatorSigningJustCompleted:
+          type: boolean
+        shouldQueueInvites:
+          type: boolean
+        blockedReason:
+          type: string
+          nullable: true
+    RemainingSignerInviteDispatchSuccess:
+      type: object
+      properties:
+        documentOutputSignerId:
+          type: string
+        documentPartyId:
+          type: string
+          nullable: true
+        recipientEmail:
+          type: string
+        recipientName:
+          type: string
+        inviteId:
+          type: string
+        existing:
+          type: boolean
+        notificationJobId:
+          type: string
+          nullable: true
+        notificationDeliveryId:
+          type: string
+          nullable: true
+        idempotencyKey:
+          type: string
+    RemainingSignerInviteDispatchSkipped:
+      type: object
+      properties:
+        documentOutputSignerId:
+          type: string
+        documentPartyId:
+          type: string
+          nullable: true
+        generationRunId:
+          type: string
+        outputKey:
+          type: string
+        documentKey:
+          type: string
+        partyRole:
+          type: string
+        partyName:
+          type: string
+        reason:
+          type: string
+        activeInviteId:
+          type: string
+          nullable: true
+        idempotencyKey:
+          type: string
+          nullable: true
+    RemainingSignerInviteDispatchFailure:
+      type: object
+      properties:
+        documentOutputSignerId:
+          type: string
+        documentPartyId:
+          type: string
+          nullable: true
+        recipientEmail:
+          type: string
+        recipientName:
+          type: string
+        idempotencyKey:
+          type: string
+        errorMessage:
+          type: string
+    RemainingSignerInviteDispatchResponse:
+      type: object
+      properties:
+        triggeredAt:
+          type: string
+          format: date-time
+        trigger:
+          $ref: "#/components/schemas/RemainingSignerInviteDispatchTrigger"
+        invited:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemainingSignerInviteDispatchSuccess"
+        skipped:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemainingSignerInviteDispatchSkipped"
+        failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemainingSignerInviteDispatchFailure"
     DocumentSigningExecution:
       type: object
       properties:
@@ -8205,6 +8330,10 @@ components:
           type: string
           nullable: true
         documentLabel:
+          type: string
+        documentType:
+          type: string
+        roleLabel:
           type: string
         recipients:
           type: array

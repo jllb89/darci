@@ -154,7 +154,7 @@ describe("Track 5 invite routes", () => {
       invite: { id: "invite-1" },
       access: {
         token: "raw-token",
-        accessUrl: "http://localhost:3000/app/sign?inviteToken=raw-token",
+        accessUrl: "http://localhost:3000/app/invite?token=raw-token",
         expiresAt: "2026-04-30T00:00:00.000Z",
       },
       notification: null,

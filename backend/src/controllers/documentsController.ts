@@ -114,6 +114,14 @@ import {
   buildDocumentWorkspaceSummary,
 } from "../services/documentWorkspaceReadModelService";
 import {
+  queueRemainingSignerInvitesAfterCreatorSignature,
+  type RemainingSignerInviteDispatchResult,
+} from "../services/signerInvitationDispatchService";
+import {
+  resolveClaimedSignerInviteAccess,
+  type ClaimedSignerInviteAccess,
+} from "../services/signerInviteAccessService";
+import {
   getVisibleDocumentIdn,
   shouldExposeDocumentReviewOutput,
 } from "../services/documentVisibilityService";
@@ -301,6 +309,17 @@ type DocumentSigningState = {
   groups: SigningGroupResponse[];
   completion: SigningCompletionSummary;
   state: "not_ready" | "preparing" | "ready" | "confirmed";
+};
+
+type DocumentSigningAccessKind = "owner" | "admin" | "service_role" | "invited_signer";
+
+type DocumentSigningAccessContext = {
+  document: DocumentRecord;
+  kind: DocumentSigningAccessKind;
+  actorUserId: string | null;
+  actorEmail: string | null;
+  signerUserId: string;
+  inviteAccess: ClaimedSignerInviteAccess | null;
 };
 
 const normalizePhoneDigits = (value: string) => value.replace(/\D/g, "");
@@ -750,6 +769,45 @@ const buildAuditActorContext = (req: Request) => {
   }
 
   return actorContext;
+};
+
+const resolveRequestActorUserId = async (req: Request) => {
+  if (req.user?.dbUserId) {
+    return req.user.dbUserId;
+  }
+
+  if (!req.user?.id) {
+    return null;
+  }
+
+  return getUserIdBySupabaseId(req.user.id);
+};
+
+const shouldExposeRemainingSignerInviteDispatch = (
+  result: RemainingSignerInviteDispatchResult | null,
+) => {
+  return Boolean(
+    result &&
+      (result.resolution.trigger.shouldQueueInvites ||
+        result.invited.length > 0 ||
+        result.failures.length > 0),
+  );
+};
+
+const mapRemainingSignerInviteDispatchResponse = (
+  result: RemainingSignerInviteDispatchResult | null,
+) => {
+  if (!shouldExposeRemainingSignerInviteDispatch(result) || !result) {
+    return null;
+  }
+
+  return {
+    triggeredAt: result.triggeredAt,
+    trigger: result.resolution.trigger,
+    invited: result.invited,
+    skipped: result.resolution.skipped,
+    failures: result.failures,
+  };
 };
 
 const buildIlluminotarizationWorkflowResponse = (
@@ -3086,6 +3144,189 @@ const getAuthorizedDocument = async (req: Request, res: Response) => {
   return document;
 };
 
+const getAuthorizedSigningAccess = async (
+  req: Request,
+  res: Response,
+): Promise<DocumentSigningAccessContext | null> => {
+  if (!req.user?.id) {
+    res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+
+    return null;
+  }
+
+  if (typeof req.params.id !== "string") {
+    res.status(400).json({
+      error: "validation_error",
+      message: "Document id is required",
+      details: [
+        {
+          path: "id",
+          message: "Document id is required",
+        },
+      ],
+    });
+
+    return null;
+  }
+
+  const document = await getDocumentById(req.params.id);
+  if (!document) {
+    res.status(404).json({
+      error: "not_found",
+      message: "Document not found",
+    });
+
+    return null;
+  }
+
+  const role = req.user.role ?? "member";
+  const actorUserId = await resolveRequestActorUserId(req);
+  const actorEmail = req.user.email ?? null;
+
+  if (role === "admin" || role === "service_role") {
+    return {
+      document,
+      kind: role,
+      actorUserId,
+      actorEmail,
+      signerUserId: document.owner_id,
+      inviteAccess: null,
+    };
+  }
+
+  if (actorUserId && document.owner_id === actorUserId) {
+    return {
+      document,
+      kind: "owner",
+      actorUserId,
+      actorEmail,
+      signerUserId: document.owner_id,
+      inviteAccess: null,
+    };
+  }
+
+  const inviteAccess = await resolveClaimedSignerInviteAccess({
+    documentId: document.id,
+    viewerUserId: actorUserId,
+    viewerEmail: actorEmail,
+  });
+
+  if (inviteAccess) {
+    return {
+      document,
+      kind: "invited_signer",
+      actorUserId,
+      actorEmail,
+      signerUserId: inviteAccess.claimedUserId,
+      inviteAccess,
+    };
+  }
+
+  res.status(404).json({
+    error: "not_found",
+    message: "Document not found",
+  });
+
+  return null;
+};
+
+const mapSigningViewerAccess = (access: DocumentSigningAccessContext) => ({
+  kind: access.kind,
+  inviteId: access.inviteAccess?.inviteId ?? null,
+  documentOutputSignerId: access.inviteAccess?.documentOutputSignerId ?? null,
+  documentPartyId: access.inviteAccess?.documentPartyId ?? null,
+});
+
+const getScopedOutputKeys = (
+  signing: DocumentSigningState,
+  inviteAccess: ClaimedSignerInviteAccess,
+) => {
+  const outputKeys = new Set<string>();
+  if (inviteAccess.outputKey) {
+    outputKeys.add(inviteAccess.outputKey);
+  }
+
+  for (const signature of signing.signatures) {
+    if (signature.outputSignerId === inviteAccess.documentOutputSignerId) {
+      outputKeys.add(signature.outputKey);
+    }
+  }
+
+  return outputKeys;
+};
+
+const buildScopedSigningCompletion = (signatures: SigningSignatureResponse[]) => {
+  const requiredSignatureCount = signatures.filter((signature) => signature.isRequired).length;
+  const capturedRequiredSignatureCount = signatures.filter(
+    (signature) => signature.isRequired && signature.status === "captured",
+  ).length;
+  const allRequiredSignaturesComplete =
+    signatures.length > 0 &&
+    signatures.every((signature) => {
+      if (signature.isRequired) {
+        return signature.status === "captured";
+      }
+
+      if (!signature.signingGroup || !signature.groupMinimumRequired) {
+        return true;
+      }
+
+      return signature.groupSatisfied;
+    });
+
+  return {
+    requiredSignatureCount,
+    capturedRequiredSignatureCount,
+    allRequiredSignaturesComplete,
+    canConfirm: false,
+  } satisfies SigningCompletionSummary;
+};
+
+const scopeSigningStateForAccess = (
+  signing: DocumentSigningState,
+  access: DocumentSigningAccessContext,
+): DocumentSigningState => {
+  if (access.kind !== "invited_signer" || !access.inviteAccess) {
+    return signing;
+  }
+
+  const scopedSignatures = signing.signatures.filter(
+    (signature) => signature.outputSignerId === access.inviteAccess?.documentOutputSignerId,
+  );
+  const scopedOutputKeys = getScopedOutputKeys(signing, access.inviteAccess);
+  const scopedGroups = signing.groups.filter((group) =>
+    scopedSignatures.some(
+      (signature) =>
+        signature.signingGroup === group.signingGroup &&
+        signature.generationRunId === group.generationRunId,
+    ),
+  );
+
+  return {
+    ...signing,
+    approvedOutputKeys: signing.approvedOutputKeys.filter((outputKey) => scopedOutputKeys.has(outputKey)),
+    outputs: signing.outputs.filter((output) => scopedOutputKeys.has(output.outputKey)),
+    pendingOutputs: signing.pendingOutputs.filter((output) => scopedOutputKeys.has(output.outputKey)),
+    missingOutputKeys: signing.missingOutputKeys.filter((outputKey) => scopedOutputKeys.has(outputKey)),
+    allOutputsReady:
+      scopedOutputKeys.size > 0 &&
+      Array.from(scopedOutputKeys).every((outputKey) =>
+        signing.outputs.some((output) => output.outputKey === outputKey),
+      ),
+    signatures: scopedSignatures,
+    groups: scopedGroups,
+    completion: buildScopedSigningCompletion(scopedSignatures),
+  };
+};
+
+const ensureSigningAccessAllowsSignature = (
+  access: DocumentSigningAccessContext,
+  outputSignerId: string,
+) => access.kind !== "invited_signer" || access.inviteAccess?.documentOutputSignerId === outputSignerId;
+
 export const getDocument = async (req: Request, res: Response) => {
   const document = await getAuthorizedDocument(req, res);
   if (!document) {
@@ -4536,13 +4777,13 @@ export const getSignatureFields = async (req: Request, res: Response) => {
 };
 
 export const listSavedSignatures = async (req: Request, res: Response) => {
-  const document = await getAuthorizedDocument(req, res);
-  if (!document) {
+  const signingAccess = await getAuthorizedSigningAccess(req, res);
+  if (!signingAccess) {
     return;
   }
 
   const savedSignatures = await listCapturedSignaturesForSigner({
-    signerId: document.owner_id,
+    signerId: signingAccess.signerUserId,
     limit: 24,
   });
 
@@ -4554,10 +4795,11 @@ export const listSavedSignatures = async (req: Request, res: Response) => {
 };
 
 export const getDocumentSigning = async (req: Request, res: Response) => {
-  const document = await getAuthorizedDocument(req, res);
-  if (!document) {
+  const signingAccess = await getAuthorizedSigningAccess(req, res);
+  if (!signingAccess) {
     return;
   }
+  const { document } = signingAccess;
 
   if (!ensureDocumentReadyForSignature(res, document)) {
     return;
@@ -4583,21 +4825,24 @@ export const getDocumentSigning = async (req: Request, res: Response) => {
     });
   }
 
+  const scopedSigning = scopeSigningStateForAccess(signing, signingAccess);
+
   return res.status(200).json({
     document: mapDocumentResponse(document, req.user?.role ?? "member"),
     signing: {
-      state: signing.state,
-      reviewApproval: signing.reviewApproval,
-      signingExecution: signing.signingExecution,
-      approvedOutputKeys: signing.approvedOutputKeys,
-      outputs: signing.outputs,
-      pendingOutputs: signing.pendingOutputs,
-      missingOutputKeys: signing.missingOutputKeys,
-      requiresGeneration: signing.requiresGeneration,
-      allOutputsReady: signing.allOutputsReady,
-      signatures: signing.signatures,
-      groups: signing.groups,
-      completion: signing.completion,
+      state: scopedSigning.state,
+      reviewApproval: scopedSigning.reviewApproval,
+      signingExecution: scopedSigning.signingExecution,
+      approvedOutputKeys: scopedSigning.approvedOutputKeys,
+      outputs: scopedSigning.outputs,
+      pendingOutputs: scopedSigning.pendingOutputs,
+      missingOutputKeys: scopedSigning.missingOutputKeys,
+      requiresGeneration: scopedSigning.requiresGeneration,
+      allOutputsReady: scopedSigning.allOutputsReady,
+      signatures: scopedSigning.signatures,
+      groups: scopedSigning.groups,
+      completion: scopedSigning.completion,
+      viewerAccess: mapSigningViewerAccess(signingAccess),
     },
   });
 };
@@ -4730,6 +4975,8 @@ const completeSignatureCapture = async (input: {
   signatureTask: SigningSignatureResponse;
   signatureRecord: SignatureRecord;
   actorContext: { actorSupabaseId?: string; actorRole?: string };
+  actorUserId: string | null;
+  actorEmail: string | null;
 }) => {
   await applySignatureCaptureToDocumentOutput({
     document: input.document,
@@ -4770,7 +5017,61 @@ const completeSignatureCapture = async (input: {
     },
   });
 
-  return mapCapturedSignatureResponse(input.signatureRecord);
+  let remainingSignerInvites: RemainingSignerInviteDispatchResult | null = null;
+  try {
+    remainingSignerInvites = await queueRemainingSignerInvitesAfterCreatorSignature({
+      documentId: input.document.id,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      completedOutputSignerId: input.signatureTask.outputSignerId,
+      completedSignatureId: input.signatureRecord.id,
+    });
+
+    if (remainingSignerInvites.failures.length > 0) {
+      await recordAuditEvent({
+        ...input.actorContext,
+        entityType: "document",
+        entityId: input.document.id,
+        action: "system.remaining_signer_invite_dispatch_failed",
+        metadata: {
+          document_id: input.document.id,
+          signature_id: input.signatureRecord.id,
+          output_signer_id: input.signatureTask.outputSignerId,
+          failures: remainingSignerInvites.failures,
+        },
+      });
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn("Remaining signer invite dispatch failed", {
+      documentId: input.document.id,
+      signatureId: input.signatureRecord.id,
+      outputSignerId: input.signatureTask.outputSignerId,
+      error: errorMessage,
+    });
+    await recordAuditEvent({
+      ...input.actorContext,
+      entityType: "document",
+      entityId: input.document.id,
+      action: "system.remaining_signer_invite_dispatch_failed",
+      metadata: {
+        document_id: input.document.id,
+        signature_id: input.signatureRecord.id,
+        output_signer_id: input.signatureTask.outputSignerId,
+        error: errorMessage,
+      },
+    });
+  }
+
+  const signatureResponse = await mapCapturedSignatureResponse(input.signatureRecord);
+  const inviteDispatchResponse = mapRemainingSignerInviteDispatchResponse(remainingSignerInvites);
+
+  return inviteDispatchResponse
+    ? {
+        ...signatureResponse,
+        remainingSignerInvites: inviteDispatchResponse,
+      }
+    : signatureResponse;
 };
 
 export const captureSignature = async (req: Request, res: Response) => {
@@ -4779,16 +5080,18 @@ export const captureSignature = async (req: Request, res: Response) => {
     return sendValidationError(res, parsed.error);
   }
 
-  const document = await getAuthorizedDocument(req, res);
-  if (!document) {
+  const signingAccess = await getAuthorizedSigningAccess(req, res);
+  if (!signingAccess) {
     return;
   }
+  const { document } = signingAccess;
 
   if (!ensureDocumentReadyForSignature(res, document)) {
     return;
   }
 
   const actorContext = buildAuditActorContext(req);
+  const actorUserId = await resolveRequestActorUserId(req);
   const { signingState, signatureTask } = await resolveSigningSignatureTarget({
     document,
     generationRunId: parsed.data.generationRunId,
@@ -4805,6 +5108,13 @@ export const captureSignature = async (req: Request, res: Response) => {
   }
 
   if (!signatureTask) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Signature obligation not found for the prepared signing set",
+    });
+  }
+
+  if (!ensureSigningAccessAllowsSignature(signingAccess, signatureTask.outputSignerId)) {
     return res.status(404).json({
       error: "not_found",
       message: "Signature obligation not found for the prepared signing set",
@@ -4844,7 +5154,7 @@ export const captureSignature = async (req: Request, res: Response) => {
       documentId: document.id,
       generationRunId: parsed.data.generationRunId,
       documentOutputSignerId: parsed.data.outputSignerId,
-      signerId: document.owner_id,
+      signerId: signingAccess.signerUserId,
       captureMethod: "type",
       typedValue: parsed.data.typedValue?.trim() ?? null,
       typedKind: parsed.data.typedKind ?? "name",
@@ -4865,7 +5175,7 @@ export const captureSignature = async (req: Request, res: Response) => {
 
     if (
       !savedSignature ||
-      savedSignature.signer_id !== document.owner_id ||
+      savedSignature.signer_id !== signingAccess.signerUserId ||
       savedSignature.status !== "captured"
     ) {
       return res.status(404).json({
@@ -4899,7 +5209,7 @@ export const captureSignature = async (req: Request, res: Response) => {
       documentId: document.id,
       generationRunId: parsed.data.generationRunId,
       documentOutputSignerId: parsed.data.outputSignerId,
-      signerId: document.owner_id,
+      signerId: signingAccess.signerUserId,
       storagePath: savedSignature.storage_path,
       captureMethod:
         savedSignature.capture_method === "upload" || savedSignature.capture_method === "draw"
@@ -4948,7 +5258,7 @@ export const captureSignature = async (req: Request, res: Response) => {
       documentId: document.id,
       generationRunId: parsed.data.generationRunId,
       documentOutputSignerId: parsed.data.outputSignerId,
-      signerId: document.owner_id,
+      signerId: signingAccess.signerUserId,
       storagePath,
       captureMethod: "draw",
       mimeType: parsedImage.mimeType,
@@ -4965,6 +5275,8 @@ export const captureSignature = async (req: Request, res: Response) => {
       signatureTask,
       signatureRecord,
       actorContext,
+      actorUserId,
+      actorEmail: req.user?.email ?? null,
     }),
   );
 };
@@ -4975,10 +5287,11 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
     return sendValidationError(res, parsed.error);
   }
 
-  const document = await getAuthorizedDocument(req, res);
-  if (!document) {
+  const signingAccess = await getAuthorizedSigningAccess(req, res);
+  if (!signingAccess) {
     return;
   }
+  const { document } = signingAccess;
 
   if (!ensureDocumentReadyForSignature(res, document)) {
     return;
@@ -5007,6 +5320,13 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
     });
   }
 
+  if (!ensureSigningAccessAllowsSignature(signingAccess, signatureTask.outputSignerId)) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Signature obligation not found for the prepared signing set",
+    });
+  }
+
   const signatureId = randomUUID();
   const normalizedMimeType = parsed.data.mimeType.toLowerCase();
   const extension = SIGNATURE_EXTENSION_MAP[normalizedMimeType] ?? "png";
@@ -5017,7 +5337,7 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
     documentId: document.id,
     generationRunId: parsed.data.generationRunId,
     documentOutputSignerId: parsed.data.outputSignerId,
-    signerId: document.owner_id,
+    signerId: signingAccess.signerUserId,
     storagePath,
     captureMethod: "upload",
     mimeType: normalizedMimeType,
@@ -5075,16 +5395,18 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
     return sendValidationError(res, parsed.error);
   }
 
-  const document = await getAuthorizedDocument(req, res);
-  if (!document) {
+  const signingAccess = await getAuthorizedSigningAccess(req, res);
+  if (!signingAccess) {
     return;
   }
+  const { document } = signingAccess;
 
   if (!ensureDocumentReadyForSignature(res, document)) {
     return;
   }
 
   const actorContext = buildAuditActorContext(req);
+  const actorUserId = await resolveRequestActorUserId(req);
   const { signingState, signatureTask } = await resolveSigningSignatureTarget({
     document,
     generationRunId: parsed.data.generationRunId,
@@ -5107,10 +5429,18 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
     });
   }
 
+  if (!ensureSigningAccessAllowsSignature(signingAccess, signatureTask.outputSignerId)) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Signature obligation not found for the prepared signing set",
+    });
+  }
+
   const signature = await getSignatureById(parsed.data.signatureId, document.id);
   if (
     !signature ||
     !signature.storage_path ||
+    signature.signer_id !== signingAccess.signerUserId ||
     signature.generation_run_id !== parsed.data.generationRunId ||
     signature.document_output_signer_id !== parsed.data.outputSignerId
   ) {
@@ -5185,6 +5515,8 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
       signatureTask,
       signatureRecord: updatedSignature,
       actorContext,
+      actorUserId,
+      actorEmail: req.user?.email ?? null,
     }),
   );
 };
