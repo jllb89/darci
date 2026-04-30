@@ -232,6 +232,8 @@ describe("Track 4 notification routes", () => {
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
       limit: 3,
       workerId: "service-role-1",
+      jobKind: null,
+      documentId: null,
     });
   });
 
