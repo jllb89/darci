@@ -303,6 +303,13 @@ Recommended approach:
   - service role
 - Use that context in signing workspace reads and signature capture writes.
 
+Implementation status:
+
+- Added `backend/src/services/signerInviteAccessService.ts` to resolve claimed signer invites by document, claimed user, and normalized recipient email.
+- Signing routes now use a signing-specific authorization context that preserves owner/admin/service-role access while allowing claimed invited signers through the invite boundary.
+- General document authorization remains owner-oriented; invite access is only used where signing routes need it.
+- The claimed signer access check requires the invite to be claimed or accepted, not expired, matched to the current user id, and matched to the invited email address.
+
 ### Phase 6: Scope The Signing Workspace Per Signer
 
 Signer access should not see the owner's full document workflow.
@@ -320,6 +327,13 @@ Frontend requirements:
 - Add a signer mode to `apps/web/src/app/app/sign/page.tsx`.
 - Hide owner-only sections and remaining signer management from invited signers.
 - Display only the invited signer's signature controls and the relevant document preview.
+
+Implementation status:
+
+- `/documents/:id/signing` now scopes invited signers to the invite's `document_output_signer_id` and returns `viewerAccess` so the frontend can render signer mode.
+- Signature capture, saved-signature application, upload request, and upload finalization reject invited signer attempts outside the assigned signer obligation.
+- Invited signer signature records use the claimed signer user id, not the document owner id.
+- The signing page hides owner confirmation controls for invited signers and shows copy focused on the assigned signature task.
 
 ### Phase 7: Sync Resend Webhooks To Invite Lifecycle
 
@@ -340,6 +354,12 @@ Add stable linking metadata when queuing invite notifications:
 - `documentId`
 - `documentOutputSignerId`
 - `notificationDeliveryId`
+
+Implementation status:
+
+- Notification delivery lifecycle events now propagate to linked invite records through `notification_deliveries.invite_recipient_id` and `notification_jobs.invite_id`.
+- Resend delivered/opened/clicked events update invite sent/open/click timestamps and recipient lifecycle state.
+- Resend bounced/complained/failed/suppressed/deferred events store the latest delivery issue metadata on invite and recipient records, and eligible pre-claim invites move to `failed` when delivery becomes terminally unsuccessful.
 
 ### Phase 8: Complete Signing When All Obligations Are Captured
 

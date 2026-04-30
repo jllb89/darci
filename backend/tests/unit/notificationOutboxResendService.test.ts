@@ -21,6 +21,8 @@ const supabaseMocks = vi.hoisted(() => ({
     from: vi.fn(),
   },
   state: {
+    document_access_invites: [] as any[],
+    invite_recipients: [] as any[],
     notification_jobs: [] as any[],
     notification_deliveries: [] as any[],
     notification_templates: [] as any[],
@@ -310,14 +312,45 @@ const buildTemplate = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const buildInvite = (overrides: Record<string, unknown> = {}) => ({
+  id: "invite-1",
+  status: "queued",
+  sent_at: null,
+  first_opened_at: null,
+  first_clicked_at: null,
+  metadata: {},
+  created_at: "2026-04-29T11:00:00.000Z",
+  updated_at: "2026-04-29T11:00:00.000Z",
+  ...overrides,
+});
+
+const buildInviteRecipient = (overrides: Record<string, unknown> = {}) => ({
+  id: "recipient-1",
+  invite_id: "invite-1",
+  status: "queued",
+  last_notified_at: "2026-04-29T11:00:00.000Z",
+  last_event_at: "2026-04-29T11:00:00.000Z",
+  metadata: {},
+  created_at: "2026-04-29T11:00:00.000Z",
+  updated_at: "2026-04-29T11:00:00.000Z",
+  ...overrides,
+});
+
 const seedOutbox = (overrides?: {
   job?: Record<string, unknown>;
   delivery?: Record<string, unknown>;
   template?: Record<string, unknown>;
+  invite?: Record<string, unknown>;
+  inviteRecipient?: Record<string, unknown>;
 }) => {
   supabaseMocks.state.notification_jobs.push(buildJob(overrides?.job));
   supabaseMocks.state.notification_deliveries.push(buildDelivery(overrides?.delivery));
   supabaseMocks.state.notification_templates.push(buildTemplate(overrides?.template));
+
+  if (overrides?.invite || overrides?.inviteRecipient) {
+    supabaseMocks.state.document_access_invites.push(buildInvite(overrides?.invite));
+    supabaseMocks.state.invite_recipients.push(buildInviteRecipient(overrides?.inviteRecipient));
+  }
 };
 
 describe("notification outbox Resend runtime", () => {
@@ -328,6 +361,8 @@ describe("notification outbox Resend runtime", () => {
     resendMocks.verifyWebhookMock.mockReset();
     __testUtils.resetResendAdapterCache();
 
+    supabaseMocks.state.document_access_invites = [];
+    supabaseMocks.state.invite_recipients = [];
     supabaseMocks.state.notification_jobs = [];
     supabaseMocks.state.notification_deliveries = [];
     supabaseMocks.state.notification_templates = [];
@@ -546,6 +581,211 @@ describe("notification outbox Resend runtime", () => {
         provider: "resend",
         provider_event_id: "svix-event-1",
         event_type: "delivered",
+      }),
+    );
+  });
+
+  it("syncs Resend delivery engagement events to linked invite lifecycle state", async () => {
+    seedOutbox({
+      job: {
+        invite_id: "invite-1",
+        status: "sent",
+        attempt_count: 1,
+        last_attempt_at: nowIso,
+      },
+      delivery: {
+        invite_recipient_id: "recipient-1",
+        status: "sent",
+        provider_message_id: "resend-msg-1",
+        sent_at: nowIso,
+      },
+      invite: {
+        status: "queued",
+        sent_at: null,
+        first_opened_at: null,
+        first_clicked_at: null,
+      },
+      inviteRecipient: {
+        status: "queued",
+      },
+    });
+
+    await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-delivered",
+      eventType: "delivered",
+      eventAt: "2026-04-29T12:03:00.000Z",
+      payload: { resendType: "email.delivered" },
+      metadata: { source: "resend_webhook" },
+    });
+
+    expect(supabaseMocks.state.document_access_invites[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        sent_at: "2026-04-29T12:03:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0]).toEqual(
+      expect.objectContaining({
+        status: "delivered",
+        last_event_at: "2026-04-29T12:03:00.000Z",
+      }),
+    );
+
+    await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-opened",
+      eventType: "opened",
+      eventAt: "2026-04-29T12:04:00.000Z",
+      payload: { resendType: "email.opened" },
+      metadata: { source: "resend_webhook" },
+    });
+
+    await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-clicked",
+      eventType: "clicked",
+      eventAt: "2026-04-29T12:05:00.000Z",
+      payload: { resendType: "email.clicked" },
+      metadata: { source: "resend_webhook" },
+    });
+
+    expect(supabaseMocks.state.document_access_invites[0]).toEqual(
+      expect.objectContaining({
+        status: "opened",
+        sent_at: "2026-04-29T12:03:00.000Z",
+        first_opened_at: "2026-04-29T12:04:00.000Z",
+        first_clicked_at: "2026-04-29T12:05:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.document_access_invites[0].metadata.latestNotificationEvent).toEqual(
+      expect.objectContaining({
+        deliveryId: "delivery-1",
+        provider: "resend",
+        providerMessageId: "resend-msg-1",
+        providerEventId: "svix-clicked",
+        eventType: "clicked",
+        eventAt: "2026-04-29T12:05:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0]).toEqual(
+      expect.objectContaining({
+        status: "clicked",
+        last_event_at: "2026-04-29T12:05:00.000Z",
+      }),
+    );
+  });
+
+  it("syncs Resend failure events to linked invite failure metadata", async () => {
+    seedOutbox({
+      job: {
+        invite_id: "invite-1",
+        status: "sent",
+        attempt_count: 1,
+        last_attempt_at: nowIso,
+      },
+      delivery: {
+        invite_recipient_id: "recipient-1",
+        status: "sent",
+        provider_message_id: "resend-msg-1",
+        sent_at: nowIso,
+      },
+      invite: {
+        status: "sent",
+        sent_at: nowIso,
+      },
+      inviteRecipient: {
+        status: "sent",
+      },
+    });
+
+    await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-bounced",
+      eventType: "bounced",
+      eventAt: "2026-04-29T12:06:00.000Z",
+      payload: { resendType: "email.bounced", bounce: { type: "hard_bounce" } },
+      metadata: { source: "resend_webhook" },
+    });
+
+    expect(supabaseMocks.state.document_access_invites[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0]).toEqual(
+      expect.objectContaining({
+        status: "bounced",
+        last_event_at: "2026-04-29T12:06:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0].metadata.latestDeliveryIssue).toEqual(
+      expect.objectContaining({
+        deliveryId: "delivery-1",
+        provider: "resend",
+        providerEventId: "svix-bounced",
+        eventType: "bounced",
+      }),
+    );
+  });
+
+  it("keeps delayed Resend delivery events as invite metadata without failing the invite", async () => {
+    seedOutbox({
+      job: {
+        invite_id: "invite-1",
+        status: "sent",
+        attempt_count: 1,
+        last_attempt_at: nowIso,
+      },
+      delivery: {
+        invite_recipient_id: "recipient-1",
+        status: "sent",
+        provider_message_id: "resend-msg-1",
+        sent_at: nowIso,
+      },
+      invite: {
+        status: "sent",
+        sent_at: nowIso,
+      },
+      inviteRecipient: {
+        status: "sent",
+      },
+    });
+
+    await recordNotificationDeliveryEvent({
+      deliveryId: "delivery-1",
+      provider: "resend",
+      providerMessageId: "resend-msg-1",
+      providerEventId: "svix-delayed",
+      eventType: "deferred",
+      eventAt: "2026-04-29T12:07:00.000Z",
+      payload: { resendType: "email.delivery_delayed" },
+      metadata: { source: "resend_webhook" },
+    });
+
+    expect(supabaseMocks.state.document_access_invites[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        last_event_at: "2026-04-29T12:07:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.document_access_invites[0].metadata.latestDeliveryIssue).toEqual(
+      expect.objectContaining({
+        providerEventId: "svix-delayed",
+        eventType: "deferred",
       }),
     );
   });

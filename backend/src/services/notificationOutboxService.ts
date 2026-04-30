@@ -121,6 +121,48 @@ type NotificationDeliveryRecord = {
   updated_at: string;
 };
 
+type DocumentInviteLifecycleStatus =
+  | "draft"
+  | "queued"
+  | "sent"
+  | "opened"
+  | "claimed"
+  | "accepted"
+  | "declined"
+  | "revoked"
+  | "expired"
+  | "completed"
+  | "failed";
+
+type DocumentInviteLifecycleRow = {
+  id: string;
+  status: DocumentInviteLifecycleStatus;
+  sent_at: string | null;
+  first_opened_at: string | null;
+  first_clicked_at: string | null;
+  metadata: JsonObject;
+};
+
+type InviteRecipientLifecycleStatus =
+  | "pending"
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "failed"
+  | "bounced"
+  | "opened"
+  | "clicked"
+  | "claimed"
+  | "suppressed"
+  | "unsubscribed";
+
+type InviteRecipientLifecycleRow = {
+  id: string;
+  invite_id: string;
+  status: InviteRecipientLifecycleStatus;
+  metadata: JsonObject;
+};
+
 type OutboundMessageEventRecord = {
   id: string;
   notification_delivery_id: string;
@@ -382,6 +424,44 @@ const eventTypeToDeliveryStatus: Partial<
   rejected: "failed",
   unsubscribed: "suppressed",
 };
+
+const inviteSentCandidateStatuses = new Set<DocumentInviteLifecycleStatus>([
+  "draft",
+  "queued",
+  "sent",
+]);
+
+const inviteOpenedCandidateStatuses = new Set<DocumentInviteLifecycleStatus>([
+  "draft",
+  "queued",
+  "sent",
+  "opened",
+]);
+
+const inviteFailureCandidateStatuses = new Set<DocumentInviteLifecycleStatus>([
+  "draft",
+  "queued",
+  "sent",
+]);
+
+const eventTypesWithDeliveryIssueMetadata = new Set<OutboundMessageEventType>([
+  "deferred",
+  "failed",
+  "bounced",
+  "complained",
+  "rejected",
+  "suppressed",
+  "unsubscribed",
+]);
+
+const inviteFailureEventTypes = new Set<OutboundMessageEventType>([
+  "failed",
+  "bounced",
+  "complained",
+  "rejected",
+  "suppressed",
+  "unsubscribed",
+]);
 
 const terminalSuccessStatuses = new Set<NotificationDeliveryStatus>([
   "delivered",
@@ -948,6 +1028,238 @@ const insertOutboundEvents = async (
   return castValue<OutboundMessageEventRecord[]>(data ?? []);
 };
 
+const mapNotificationEventToInviteRecipientStatus = (input: {
+  eventType: OutboundMessageEventType;
+  currentStatus: InviteRecipientLifecycleStatus;
+}) => {
+  if (input.currentStatus === "claimed") {
+    return input.currentStatus;
+  }
+
+  if (input.eventType === "queued" || input.eventType === "deferred") {
+    return input.currentStatus === "sent" ? "sent" : "queued";
+  }
+  if (input.eventType === "sent" || input.eventType === "accepted") {
+    return "sent";
+  }
+  if (input.eventType === "delivered") {
+    return "delivered";
+  }
+  if (input.eventType === "opened") {
+    return "opened";
+  }
+  if (input.eventType === "clicked") {
+    return "clicked";
+  }
+  if (input.eventType === "bounced") {
+    return "bounced";
+  }
+  if (input.eventType === "failed" || input.eventType === "rejected") {
+    return "failed";
+  }
+  if (input.eventType === "unsubscribed") {
+    return "unsubscribed";
+  }
+  if (input.eventType === "complained" || input.eventType === "suppressed") {
+    return "suppressed";
+  }
+
+  return input.currentStatus;
+};
+
+const mapNotificationEventToInviteStatus = (input: {
+  eventType: OutboundMessageEventType;
+  currentStatus: DocumentInviteLifecycleStatus;
+}) => {
+  if (
+    (input.eventType === "sent" ||
+      input.eventType === "delivered" ||
+      input.eventType === "accepted") &&
+    inviteSentCandidateStatuses.has(input.currentStatus)
+  ) {
+    return "sent";
+  }
+
+  if (
+    (input.eventType === "opened" || input.eventType === "clicked") &&
+    inviteOpenedCandidateStatuses.has(input.currentStatus)
+  ) {
+    return "opened";
+  }
+
+  if (
+    inviteFailureEventTypes.has(input.eventType) &&
+    inviteFailureCandidateStatuses.has(input.currentStatus)
+  ) {
+    return "failed";
+  }
+
+  if (input.eventType === "queued" && input.currentStatus === "draft") {
+    return "queued";
+  }
+
+  return input.currentStatus;
+};
+
+const buildNotificationLifecycleMetadata = (input: {
+  existingMetadata: JsonObject;
+  delivery: NotificationDeliveryRecord;
+  provider: NotificationProviderName;
+  providerMessageId: string | null;
+  providerEventId: string | null;
+  eventType: OutboundMessageEventType;
+  eventAt: string;
+  payload?: JsonObject | undefined;
+}) => {
+  const latestNotificationEvent = {
+    deliveryId: input.delivery.id,
+    provider: input.provider,
+    providerMessageId: input.providerMessageId,
+    providerEventId: input.providerEventId,
+    eventType: input.eventType,
+    eventAt: input.eventAt,
+  } satisfies JsonObject;
+
+  return {
+    ...input.existingMetadata,
+    latestNotificationEvent,
+    ...(eventTypesWithDeliveryIssueMetadata.has(input.eventType)
+      ? {
+          latestDeliveryIssue: {
+            ...latestNotificationEvent,
+            payload: input.payload ?? {},
+          },
+        }
+      : {}),
+  } satisfies JsonObject;
+};
+
+const getInviteRecipientLifecycleRow = async (recipientId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("invite_recipients")
+    .select("id, invite_id, status, metadata")
+    .eq("id", recipientId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  return (data as InviteRecipientLifecycleRow | null) ?? null;
+};
+
+const getDocumentInviteLifecycleRow = async (inviteId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_access_invites")
+    .select("id, status, sent_at, first_opened_at, first_clicked_at, metadata")
+    .eq("id", inviteId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  return (data as DocumentInviteLifecycleRow | null) ?? null;
+};
+
+const syncInviteLifecycleForNotificationEvent = async (input: {
+  delivery: NotificationDeliveryRecord;
+  job: NotificationJobRecord;
+  provider: NotificationProviderName;
+  providerMessageId: string | null;
+  providerEventId: string | null;
+  eventType: OutboundMessageEventType;
+  eventAt: string;
+  payload?: JsonObject | undefined;
+}) => {
+  if (!input.delivery.invite_recipient_id && !input.job.invite_id) {
+    return;
+  }
+
+  const recipient = input.delivery.invite_recipient_id
+    ? await getInviteRecipientLifecycleRow(input.delivery.invite_recipient_id)
+    : null;
+  const inviteId = recipient?.invite_id ?? input.job.invite_id;
+  if (!inviteId) {
+    return;
+  }
+
+  const invite = await getDocumentInviteLifecycleRow(inviteId);
+  if (!invite) {
+    return;
+  }
+
+  const inviteMetadata = buildNotificationLifecycleMetadata({
+    existingMetadata: objectOrEmpty(invite.metadata),
+    delivery: input.delivery,
+    provider: input.provider,
+    providerMessageId: input.providerMessageId,
+    providerEventId: input.providerEventId,
+    eventType: input.eventType,
+    eventAt: input.eventAt,
+    payload: input.payload,
+  });
+  const invitePatch: Partial<DocumentInviteLifecycleRow> & { metadata: JsonObject } = {
+    status: mapNotificationEventToInviteStatus({
+      eventType: input.eventType,
+      currentStatus: invite.status,
+    }),
+    metadata: inviteMetadata,
+  };
+
+  if (["sent", "delivered", "opened", "clicked", "accepted"].includes(input.eventType)) {
+    invitePatch.sent_at = invite.sent_at ?? input.eventAt;
+  }
+  if (input.eventType === "opened" || input.eventType === "clicked") {
+    invitePatch.first_opened_at = invite.first_opened_at ?? input.eventAt;
+  }
+  if (input.eventType === "clicked") {
+    invitePatch.first_clicked_at = invite.first_clicked_at ?? input.eventAt;
+  }
+
+  const updates: Array<Promise<{ error: { message: string } | null }>> = [
+    supabaseAdmin
+      .from("document_access_invites")
+      .update(invitePatch)
+      .eq("id", invite.id) as unknown as Promise<{ error: { message: string } | null }>,
+  ];
+
+  if (recipient) {
+    const recipientMetadata = buildNotificationLifecycleMetadata({
+      existingMetadata: objectOrEmpty(recipient.metadata),
+      delivery: input.delivery,
+      provider: input.provider,
+      providerMessageId: input.providerMessageId,
+      providerEventId: input.providerEventId,
+      eventType: input.eventType,
+      eventAt: input.eventAt,
+      payload: input.payload,
+    });
+
+    updates.push(
+      supabaseAdmin
+        .from("invite_recipients")
+        .update({
+          status: mapNotificationEventToInviteRecipientStatus({
+            eventType: input.eventType,
+            currentStatus: recipient.status,
+          }),
+          last_event_at: input.eventAt,
+          metadata: recipientMetadata,
+        })
+        .eq("id", recipient.id) as unknown as Promise<{ error: { message: string } | null }>,
+    );
+  }
+
+  const results = await Promise.all(updates);
+  const failedUpdate = results.find((result) => result.error);
+  if (failedUpdate?.error) {
+    throw new NotificationOutboxServiceError(500, failedUpdate.error.message);
+  }
+};
+
 const listDueNotificationJobs = async (input: {
   limit: number;
   now: string;
@@ -1436,6 +1748,17 @@ export const recordNotificationDeliveryEvent = async (input: {
     status: nextState.status,
     processing_started_at: nextState.status === "processing" ? job.processing_started_at : null,
     completed_at: nextState.isTerminal ? eventAt : null,
+  });
+
+  await syncInviteLifecycleForNotificationEvent({
+    delivery: updatedDelivery,
+    job: updatedJob,
+    provider: input.provider,
+    providerMessageId: input.providerMessageId ?? updatedDelivery.provider_message_id,
+    providerEventId: input.providerEventId ?? null,
+    eventType: input.eventType,
+    eventAt,
+    payload: input.payload,
   });
 
   return {
