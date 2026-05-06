@@ -41,7 +41,7 @@ export type ClaimedSignerInviteAccess = {
   recipientEmail: string;
 };
 
-const claimAccessibleInviteStatuses = ["claimed", "accepted"];
+const claimAccessibleInviteStatuses = ["claimed", "accepted", "completed"];
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const documentInviteAccessSelect = [
