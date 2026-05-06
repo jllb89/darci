@@ -56,6 +56,29 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Load web public Supabase config
+        run: |
+          secret_json="$(aws secretsmanager get-secret-value --secret-id /darci/staging/app --query SecretString --output text)"
+          node - "$secret_json" >> "$GITHUB_ENV" <<'NODE'
+          const secret = JSON.parse(process.argv[2] ?? "{}");
+          const supabaseUrl = secret.NEXT_PUBLIC_SUPABASE_URL || secret.SUPABASE_URL || "";
+          const supabaseAnonKey = secret.NEXT_PUBLIC_SUPABASE_ANON_KEY || secret.SUPABASE_ANON_KEY || "";
+          const sentryDsn = secret.NEXT_PUBLIC_SENTRY_DSN || secret.SENTRY_DSN || "";
+          const sentryTracesSampleRate = secret.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE || secret.SENTRY_TRACES_SAMPLE_RATE || "0.05";
+
+          if (!supabaseUrl || !supabaseAnonKey || !sentryDsn) {
+            console.error("/darci/staging/app must contain NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SENTRY_DSN for the web build.");
+            process.exit(1);
+          }
+
+          console.log(`STAGING_NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl}`);
+          console.log(`STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY=${supabaseAnonKey}`);
+          console.log(`STAGING_NEXT_PUBLIC_SENTRY_DSN=${sentryDsn}`);
+          console.log("STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging");
+          console.log(`STAGING_NEXT_PUBLIC_SENTRY_RELEASE=${process.env.GITHUB_SHA || ""}`);
+          console.log(`STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${sentryTracesSampleRate}`);
+          NODE
+
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
@@ -93,6 +116,12 @@ jobs:
             --platform linux/arm64 \
             -f apps/web/Dockerfile \
             --build-arg NEXT_PUBLIC_API_BASE_URL="$STAGING_NEXT_PUBLIC_API_BASE_URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="$STAGING_NEXT_PUBLIC_SUPABASE_URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+            --build-arg NEXT_PUBLIC_SENTRY_DSN="$STAGING_NEXT_PUBLIC_SENTRY_DSN" \
+            --build-arg NEXT_PUBLIC_SENTRY_ENVIRONMENT="$STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT" \
+            --build-arg NEXT_PUBLIC_SENTRY_RELEASE="$STAGING_NEXT_PUBLIC_SENTRY_RELEASE" \
+            --build-arg NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE="$STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE" \
             -t "$ECR_REGISTRY/darci-web:staging-latest" \
             -t "$ECR_REGISTRY/darci-web:$IMAGE_TAG" \
             --push \

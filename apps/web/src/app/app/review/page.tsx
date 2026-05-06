@@ -6,6 +6,7 @@ import ProcessBand from "@/app/app/start/ProcessBand";
 import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
 import { formatLabel } from "@/app/app/start/startPageUtils";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { captureAppException, captureAppMessage } from "@/lib/clientTelemetry";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 
 const apiBaseUrl =
@@ -263,6 +264,20 @@ export default function ReviewPage() {
           error instanceof Error
             ? error.message
             : "Failed to load review documents.";
+        captureAppException(error, {
+          level: "error",
+          tags: {
+            feature: "document_review",
+            document_id: documentId,
+          },
+          contexts: {
+            document_review: {
+              documentId,
+              stage: "fetch_review",
+            },
+          },
+          fingerprint: ["document_review", "fetch_failed"],
+        });
         setErrorMessage(message);
         return null;
       } finally {
@@ -297,10 +312,59 @@ export default function ReviewPage() {
           },
         );
         const responsePayload = (await response.json().catch(() => null)) as
-          | { message?: string }
+          | {
+              message?: string;
+              runs?: Array<{
+                id?: string;
+                outputKey?: string;
+                documentKey?: string;
+                status?: string;
+                blockedCount?: number;
+                errorMessage?: string | null;
+              }>;
+            }
           | null;
 
+        const blockedRuns = (responsePayload?.runs ?? []).filter(
+          (run) => run.status === "blocked",
+        );
+
+        if (blockedRuns.length > 0) {
+          captureAppMessage("Review PDF generation returned blocked runs", {
+            level: "warning",
+            tags: {
+              feature: "document_generation",
+              document_id: documentId,
+            },
+            contexts: {
+              document_generation: {
+                documentId,
+                requestedOutputKeys: missingOutputKeys,
+                blockedRuns,
+              },
+            },
+            fingerprint: ["review_generation", "blocked_runs"],
+          });
+        }
+
         if (!response.ok && response.status !== 409) {
+          captureAppMessage("Review PDF generation request failed", {
+            level: "error",
+            tags: {
+              feature: "document_generation",
+              document_id: documentId,
+            },
+            contexts: {
+              document_generation: {
+                documentId,
+                status: response.status,
+                requestedOutputKeys: missingOutputKeys,
+                message: responsePayload?.message ?? null,
+              },
+            },
+            fingerprint: ["review_generation", "request_failed"],
+          });
+
           throw new Error(
             responsePayload?.message ?? "Failed to start review PDF generation.",
           );
@@ -312,6 +376,21 @@ export default function ReviewPage() {
           error instanceof Error
             ? error.message
             : "Failed to start review PDF generation.";
+        captureAppException(error, {
+          level: "error",
+          tags: {
+            feature: "document_generation",
+            document_id: documentId,
+          },
+          contexts: {
+            document_generation: {
+              documentId,
+              requestedOutputKeys: missingOutputKeys,
+              stage: "ensure_generation_runs",
+            },
+          },
+          fingerprint: ["review_generation", "exception"],
+        });
         setErrorMessage(message);
         showToast({ tone: "error", message });
       } finally {

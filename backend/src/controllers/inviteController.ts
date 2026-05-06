@@ -12,6 +12,7 @@ import {
   InviteClaimServiceError,
   validateInviteToken,
 } from "../services/inviteClaimService";
+import { getOrCreateUserId } from "../services/documentService";
 import type { RequestRole } from "../services/userRoleService";
 import { sendValidationError } from "../utils/validation";
 
@@ -77,6 +78,18 @@ const claimInviteBodySchema = z.object({
 
 const resolveRole = (req: Request) => {
   return (req.user?.role ?? "member") as RequestRole;
+};
+
+const resolveViewerUserId = async (req: Request) => {
+  if (req.user?.dbUserId) {
+    return req.user.dbUserId;
+  }
+
+  if (!req.user?.id) {
+    return null;
+  }
+
+  return getOrCreateUserId(req.user.id, req.user.email, req.user.role);
 };
 
 const sendServiceError = (res: Response, error: unknown) => {
@@ -207,9 +220,10 @@ export const getPublicInvite = async (req: Request, res: Response) => {
   }
 
   try {
+    const viewerUserId = await resolveViewerUserId(req);
     const invite = await validateInviteToken({
       token: parsed.data.token,
-      viewerUserId: req.user?.dbUserId ?? null,
+      viewerUserId,
     });
 
     if (!invite) {
@@ -237,9 +251,10 @@ export const claimPublicInvite = async (req: Request, res: Response) => {
   }
 
   try {
+    const viewerUserId = await resolveViewerUserId(req);
     const result = await claimInviteToken({
       token: parsedParams.data.token,
-      viewerUserId: req.user?.dbUserId ?? null,
+      viewerUserId,
       claimAddress: parsedBody.data.claimAddress ?? null,
     });
 

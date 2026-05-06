@@ -378,6 +378,8 @@ describe("notification outbox Resend runtime", () => {
     vi.useRealTimers();
     delete process.env.RESEND_API_KEY;
     delete process.env.NOTIFICATION_OUTBOX_RETRY_BASE_SECONDS;
+    delete process.env.NOTIFICATION_SIGNATURE_FROM;
+    delete process.env.NOTIFICATION_REPLY_TO;
   });
 
   it("maps a queued email delivery to the Resend send API and provider message id", async () => {
@@ -425,6 +427,31 @@ describe("notification outbox Resend runtime", () => {
     ]);
   });
 
+  it("uses configured sender and reply-to addresses for Resend email", async () => {
+    process.env.NOTIFICATION_SIGNATURE_FROM = "DARCI Staging <onboarding@resend.dev>";
+    process.env.NOTIFICATION_REPLY_TO = "staging-support@example.com";
+    resendMocks.sendEmailMock.mockResolvedValue({
+      data: { id: "resend-msg-1" },
+      error: null,
+    });
+
+    const adapter = __testUtils.buildResendAdapter();
+    await adapter.send({
+      job: buildJob(),
+      delivery: buildDelivery(),
+      template: buildTemplate(),
+      workerId: "worker-1",
+      now: nowIso,
+    } as any);
+
+    expect(resendMocks.sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "DARCI Staging <onboarding@resend.dev>",
+        replyTo: "staging-support@example.com",
+      }),
+    );
+  });
+
   it("surfaces Resend API failures as dispatch errors", async () => {
     resendMocks.sendEmailMock.mockResolvedValue({
       data: null,
@@ -444,7 +471,7 @@ describe("notification outbox Resend runtime", () => {
     ).rejects.toMatchObject({
       name: "NotificationProviderDispatchError",
       code: "resend_api_error",
-      message: "Resend API unavailable",
+      message: "Resend send failed from DARCI Signatures <no-reply@darciregistry.com>: Resend API unavailable",
     });
   });
 
@@ -495,10 +522,64 @@ describe("notification outbox Resend runtime", () => {
     ]);
   });
 
+  it("syncs immediate Resend sent events to linked invite lifecycle state", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: {
+        invite_id: "invite-1",
+        job_kind: "invite",
+      },
+      delivery: {
+        invite_recipient_id: "recipient-1",
+      },
+      invite: {
+        status: "queued",
+        sent_at: null,
+      },
+      inviteRecipient: {
+        status: "queued",
+      },
+    });
+    resendMocks.sendEmailMock.mockResolvedValue({
+      data: { id: "resend-msg-1" },
+      error: null,
+    });
+
+    await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(supabaseMocks.state.document_access_invites[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        sent_at: nowIso,
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        last_event_at: nowIso,
+      }),
+    );
+  });
+
   it("schedules a retry when Resend dispatch fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(nowIso));
-    seedOutbox();
+    seedOutbox({
+      job: {
+        invite_id: "invite-1",
+        job_kind: "invite",
+      },
+      delivery: {
+        invite_recipient_id: "recipient-1",
+      },
+      invite: {
+        status: "queued",
+      },
+      inviteRecipient: {
+        status: "queued",
+      },
+    });
     resendMocks.sendEmailMock.mockResolvedValue({
       data: null,
       error: { message: "Resend temporarily unavailable" },
@@ -520,7 +601,7 @@ describe("notification outbox Resend runtime", () => {
       expect.objectContaining({
         status: "failed",
         error_code: "resend_api_error",
-        error_message: "Resend temporarily unavailable",
+        error_message: "Resend send failed from DARCI Signatures <no-reply@darciregistry.com>: Resend temporarily unavailable",
         failed_at: nowIso,
       }),
     );
@@ -531,6 +612,17 @@ describe("notification outbox Resend runtime", () => {
         payload: expect.objectContaining({ errorCode: "resend_api_error" }),
       }),
     ]);
+    expect(supabaseMocks.state.document_access_invites[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+      }),
+    );
+    expect(supabaseMocks.state.invite_recipients[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        last_event_at: nowIso,
+      }),
+    );
   });
 
   it("treats duplicate provider webhook event ids as idempotent", async () => {

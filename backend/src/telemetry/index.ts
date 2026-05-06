@@ -37,11 +37,33 @@ const parseOtelHeaders = (raw?: string): Record<string, string> | undefined => {
 export const initTelemetry = async () => {
   const sentryDsn = process.env.SENTRY_DSN;
   if (sentryDsn) {
+    const environment =
+      process.env.SENTRY_ENVIRONMENT ??
+      process.env.APP_ENV ??
+      process.env.NODE_ENV ??
+      "development";
+    const release =
+      process.env.SENTRY_RELEASE ??
+      process.env.GIT_SHA ??
+      process.env.GITHUB_SHA ??
+      process.env.IMAGE_TAG;
     const sentryOptions: Sentry.NodeOptions = {
       dsn: sentryDsn,
-      environment: process.env.NODE_ENV ?? "development",
+      environment,
       skipOpenTelemetrySetup: usesExternalOtel,
+      enabled: process.env.SENTRY_ENABLED !== "false",
+      initialScope: {
+        tags: {
+          app_env: process.env.APP_ENV ?? environment,
+          service: process.env.SERVICE_NAME ?? "backend",
+          runtime: "node",
+        },
+      },
     };
+
+    if (release) {
+      sentryOptions.release = release;
+    }
 
     if (!usesExternalOtel) {
       sentryOptions.tracesSampleRate = Number(

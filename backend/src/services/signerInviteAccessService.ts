@@ -78,15 +78,13 @@ export const resolveClaimedSignerInviteAccess = async (input: {
 }) => {
   const viewerUserId = input.viewerUserId?.trim() ?? "";
   const viewerEmail = normalizeEmail(input.viewerEmail);
-  if (!viewerUserId || !viewerEmail) {
+  if (!viewerUserId) {
     return null;
-
-  };
+  }
   const { data: inviteRows, error: inviteError } = await supabaseAdmin
     .from("document_access_invites")
     .select(documentInviteAccessSelect)
     .eq("document_id", input.documentId)
-    .eq("claimed_user_id", viewerUserId)
     .in("status", claimAccessibleInviteStatuses)
     .order("updated_at", { ascending: false });
 
@@ -116,9 +114,20 @@ export const resolveClaimedSignerInviteAccess = async (input: {
   const recipients = (recipientRows ?? []) as unknown as InviteRecipientAccessRow[];
 
   for (const invite of candidateInvites) {
+    const claimedUserId = invite.claimed_user_id?.trim() ?? null;
+    if (claimedUserId && claimedUserId !== viewerUserId) {
+      continue;
+    }
+
     const recipient = recipients.find((entry) => entry.invite_id === invite.id) ?? null;
     const recipientEmail = normalizeEmail(recipient?.delivery_address);
-    if (!recipientEmail || recipientEmail !== viewerEmail) {
+    if (!recipientEmail) {
+      continue;
+    }
+
+    // Trust claimed_user_id as the primary authorization key; if an email claim exists,
+    // keep the strict recipient-email match for defense in depth.
+    if (viewerEmail && recipientEmail !== viewerEmail) {
       continue;
     }
 

@@ -98,6 +98,7 @@ import {
 import {
   createDocumentDownloadUrl,
   createDocumentUploadUrl,
+  downloadDocumentObject,
   createSignatureDownloadUrl,
   createSignatureUploadUrl,
   getDocumentObjectMetadata,
@@ -117,6 +118,7 @@ import {
   queueRemainingSignerInvitesAfterCreatorSignature,
   type RemainingSignerInviteDispatchResult,
 } from "../services/signerInvitationDispatchService";
+import { completeSigningWorkflowAfterSignatureCapture } from "../services/signingCompletionService";
 import {
   resolveClaimedSignerInviteAccess,
   type ClaimedSignerInviteAccess,
@@ -136,6 +138,7 @@ import {
 import { buildDocumentTimeline } from "../services/documentTimelineService";
 import { getUserIdentityContextByUserId } from "../services/userRoleService";
 import { logDocumentTrace } from "../utils/documentTrace";
+import { captureException, captureMessage } from "../utils/sentry";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 5 * 1024 * 1024;
@@ -158,6 +161,238 @@ const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_VERSION = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_HASH = "uploaded_pdf";
 const RENDERING_RUN_STALE_AFTER_MS = 5 * 60 * 1000;
+
+const summarizeGenerationBlockersForTelemetry = (
+  blockers: GenerationRunBlockingRequirement[],
+) =>
+  blockers.map((blocker) => ({
+    code: blocker.code,
+    source: blocker.source,
+    field: blocker.field,
+    blocking: blocker.blocking,
+    message: blocker.message,
+  }));
+
+const captureGenerationRunBlocked = (input: {
+  document: DocumentRecord;
+  draft: DocumentIntakeDraftRecord;
+  run: DocumentGenerationRunRecord;
+  blockers: GenerationRunBlockingRequirement[];
+  placeholderKeys: string[];
+  signerObligations: Array<{
+    party_role: string | null;
+    obligation_type: string;
+    is_required: boolean;
+    resolution_source: string | null;
+  }>;
+}) => {
+  const blockingBlockers = input.blockers.filter((blocker) => blocker.blocking);
+
+  captureMessage("Document generation run blocked", {
+    level: "warning",
+    tags: {
+      feature: "document_generation",
+      document_id: input.document.id,
+      generation_run_id: input.run.id,
+      output_key: input.run.output_key,
+      document_key: input.run.document_key,
+      jurisdiction: input.draft.jurisdiction,
+      product_flow_mode: input.draft.product_flow_mode,
+    },
+    contexts: {
+      generation_run: {
+        documentId: input.document.id,
+        generationRunId: input.run.id,
+        intakeRevision: input.run.intake_revision,
+        status: input.run.status,
+        outputKey: input.run.output_key,
+        documentKey: input.run.document_key,
+        templateKey: input.run.template_key,
+        templateVersion: input.run.template_version,
+        templateArtifactId: input.run.template_artifact_id,
+        blockerCount: input.blockers.length,
+        blockingBlockerCount: blockingBlockers.length,
+        blockers: summarizeGenerationBlockersForTelemetry(input.blockers),
+        placeholderKeys: input.placeholderKeys,
+        signerObligations: input.signerObligations,
+      },
+    },
+    fingerprint: [
+      "document_generation_blocked",
+      input.run.output_key,
+      ...blockingBlockers.map((blocker) => blocker.code).sort(),
+    ],
+  });
+};
+
+const captureDocumentUploadIssue = (input: {
+  level?: "warning" | "error";
+  message: string;
+  documentId: string;
+  versionId?: string | null;
+  storagePath?: string | null;
+  metadata?: Record<string, unknown>;
+}) => {
+  captureMessage(input.message, {
+    level: input.level ?? "warning",
+    tags: {
+      feature: "document_upload",
+      document_id: input.documentId,
+      document_version_id: input.versionId,
+    },
+    contexts: {
+      document_upload: {
+        documentId: input.documentId,
+        documentVersionId: input.versionId ?? null,
+        storagePath: input.storagePath ?? null,
+        metadata: input.metadata ?? {},
+      },
+    },
+    fingerprint: ["document_upload", input.message],
+  });
+};
+
+const hasPdfMagicBytes = (content: Buffer) => {
+  return content.subarray(0, 5).toString("utf8") === "%PDF-";
+};
+
+const postSigningReadableStatuses = new Set(["pending_notary", "completed"]);
+
+const captureSigningReadinessIssue = (input: {
+  document: { id?: string | null; status: string | null; idn: string | null };
+  message: string;
+  reason: string;
+  statusCode: number;
+}) => {
+  console.warn("Document signing request rejected", {
+    documentId: input.document.id ?? null,
+    status: input.document.status,
+    idnPrepared: isFinalIdn(input.document.idn),
+    reason: input.reason,
+    statusCode: input.statusCode,
+    message: input.message,
+  });
+
+  captureMessage("Document signing request rejected", {
+    level: "warning",
+    tags: {
+      feature: "document_signing",
+      document_id: input.document.id ?? undefined,
+      document_status: input.document.status ?? undefined,
+      reason: input.reason,
+      status_code: input.statusCode,
+    },
+    contexts: {
+      document_signing: {
+        documentId: input.document.id ?? null,
+        status: input.document.status,
+        idnPrepared: isFinalIdn(input.document.idn),
+        reason: input.reason,
+        statusCode: input.statusCode,
+        message: input.message,
+      },
+    },
+    fingerprint: ["document_signing", "readiness_rejected", input.reason],
+  });
+};
+
+const createSignatureAssetDownloadUrl = async (input: {
+  signature: SignatureRecord;
+  feature: string;
+}) => {
+  if (!input.signature.storage_path) {
+    return null;
+  }
+
+  try {
+    return (await createSignatureDownloadUrl(input.signature.storage_path)).signedUrl;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn("Signature asset signed URL creation failed", {
+      feature: input.feature,
+      documentId: input.signature.document_id,
+      signatureId: input.signature.id,
+      storagePath: input.signature.storage_path,
+      captureMethod: input.signature.capture_method,
+      error: errorMessage,
+    });
+
+    captureException(error, {
+      level: "warning",
+      tags: {
+        feature: input.feature,
+        document_id: input.signature.document_id,
+        signature_id: input.signature.id,
+        capture_method: input.signature.capture_method,
+      },
+      contexts: {
+        signature_asset: {
+          documentId: input.signature.document_id,
+          generationRunId: input.signature.generation_run_id,
+          outputSignerId: input.signature.document_output_signer_id,
+          signerId: input.signature.signer_id,
+          signatureId: input.signature.id,
+          storagePath: input.signature.storage_path,
+          captureMethod: input.signature.capture_method,
+          mimeType: input.signature.mime_type,
+          sizeBytes: input.signature.size_bytes,
+          error: errorMessage,
+        },
+      },
+      fingerprint: ["signature_asset_download_url_failed", input.feature],
+    });
+
+    return null;
+  }
+};
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+const sendSigningEndpointFailure = (
+  res: Response,
+  error: unknown,
+  input: {
+    route: string;
+    documentId?: string | null;
+    actorSupabaseId?: string | null;
+    actorRole?: string | null;
+    signerUserId?: string | null;
+  },
+) => {
+  const message = getErrorMessage(error);
+  console.error("Document signing endpoint failed", {
+    route: input.route,
+    documentId: input.documentId ?? null,
+    actorSupabaseId: input.actorSupabaseId ?? null,
+    actorRole: input.actorRole ?? null,
+    signerUserId: input.signerUserId ?? null,
+    error: message,
+  });
+
+  captureException(error, {
+    level: "error",
+    tags: {
+      feature: "document_signing",
+      route: input.route,
+      document_id: input.documentId ?? undefined,
+      actor_role: input.actorRole ?? undefined,
+    },
+    contexts: {
+      document_signing: {
+        route: input.route,
+        documentId: input.documentId ?? null,
+        actorSupabaseId: input.actorSupabaseId ?? null,
+        actorRole: input.actorRole ?? null,
+        signerUserId: input.signerUserId ?? null,
+        error: message,
+      },
+    },
+    fingerprint: ["document_signing", input.route, "endpoint_failed"],
+  });
+
+  return res.status(500).json({ error: "internal_error", message });
+};
 
 const documentPartyRoles = [
   "principal",
@@ -780,7 +1015,7 @@ const resolveRequestActorUserId = async (req: Request) => {
     return null;
   }
 
-  return getUserIdBySupabaseId(req.user.id);
+  return getOrCreateUserId(req.user.id, req.user.email, req.user.role);
 };
 
 const shouldExposeRemainingSignerInviteDispatch = (
@@ -1299,9 +1534,10 @@ const ensureUploadedDocumentSigningPreparation = async (input: {
 const mapSavedSignatureResponse = async (
   signature: SignatureRecord,
 ): Promise<SavedSignatureResponse> => {
-  const assetDownloadUrl = signature.storage_path
-    ? (await createSignatureDownloadUrl(signature.storage_path)).signedUrl
-    : null;
+  const assetDownloadUrl = await createSignatureAssetDownloadUrl({
+    signature,
+    feature: "saved_signatures",
+  });
 
   return {
     id: signature.id,
@@ -1761,6 +1997,7 @@ const buildDocumentReviewState = async (input: {
 };
 
 const ensureDocumentReadyForSignature = (res: Response, document: {
+  id?: string | null;
   status: string | null;
   idn: string | null;
 }) => {
@@ -1769,6 +2006,13 @@ const ensureDocumentReadyForSignature = (res: Response, document: {
       document.status === "pending_review" || document.status === "draft"
         ? "Document review approval is required before signing"
         : "Document is not ready for signing";
+
+    captureSigningReadinessIssue({
+      document,
+      message,
+      reason: "status_not_pending_signature",
+      statusCode: 400,
+    });
 
     res.status(400).json({
       error: "validation_error",
@@ -1785,6 +2029,73 @@ const ensureDocumentReadyForSignature = (res: Response, document: {
   }
 
   if (!isFinalIdn(document.idn)) {
+    captureSigningReadinessIssue({
+      document,
+      message: "Document IDN is not prepared for signing",
+      reason: "idn_not_final",
+      statusCode: 409,
+    });
+
+    res.status(409).json({
+      error: "conflict",
+      message: "Document IDN is not prepared for signing",
+      details: [
+        {
+          path: "idn",
+          message: "Document IDN is not prepared for signing",
+        },
+      ],
+    });
+
+    return false;
+  }
+
+  return true;
+};
+
+const ensureDocumentReadableForSigning = (res: Response, document: {
+  id?: string | null;
+  status: string | null;
+  idn: string | null;
+}) => {
+  if (
+    document.status !== "pending_signature" &&
+    !postSigningReadableStatuses.has(document.status ?? "")
+  ) {
+    const message =
+      document.status === "pending_review" || document.status === "draft"
+        ? "Document review approval is required before signing"
+        : "Document is not ready for signing";
+
+    captureSigningReadinessIssue({
+      document,
+      message,
+      reason: "status_not_signing_readable",
+      statusCode: 400,
+    });
+
+    res.status(400).json({
+      error: "validation_error",
+      message,
+      details: [
+        {
+          path: "status",
+          message,
+        },
+      ],
+    });
+
+    return false;
+  }
+
+  if (!isFinalIdn(document.idn)) {
+    captureSigningReadinessIssue({
+      document,
+      message: "Document IDN is not prepared for signing",
+      reason: "idn_not_final",
+      statusCode: 409,
+    });
+
     res.status(409).json({
       error: "conflict",
       message: "Document IDN is not prepared for signing",
@@ -2053,8 +2364,11 @@ const buildDocumentSigningState = async (input: {
           !signer.is_required && signer.signing_group
             ? getSignatureGroupMinimumRequired(signer.metadata ?? {})
             : null;
-        const assetDownloadUrl = matchedSignature?.storage_path
-          ? (await createSignatureDownloadUrl(matchedSignature.storage_path)).signedUrl
+        const assetDownloadUrl = matchedSignature
+          ? await createSignatureAssetDownloadUrl({
+              signature: matchedSignature,
+              feature: "document_signing",
+            })
           : null;
 
         return {
@@ -2470,6 +2784,22 @@ const createGenerationRunsForDocument = async (input: {
         })),
       },
     );
+
+    if (preparedRun.status === "blocked") {
+      captureGenerationRunBlocked({
+        document: preparedRun.document,
+        draft,
+        run,
+        blockers: preparedRun.blockingRequirements,
+        placeholderKeys: Object.keys(preparedRun.renderContext.placeholders ?? {}),
+        signerObligations: preparedRun.signerObligations.map((signer) => ({
+          party_role: signer.party_role,
+          obligation_type: signer.obligation_type,
+          is_required: signer.is_required,
+          resolution_source: signer.resolution_source,
+        })),
+      });
+    }
 
     if (preparedRun.status === "queued") {
       await enqueueDocumentGenerationRun({
@@ -2970,18 +3300,116 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
       message: "Document version not found",
     });
   }
+  const uploadStoragePath = version.storage_path;
 
-  const objectMetadata = await getDocumentObjectMetadata(version.storage_path);
+  let objectMetadata: Awaited<ReturnType<typeof getDocumentObjectMetadata>>;
+  try {
+    objectMetadata = await getDocumentObjectMetadata(uploadStoragePath);
+  } catch (error) {
+    captureException(error, {
+      level: "error",
+      tags: {
+        feature: "document_upload",
+        document_id: document.id,
+        document_version_id: version.id,
+      },
+      contexts: {
+        document_upload: {
+          documentId: document.id,
+          documentVersionId: version.id,
+          storagePath: uploadStoragePath,
+          stage: "metadata_lookup",
+        },
+      },
+      fingerprint: ["document_upload", "metadata_lookup_failed"],
+    });
+    throw error;
+  }
+
   if (!objectMetadata) {
+    captureDocumentUploadIssue({
+      message: "Document upload finalize failed because uploaded object was not found",
+      documentId: document.id,
+      versionId: version.id,
+      storagePath: uploadStoragePath,
+    });
+
     return res.status(404).json({
       error: "not_found",
       message: "Uploaded file not found",
     });
   }
 
-  const normalizedMimeType =
-    objectMetadata.mimeType?.toLowerCase() ?? "";
-  if (normalizedMimeType !== "application/pdf") {
+  let inspectedContent: Buffer | null = null;
+  const inspectUploadedDocument = async () => {
+    if (inspectedContent) {
+      return inspectedContent;
+    }
+
+    try {
+      inspectedContent = await downloadDocumentObject(uploadStoragePath);
+      return inspectedContent;
+    } catch (error) {
+      captureException(error, {
+        level: "error",
+        tags: {
+          feature: "document_upload",
+          document_id: document.id,
+          document_version_id: version.id,
+        },
+        contexts: {
+          document_upload: {
+            documentId: document.id,
+            documentVersionId: version.id,
+            storagePath: uploadStoragePath,
+            stage: "object_download_validation",
+            metadata: objectMetadata,
+          },
+        },
+        fingerprint: ["document_upload", "object_download_validation_failed"],
+      });
+      throw error;
+    }
+  };
+
+  const normalizedMimeType = objectMetadata.mimeType?.toLowerCase().trim() ?? "";
+  const ambiguousMimeType =
+    normalizedMimeType === "" ||
+    normalizedMimeType === "application/octet-stream" ||
+    normalizedMimeType === "binary/octet-stream";
+  let resolvedMimeType =
+    normalizedMimeType === "application/pdf" ? "application/pdf" : "";
+
+  if (!resolvedMimeType && ambiguousMimeType) {
+    const content = await inspectUploadedDocument();
+    if (hasPdfMagicBytes(content)) {
+      resolvedMimeType = "application/pdf";
+      captureDocumentUploadIssue({
+        message: "Document upload PDF mime type inferred from file bytes",
+        documentId: document.id,
+        versionId: version.id,
+        storagePath: uploadStoragePath,
+        metadata: {
+          storageMimeType: objectMetadata.mimeType,
+          storedVersionMimeType: version.mime_type,
+        },
+      });
+    }
+  }
+
+  if (resolvedMimeType !== "application/pdf") {
+    captureDocumentUploadIssue({
+      message: "Document upload finalize rejected non-PDF content",
+      documentId: document.id,
+      versionId: version.id,
+      storagePath: uploadStoragePath,
+      metadata: {
+        storageMimeType: objectMetadata.mimeType,
+        storedVersionMimeType: version.mime_type,
+        sizeBytes: objectMetadata.sizeBytes,
+      },
+    });
+
     return res.status(400).json({
       error: "validation_error",
       message: "Only application/pdf is supported",
@@ -2994,7 +3422,36 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
     });
   }
 
-  if (typeof objectMetadata.sizeBytes !== "number") {
+  let resolvedSizeBytes =
+    typeof objectMetadata.sizeBytes === "number" ? objectMetadata.sizeBytes : null;
+
+  if (resolvedSizeBytes === null) {
+    const content = await inspectUploadedDocument();
+    resolvedSizeBytes = content.byteLength;
+    captureDocumentUploadIssue({
+      message: "Document upload file size inferred from object download",
+      documentId: document.id,
+      versionId: version.id,
+      storagePath: uploadStoragePath,
+      metadata: {
+        storageMimeType: objectMetadata.mimeType,
+        inferredSizeBytes: resolvedSizeBytes,
+      },
+    });
+  }
+
+  if (resolvedSizeBytes === null) {
+    captureDocumentUploadIssue({
+      message: "Document upload finalize failed because file size metadata is missing",
+      documentId: document.id,
+      versionId: version.id,
+      storagePath: uploadStoragePath,
+      metadata: {
+        storageMimeType: objectMetadata.mimeType,
+        storedVersionMimeType: version.mime_type,
+      },
+    });
+
     return res.status(400).json({
       error: "validation_error",
       message: "File size metadata is missing",
@@ -3007,7 +3464,19 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
     });
   }
 
-  if (objectMetadata.sizeBytes > MAX_UPLOAD_BYTES) {
+  if (resolvedSizeBytes > MAX_UPLOAD_BYTES) {
+    captureDocumentUploadIssue({
+      message: "Document upload finalize rejected oversized PDF",
+      documentId: document.id,
+      versionId: version.id,
+      storagePath: uploadStoragePath,
+      metadata: {
+        storageMimeType: objectMetadata.mimeType,
+        sizeBytes: resolvedSizeBytes,
+        maxUploadBytes: MAX_UPLOAD_BYTES,
+      },
+    });
+
     return res.status(400).json({
       error: "validation_error",
       message: "File exceeds 25 MB limit",
@@ -3021,8 +3490,8 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
   }
 
   const updatedVersion = await updateDocumentVersion(version.id, {
-    mime_type: normalizedMimeType || version.mime_type,
-    size_bytes: objectMetadata.sizeBytes,
+    mime_type: resolvedMimeType,
+    size_bytes: resolvedSizeBytes,
     file_name: version.file_name,
   });
 
@@ -4777,74 +5246,92 @@ export const getSignatureFields = async (req: Request, res: Response) => {
 };
 
 export const listSavedSignatures = async (req: Request, res: Response) => {
-  const signingAccess = await getAuthorizedSigningAccess(req, res);
-  if (!signingAccess) {
-    return;
+  try {
+    const signingAccess = await getAuthorizedSigningAccess(req, res);
+    if (!signingAccess) {
+      return;
+    }
+
+    const savedSignatures = await listCapturedSignaturesForSigner({
+      signerId: signingAccess.signerUserId,
+      limit: 24,
+    });
+
+    return res.status(200).json({
+      savedSignatures: await Promise.all(
+        savedSignatures.map((signature) => mapSavedSignatureResponse(signature)),
+      ),
+    });
+  } catch (error) {
+    return sendSigningEndpointFailure(res, error, {
+      route: "list_saved_signatures",
+      documentId: typeof req.params.id === "string" ? req.params.id : null,
+      actorSupabaseId: req.user?.id ?? null,
+      actorRole: req.user?.role ?? null,
+    });
   }
-
-  const savedSignatures = await listCapturedSignaturesForSigner({
-    signerId: signingAccess.signerUserId,
-    limit: 24,
-  });
-
-  return res.status(200).json({
-    savedSignatures: await Promise.all(
-      savedSignatures.map((signature) => mapSavedSignatureResponse(signature)),
-    ),
-  });
 };
 
 export const getDocumentSigning = async (req: Request, res: Response) => {
-  const signingAccess = await getAuthorizedSigningAccess(req, res);
-  if (!signingAccess) {
-    return;
-  }
-  const { document } = signingAccess;
+  try {
+    const signingAccess = await getAuthorizedSigningAccess(req, res);
+    if (!signingAccess) {
+      return;
+    }
+    const { document } = signingAccess;
 
-  if (!ensureDocumentReadyForSignature(res, document)) {
-    return;
-  }
+    if (!ensureDocumentReadableForSigning(res, document)) {
+      return;
+    }
 
-  let signing = await ensureSigningState({
-    document,
-    viewerRole: req.user?.role ?? "member",
-    actorContext: buildAuditActorContext(req),
-  });
-
-  if (
-    signing.state === "preparing" &&
-    (await processQueuedSigningOutputsInline({
-      document,
-      signing,
-    }))
-  ) {
-    signing = await ensureSigningState({
+    let signing = await ensureSigningState({
       document,
       viewerRole: req.user?.role ?? "member",
       actorContext: buildAuditActorContext(req),
     });
+
+    if (
+      signing.state === "preparing" &&
+      (await processQueuedSigningOutputsInline({
+        document,
+        signing,
+      }))
+    ) {
+      signing = await ensureSigningState({
+        document,
+        viewerRole: req.user?.role ?? "member",
+        actorContext: buildAuditActorContext(req),
+      });
+    }
+
+    const scopedSigning = scopeSigningStateForAccess(signing, signingAccess);
+
+    return res.status(200).json({
+      document: mapDocumentResponse(document, req.user?.role ?? "member"),
+      signing: {
+        state: scopedSigning.state,
+        reviewApproval: scopedSigning.reviewApproval,
+        signingExecution: scopedSigning.signingExecution,
+        approvedOutputKeys: scopedSigning.approvedOutputKeys,
+        outputs: scopedSigning.outputs,
+        pendingOutputs: scopedSigning.pendingOutputs,
+        missingOutputKeys: scopedSigning.missingOutputKeys,
+        requiresGeneration: scopedSigning.requiresGeneration,
+        allOutputsReady: scopedSigning.allOutputsReady,
+        signatures: scopedSigning.signatures,
+        groups: scopedSigning.groups,
+        completion: scopedSigning.completion,
+        viewerAccess: mapSigningViewerAccess(signingAccess),
+      },
+    });
+  } catch (error) {
+    return sendSigningEndpointFailure(res, error, {
+      route: "get_document_signing",
+      documentId: typeof req.params.id === "string" ? req.params.id : null,
+      actorSupabaseId: req.user?.id ?? null,
+      actorRole: req.user?.role ?? null,
+    });
   }
-
-  const scopedSigning = scopeSigningStateForAccess(signing, signingAccess);
-
-  return res.status(200).json({
-    document: mapDocumentResponse(document, req.user?.role ?? "member"),
-    signing: {
-      state: scopedSigning.state,
-      reviewApproval: scopedSigning.reviewApproval,
-      signingExecution: scopedSigning.signingExecution,
-      approvedOutputKeys: scopedSigning.approvedOutputKeys,
-      outputs: scopedSigning.outputs,
-      pendingOutputs: scopedSigning.pendingOutputs,
-      missingOutputKeys: scopedSigning.missingOutputKeys,
-      requiresGeneration: scopedSigning.requiresGeneration,
-      allOutputsReady: scopedSigning.allOutputsReady,
-      signatures: scopedSigning.signatures,
-      groups: scopedSigning.groups,
-      completion: scopedSigning.completion,
-      viewerAccess: mapSigningViewerAccess(signingAccess),
-    },
-  });
 };
 
 export const signDocument = async (req: Request, res: Response) => {
@@ -4947,9 +5434,10 @@ export const signDocument = async (req: Request, res: Response) => {
 };
 
 const mapCapturedSignatureResponse = async (signatureRecord: SignatureRecord) => {
-  const assetDownloadUrl = signatureRecord.storage_path
-    ? (await createSignatureDownloadUrl(signatureRecord.storage_path)).signedUrl
-    : null;
+  const assetDownloadUrl = await createSignatureAssetDownloadUrl({
+    signature: signatureRecord,
+    feature: "signature_capture_response",
+  });
 
   return {
     signature: {
@@ -5018,6 +5506,9 @@ const completeSignatureCapture = async (input: {
   });
 
   let remainingSignerInvites: RemainingSignerInviteDispatchResult | null = null;
+  let signingCompletion: Awaited<
+    ReturnType<typeof completeSigningWorkflowAfterSignatureCapture>
+  > | null = null;
   try {
     remainingSignerInvites = await queueRemainingSignerInvitesAfterCreatorSignature({
       documentId: input.document.id,
@@ -5063,15 +5554,82 @@ const completeSignatureCapture = async (input: {
     });
   }
 
+  try {
+    signingCompletion = await completeSigningWorkflowAfterSignatureCapture({
+      documentId: input.document.id,
+      completedOutputSignerId: input.signatureTask.outputSignerId,
+      completedSignatureId: input.signatureRecord.id,
+      signatureRecord: input.signatureRecord,
+      actorSupabaseId: input.actorContext.actorSupabaseId ?? null,
+      actorRole: input.actorContext.actorRole ?? null,
+    });
+
+    if (
+      signingCompletion?.signingExecution.persisted ||
+      signingCompletion?.documentStatus.updated
+    ) {
+      await recordAuditEvent({
+        ...input.actorContext,
+        entityType: "document",
+        entityId: input.document.id,
+        action: "system.signature_completion_workflow_applied",
+        metadata: {
+          document_id: input.document.id,
+          signature_id: input.signatureRecord.id,
+          output_signer_id: input.signatureTask.outputSignerId,
+          all_signer_requirements_satisfied:
+            signingCompletion.allSignerRequirementsSatisfied,
+          remaining_signer_count: signingCompletion.remainingSignerCount,
+          completed_invite_ids: signingCompletion.completedInviteIds,
+          signing_execution_persisted: signingCompletion.signingExecution.persisted,
+          previous_status: signingCompletion.documentStatus.previousStatus,
+          next_status: signingCompletion.documentStatus.nextStatus,
+          status_updated: signingCompletion.documentStatus.updated,
+          requires_notarization: signingCompletion.documentStatus.requiresNotarization,
+        },
+      });
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn("Signing completion workflow failed", {
+      documentId: input.document.id,
+      signatureId: input.signatureRecord.id,
+      outputSignerId: input.signatureTask.outputSignerId,
+      error: errorMessage,
+    });
+    await recordAuditEvent({
+      ...input.actorContext,
+      entityType: "document",
+      entityId: input.document.id,
+      action: "system.signature_completion_workflow_failed",
+      metadata: {
+        document_id: input.document.id,
+        signature_id: input.signatureRecord.id,
+        output_signer_id: input.signatureTask.outputSignerId,
+        error: errorMessage,
+      },
+    });
+  }
+
   const signatureResponse = await mapCapturedSignatureResponse(input.signatureRecord);
   const inviteDispatchResponse = mapRemainingSignerInviteDispatchResponse(remainingSignerInvites);
-
-  return inviteDispatchResponse
+  const signingCompletionResponse = signingCompletion
     ? {
-        ...signatureResponse,
-        remainingSignerInvites: inviteDispatchResponse,
+        allSignerRequirementsSatisfied:
+          signingCompletion.allSignerRequirementsSatisfied,
+        remainingSignerCount: signingCompletion.remainingSignerCount,
+        completedInviteIds: signingCompletion.completedInviteIds,
+        documentStatus: signingCompletion.documentStatus,
+        signingExecution: signingCompletion.signingExecution,
+        notifications: signingCompletion.notifications,
       }
-    : signatureResponse;
+    : null;
+
+  return {
+    ...signatureResponse,
+    ...(inviteDispatchResponse ? { remainingSignerInvites: inviteDispatchResponse } : {}),
+    ...(signingCompletionResponse ? { signingCompletion: signingCompletionResponse } : {}),
+  };
 };
 
 export const captureSignature = async (req: Request, res: Response) => {
@@ -5591,7 +6149,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
     }
   }
 
-  if (document.status !== "pending_signature") {
+  if (document.status !== "pending_signature" && document.status !== "pending_notary") {
     return res.status(400).json({
       error: "validation_error",
       message: "Document is not ready for notarization",

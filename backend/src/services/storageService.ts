@@ -152,15 +152,28 @@ export const getDocumentObjectMetadata = async (storagePath: string) => {
   }
 
   const metadata = match.metadata ?? {};
+  const rawSize =
+    metadata.size ?? metadata.contentLength ?? metadata.content_length ?? null;
+  const parsedSize =
+    typeof rawSize === "number"
+      ? rawSize
+      : typeof rawSize === "string" && rawSize.trim().length > 0
+        ? Number(rawSize)
+        : null;
 
   return {
-    sizeBytes: typeof metadata.size === "number" ? metadata.size : null,
+    sizeBytes:
+      typeof parsedSize === "number" && Number.isFinite(parsedSize)
+        ? parsedSize
+        : null,
     mimeType:
       typeof metadata.mimetype === "string"
         ? metadata.mimetype
         : typeof metadata.contentType === "string"
           ? metadata.contentType
-          : null,
+          : typeof metadata.content_type === "string"
+            ? metadata.content_type
+            : null,
   };
 };
 

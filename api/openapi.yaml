@@ -9,7 +9,7 @@ info:
 
     `pro` is a first-class runtime role and currently satisfies member-authorized routes where the product surface is member-equivalent.
 
-    This OpenAPI document only describes mounted HTTP endpoints. The currently mounted review, signing, and notarization flows now enqueue notification outbox rows and delivery-ledger rows against the seeded template keys, and invite issuance plus public claim APIs are now published. Billing payment-request APIs and external delivery-provider APIs are still not published yet.
+    This OpenAPI document only describes mounted HTTP endpoints. The currently mounted review, signing, and notarization flows now enqueue notification outbox rows and delivery-ledger rows against the seeded template keys, and invite issuance plus public claim APIs are now published. Signer invitation access is claim-aware and signer-scoped, and signature capture/finalization can now return automatic signing-completion workflow state. Billing payment-request APIs and external delivery-provider APIs are still not published yet.
 servers:
   - url: "{apiBaseUrl}"
     description: Base URL for local, staging, or production.
@@ -22,6 +22,7 @@ paths:
   /auth/login:
     post:
       summary: Login
+      description: Returns a Supabase-backed DARCi session for an active account. Suspended or revoked DARCi accounts receive `403 account_inactive` even if Supabase credentials are valid.
       security: []
       requestBody:
         required: true
@@ -48,9 +49,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /auth/signup:
     post:
       summary: Sign up
+      description: |
+        Creates a Supabase-backed account and sends the Supabase email-confirmation link. When email confirmation is required, the response contains a DARCi user mirror with null tokens and `requiresEmailConfirmation: true`.
       security: []
       requestBody:
         required: true
@@ -77,9 +86,125 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /auth/magic-link:
+    post:
+      summary: Request magic link
+      description: Sends a Supabase passwordless magic link for an existing account. Passwordless account creation is disabled; invite access still requires the authenticated invite claim flow.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailActionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/otp/start:
+    post:
+      summary: Request email OTP
+      description: Sends a Supabase passwordless email OTP for an existing account. Passwordless account creation is disabled; invite access still requires the authenticated invite claim flow.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailActionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/otp/verify:
+    post:
+      summary: Verify email OTP
+      description: Verifies a Supabase passwordless email OTP, syncs the DARCi user mirror, and returns the DARCi session shape for an active account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailOtpVerifyRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /auth/logout:
     post:
       summary: Log out
+      description: |
+        Logs out the current app session. The default `scope` is `local`; use `global` only for explicit "sign out everywhere" or security-event flows.
       requestBody:
         required: true
         content:
@@ -111,9 +236,152 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /auth/resend-confirmation:
+    post:
+      summary: Resend email confirmation
+      description: Sends a new Supabase signup confirmation email for an unconfirmed account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailActionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/password/recovery:
+    post:
+      summary: Request password recovery
+      description: Sends a Supabase password-recovery email with the configured DARCi callback URL.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailActionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/password/reset:
+    post:
+      summary: Reset password
+      description: Updates the password for an authenticated Supabase recovery session and syncs the local DARCi user mirror.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/session/sync:
+    post:
+      summary: Sync browser auth session
+      description: Syncs a Supabase browser PKCE session into DARCi local user/profile state after confirmation or recovery callbacks.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionSyncRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /auth/refresh:
     post:
       summary: Refresh auth session
+      description: Returns a refreshed Supabase-backed DARCi session for an active account. Suspended or revoked DARCi accounts receive `403 account_inactive`.
       security: []
       requestBody:
         required: true
@@ -140,25 +408,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuthResponse"
-        "400":
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: Unauthorized
+        "403":
+          description: Account inactive
           content:
             application/json:
               schema:
@@ -181,6 +432,12 @@ paths:
                 $ref: "#/components/schemas/UserResponse"
         "401":
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account inactive or forbidden
           content:
             application/json:
               schema:
@@ -1020,7 +1277,10 @@ paths:
   /invites/public/{token}:
     get:
       summary: Validate public invite token
-      description: Validates an invite token for public signer entry. Bearer auth is optional and is only used to hydrate existing-account claim context.
+      description: |
+        Validates an invite token for public signer entry. Bearer auth is optional and is only used to hydrate existing-account claim context.
+
+        The response is the source of truth for invite landing decisions: `invite.token.canClaim` reflects token status, expiry, invite lifecycle state, max-use limits, and whether `existing_account_only` requires an authenticated viewer.
       security: []
       parameters:
         - in: path
@@ -1056,7 +1316,10 @@ paths:
   /invites/public/{token}/claim:
     post:
       summary: Claim public invite token
-      description: Claims an invite token for the current session or signup flow and returns the updated invite lifecycle snapshot.
+      description: |
+        Claims an invite token for the current session or signup flow and returns the updated invite lifecycle snapshot.
+
+        Claims created with an authenticated bearer token attach `claimedUserId`; signup-flow claims may carry only `claimAddress` until the auth onboarding flow binds the created user. Downstream signing access still requires the authenticated account email to match the invited email recipient.
       security: []
       parameters:
         - in: path
@@ -2498,6 +2761,10 @@ paths:
   /documents/{id}/signing:
     get:
       summary: Get signing workspace state
+      description: |
+        Returns the signing workspace for the document owner, admin/service-role actors, or a claimed invited signer.
+
+        Invited signer access is scoped to the claimed invite's `documentOutputSignerId`; unrelated outputs, signer tasks, and owner confirmation controls are omitted from the response. A claimed invite must belong to the current user and the authenticated email must match the invite email recipient. Missing claims, expired invites, and email mismatch are intentionally returned as `404` document-not-found responses.
       x-roles:
         - member
         - admin
@@ -2542,6 +2809,10 @@ paths:
   /documents/{id}/signatures:
     post:
       summary: Capture a typed, drawn, or saved signature
+      description: |
+        Captures a typed, drawn, or saved signature for an owner/admin/service-role actor or for a claimed invited signer assigned to the submitted `outputSignerId`.
+
+        If the capture is the principal's completing signature, the response may include `remainingSignerInvites`. If the capture satisfies all required signer obligations, including optional signing groups, the response may include `signingCompletion` with persisted execution, invite-completion, notification, and document-status details. Invite dispatch or completion-notification failures are audited and do not roll back successful signature capture.
       x-roles:
         - member
         - admin
@@ -2550,6 +2821,8 @@ paths:
         - member.signature_capture_started
         - member.signature_capture_completed
         - system.signature_linked_to_document
+        - system.signature_completion_workflow_applied
+        - system.signature_completion_workflow_failed
       parameters:
         - in: path
           name: id
@@ -2596,6 +2869,7 @@ paths:
   /documents/{id}/signatures/request:
     post:
       summary: Request member signature upload
+      description: Requests a direct-upload session for an owner/admin/service-role actor or a claimed invited signer assigned to the submitted `outputSignerId`. Invited signer attempts outside their assigned signer obligation return `404`.
       x-roles:
         - member
         - admin
@@ -2648,6 +2922,10 @@ paths:
   /documents/{id}/signatures/finalize:
     post:
       summary: Finalize member signature upload
+      description: |
+        Finalizes an uploaded signature asset, stamps the official signing PDF, and runs the same invitation/completion workflow as direct signature capture.
+
+        The response may include `remainingSignerInvites` after principal completion and `signingCompletion` after all required signer obligations are satisfied.
       x-roles:
         - member
         - admin
@@ -2655,6 +2933,8 @@ paths:
       x-audit-events:
         - member.signature_capture_completed
         - system.signature_linked_to_document
+        - system.signature_completion_workflow_applied
+        - system.signature_completion_workflow_failed
       parameters:
         - in: path
           name: id
@@ -2701,6 +2981,7 @@ paths:
   /documents/{id}/sign:
     post:
       summary: Confirm the completed signing set
+      description: Legacy owner/admin confirmation endpoint for a completed signing set. New automatic completion from signature capture/finalization may have already persisted `signature_execution`, in which case this endpoint returns conflict instead of duplicating confirmation.
       x-roles:
         - member
         - admin
@@ -4726,6 +5007,18 @@ components:
           nullable: true
         status:
           type: string
+        emailConfirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSignInAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastAuthSyncedAt:
+          type: string
+          format: date-time
+          nullable: true
         documentType:
           type: string
         jurisdiction:
@@ -6369,6 +6662,10 @@ components:
           allOf:
             - $ref: "#/components/schemas/RemainingSignerInviteDispatchResponse"
           nullable: true
+        signingCompletion:
+          allOf:
+            - $ref: "#/components/schemas/SignatureCompletionWorkflowResponse"
+          nullable: true
     SignatureCaptureResponse:
       type: object
       properties:
@@ -6377,6 +6674,10 @@ components:
         remainingSignerInvites:
           allOf:
             - $ref: "#/components/schemas/RemainingSignerInviteDispatchResponse"
+          nullable: true
+        signingCompletion:
+          allOf:
+            - $ref: "#/components/schemas/SignatureCompletionWorkflowResponse"
           nullable: true
     RemainingSignerInviteDispatchTrigger:
       type: object
@@ -6495,6 +6796,65 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RemainingSignerInviteDispatchFailure"
+    SignatureCompletionNotifications:
+      type: object
+      properties:
+        signerCompletionConfirmationJobIds:
+          type: array
+          items:
+            type: string
+        signerSignedUpdateJobId:
+          type: string
+          nullable: true
+        allSignaturesCompleteJobId:
+          type: string
+          nullable: true
+    SignatureCompletionExecutionState:
+      type: object
+      properties:
+        alreadyConfirmed:
+          type: boolean
+        persisted:
+          type: boolean
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+    SignatureCompletionDocumentStatus:
+      type: object
+      properties:
+        previousStatus:
+          type: string
+          nullable: true
+        nextStatus:
+          type: string
+          nullable: true
+          enum:
+            - pending_notary
+            - completed
+        updated:
+          type: boolean
+        requiresNotarization:
+          type: boolean
+    SignatureCompletionWorkflowResponse:
+      type: object
+      description: Optional response block returned after signature capture/finalization when the automatic signing-completion workflow ran successfully.
+      properties:
+        allSignerRequirementsSatisfied:
+          type: boolean
+        remainingSignerCount:
+          type: integer
+          minimum: 0
+        completedInviteIds:
+          type: array
+          items:
+            type: string
+        documentStatus:
+          $ref: "#/components/schemas/SignatureCompletionDocumentStatus"
+        signingExecution:
+          $ref: "#/components/schemas/SignatureCompletionExecutionState"
+        notifications:
+          $ref: "#/components/schemas/SignatureCompletionNotifications"
     DocumentSigningExecution:
       type: object
       properties:
@@ -6626,6 +6986,25 @@ components:
           type: boolean
         canConfirm:
           type: boolean
+    DocumentSigningViewerAccess:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - owner
+            - admin
+            - service_role
+            - invited_signer
+        inviteId:
+          type: string
+          nullable: true
+        documentOutputSignerId:
+          type: string
+          nullable: true
+        documentPartyId:
+          type: string
+          nullable: true
     DocumentSigning:
       type: object
       properties:
@@ -6674,6 +7053,8 @@ components:
             $ref: "#/components/schemas/DocumentSigningGroup"
         completion:
           $ref: "#/components/schemas/DocumentSigningCompletion"
+        viewerAccess:
+          $ref: "#/components/schemas/DocumentSigningViewerAccess"
     DocumentSigningResponse:
       type: object
       properties:
@@ -7889,6 +8270,11 @@ components:
         password:
           type: string
           minLength: 8
+        returnTo:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Optional same-origin app route to return to after email confirmation.
     SignupRequest:
       type: object
       required:
@@ -7915,6 +8301,13 @@ components:
         refreshToken:
           type: string
           minLength: 1
+        scope:
+          type: string
+          default: local
+          enum:
+            - local
+            - global
+          description: Local signs out the current app session. Global signs out all Supabase sessions for the user and should be reserved for explicit sign-out-everywhere or security actions.
     RefreshRequest:
       type: object
       required:
@@ -7922,6 +8315,57 @@ components:
       properties:
         refreshToken:
           type: string
+          minLength: 1
+    EmailActionRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+        returnTo:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Optional same-origin app route to return to after the email action.
+    EmailOtpVerifyRequest:
+      type: object
+      required:
+        - email
+        - token
+      properties:
+        email:
+          type: string
+          format: email
+        token:
+          type: string
+          minLength: 4
+          maxLength: 32
+          description: Supabase email OTP entered by the user.
+        returnTo:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Optional same-origin app route to return to after verification.
+    PasswordResetRequest:
+      type: object
+      required:
+        - refreshToken
+        - password
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+    SessionSyncRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          nullable: true
           minLength: 1
     AuthResponse:
       type: object
@@ -7934,6 +8378,10 @@ components:
           nullable: true
         user:
           $ref: "#/components/schemas/User"
+        requiresEmailConfirmation:
+          type: boolean
+        emailConfirmationSent:
+          type: boolean
     UserResponse:
       type: object
       properties:
@@ -7998,6 +8446,7 @@ components:
           nullable: true
         status:
           type: string
+          description: Delivery lifecycle state for this recipient, updated by notification queue events and Resend webhook events.
         isPrimary:
           type: boolean
         lastNotifiedAt:
@@ -8008,6 +8457,7 @@ components:
           type: string
           format: date-time
           nullable: true
+          description: Timestamp of the latest provider or internal lifecycle event applied to this recipient.
     DocumentInviteTokenSummary:
       type: object
       properties:
@@ -8076,8 +8526,10 @@ components:
           nullable: true
         isExpired:
           type: boolean
+          description: True when the token expiry is in the past, regardless of stored token status.
         canClaim:
           type: boolean
+          description: True only when token status, use count, expiry, invite lifecycle state, and claim-mode requirements allow a claim attempt.
     DocumentInviteClaimSummary:
       type: object
       properties:
@@ -8181,7 +8633,9 @@ components:
         claimMode:
           $ref: "#/components/schemas/InviteClaimMode"
         status:
-          $ref: "#/components/schemas/InviteStatus"
+          allOf:
+            - $ref: "#/components/schemas/InviteStatus"
+          description: Invite lifecycle state. Resend delivery/open/click/failure events update this field for pre-claim invites, and signer completion moves eligible document-signing invites to `completed`.
         inviteLabel:
           type: string
           nullable: true
@@ -8210,14 +8664,17 @@ components:
           type: string
           format: date-time
           nullable: true
+          description: First send timestamp derived from invite dispatch or provider delivery lifecycle.
         firstOpenedAt:
           type: string
           format: date-time
           nullable: true
+          description: First invite-open timestamp from public token validation or Resend open events.
         firstClickedAt:
           type: string
           format: date-time
           nullable: true
+          description: First invite-click timestamp from public claim or Resend click events.
         acceptedAt:
           type: string
           format: date-time
@@ -8234,6 +8691,7 @@ components:
           type: string
           format: date-time
           nullable: true
+          description: Timestamp when the signer obligation associated with this invite was completed.
         deliveryCount:
           type: integer
         resendCount:
@@ -8244,6 +8702,7 @@ components:
         metadata:
           type: object
           additionalProperties: true
+          description: Runtime metadata including latest notification lifecycle event and latest terminal delivery issue when available.
         createdAt:
           type: string
           format: date-time
@@ -8279,7 +8738,9 @@ components:
         claimMode:
           $ref: "#/components/schemas/InviteClaimMode"
         status:
-          $ref: "#/components/schemas/InviteStatus"
+          allOf:
+            - $ref: "#/components/schemas/InviteStatus"
+          description: Public invite lifecycle state used by the invite landing page for entry gating.
         recipientName:
           type: string
           nullable: true
@@ -8412,6 +8873,7 @@ components:
         claimAddress:
           type: string
           nullable: true
+          description: Email or channel address captured during signup/login handoff. It does not bypass the later authenticated email-match check for signing access.
     DocumentInviteAccess:
       type: object
       properties:

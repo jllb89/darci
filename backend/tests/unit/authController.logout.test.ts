@@ -28,7 +28,7 @@ describe("logout", () => {
       });
   });
 
-  it("revokes the current session when bearer and refresh token are provided", async () => {
+  it("signs out the local session when bearer and refresh token are provided", async () => {
     setSessionMock.mockResolvedValue({ error: null });
     signOutMock.mockResolvedValue({ error: null });
 
@@ -51,7 +51,7 @@ describe("logout", () => {
       access_token: "access-token",
       refresh_token: "refresh-token",
     });
-    expect(signOutMock).toHaveBeenCalledWith({ scope: "global" });
+    expect(signOutMock).toHaveBeenCalledWith({ scope: "local" });
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       status: "ok",
@@ -77,5 +77,28 @@ describe("logout", () => {
 
     expect(setSessionMock).not.toHaveBeenCalled();
     expect(status).toHaveBeenCalledWith(400);
+  });
+
+  it("supports explicit global sign-out", async () => {
+    setSessionMock.mockResolvedValue({ error: null });
+    signOutMock.mockResolvedValue({ error: null });
+
+    const { logout } = await import("../../src/controllers/authController.ts");
+
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+    const req = {
+      headers: { authorization: "Bearer access-token" },
+      body: { refreshToken: "refresh-token", scope: "global" },
+      user: { id: "user-1" },
+    } as unknown as Request;
+    const res = {
+      status,
+    } as unknown as Response;
+
+    await logout(req, res);
+
+    expect(signOutMock).toHaveBeenCalledWith({ scope: "global" });
+    expect(status).toHaveBeenCalledWith(200);
   });
 });

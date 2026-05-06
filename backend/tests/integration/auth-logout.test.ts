@@ -64,7 +64,7 @@ describe("POST /auth/logout", () => {
     createClientMock.mockImplementation(() => buildSupabaseClient());
   });
 
-  it("revokes the Supabase session through the Express route", async () => {
+  it("signs out the local Supabase session through the Express route", async () => {
     setSessionMock.mockResolvedValue({ error: null });
     signOutMock.mockResolvedValue({ error: null });
 
@@ -88,6 +88,25 @@ describe("POST /auth/logout", () => {
       access_token: token,
       refresh_token: "refresh-token",
     });
+    expect(signOutMock).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it("passes explicit global sign-out scope through the Express route", async () => {
+    setSessionMock.mockResolvedValue({ error: null });
+    signOutMock.mockResolvedValue({ error: null });
+
+    const app = await buildTestApp();
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .post("/auth/logout")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ refreshToken: "refresh-token", scope: "global" });
+
+    expect(response.status).toBe(200);
     expect(signOutMock).toHaveBeenCalledWith({ scope: "global" });
   });
 

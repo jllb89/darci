@@ -8,6 +8,7 @@ vi.hoisted(() => {
 const mocks = vi.hoisted(() => ({
   resolveRemainingSignerInvitationsAfterCreatorSignatureMock: vi.fn(),
   createDocumentInviteMock: vi.fn(),
+  resendDocumentInviteMock: vi.fn(),
   runDueNotificationJobsMock: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("../../src/services/signerInvitationResolverService", () => ({
 
 vi.mock("../../src/services/documentInviteService", () => ({
   createDocumentInvite: mocks.createDocumentInviteMock,
+  resendDocumentInvite: mocks.resendDocumentInviteMock,
 }));
 
 vi.mock("../../src/services/notificationOutboxService", () => ({
@@ -62,6 +64,7 @@ describe("signer invitation dispatcher", () => {
   beforeEach(() => {
     mocks.resolveRemainingSignerInvitationsAfterCreatorSignatureMock.mockReset();
     mocks.createDocumentInviteMock.mockReset();
+    mocks.resendDocumentInviteMock.mockReset();
     mocks.runDueNotificationJobsMock.mockReset();
     mocks.runDueNotificationJobsMock.mockResolvedValue({
       scannedCount: 0,
@@ -160,9 +163,68 @@ describe("signer invitation dispatcher", () => {
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
       limit: 1,
       workerId: "signer-invite-immediate",
-      jobKind: "invite",
       documentId: "doc-1",
       notificationJobIds: ["job-1"],
+    });
+  });
+
+  it("resends stale existing invite candidates and flushes the new reminder job", async () => {
+    mocks.resolveRemainingSignerInvitationsAfterCreatorSignatureMock.mockResolvedValue({
+      documentId: "doc-1",
+      actorUserId: "owner-1",
+      actorEmail: "owner@example.com",
+      trigger: baseTrigger,
+      candidates: [buildCandidate()],
+      skipped: [],
+    });
+    mocks.createDocumentInviteMock.mockResolvedValue({
+      invite: { id: "invite-1", status: "queued" },
+      notification: null,
+      access: null,
+      existing: true,
+    });
+    mocks.resendDocumentInviteMock.mockResolvedValue({
+      invite: { id: "invite-1", status: "queued" },
+      notification: {
+        jobId: "job-reminder-1",
+        deliveryId: "delivery-reminder-1",
+        templateId: "template-reminder-1",
+        templateKey: "signer_reminder_email",
+      },
+      access: {
+        token: "raw-token",
+        accessUrl: "https://app.example.com/app/invite?token=raw-token",
+        expiresAt: "2026-04-30T00:00:00.000Z",
+      },
+      existing: true,
+    });
+
+    const result = await queueRemainingSignerInvitesAfterCreatorSignature({
+      documentId: "doc-1",
+      actorUserId: "owner-1",
+      actorEmail: "owner@example.com",
+      completedOutputSignerId: "creator-signer",
+      completedSignatureId: "sig-1",
+    });
+
+    expect(mocks.resendDocumentInviteMock).toHaveBeenCalledWith({
+      role: "service_role",
+      viewerUserId: "owner-1",
+      inviteId: "invite-1",
+    });
+    expect(result.invited).toEqual([
+      expect.objectContaining({
+        inviteId: "invite-1",
+        existing: true,
+        notificationJobId: "job-reminder-1",
+        notificationDeliveryId: "delivery-reminder-1",
+      }),
+    ]);
+    expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
+      limit: 1,
+      workerId: "signer-invite-immediate",
+      documentId: "doc-1",
+      notificationJobIds: ["job-reminder-1"],
     });
   });
 

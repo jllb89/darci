@@ -38,6 +38,7 @@ import {
   uploadGeneratedDocument,
 } from "./storageService";
 import { logDocumentTrace } from "../utils/documentTrace";
+import { captureException } from "../utils/sentry";
 
 const PDF_PAGE_MARGINS = {
   top: 86,
@@ -2628,6 +2629,32 @@ export const processDocumentGenerationRun = async (input: {
       outputKey: failedRun.output_key,
       failureCode: failedRun.failure_code,
       errorMessage: failedRun.error_message,
+    });
+
+    captureException(error, {
+      level: "error",
+      tags: {
+        feature: "document_generation",
+        document_id: failedRun.document_id,
+        generation_run_id: failedRun.id,
+        output_key: failedRun.output_key,
+        document_key: failedRun.document_key,
+      },
+      contexts: {
+        generation_run: {
+          documentId: failedRun.document_id,
+          generationRunId: failedRun.id,
+          rendererJobId: input.rendererJobId,
+          outputKey: failedRun.output_key,
+          documentKey: failedRun.document_key,
+          templateKey: failedRun.template_key,
+          templateVersion: failedRun.template_version,
+          templateArtifactId: failedRun.template_artifact_id,
+          failureCode: failedRun.failure_code,
+          errorMessage: failedRun.error_message,
+        },
+      },
+      fingerprint: ["document_generation_render_failed", failedRun.output_key],
     });
 
     throw error;

@@ -9,6 +9,7 @@ import {
   isValidEmailFormat,
   isValidPhoneCountryCode,
   isValidPhoneFormat,
+  parseMultilineArrayFormInput,
   parsePriorDocumentItems,
   parsePersonContact,
   parsePersonListItems,
@@ -175,6 +176,22 @@ describe("memberFormControls", () => {
     });
   });
 
+  it("preserves live spaces in structured contact values", () => {
+    const serialized = serializePersonContact({
+      email: "principal@example.com ",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "555 111 ",
+    });
+
+    expect(parsePersonContact(serialized)).toEqual({
+      email: "principal@example.com ",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "555 111 ",
+    });
+  });
+
   it("falls back to default country code for legacy contact strings", () => {
     expect(parsePersonContact("principal@example.com")).toEqual({
       email: "principal@example.com",
@@ -209,6 +226,30 @@ describe("memberFormControls", () => {
       },
     ]);
     expect(hasSigningTrustee(parsed)).toBe(true);
+  });
+
+  it("preserves live spaces in trustee rows", () => {
+    const serialized = serializePersonListItems([
+      {
+        fullName: "Jordan Trustee ",
+        email: "jordan@example.com ",
+        phoneCountryIso2: "US",
+        phoneCountryCode: "+1",
+        phone: "555 222 ",
+        isSigningTrustee: true,
+      },
+    ]);
+
+    expect(parsePersonListItems(serialized)).toEqual([
+      {
+        fullName: "Jordan Trustee ",
+        email: "jordan@example.com ",
+        phoneCountryIso2: "US",
+        phoneCountryCode: "+1",
+        phone: "555 222 ",
+        isSigningTrustee: true,
+      },
+    ]);
   });
 
   it("preserves blank trustee rows for interactive add flows", () => {
@@ -267,6 +308,35 @@ describe("memberFormControls", () => {
 
     expect(isValidPhoneFormat("555-111-2222")).toBe(true);
     expect(isValidPhoneFormat("123")).toBe(false);
+  });
+
+  it("preserves spaces while converting multiline array input", () => {
+    expect(parseMultilineArrayFormInput("Jane Doe \n  John Q Public\n\n")).toEqual([
+      "Jane Doe ",
+      "  John Q Public",
+    ]);
+  });
+
+  it("preserves live spaces in prior document labels and references", () => {
+    const serialized = serializePriorDocumentItems([
+      {
+        chronologyOrder: 1,
+        documentType: "trust_agreement",
+        documentLabel: "Original trust agreement ",
+        documentDate: "2021-04-05",
+        attachmentReference: "Book 20, Page 104 ",
+      },
+    ]);
+
+    expect(parsePriorDocumentItems(serialized)).toEqual([
+      {
+        chronologyOrder: 1,
+        documentType: "trust_agreement",
+        documentLabel: "Original trust agreement ",
+        documentDate: "2021-04-05",
+        attachmentReference: "Book 20, Page 104 ",
+      },
+    ]);
   });
 
   it("exposes a complete country dial-code list with flags", () => {

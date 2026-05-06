@@ -23,6 +23,7 @@ RUN cd backend && npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV SERVICE_NAME=api
 
 # Copy compiled output and production node_modules
 COPY --from=builder /app/backend/dist ./dist

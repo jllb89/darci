@@ -478,6 +478,8 @@ const toFirstName = (input: {
 
 const getAppBaseUrl = () => {
   return (
+    process.env.WEB_APP_URL?.trim() ??
+    process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim() ??
     process.env.APP_BASE_URL?.trim() ??
     process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() ??
     process.env.NEXT_PUBLIC_SITE_URL?.trim() ??
@@ -1106,6 +1108,69 @@ export const listDocumentInvites = async (input: {
       total: count ?? 0,
     },
   } satisfies ListDocumentInvitesResponse;
+};
+
+const signerCompletionEligibleInviteStatuses = new Set<DocumentInviteStatus>([
+  "draft",
+  "queued",
+  "sent",
+  "opened",
+  "claimed",
+  "accepted",
+  "failed",
+]);
+
+export const completeDocumentSignerInvitesForOutputSigners = async (input: {
+  documentId: string;
+  documentOutputSignerIds: string[];
+  completedAt: string;
+}) => {
+  const outputSignerIds = Array.from(
+    new Set(
+      input.documentOutputSignerIds
+        .map((documentOutputSignerId) => documentOutputSignerId.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (outputSignerIds.length === 0) {
+    return [] as DocumentInviteDetail[];
+  }
+
+  const { data: existingData, error: existingError } = await supabaseAdmin
+    .from("document_access_invites")
+    .select(documentInviteSelect)
+    .eq("document_id", input.documentId)
+    .in("document_output_signer_id", outputSignerIds)
+    .eq("invite_kind", "document_signing");
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const eligibleInviteIds = ((existingData ?? []) as unknown as DocumentInviteRow[])
+    .filter((invite) => signerCompletionEligibleInviteStatuses.has(invite.status))
+    .map((invite) => invite.id);
+
+  if (eligibleInviteIds.length === 0) {
+    return [] as DocumentInviteDetail[];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("document_access_invites")
+    .update({
+      status: "completed" satisfies DocumentInviteStatus,
+      completed_at: input.completedAt,
+      updated_at: input.completedAt,
+    })
+    .in("id", eligibleInviteIds)
+    .select(documentInviteSelect);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return loadInviteDetails((data ?? []) as unknown as DocumentInviteRow[]);
 };
 
 export const createDocumentInvite = async (input: {

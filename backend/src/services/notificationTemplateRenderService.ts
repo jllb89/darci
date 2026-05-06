@@ -142,11 +142,39 @@ const wrapEmailHtml = (bodyHtml: string): string => `
   </body>
 </html>`.trim();
 
+const firstConfiguredValue = (keys: string[]) => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
+const normalizeEnvKeySegment = (value: string) => {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+};
+
 const resolveFromAddress = (audienceScope: string | null, templateKey: string): string => {
   const isBilling =
     templateKey.includes("payment") ||
     templateKey.includes("billing") ||
     templateKey.includes("client_payment");
+
+  const configuredFromAddress = firstConfiguredValue([
+    `NOTIFICATION_FROM_${normalizeEnvKeySegment(templateKey)}`,
+    isBilling ? "NOTIFICATION_BILLING_FROM" : "",
+    audienceScope === "notary" ? "NOTIFICATION_NOTARY_FROM" : "",
+    audienceScope ? `NOTIFICATION_FROM_${normalizeEnvKeySegment(audienceScope)}` : "",
+    "NOTIFICATION_SIGNATURE_FROM",
+    "NOTIFICATION_DEFAULT_FROM",
+    "RESEND_FROM_ADDRESS",
+  ]);
+  if (configuredFromAddress) {
+    return configuredFromAddress;
+  }
 
   if (isBilling) {
     return "DARCI Billing <billing@darciregistry.com>";
@@ -157,6 +185,10 @@ const resolveFromAddress = (audienceScope: string | null, templateKey: string): 
   }
 
   return "DARCI Signatures <no-reply@darciregistry.com>";
+};
+
+const resolveReplyToAddress = () => {
+  return firstConfiguredValue(["NOTIFICATION_REPLY_TO", "RESEND_REPLY_TO_ADDRESS"]) ?? "support@darciregistry.com";
 };
 
 export const renderNotificationTemplate = (
@@ -193,7 +225,7 @@ export const renderNotificationTemplate = (
 
   return {
     from: resolveFromAddress(template.audienceScope, template.templateKey),
-    replyTo: "support@darciregistry.com",
+    replyTo: resolveReplyToAddress(),
     to: recipientEmail
       ? recipientDisplayName
         ? `${recipientDisplayName} <${recipientEmail}>`

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
+  getOrCreateUserIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   listDocumentSystemValuesMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
@@ -16,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   updateDocumentVersionMock: vi.fn(),
   replaceDocumentOutputSignersMock: vi.fn(),
   createDocumentDownloadUrlMock: vi.fn(),
+  recordAuditEventMock: vi.fn(),
+  getUserIdentityContextBySupabaseIdMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", async (importOriginal) => {
@@ -24,6 +27,7 @@ vi.mock("../../src/services/documentService", async (importOriginal) => {
   return {
     ...actual,
     getDocumentById: mocks.getDocumentByIdMock,
+    getOrCreateUserId: mocks.getOrCreateUserIdMock,
     getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
     listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
     listDocumentVersions: mocks.listDocumentVersionsMock,
@@ -41,6 +45,19 @@ vi.mock("../../src/services/documentService", async (importOriginal) => {
 vi.mock("../../src/services/storageService", () => ({
   createDocumentDownloadUrl: mocks.createDocumentDownloadUrlMock,
 }));
+
+vi.mock("../../src/services/auditService", () => ({
+  recordAuditEvent: mocks.recordAuditEventMock,
+}));
+
+vi.mock("../../src/services/userRoleService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/userRoleService")>();
+
+  return {
+    ...actual,
+    getUserIdentityContextBySupabaseId: mocks.getUserIdentityContextBySupabaseIdMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -72,6 +89,7 @@ describe("uploaded-pdf signing state", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     mocks.getDocumentByIdMock.mockReset();
+    mocks.getOrCreateUserIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.listDocumentSystemValuesMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
@@ -84,6 +102,10 @@ describe("uploaded-pdf signing state", () => {
     mocks.updateDocumentVersionMock.mockReset();
     mocks.replaceDocumentOutputSignersMock.mockReset();
     mocks.createDocumentDownloadUrlMock.mockReset();
+    mocks.recordAuditEventMock.mockReset();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
+    mocks.recordAuditEventMock.mockResolvedValue(undefined);
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(null);
     mocks.createDocumentDownloadUrlMock.mockResolvedValue({
       bucket: "documents",
       path: "owner-1/doc-1/generated/original.pdf",
@@ -106,6 +128,7 @@ describe("uploaded-pdf signing state", () => {
       intake_submitted_at: "2026-03-05T00:10:00.000Z",
       created_at: "2026-03-05T00:00:00.000Z",
     });
+    mocks.getOrCreateUserIdMock.mockResolvedValue("owner-1");
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.listDocumentSystemValuesMock
       .mockResolvedValueOnce([
@@ -309,7 +332,7 @@ describe("uploaded-pdf signing state", () => {
       .get("/documents/doc-1/signing")
       .set("Authorization", `Bearer ${token}`);
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
     expect(response.body.signing.state).toBe("ready");
     expect(response.body.signing.reviewApproval.reviewSource).toBe("uploaded_pdf");
     expect(response.body.signing.allOutputsReady).toBe(true);

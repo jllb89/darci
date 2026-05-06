@@ -114,7 +114,15 @@ if (process.env.SENTRY_DSN) {
   Sentry.setupExpressErrorHandler(app);
 }
 
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+  console.error("Unhandled API error", {
+    method: req.method,
+    path: req.path,
+    statusCode: 500,
+    message: err.message,
+    stack: err.stack,
+  });
+
   res.status(500).json({ error: "internal_error", message: err.message });
 });
 

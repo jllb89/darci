@@ -1,9 +1,11 @@
+import "../instrument";
 import { Worker } from "bullmq";
 import { bullMqPrefix, connection } from "./queues";
 import { processDocumentGenerationRun } from "../services/documentGenerationRenderService";
 import { hashDocument } from "../services/hashingService";
 import { anchorToLedger } from "../services/ledgerService";
 import { deliverWebhook } from "../services/webhookService";
+import { captureException, flushSentry } from "../utils/sentry";
 
 type HashingJobData = {
   documentId: string;
@@ -28,6 +30,73 @@ type GenerationRunJobData = {
 const redisConnection = connection;
 
 const workers: Array<Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>> = [];
+
+const summarizeJobData = (data: unknown) => {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const record = data as Record<string, unknown>;
+  return {
+    keys: Object.keys(record),
+    documentId: typeof record.documentId === "string" ? record.documentId : null,
+    generationRunId: typeof record.runId === "string" ? record.runId : null,
+    idn: typeof record.idn === "string" ? record.idn : null,
+    urlHost:
+      typeof record.url === "string"
+        ? (() => {
+            try {
+              return new URL(record.url).host;
+            } catch {
+              return null;
+            }
+          })()
+        : null,
+  };
+};
+
+const attachWorkerTelemetry = (
+  worker: Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>,
+) => {
+  worker.on("failed", (job, error) => {
+    captureException(error, {
+      level: "error",
+      tags: {
+        service: "worker",
+        worker_queue: worker.name,
+        job_name: job?.name,
+      },
+      contexts: {
+        bullmq_job: {
+          id: job?.id ?? null,
+          name: job?.name ?? null,
+          queueName: worker.name,
+          attemptsMade: job?.attemptsMade ?? null,
+          attemptsStarted: job?.attemptsStarted ?? null,
+          failedReason: job?.failedReason ?? null,
+          data: summarizeJobData(job?.data),
+        },
+      },
+      fingerprint: ["worker", worker.name, job?.name ?? "unknown"],
+    });
+  });
+
+  worker.on("error", (error) => {
+    captureException(error, {
+      level: "error",
+      tags: {
+        service: "worker",
+        worker_queue: worker.name,
+      },
+      contexts: {
+        bullmq_worker: {
+          queueName: worker.name,
+        },
+      },
+      fingerprint: ["worker", worker.name, "worker_error"],
+    });
+  });
+};
 
 if (!redisConnection) {
   console.warn("REDIS_URL is not set; background workers are disabled.");
@@ -100,10 +169,13 @@ if (!redisConnection) {
       workerOptions,
     ) as Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>,
   );
+
+  workers.forEach(attachWorkerTelemetry);
 }
 
 const shutdown = async () => {
   await Promise.all(workers.map((worker) => worker.close()));
+  await flushSentry();
 
   if (redisConnection) {
     await redisConnection.quit();

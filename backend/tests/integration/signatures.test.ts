@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
+  getOrCreateUserIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   listDocumentSystemValuesMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   listDocumentGenerationRunsMock: vi.fn(),
+  listCapturedSignaturesForSignerMock: vi.fn(),
   listDocumentSignaturesMock: vi.fn(),
   listDocumentOutputSignersMock: vi.fn(),
   getDocumentOutputSignerByIdMock: vi.fn(),
@@ -22,15 +24,18 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   applySignatureCaptureToDocumentOutputMock: vi.fn(),
   queueRemainingSignerInvitesAfterCreatorSignatureMock: vi.fn(),
+  completeSigningWorkflowAfterSignatureCaptureMock: vi.fn(),
   resolveClaimedSignerInviteAccessMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
+  getOrCreateUserId: mocks.getOrCreateUserIdMock,
   getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
   listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
+  listCapturedSignaturesForSigner: mocks.listCapturedSignaturesForSignerMock,
   listDocumentSignatures: mocks.listDocumentSignaturesMock,
   listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
   getDocumentOutputSignerById: mocks.getDocumentOutputSignerByIdMock,
@@ -67,9 +72,23 @@ vi.mock("../../src/services/signerInvitationDispatchService", () => ({
     mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock,
 }));
 
+vi.mock("../../src/services/signingCompletionService", () => ({
+  completeSigningWorkflowAfterSignatureCapture:
+    mocks.completeSigningWorkflowAfterSignatureCaptureMock,
+}));
+
 vi.mock("../../src/services/signerInviteAccessService", () => ({
   resolveClaimedSignerInviteAccess: mocks.resolveClaimedSignerInviteAccessMock,
 }));
+
+vi.mock("../../src/services/userRoleService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/userRoleService")>();
+
+  return {
+    ...actual,
+    getUserIdentityContextBySupabaseId: vi.fn().mockResolvedValue(null),
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -139,10 +158,12 @@ describe("member signature capture", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     mocks.getDocumentByIdMock.mockReset();
+    mocks.getOrCreateUserIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.listDocumentSystemValuesMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentGenerationRunsMock.mockReset();
+    mocks.listCapturedSignaturesForSignerMock.mockReset();
     mocks.listDocumentSignaturesMock.mockReset();
     mocks.listDocumentOutputSignersMock.mockReset();
     mocks.getDocumentOutputSignerByIdMock.mockReset();
@@ -157,8 +178,12 @@ describe("member signature capture", () => {
     mocks.recordAuditEventMock.mockReset();
     mocks.applySignatureCaptureToDocumentOutputMock.mockReset();
     mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock.mockReset();
+    mocks.completeSigningWorkflowAfterSignatureCaptureMock.mockReset();
     mocks.resolveClaimedSignerInviteAccessMock.mockReset();
     mocks.resolveClaimedSignerInviteAccessMock.mockResolvedValue(null);
+    mocks.getOrCreateUserIdMock.mockResolvedValue("owner-1");
+    mocks.listCapturedSignaturesForSignerMock.mockResolvedValue([]);
+    mocks.completeSigningWorkflowAfterSignatureCaptureMock.mockResolvedValue(null);
     mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock.mockResolvedValue({
       documentId: "doc-1",
       triggeredAt: "2026-03-05T00:00:20.000Z",
@@ -299,6 +324,7 @@ describe("member signature capture", () => {
       output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("invited-user-1");
+    mocks.getOrCreateUserIdMock.mockResolvedValue("invited-user-1");
     mocks.resolveClaimedSignerInviteAccessMock.mockResolvedValue({
       inviteId: "invite-1",
       documentId: "doc-1",
@@ -345,6 +371,166 @@ describe("member signature capture", () => {
     expect(response.body.signing.completion.canConfirm).toBe(false);
   });
 
+  it("keeps the signing workspace readable after completion advances to notary", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([
+      {
+        system_key: "review_approval",
+        value_json: {
+          approvedAt: "2026-03-05T00:00:00.000Z",
+          approvedOutputKeys: ["trust_rrr"],
+        },
+      },
+      {
+        system_key: "signature_execution",
+        value_json: {
+          confirmedAt: "2026-03-05T00:00:30.000Z",
+          confirmedBySupabaseId: "supabase-owner-1",
+          confirmedByRole: "member",
+          generationRunIds: [generationRunId],
+          completedOutputSignerIds: [outputSignerId],
+          completedSignatureIds: ["sig-1"],
+        },
+      },
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      {
+        id: "sig-1",
+        document_id: "doc-1",
+        generation_run_id: generationRunId,
+        document_output_signer_id: outputSignerId,
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: null,
+        capture_method: "type",
+        typed_value: "Owner One",
+        typed_kind: "name",
+        mime_type: null,
+        size_bytes: null,
+        status: "captured",
+        metadata: {},
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/signing")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body.document.status).toBe("pending_notary");
+    expect(response.body.signing.state).toBe("confirmed");
+    expect(response.body.signing.signatures[0]).toEqual(
+      expect.objectContaining({
+        outputSignerId,
+        status: "captured",
+        typedValue: "Owner One",
+      }),
+    );
+  });
+
+  it("lists saved signatures when an older saved asset is missing", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.listCapturedSignaturesForSignerMock.mockResolvedValue([
+      {
+        id: "saved-good",
+        document_id: "doc-1",
+        generation_run_id: generationRunId,
+        document_output_signer_id: outputSignerId,
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: "signatures/doc-1/run-1/saved-good.png",
+        capture_method: "draw",
+        typed_value: null,
+        typed_kind: null,
+        mime_type: "image/png",
+        size_bytes: 1024,
+        status: "captured",
+        metadata: {},
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+      {
+        id: "saved-missing",
+        document_id: "old-doc-1",
+        generation_run_id: null,
+        document_output_signer_id: null,
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: "signatures/old-doc-1/saved-missing.png",
+        capture_method: "upload",
+        typed_value: null,
+        typed_kind: null,
+        mime_type: "image/png",
+        size_bytes: null,
+        status: "captured",
+        metadata: {},
+        captured_at: "2026-03-04T00:00:20.000Z",
+        created_at: "2026-03-04T00:00:20.000Z",
+      },
+    ]);
+    mocks.createSignatureDownloadUrlMock.mockReset();
+    mocks.createSignatureDownloadUrlMock
+      .mockResolvedValueOnce({ signedUrl: "https://signature.example.com/good" })
+      .mockRejectedValueOnce(new Error("Object not found"));
+
+    try {
+      const token = signToken({
+        sub: "supabase-owner-1",
+        email: "owner@example.com",
+        app_metadata: { role: "member" },
+      });
+
+      const response = await request(app)
+        .get("/documents/doc-1/signatures/saved")
+        .set("Authorization", `Bearer ${token}`);
+
+      expect(response.status, JSON.stringify(response.body)).toBe(200);
+      expect(response.body.savedSignatures).toEqual([
+        expect.objectContaining({
+          id: "saved-good",
+          assetDownloadUrl: "https://signature.example.com/good",
+        }),
+        expect.objectContaining({
+          id: "saved-missing",
+          assetDownloadUrl: null,
+        }),
+      ]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("creates invited signer signature records with the claimed user id", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
@@ -359,6 +545,7 @@ describe("member signature capture", () => {
       output_bundle: outputBundle,
     });
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("invited-user-1");
+    mocks.getOrCreateUserIdMock.mockResolvedValue("invited-user-1");
     mocks.resolveClaimedSignerInviteAccessMock.mockResolvedValue({
       inviteId: "invite-1",
       documentId: "doc-1",
@@ -411,6 +598,13 @@ describe("member signature capture", () => {
       expect.objectContaining({
         documentOutputSignerId: outputSignerId,
         signerId: "invited-user-1",
+      }),
+    );
+    expect(mocks.completeSigningWorkflowAfterSignatureCaptureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        completedOutputSignerId: outputSignerId,
+        completedSignatureId: "sig-1",
       }),
     );
   });
@@ -534,6 +728,30 @@ describe("member signature capture", () => {
       ],
       failures: [],
     });
+    mocks.completeSigningWorkflowAfterSignatureCaptureMock.mockResolvedValueOnce({
+      documentId: "doc-1",
+      completedOutputSignerId: outputSignerId,
+      completedSignatureId: "sig-1",
+      allSignerRequirementsSatisfied: true,
+      remainingSignerCount: 0,
+      completedInviteIds: ["invite-1"],
+      notifications: {
+        signerCompletionConfirmationJobIds: [],
+        signerSignedUpdateJobId: null,
+        allSignaturesCompleteJobId: "job-all-complete",
+      },
+      signingExecution: {
+        alreadyConfirmed: false,
+        persisted: true,
+        confirmedAt: "2026-03-05T00:00:20.000Z",
+      },
+      documentStatus: {
+        previousStatus: "pending_signature",
+        nextStatus: "pending_notary",
+        updated: true,
+        requiresNotarization: true,
+      },
+    });
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
@@ -607,6 +825,21 @@ describe("member signature capture", () => {
         inviteId: "invite-1",
       }),
     ]);
+    expect(response.body.signingCompletion).toEqual(
+      expect.objectContaining({
+        allSignerRequirementsSatisfied: true,
+        remainingSignerCount: 0,
+        completedInviteIds: ["invite-1"],
+        documentStatus: expect.objectContaining({
+          nextStatus: "pending_notary",
+          updated: true,
+          requiresNotarization: true,
+        }),
+        signingExecution: expect.objectContaining({
+          persisted: true,
+        }),
+      }),
+    );
     expect(mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock).toHaveBeenCalledWith({
       documentId: "doc-1",
       actorUserId: "owner-1",
@@ -614,6 +847,13 @@ describe("member signature capture", () => {
       completedOutputSignerId: outputSignerId,
       completedSignatureId: "sig-1",
     });
+    expect(mocks.completeSigningWorkflowAfterSignatureCaptureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        completedOutputSignerId: outputSignerId,
+        completedSignatureId: "sig-1",
+      }),
+    );
   });
 
   it("rejects missing signature upload", async () => {

@@ -325,7 +325,9 @@ Mitigation:
 1. Roll back to `internal` for production if sends are blocked.
 2. Confirm DNS records in the registrar or DNS provider against the Resend dashboard.
 3. Confirm `darciregistry.com` remains the production sending domain.
-4. Confirm billing sender remains `billing@darciregistry.com` and non-billing senders remain `no-reply@darciregistry.com` unless explicitly approved.
+4. Confirm the active sender is a verified Resend sender. The runtime supports `NOTIFICATION_SIGNATURE_FROM`, `NOTIFICATION_BILLING_FROM`, `NOTIFICATION_NOTARY_FROM`, `NOTIFICATION_DEFAULT_FROM`, and `RESEND_FROM_ADDRESS` overrides.
+5. Confirm billing sender remains `billing@darciregistry.com` and non-billing senders remain `no-reply@darciregistry.com` unless explicitly approved.
+6. If staging uses a separate verified sender before `darciregistry.com` is verified, set `NOTIFICATION_SIGNATURE_FROM` and redeploy both API and worker tasks.
 
 Recovery:
 
@@ -353,6 +355,27 @@ Recovery:
 1. Preview the affected template through the template admin preview endpoint when applicable.
 2. Queue a controlled test notification.
 3. Confirm `rendered`, `sent`, and final lifecycle events appear in `outbound_message_events`.
+
+## Playbook: Existing Invite Re-Send Gap
+
+Symptoms:
+
+1. A creator completes signing, but remaining signer emails are not arriving.
+2. There are no new Resend logs for the repeated attempt.
+3. An existing invite row already exists for the same document signer and recipient.
+
+Mitigation:
+
+1. Confirm the invite status. Existing `draft`, `queued`, or `failed` signer invites are eligible for an immediate reminder re-send from the creator-signing dispatcher.
+2. Confirm the new reminder job id appears in the dispatch result and in `notification_jobs` with `job_kind = 'invite_reminder'`.
+3. Confirm the immediate worker path processes the exact notification job id.
+4. If the new reminder job fails, use the logged Resend sender address and provider error to decide whether this is a sender-domain, provider, or template issue.
+
+Recovery:
+
+1. Correct the underlying sender/provider/template issue.
+2. Trigger a controlled re-send for the affected invite or repeat the signing completion flow in staging.
+3. Confirm the invite transitions from `queued` to `sent` or to a clear failed state with a provider error.
 
 ## Recovery Verification Checklist
 

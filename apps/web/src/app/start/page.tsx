@@ -4,39 +4,37 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { hasStoredSession, setStoredAuth } from "@/lib/auth";
+import {
+  hasStoredSession,
+  setStoredAuth,
+  syncStoredAuthFromSession,
+} from "@/lib/auth";
+import { buildAuthCallbackUrl, sanitizeAuthReturnTo } from "@/lib/authRedirects";
+import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
 
-const sanitizeReturnTo = (value: string | null) => {
-  const candidate = value?.trim() ?? "";
-  if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
-    return "/app";
-  }
-
-  const isAppRoute =
-    candidate === "/app" || candidate.startsWith("/app/") || candidate.startsWith("/app?");
-
-  if (!isAppRoute) {
-    return "/app";
-  }
-
-  return candidate;
-};
+type LoginMode = "password" | "magic-link" | "otp";
 
 function StartAuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const returnTo = sanitizeReturnTo(searchParams.get("returnTo"));
+  const returnTo = sanitizeAuthReturnTo(searchParams.get("returnTo"));
   const [isSignUp, setIsSignUp] = useState(searchParams.get("mode") === "signup");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loginMode, setLoginMode] = useState<LoginMode>("password");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpChallengeEmail, setOtpChallengeEmail] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [confirmationEmail, setConfirmationEmail] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRecoverySubmitting, setIsRecoverySubmitting] = useState(false);
 
   useEffect(() => {
     if (hasStoredSession()) {
@@ -55,27 +53,186 @@ function StartAuthPageContent() {
 
   const handleModeToggle = () => {
     setIsSignUp((current) => !current);
+    setLoginMode("password");
+    setOtpCode("");
+    setOtpChallengeEmail(null);
     setErrorMessage(null);
+    setNoticeMessage(null);
+    setConfirmationEmail(null);
+  };
+
+  const handleLoginModeChange = (mode: LoginMode) => {
+    setLoginMode(mode);
+    setOtpCode("");
+    setOtpChallengeEmail(null);
+    setErrorMessage(null);
+    setNoticeMessage(null);
+  };
+
+  const getActionRedirectTo = (intent: "signup" | "recovery") => {
+    return buildAuthCallbackUrl({
+      origin: window.location.origin,
+      intent,
+      returnTo,
+    });
+  };
+
+  const postAuthEmailAction = async (path: string, targetEmail: string) => {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email: targetEmail, returnTo }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as {
+      message?: string;
+      details?: Array<{ message?: string }>;
+    } | null;
+
+    if (!response.ok) {
+      const validationMessage = payload?.details?.[0]?.message;
+      throw new Error(payload?.message || validationMessage || "Request failed");
+    }
+
+    return payload;
+  };
+
+  const handleResendConfirmation = async () => {
+    const targetEmail = confirmationEmail ?? email;
+    setErrorMessage(null);
+    setNoticeMessage(null);
+
+    if (!targetEmail) {
+      setErrorMessage("Enter your email first.");
+      return;
+    }
+
+    try {
+      const payload = await postAuthEmailAction("/auth/resend-confirmation", targetEmail);
+      setNoticeMessage(payload?.message ?? "Confirmation email sent.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Request failed");
+    }
+  };
+
+  const handlePasswordRecovery = async () => {
+    setErrorMessage(null);
+    setNoticeMessage(null);
+
+    if (!email) {
+      setErrorMessage("Enter your email first.");
+      return;
+    }
+
+    setIsRecoverySubmitting(true);
+    try {
+      const payload = await postAuthEmailAction("/auth/password/recovery", email);
+      setNoticeMessage(payload?.message ?? "Password reset email sent.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Request failed");
+    } finally {
+      setIsRecoverySubmitting(false);
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage(null);
+    setNoticeMessage(null);
     setIsSubmitting(true);
 
     try {
+      if (isSignUp) {
+        const supabase = getSupabaseBrowserClient();
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: getActionRedirectTo("signup"),
+            data: {
+              first_name: firstName,
+              last_name: lastName,
+            },
+          },
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        if (data.session?.access_token) {
+          await syncStoredAuthFromSession({
+            accessToken: data.session.access_token,
+            refreshToken: data.session.refresh_token,
+            intent: "signup",
+          });
+          router.push(returnTo);
+          return;
+        }
+
+        setConfirmationEmail(email);
+        setNoticeMessage("Confirmation email sent.");
+        return;
+      }
+
+      if (loginMode === "magic-link") {
+        const payload = await postAuthEmailAction("/auth/magic-link", email);
+        setNoticeMessage(payload?.message ?? "Magic link sent.");
+        return;
+      }
+
+      if (loginMode === "otp") {
+        if (otpChallengeEmail) {
+          const response = await fetch(`${apiBaseUrl}/auth/otp/verify`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: otpChallengeEmail,
+              token: otpCode,
+              returnTo,
+            }),
+          });
+
+          const payload = (await response.json().catch(() => null)) as {
+            accessToken?: string | null;
+            refreshToken?: string | null;
+            user?: unknown;
+            message?: string;
+            details?: Array<{ path?: string; message?: string }>;
+          } | null;
+
+          if (!response.ok || !payload?.user) {
+            const validationMessage = payload?.details?.[0]?.message;
+            throw new Error(payload?.message || validationMessage || "Request failed");
+          }
+
+          setStoredAuth({
+            accessToken: payload.accessToken ?? null,
+            refreshToken: payload.refreshToken ?? null,
+            user: payload.user,
+          });
+          router.push(returnTo);
+          return;
+        }
+
+        const payload = await postAuthEmailAction("/auth/otp/start", email);
+        setOtpChallengeEmail(email);
+        setNoticeMessage(payload?.message ?? "Email code sent.");
+        return;
+      }
+
       const response = await fetch(
-        `${apiBaseUrl}${isSignUp ? "/auth/signup" : "/auth/login"}`,
+        `${apiBaseUrl}/auth/login`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(
-            isSignUp
-              ? { firstName, lastName, email, password }
-              : { email, password }
-          ),
+          body: JSON.stringify({ email, password }),
         }
       );
 
@@ -105,6 +262,83 @@ function StartAuthPageContent() {
       setIsSubmitting(false);
     }
   };
+
+  if (confirmationEmail) {
+    return (
+      <div className="h-screen w-screen overflow-hidden bg-white text-Color-Scheme-1-Text">
+        <div className="relative flex h-full w-full flex-col">
+          <header className="absolute left-0 right-0 top-0 z-10 flex h-20 items-center bg-transparent px-8 md:px-12">
+            <Link href="/" aria-label="DARCi home">
+              <Image
+                src="/icons/navbar/darci_black.svg"
+                alt="DARCi"
+                width={91}
+                height={20}
+                className="h-5 w-auto"
+              />
+            </Link>
+          </header>
+
+          <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-2">
+            <section className="relative flex min-h-0 items-center justify-center bg-white px-8 pb-10 pt-24 md:px-12 md:pb-16 md:pt-28">
+              <div className="w-full max-w-md">
+                <h1 className="font-display text-4xl font-medium tracking-tight md:text-5xl">
+                  Check your email
+                </h1>
+                <p className="mt-3 text-sm leading-6 text-Color-Neutral">
+                  We sent a confirmation link to {confirmationEmail}.
+                </p>
+
+                {noticeMessage ? (
+                  <div className="mt-8 border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                    {noticeMessage}
+                  </div>
+                ) : null}
+
+                {errorMessage ? (
+                  <div className="mt-8 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {errorMessage}
+                  </div>
+                ) : null}
+
+                <div className="mt-8 space-y-3">
+                  <button
+                    className="w-full bg-Green px-4 py-3 text-sm font-medium text-Color-Neutral-Darkest"
+                    type="button"
+                    onClick={() => {
+                      setIsSignUp(false);
+                      setConfirmationEmail(null);
+                      setNoticeMessage(null);
+                    }}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm font-medium"
+                    onClick={handleResendConfirmation}
+                  >
+                    Resend confirmation
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section className="relative hidden min-h-0 md:block">
+              <Image
+                src="/images/hero/hero.webp"
+                alt="DARCi hero"
+                fill
+                priority
+                className="object-cover"
+              />
+              <div className="absolute inset-0 bg-black/60" />
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-white text-Color-Scheme-1-Text">
@@ -180,26 +414,75 @@ function StartAuthPageContent() {
                   />
                 </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium">Password</label>
-                  <input
-                    className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                    placeholder="Enter your password"
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    required
-                    minLength={8}
-                  />
-                </div>
-
                 {!isSignUp ? (
+                  <div className="grid grid-cols-3 border border-Color-Scheme-1-Border text-xs font-medium">
+                    {([
+                      ["password", "Password"],
+                      ["magic-link", "Link"],
+                      ["otp", "Code"],
+                    ] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={`px-3 py-2 transition ${
+                          loginMode === mode
+                            ? "bg-Color-Scheme-1-Text text-white"
+                            : "bg-white text-Color-Neutral hover:bg-black/5"
+                        }`}
+                        onClick={() => handleLoginModeChange(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {isSignUp || loginMode === "password" ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-medium">Password</label>
+                    <input
+                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                      placeholder="Enter your password"
+                      type="password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      required={isSignUp || loginMode === "password"}
+                      minLength={8}
+                    />
+                  </div>
+                ) : null}
+
+                {!isSignUp && loginMode === "otp" && otpChallengeEmail ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-medium">Code</label>
+                    <input
+                      autoComplete="one-time-code"
+                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                      inputMode="numeric"
+                      placeholder="123456"
+                      type="text"
+                      value={otpCode}
+                      onChange={(event) => setOtpCode(event.target.value)}
+                      required
+                    />
+                  </div>
+                ) : null}
+
+                {!isSignUp && loginMode === "password" ? (
                   <button
                     type="button"
                     className="text-xs text-Color-Neutral underline underline-offset-4"
+                    onClick={handlePasswordRecovery}
+                    disabled={isRecoverySubmitting}
                   >
-                    Reset your password
+                    {isRecoverySubmitting ? "Sending reset..." : "Reset your password"}
                   </button>
+                ) : null}
+
+                {noticeMessage ? (
+                  <div className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                    {noticeMessage}
+                  </div>
                 ) : null}
 
                 {errorMessage ? (
@@ -217,10 +500,22 @@ function StartAuthPageContent() {
                     {isSubmitting
                       ? isSignUp
                         ? "Creating account..."
-                        : "Signing in..."
+                        : loginMode === "magic-link"
+                          ? "Sending link..."
+                          : loginMode === "otp"
+                            ? otpChallengeEmail
+                              ? "Verifying code..."
+                              : "Sending code..."
+                            : "Signing in..."
                       : isSignUp
                       ? "Create account"
-                      : "Sign in"}
+                      : loginMode === "magic-link"
+                        ? "Send sign-in link"
+                        : loginMode === "otp"
+                          ? otpChallengeEmail
+                            ? "Verify code"
+                            : "Send code"
+                          : "Sign in"}
                   </button>
                   <button
                     className="flex w-full items-center justify-center gap-3 border border-Color-Scheme-1-Border bg-black/5 px-4 py-3 text-sm font-medium text-Color-Scheme-1-Text"

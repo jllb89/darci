@@ -17,6 +17,9 @@ export type StoredUser = {
   status: string;
   firstName?: string | null;
   lastName?: string | null;
+  emailConfirmedAt?: string | null;
+  lastSignInAt?: string | null;
+  lastAuthSyncedAt?: string | null;
 };
 
 type StoredAuth = {
@@ -55,7 +58,7 @@ const emitAuthChange = () => {
   window.dispatchEvent(new Event(AUTH_STORAGE_EVENT));
 };
 
-const getApiBaseUrl = () => {
+export const getApiBaseUrl = () => {
   return (
     process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
     "http://localhost:4000"
@@ -179,6 +182,45 @@ export const clearStoredAuth = () => {
   localStorage.removeItem(USER_KEY);
 
   emitAuthChange();
+};
+
+export const syncStoredAuthFromSession = async (input: {
+  accessToken: string;
+  refreshToken?: string | null;
+  intent?: "signup" | "magic-link" | "otp" | null;
+}) => {
+  const response = await fetch(`${getApiBaseUrl()}/auth/session/sync`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${input.accessToken}`,
+    },
+    body: JSON.stringify({
+      refreshToken: input.refreshToken ?? null,
+      ...(input.intent ? { intent: input.intent } : {}),
+    }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        accessToken?: string | null;
+        refreshToken?: string | null;
+        user?: StoredUser | null;
+        message?: string;
+      }
+    | null;
+
+  if (!response.ok || !payload?.accessToken || !payload.user) {
+    throw new Error(payload?.message || "Failed to sync session");
+  }
+
+  setStoredAuth({
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken ?? input.refreshToken ?? null,
+    user: payload.user,
+  });
+
+  return getStoredAuth();
 };
 
 export const logoutStoredAuth = async () => {

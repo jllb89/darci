@@ -413,11 +413,17 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
     signers: rawSigners,
     generationRuns,
   }).filter((signer) => signer.obligation_type === "signer");
+  const completedSigner = completedOutputSignerId
+    ? signers.find((signer) => signer.id === completedOutputSignerId) ?? null
+    : null;
+  const triggerScopeSigners = completedSigner
+    ? signers.filter((signer) => signer.generation_run_id === completedSigner.generation_run_id)
+    : signers;
   const creatorPartyResolution = resolveCreatorParties({ parties, actorEmail });
   const creatorPartyIds = new Set(
     creatorPartyResolution.parties.map((party) => party.id),
   );
-  const creatorSigners = signers.filter(
+  const creatorSigners = triggerScopeSigners.filter(
     (signer) => signer.document_party_id && creatorPartyIds.has(signer.document_party_id),
   );
   const capturedAfter = buildCapturedOutputSignerIds({ signatures });
@@ -488,8 +494,8 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
 
   for (const signer of signers) {
     const idempotencyKey = buildIdempotencyKey(document.id, signer.id);
-    const isCreatorSigner = creatorSigners.some(
-      (creatorSigner) => creatorSigner.id === signer.id,
+    const isCreatorSigner = Boolean(
+      signer.document_party_id && creatorPartyIds.has(signer.document_party_id),
     );
     const party = signer.document_party_id
       ? partyById.get(signer.document_party_id) ?? null
@@ -530,21 +536,26 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
     }
 
     const activeInvite = activeInviteByOutputSignerId.get(signer.id) ?? null;
-    if (activeInvite) {
+    const activeInviteEmail = normalizeEmail(activeInvite?.recipients?.find(
+      (recipient) => recipient.channel === "email" && recipient.isPrimary,
+    )?.deliveryAddress ?? activeInvite?.recipients?.find(
+      (recipient) => recipient.channel === "email",
+    )?.deliveryAddress ?? null);
+    const recipientEmail = normalizeEmail(party?.email) ?? activeInviteEmail;
+    if (!recipientEmail) {
       skipped.push({
         ...baseSkip,
-        reason: "active_invite_exists",
-        activeInviteId: activeInvite.id,
+        reason: "missing_email",
         idempotencyKey,
       });
       continue;
     }
 
-    const recipientEmail = normalizeEmail(party?.email ?? null);
-    if (!recipientEmail) {
+    if (activeInvite && (!activeInviteEmail || activeInviteEmail !== recipientEmail)) {
       skipped.push({
         ...baseSkip,
-        reason: "missing_email",
+        reason: "active_invite_exists",
+        activeInviteId: activeInvite.id,
         idempotencyKey,
       });
       continue;

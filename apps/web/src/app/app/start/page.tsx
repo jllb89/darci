@@ -3,6 +3,7 @@
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { captureAppException, captureAppMessage } from "@/lib/clientTelemetry";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
 import ProductSelectionBand from "@/app/app/start/ProductSelectionBand";
@@ -22,7 +23,11 @@ import {
   getPhoneCountryCodeByIso2,
   getMemberFieldControlKind,
   hasSigningTrustee,
+  isValidEmailFormat,
+  isValidPhoneCountryCode,
+  isValidPhoneFormat,
   isTemporarilyHiddenCreateFlowField,
+  parseMultilineArrayFormInput,
   parsePriorDocumentItems,
   parsePersonContact,
   parsePersonListItems,
@@ -221,6 +226,7 @@ export default function StartDocumentPage() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submissionErrorMessage, setSubmissionErrorMessage] = useState<string | null>(null);
+  const [showContinueValidationDetails, setShowContinueValidationDetails] = useState(false);
   const [missingRequirements, setMissingRequirements] = useState<MissingRequirement[]>([]);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
   const [pendingLeaveAction, setPendingLeaveAction] = useState<LeaveAction | null>(null);
@@ -1422,65 +1428,127 @@ export default function StartDocumentPage() {
     };
   }, [formValues.prior_document_items, visibleCanonicalKeys]);
 
-  const hasBlockingValidation =
-    principalContactValidation.hasErrors ||
-    agentContactValidation.hasErrors ||
-    trusteeValidation.incompleteCount > 0 ||
-    trusteeValidation.invalidFormatCount > 0 ||
-    trusteeValidation.missingNamedSigner ||
-    trusteeValidation.multipleNamedSigners ||
-    trusteeValidation.namedSignerModeConflict ||
-    priorDocumentItemsValidation.incompleteCount > 0 ||
-    priorDocumentItemsValidation.missingOriginatingDocument ||
-    priorDocumentItemsValidation.chronologyOutOfOrderCount > 0 ||
-    !taxIdOwnerValidation.isValid ||
-    successorTrusteeValidation.incompleteCount > 0 ||
-    successorTrusteeValidation.invalidFormatCount > 0;
+  const requiredVisibleFieldMessages = useMemo(() => {
+    const messages: string[] = [];
+    const addMessage = (message: string) => {
+      if (!messages.includes(message)) {
+        messages.push(message);
+      }
+    };
+    const getPersonRoleLabel = (canonicalKey: string) => {
+      const normalizedKey = normalizeCanonicalKey(canonicalKey);
+      if (normalizedKey === "grantors") {
+        return "Trustmaker";
+      }
 
-  const allRequiredVisibleFieldsComplete = useMemo(() => {
-    return visibleSections.every((section) => {
-      return section.fields.every((field) => {
+      if (normalizedKey === "trustees") {
+        return "Trustee";
+      }
+
+      if (normalizedKey === "successor_trustees") {
+        return "Successor trustee";
+      }
+
+      return "Person";
+    };
+
+    for (const section of visibleSections) {
+      for (const field of section.fields) {
         if (isTemporarilyHiddenCreateFlowField(field.canonical_key)) {
-          return true;
+          continue;
         }
 
         const runtime = fieldRuntime.get(field.canonical_key);
         if (!runtime?.visible || !runtime.required) {
-          return true;
+          continue;
         }
 
         const fieldValue = formValues[field.canonical_key];
         const resolvedAllowedValues = getResolvedAllowedValues(field);
         const controlKind = getMemberFieldControlKind(field, resolvedAllowedValues);
+        const fieldLabel = field.label || formatLabel(normalizeCanonicalKey(field.canonical_key));
 
         if (controlKind === "boolean") {
-          return typeof fieldValue === "boolean";
+          if (typeof fieldValue !== "boolean") {
+            addMessage(`${fieldLabel}: choose yes or no.`);
+          }
+
+          continue;
         }
 
         if (controlKind === "person-contact") {
           const validation = validatePersonContact(fieldValue);
-          return (
-            !validation.missingEmail &&
-            !validation.missingPhone &&
-            !validation.invalidEmail &&
-            !validation.invalidPhone &&
-            !validation.invalidCountryCode
-          );
+          if (validation.missingEmail) {
+            addMessage(`${fieldLabel}: email is required.`);
+          }
+
+          if (validation.missingPhone) {
+            addMessage(`${fieldLabel}: phone number is required.`);
+          }
+
+          if (validation.invalidEmail) {
+            addMessage(`${fieldLabel}: enter a valid email address.`);
+          }
+
+          if (validation.invalidPhone || validation.invalidCountryCode) {
+            addMessage(`${fieldLabel}: enter a valid phone country code and phone number.`);
+          }
+
+          continue;
         }
 
         if (controlKind === "repeatable-person-list") {
           const items = parsePersonListItems(fieldValue);
           const filledRows = getFilledPersonRows(items);
+          const roleLabel = getPersonRoleLabel(field.canonical_key);
 
-          if (filledRows.length === 0) {
-            return false;
+          if (filledRows.length === 0 && items.length === 0) {
+            addMessage(`${fieldLabel}: add at least one ${roleLabel.toLowerCase()}.`);
+            continue;
           }
 
-          if (
-            getIncompletePersonRowCount(items) > 0 ||
-            getInvalidPersonRowFormatCount(items) > 0
-          ) {
-            return false;
+          items.forEach((item, index) => {
+            const rowHasValue =
+              item.fullName.trim().length > 0 ||
+              item.email.trim().length > 0 ||
+              item.phone.trim().length > 0;
+
+            if (!rowHasValue && filledRows.length > 0) {
+              return;
+            }
+
+            const rowLabel = `${roleLabel} ${index + 1}`;
+            const missingParts: string[] = [];
+            if (item.fullName.trim().length === 0) {
+              missingParts.push("full name");
+            }
+
+            if (item.email.trim().length === 0) {
+              missingParts.push("email");
+            }
+
+            if (item.phone.trim().length === 0) {
+              missingParts.push("phone number");
+            }
+
+            if (missingParts.length > 0) {
+              addMessage(`${rowLabel}: ${missingParts.join(", ")} required.`);
+            }
+
+            if (item.email.trim().length > 0 && !isValidEmailFormat(item.email)) {
+              addMessage(`${rowLabel}: enter a valid email address.`);
+            }
+
+            if (
+              item.phone.trim().length > 0 &&
+              (!isValidPhoneCountryCode(item.phoneCountryCode) || !isValidPhoneFormat(item.phone))
+            ) {
+              addMessage(`${rowLabel}: enter a valid phone country code and phone number.`);
+            }
+          });
+
+          if (filledRows.length === 0 && items.length > 0) {
+            addMessage(`${fieldLabel}: complete at least one ${roleLabel.toLowerCase()} row.`);
           }
 
           if (
@@ -1488,56 +1556,98 @@ export default function StartDocumentPage() {
             requiresNamedSigningTrusteeSelection &&
             !hasSigningTrustee(filledRows.filter((item) => item.fullName.trim().length > 0))
           ) {
-            return false;
+            addMessage("Trustees: select exactly one named signing trustee.");
           }
 
-          return true;
+          continue;
         }
 
         if (controlKind === "checkbox-multi" || controlKind === "repeatable-text-list") {
-          return toStringArrayValue(fieldValue).some((item) => item.trim().length > 0);
+          if (!toStringArrayValue(fieldValue).some((item) => item.trim().length > 0)) {
+            addMessage(`${fieldLabel}: add at least one entry.`);
+          }
+
+          continue;
         }
 
         if (controlKind === "repeatable-document-list") {
           const items = parsePriorDocumentItems(fieldValue);
           const filledRows = getFilledPriorDocumentRows(items);
 
-          if (filledRows.length === 0) {
-            return false;
+          if (filledRows.length === 0 && items.length === 0) {
+            addMessage(`${fieldLabel}: add at least one document.`);
+            continue;
           }
 
-          if (getIncompletePriorDocumentRowCount(items) > 0) {
-            return false;
-          }
+          items.forEach((item, index) => {
+            const rowHasValue =
+              item.documentType.trim().length > 0 ||
+              item.documentLabel.trim().length > 0 ||
+              item.documentDate.trim().length > 0 ||
+              item.attachmentReference.trim().length > 0;
+
+            if (!rowHasValue && filledRows.length > 0) {
+              return;
+            }
+
+            const missingParts: string[] = [];
+            if (item.documentType.trim().length === 0) {
+              missingParts.push("type");
+            }
+
+            if (item.documentDate.trim().length === 0) {
+              missingParts.push("signed date");
+            }
+
+            if (item.documentLabel.trim().length === 0) {
+              missingParts.push("document label");
+            }
+
+            if (item.attachmentReference.trim().length === 0) {
+              missingParts.push("recording or attachment reference");
+            }
+
+            if (missingParts.length > 0) {
+              addMessage(`Document ${index + 1}: ${missingParts.join(", ")} required.`);
+            }
+          });
 
           if (!hasOriginatingPriorDocumentType(filledRows[0])) {
-            return false;
+            addMessage(
+              "Document 1: type must be Trust Agreement or Declaration of Trust.",
+            );
           }
 
           if (getPriorDocumentChronologyOutOfOrderCount(items) > 0) {
-            return false;
+            addMessage("Documents: signed dates must be chronological from oldest to newest.");
           }
 
-          return true;
+          continue;
         }
 
         if (controlKind === "file-upload") {
-          return typeof fieldValue === "string" && fieldValue.trim().length > 0;
+          if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
+            addMessage(`${fieldLabel}: upload a file.`);
+          }
+
+          continue;
         }
 
         if (controlKind === "select") {
           if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
-            return false;
+            addMessage(`${fieldLabel}: select an option.`);
+            continue;
           }
 
           if (
             isTaxIdOwnerSelectionBoundToTrustmakers(field) &&
-            trustmakerNames.length > 1
+            trustmakerNames.length > 1 &&
+            !isNameInList(fieldValue, trustmakerNames)
           ) {
-            return isNameInList(fieldValue, trustmakerNames);
+            addMessage(`${fieldLabel}: select one of the listed Trustmakers.`);
           }
 
-          return true;
+          continue;
         }
 
         if (
@@ -1546,12 +1656,15 @@ export default function StartDocumentPage() {
           controlKind === "textarea" ||
           controlKind === "text"
         ) {
-          return typeof fieldValue === "string" && fieldValue.trim().length > 0;
+          if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
+            addMessage(`${fieldLabel}: this field is required.`);
+          }
         }
 
-        return true;
-      });
-    });
+      }
+    }
+
+    return messages;
   }, [
     fieldRuntime,
     formValues,
@@ -1559,6 +1672,122 @@ export default function StartDocumentPage() {
     requiresNamedSigningTrusteeSelection,
     trustmakerNames,
     visibleSections,
+  ]);
+
+  const blockingValidationMessages = useMemo(() => {
+    const messages: string[] = [];
+    const addMessage = (message: string) => {
+      if (!messages.includes(message)) {
+        messages.push(message);
+      }
+    };
+
+    const addContactMessages = (
+      label: string,
+      validation: typeof principalContactValidation,
+    ) => {
+      if (!("missingEmail" in validation)) {
+        return;
+      }
+
+      if (validation.missingEmail) {
+        addMessage(`${label}: email is required.`);
+      }
+
+      if (validation.missingPhone) {
+        addMessage(`${label}: phone number is required.`);
+      }
+
+      if (validation.invalidEmail) {
+        addMessage(`${label}: enter a valid email address.`);
+      }
+
+      if (validation.invalidPhone || validation.invalidCountryCode) {
+        addMessage(`${label}: enter a valid phone country code and phone number.`);
+      }
+    };
+
+    addContactMessages("Principal contact", principalContactValidation);
+    addContactMessages("Agent contact", agentContactValidation);
+
+    if (trusteeValidation.incompleteCount > 0) {
+      addMessage("Trustees: complete name, email, and phone for each started trustee row.");
+    }
+
+    if (trusteeValidation.invalidFormatCount > 0) {
+      addMessage("Trustees: use valid email and phone formats.");
+    }
+
+    if (trusteeValidation.missingNamedSigner) {
+      addMessage("Trustees: select exactly one named signing trustee.");
+    }
+
+    if (trusteeValidation.multipleNamedSigners) {
+      addMessage("Trustees: choose only one named signing trustee.");
+    }
+
+    if (trusteeValidation.namedSignerModeConflict) {
+      addMessage(
+        "Trustees: clear named signer selections or switch Signing Authority to Named signing trustee.",
+      );
+    }
+
+    if (successorTrusteeValidation.incompleteCount > 0) {
+      addMessage(
+        "Successor trustees: complete name, email, and phone for each started successor trustee row.",
+      );
+    }
+
+    if (successorTrusteeValidation.invalidFormatCount > 0) {
+      addMessage("Successor trustees: use valid email and phone formats.");
+    }
+
+    if (priorDocumentItemsValidation.incompleteCount > 0) {
+      addMessage(
+        "Documents: complete type, signed date, document label, and recording or attachment reference for each started document row.",
+      );
+    }
+
+    if (priorDocumentItemsValidation.missingOriginatingDocument) {
+      addMessage("Document 1: type must be Trust Agreement or Declaration of Trust.");
+    }
+
+    if (priorDocumentItemsValidation.chronologyOutOfOrderCount > 0) {
+      addMessage("Documents: signed dates must be chronological from oldest to newest.");
+    }
+
+    if (!taxIdOwnerValidation.isValid) {
+      addMessage("Tax ID owner: select one of the listed Trustmakers.");
+    }
+
+    return messages;
+  }, [
+    agentContactValidation,
+    principalContactValidation,
+    priorDocumentItemsValidation,
+    successorTrusteeValidation,
+    taxIdOwnerValidation.isValid,
+    trusteeValidation,
+  ]);
+
+  const continueValidationMessages = useMemo(() => {
+    const messages = [...requiredVisibleFieldMessages, ...blockingValidationMessages];
+
+    if (!isDocumentsColumnComplete) {
+      messages.push("Supporting documents: add at least one document entry.");
+    }
+
+    if (hasNextFormStep) {
+      messages.push(`Continue through ${nextFormStep?.label ?? "the remaining step"} first.`);
+    }
+
+    return Array.from(new Set(messages));
+  }, [
+    blockingValidationMessages,
+    hasNextFormStep,
+    isDocumentsColumnComplete,
+    nextFormStep,
+    requiredVisibleFieldMessages,
   ]);
 
   const hasUnsavedProgress = useMemo(() => {
@@ -1711,6 +1940,31 @@ export default function StartDocumentPage() {
           (item) => typeof item.message === "string" && item.message.trim().length > 0,
         )?.message;
 
+        captureAppMessage("Member form submission validation failed", {
+          level: "warning",
+          tags: {
+            feature: "member_form",
+            document_id: draftDocumentId,
+            product_flow_mode: selectedProductFlowMode,
+            jurisdiction: selectedJurisdiction,
+            current_step: currentFormStep,
+          },
+          contexts: {
+            member_form_submission: {
+              documentId: draftDocumentId,
+              status: response.status,
+              currentStep: currentFormStep,
+              errorCount: payload?.errors?.length ?? 0,
+              errors: (payload?.errors ?? []).map((item) => ({
+                code: item.code,
+                field: item.field,
+                message: item.message,
+              })),
+            },
+          },
+          fingerprint: ["member_form_submit", "validation_failed"],
+        });
+
         setSubmissionErrorMessage(
           firstErrorMessage ??
             payload?.message ??
@@ -1724,6 +1978,25 @@ export default function StartDocumentPage() {
           syncDraftRevision(payload.currentRevision);
         }
 
+        captureAppMessage("Member form submission revision conflict", {
+          level: "warning",
+          tags: {
+            feature: "member_form",
+            document_id: draftDocumentId,
+            product_flow_mode: selectedProductFlowMode,
+            jurisdiction: selectedJurisdiction,
+          },
+          contexts: {
+            member_form_submission: {
+              documentId: draftDocumentId,
+              status: response.status,
+              currentStep: currentFormStep,
+              currentRevision: payload?.currentRevision ?? null,
+            },
+          },
+          fingerprint: ["member_form_submit", "revision_conflict"],
+        });
+
         setSubmissionErrorMessage(
           payload?.message ??
             "Your draft changed before submission. Please review and submit again.",
@@ -1732,6 +2005,25 @@ export default function StartDocumentPage() {
       }
 
       if (!response.ok || !payload?.draft) {
+        captureAppMessage("Member form submission request failed", {
+          level: "error",
+          tags: {
+            feature: "member_form",
+            document_id: draftDocumentId,
+            product_flow_mode: selectedProductFlowMode,
+            jurisdiction: selectedJurisdiction,
+          },
+          contexts: {
+            member_form_submission: {
+              documentId: draftDocumentId,
+              status: response.status,
+              currentStep: currentFormStep,
+              message: payload?.message ?? null,
+            },
+          },
+          fingerprint: ["member_form_submit", "request_failed"],
+        });
+
         setSubmissionErrorMessage(
           payload?.message ?? "Failed to submit member form.",
         );
@@ -1755,6 +2047,23 @@ export default function StartDocumentPage() {
 
       return true;
     } catch (error) {
+      captureAppException(error, {
+        level: "error",
+        tags: {
+          feature: "member_form",
+          document_id: draftDocumentId,
+          product_flow_mode: selectedProductFlowMode,
+          jurisdiction: selectedJurisdiction,
+        },
+        contexts: {
+          member_form_submission: {
+            documentId: draftDocumentId,
+            currentStep: currentFormStep,
+          },
+        },
+        fingerprint: ["member_form_submit", "exception"],
+      });
+
       setSubmissionErrorMessage(
         error instanceof Error
           ? error.message
@@ -1779,7 +2088,14 @@ export default function StartDocumentPage() {
   ]);
 
   const handleFinalContinue = async () => {
-    if (isContinueDisabled || hasNextFormStep) {
+    setShowContinueValidationDetails(true);
+
+    if (isContinueUnavailable) {
+      return;
+    }
+
+    if (continueValidationMessages.length > 0) {
+      setSubmissionErrorMessage("Complete the missing information listed below before continuing.");
       return;
     }
 
@@ -1864,7 +2180,7 @@ export default function StartDocumentPage() {
         return;
       }
 
-      const key = event.key.toLowerCase();
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
       const isMacRefresh = event.metaKey && key === "r";
       const isWindowsRefresh = event.ctrlKey && key === "r";
       const isFunctionRefresh = event.key === "F5";
@@ -1900,6 +2216,7 @@ export default function StartDocumentPage() {
     setMissingRequirements([]);
     setErrorMessage(null);
     setSubmissionErrorMessage(null);
+    setShowContinueValidationDetails(false);
   };
 
   const applyJurisdictionSelection = (nextJurisdiction: string) => {
@@ -1913,6 +2230,7 @@ export default function StartDocumentPage() {
       setMissingRequirements([]);
       setErrorMessage(null);
       setSubmissionErrorMessage(null);
+      setShowContinueValidationDetails(false);
     }
   };
 
@@ -1970,6 +2288,7 @@ export default function StartDocumentPage() {
 
   const handleFieldChange = (key: string, value: FormValue) => {
     setSubmissionErrorMessage(null);
+    setShowContinueValidationDetails(false);
     setFormValues((current) => ({
       ...current,
       [key]: value,
@@ -2028,7 +2347,7 @@ export default function StartDocumentPage() {
 
       return (
         <div className="space-y-2 border border-Color-Scheme-1-Border/40 bg-white p-3">
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="space-y-2">
             <input
               className={baseInputClassName}
               onChange={(event) => {
@@ -2044,7 +2363,7 @@ export default function StartDocumentPage() {
               type="email"
               value={contact.email}
             />
-            <div className="grid grid-cols-[190px_1fr] gap-2">
+            <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
               <div className="platform-select-wrap">
                 <select
                   className={baseInputClassName}
@@ -2417,36 +2736,38 @@ export default function StartDocumentPage() {
                 key={`${field.canonical_key}-person-${index}`}
                 className="space-y-2 border border-Color-Scheme-1-Border/30 p-3"
               >
-                <div className="grid gap-2 md:grid-cols-3">
-                  <input
-                    className={baseInputClassName}
-                    onChange={(event) => {
-                      const nextItems = [...items];
-                      nextItems[index] = {
-                        ...item,
-                        fullName: event.target.value,
-                      };
-                      updateItems(nextItems);
-                    }}
-                    placeholder={`${roleLabel} full name`}
-                    type="text"
-                    value={item.fullName}
-                  />
-                  <input
-                    className={baseInputClassName}
-                    onChange={(event) => {
-                      const nextItems = [...items];
-                      nextItems[index] = {
-                        ...item,
-                        email: event.target.value,
-                      };
-                      updateItems(nextItems);
-                    }}
-                    placeholder="Email"
-                    type="email"
-                    value={item.email}
-                  />
-                  <div className="grid grid-cols-[190px_1fr] gap-2">
+                <div className="space-y-2">
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <input
+                      className={baseInputClassName}
+                      onChange={(event) => {
+                        const nextItems = [...items];
+                        nextItems[index] = {
+                          ...item,
+                          fullName: event.target.value,
+                        };
+                        updateItems(nextItems);
+                      }}
+                      placeholder={`${roleLabel} full name`}
+                      type="text"
+                      value={item.fullName}
+                    />
+                    <input
+                      className={baseInputClassName}
+                      onChange={(event) => {
+                        const nextItems = [...items];
+                        nextItems[index] = {
+                          ...item,
+                          email: event.target.value,
+                        };
+                        updateItems(nextItems);
+                      }}
+                      placeholder="Email"
+                      type="email"
+                      value={item.email}
+                    />
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
                     <div className="platform-select-wrap">
                       <select
                         className={baseInputClassName}
@@ -2931,10 +3252,7 @@ export default function StartDocumentPage() {
           maxLength={getNumberConstraint(field, "maxLength")}
           onChange={(event) => {
             if (field.data_type === "array") {
-              const nextValues = event.target.value
-                .split("\n")
-                .map((entry) => entry.trim())
-                .filter(Boolean);
+              const nextValues = parseMultilineArrayFormInput(event.target.value);
               handleFieldChange(field.canonical_key, nextValues);
               return;
             }
@@ -3091,14 +3409,27 @@ export default function StartDocumentPage() {
 
   const isContinueDisabled =
     !selectedProductFlowMode ||
+    !selectedJurisdiction ||
     isLoadingProductFlowModes ||
-    hasBlockingValidation ||
     isValidatingMemberFormSubmission ||
     isLoadingMemberForm ||
-    !memberForm ||
-    !allRequiredVisibleFieldsComplete ||
-    !isDocumentsColumnComplete ||
-    hasNextFormStep;
+    !memberForm;
+
+  const isContinueUnavailable = isContinueDisabled;
+  const isContinueBlocked = continueValidationMessages.length > 0;
+  const shouldStyleContinueAsBlocked = isContinueUnavailable || isContinueBlocked;
+
+  const continueValidationPanel =
+    showContinueValidationDetails && continueValidationMessages.length > 0 ? (
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="font-medium">Missing information</div>
+        <ul className="mt-2 list-disc space-y-1 pl-4">
+          {continueValidationMessages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
 
   const isProductSelectionStep = !selectedProductFlowMode;
   const selectedProductLabel = useMemo(() => {
@@ -3375,17 +3706,22 @@ export default function StartDocumentPage() {
                         </div>
                       ) : null}
 
+                      {continueValidationPanel}
+
                       {selectedJurisdiction ? (
                         <button
                           onClick={() => {
                             void handleFinalContinue();
                           }}
                           className={`inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition ${
-                            isContinueDisabled
-                              ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                            shouldStyleContinueAsBlocked
+                              ? isContinueUnavailable
+                                ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                                : "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
                               : "platform-btn-primary"
                           }`}
-                          disabled={isContinueDisabled}
+                          aria-disabled={shouldStyleContinueAsBlocked}
+                          disabled={isContinueUnavailable}
                         >
                           {isValidatingMemberFormSubmission
                             ? "Validating..."
@@ -3451,17 +3787,22 @@ export default function StartDocumentPage() {
                 </div>
               ) : null}
 
+              {continueValidationPanel}
+
               {selectedJurisdiction ? (
                 <button
                   onClick={() => {
                     void handleFinalContinue();
                   }}
                   className={`w-full px-4 py-2 text-sm font-medium transition ${
-                    isContinueDisabled
-                      ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                    shouldStyleContinueAsBlocked
+                      ? isContinueUnavailable
+                        ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+                        : "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
                       : "platform-btn-primary"
                   }`}
-                  disabled={isContinueDisabled}
+                  aria-disabled={shouldStyleContinueAsBlocked}
+                  disabled={isContinueUnavailable}
                 >
                   {isValidatingMemberFormSubmission ? "Validating..." : "Continue"}
                 </button>

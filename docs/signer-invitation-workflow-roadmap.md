@@ -1,7 +1,7 @@
 # Signer Invitation Workflow Roadmap
 
-Status: implementation through Phase 4 complete
-Date: 2026-04-29
+Status: signer invitation backend/API wrap-up through Phase 10 complete; Phase 9 deferred to the frontend/auth/dashboard milestone
+Date: 2026-04-30
 
 ## Objective
 
@@ -384,7 +384,16 @@ Completion templates to wire:
 - `signer_signed_update_email`
 - `all_signatures_complete_email`
 
-### Phase 9: Update Frontend Copy And UX
+Implementation status:
+
+- Added `backend/src/services/signingCompletionService.ts` and wired it into the shared signature capture/finalize path after PDF stamping and remaining-signer invite dispatch.
+- The completion service evaluates the current signer obligations, including optional signing groups with `groupMinimumRequired`, and persists `document_system_values.signature_execution` once all obligations are satisfied.
+- Completed signer invites are marked `completed`, signer completion confirmations and owner signer updates are queued through DB-backed notification templates, and the all-signatures-complete owner notification is deduped per document.
+- Eligible documents now transition from `pending_signature` to `pending_notary` when the product flow requires notarization, or to `completed` when it does not. The notarization submission route also accepts already-ready `pending_notary` documents without requiring a second status repair.
+
+### Phase 9: Update Frontend Copy And UX (Deferred)
+
+Decision on 2026-04-30: defer this phase until the larger frontend/auth/dashboard sequence is ready. The required UX depends on the next auth check, notary signup, admin dashboard, and member dashboard work, so this signer-invitation phase will wrap at the backend/API boundary.
 
 Replace the current principal copy:
 
@@ -432,7 +441,7 @@ Backend test coverage:
 - Resend delivered/opened/clicked events update invite lifecycle.
 - All required signatures captured marks signing complete and queues completion emails.
 
-Frontend test coverage:
+Deferred frontend test coverage:
 
 - Principal copy reflects automatic signer notifications.
 - Invite landing routes unauthenticated users to signup/login.
@@ -440,10 +449,16 @@ Frontend test coverage:
 - Mismatched email state blocks signing.
 - Invited signer sees only their scoped document/signature task.
 
-Phase 9 implementation note on 2026-04-29:
+Prior UX implementation note on 2026-04-29:
 
 - Signer invitation emails now use the shared DARCi-styled email frame and DB templates that include document type plus signer role.
 - The public `/app/invite?token={token}` landing page now mirrors the `/start` two-column visual shell with productized invitation copy and CTAs.
+
+Phase 10 implementation status on 2026-04-30:
+
+- Updated `api/openapi.yaml` for public invite token/claim semantics, signer-scoped signing access, email-match failure behavior, signature capture/finalize completion responses, and invite lifecycle fields driven by Resend events.
+- Documented `signing.viewerAccess` and optional `signingCompletion` response blocks for frontend consumers in `apps/web/docs/workspace-api-usage.md`.
+- Added/updated backend tests for all-signatures-complete behavior, optional signing groups, invite completion, completion notifications, and the signature capture/finalize response hook.
 
 ## Recommended Implementation Order
 

@@ -143,6 +143,16 @@ const buildInvite = (overrides: Record<string, unknown> = {}) => ({
   documentOutputSignerId: "trustee-active",
   documentPartyId: "party-active",
   status: "sent",
+  recipients: [
+    {
+      id: "recipient-active",
+      channel: "email",
+      deliveryAddress: "active@example.com",
+      displayName: "Ari Active",
+      isPrimary: true,
+      status: "sent",
+    },
+  ],
   ...overrides,
 });
 
@@ -308,7 +318,185 @@ describe("signer invitation resolver", () => {
     expect(mocks.listDocumentInvitesMock).not.toHaveBeenCalled();
   });
 
-  it("skips already signed signers, satisfied groups, and signers with active invites", async () => {
+  it("scopes creator completion to the output that was just signed", async () => {
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      buildGenerationRun({ id: "run-trust", output_key: "trust_rrr", document_key: "trust_rrr" }),
+      buildGenerationRun({ id: "run-poa", output_key: "poa_document", document_key: "poa_general" }),
+    ]);
+    mocks.listDocumentPartiesMock.mockResolvedValue([
+      buildParty({ id: "party-grantor", party_role: "grantor", email: "owner@example.com" }),
+      buildParty({
+        id: "party-principal",
+        party_role: "principal",
+        full_name: "Owner Principal",
+        email: "owner@example.com",
+      }),
+      buildParty({
+        id: "party-trustee",
+        party_role: "trustee",
+        full_name: "Tina Trustee",
+        email: "trustee@example.com",
+      }),
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      buildSigner({
+        id: "grantor-signer",
+        generation_run_id: "run-trust",
+        document_party_id: "party-grantor",
+        output_key: "trust_rrr",
+        document_key: "trust_rrr",
+      }),
+      buildSigner({
+        id: "trustee-signer",
+        generation_run_id: "run-trust",
+        document_party_id: "party-trustee",
+        party_role: "trustee",
+        party_name: "Tina Trustee",
+        output_key: "trust_rrr",
+        document_key: "trust_rrr",
+        sort_order: 1,
+      }),
+      buildSigner({
+        id: "principal-signer",
+        generation_run_id: "run-poa",
+        document_party_id: "party-principal",
+        party_role: "principal",
+        party_name: "Owner Principal",
+        output_key: "poa_document",
+        document_key: "poa_general",
+        sort_order: 2,
+      }),
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      buildSignature({
+        id: "sig-grantor",
+        generation_run_id: "run-trust",
+        document_output_signer_id: "grantor-signer",
+      }),
+    ]);
+
+    const result = await resolveRemainingSignerInvitationsAfterCreatorSignature({
+      documentId: "doc-1",
+      actorUserId: "owner-1",
+      actorEmail: "owner@example.com",
+      completedOutputSignerId: "grantor-signer",
+      completedSignatureId: "sig-grantor",
+    });
+
+    expect(result.trigger.shouldQueueInvites).toBe(true);
+    expect(result.trigger.creatorOutputSignerIds).toEqual(["grantor-signer"]);
+    expect(result.candidates.map((candidate) => candidate.documentOutputSignerId)).toEqual([
+      "trustee-signer",
+    ]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          documentOutputSignerId: "grantor-signer",
+          reason: "creator_obligation",
+        }),
+        expect.objectContaining({
+          documentOutputSignerId: "principal-signer",
+          reason: "creator_obligation",
+        }),
+      ]),
+    );
+  });
+
+  it("invites current signers across outputs after the completed output creator signs", async () => {
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      buildGenerationRun({ id: "run-trust", output_key: "trust_rrr", document_key: "trust_rrr" }),
+      buildGenerationRun({ id: "run-poa", output_key: "poa_document", document_key: "poa_general" }),
+    ]);
+    mocks.listDocumentPartiesMock.mockResolvedValue([
+      buildParty({
+        id: "party-grantor",
+        party_role: "grantor",
+        full_name: "Alex Grantor",
+        email: "grantor@example.com",
+      }),
+      buildParty({
+        id: "party-principal",
+        party_role: "principal",
+        full_name: "Alex Morgan",
+        email: "owner@example.com",
+      }),
+      buildParty({
+        id: "party-trustee",
+        party_role: "trustee",
+        full_name: "Jordan Trustee",
+        email: "trustee@example.com",
+      }),
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      buildSigner({
+        id: "grantor-signer",
+        generation_run_id: "run-trust",
+        document_party_id: "party-grantor",
+        party_role: "grantor",
+        party_name: "Alex Grantor",
+        output_key: "trust_rrr",
+        document_key: "trust_rrr",
+      }),
+      buildSigner({
+        id: "trustee-signer",
+        generation_run_id: "run-trust",
+        document_party_id: "party-trustee",
+        party_role: "trustee",
+        party_name: "Jordan Trustee",
+        output_key: "trust_rrr",
+        document_key: "trust_rrr",
+        sort_order: 1,
+      }),
+      buildSigner({
+        id: "principal-signer",
+        generation_run_id: "run-poa",
+        document_party_id: "party-principal",
+        party_role: "principal",
+        party_name: "Alex Morgan",
+        output_key: "poa_document",
+        document_key: "poa_general",
+        sort_order: 2,
+      }),
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      buildSignature({
+        id: "sig-principal",
+        generation_run_id: "run-poa",
+        document_output_signer_id: "principal-signer",
+      }),
+    ]);
+
+    const result = await resolveRemainingSignerInvitationsAfterCreatorSignature({
+      documentId: "doc-1",
+      actorUserId: "owner-1",
+      actorEmail: "owner@example.com",
+      completedOutputSignerId: "principal-signer",
+      completedSignatureId: "sig-principal",
+    });
+
+    expect(result.trigger.shouldQueueInvites).toBe(true);
+    expect(result.trigger.creatorOutputSignerIds).toEqual(["principal-signer"]);
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        documentOutputSignerId: "grantor-signer",
+        recipientEmail: "grantor@example.com",
+      }),
+      expect.objectContaining({
+        documentOutputSignerId: "trustee-signer",
+        recipientEmail: "trustee@example.com",
+      }),
+    ]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          documentOutputSignerId: "principal-signer",
+          reason: "creator_obligation",
+        }),
+      ]),
+    );
+  });
+
+  it("returns active-invite signers for dispatch while skipping signed and satisfied group signers", async () => {
     mocks.listDocumentPartiesMock.mockResolvedValue([
       buildParty({ id: "party-owner", email: "owner@example.com" }),
       buildParty({
@@ -412,15 +600,11 @@ describe("signer invitation resolver", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.documentOutputSignerId)).toEqual([
+      "trustee-active",
       "trustee-candidate",
     ]);
     expect(result.skipped).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          documentOutputSignerId: "trustee-active",
-          reason: "active_invite_exists",
-          activeInviteId: "invite-1",
-        }),
         expect.objectContaining({
           documentOutputSignerId: "trustee-signed",
           reason: "already_signed",

@@ -197,6 +197,23 @@ const buildOwnerRecipient = (user: NotificationUserRecord): NotificationRecipien
   };
 };
 
+const toFirstNameFromNameOrEmail = (input: {
+  displayName?: string | null;
+  email?: string | null;
+}) => {
+  const firstName = input.displayName?.trim().split(/\s+/)[0]?.trim();
+  if (firstName) {
+    return firstName;
+  }
+
+  const emailPrefix = input.email?.split("@")[0]?.trim();
+  if (emailPrefix) {
+    return emailPrefix;
+  }
+
+  return "there";
+};
+
 const resolveRequestedByUserId = async (supabaseUserId?: string) => {
   if (!supabaseUserId) {
     return null;
@@ -607,6 +624,153 @@ export const queueMemberSignaturesRecordedNotification = async (input: {
     });
   } catch (error) {
     logNotificationFailure("member_signatures_recorded_email", error, {
+      documentId: input.documentId,
+    });
+    return null;
+  }
+};
+
+export const queueSignerCompletionConfirmationNotification = async (input: {
+  documentId: string;
+  documentOutputSignerId: string;
+  signatureId: string;
+  signerEmail: string;
+  signerName?: string | null | undefined;
+  signerUserId?: string | null | undefined;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    return await queueTemplatedNotification({
+      templateKey: "signer_completion_confirmation_email",
+      jobKind: "completion",
+      dedupeKey: `signer_completion_confirmation:${document.id}:${input.documentOutputSignerId}`,
+      documentId: document.id,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstNameFromNameOrEmail({
+          displayName: input.signerName ?? null,
+          email: input.signerEmail,
+        }),
+        documentName: getDocumentLabel(document),
+      },
+      recipients: [
+        {
+          targetUserId: input.signerUserId ?? null,
+          email: input.signerEmail,
+          displayName: input.signerName ?? null,
+          metadata: {
+            documentOutputSignerId: input.documentOutputSignerId,
+            signatureId: input.signatureId,
+          },
+        },
+      ],
+      metadata: {
+        documentOutputSignerId: input.documentOutputSignerId,
+        signatureId: input.signatureId,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("signer_completion_confirmation_email", error, {
+      documentId: input.documentId,
+      documentOutputSignerId: input.documentOutputSignerId,
+      signatureId: input.signatureId,
+    });
+    return null;
+  }
+};
+
+export const queueSignerSignedUpdateNotification = async (input: {
+  documentId: string;
+  documentOutputSignerId: string;
+  signatureId: string;
+  signerName: string;
+  remainingSignerCount: number;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    const owner = await getUserById(document.owner_id);
+    if (!owner) {
+      return null;
+    }
+
+    return await queueTemplatedNotification({
+      templateKey: "signer_signed_update_email",
+      jobKind: "status_update",
+      dedupeKey: `signer_signed_update:${document.id}:${input.documentOutputSignerId}`,
+      documentId: document.id,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(owner),
+        signerName: input.signerName,
+        documentName: getDocumentLabel(document),
+        dashboardUrl: buildDocumentDetailsUrl(document.id),
+        remainingSignerCount: input.remainingSignerCount,
+      },
+      recipients: [buildOwnerRecipient(owner)],
+      metadata: {
+        documentOutputSignerId: input.documentOutputSignerId,
+        signatureId: input.signatureId,
+        remainingSignerCount: input.remainingSignerCount,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("signer_signed_update_email", error, {
+      documentId: input.documentId,
+      documentOutputSignerId: input.documentOutputSignerId,
+      signatureId: input.signatureId,
+    });
+    return null;
+  }
+};
+
+export const queueAllSignaturesCompleteNotification = async (input: {
+  documentId: string;
+  completedAt: string;
+  requiresNotarization: boolean;
+  nextDocumentStatus: string | null;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    const owner = await getUserById(document.owner_id);
+    if (!owner) {
+      return null;
+    }
+
+    return await queueTemplatedNotification({
+      templateKey: "all_signatures_complete_email",
+      jobKind: "completion",
+      dedupeKey: `all_signatures_complete:${document.id}`,
+      documentId: document.id,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(owner),
+        documentName: getDocumentLabel(document),
+        nextStepUrl: buildDocumentDetailsUrl(document.id),
+      },
+      recipients: [buildOwnerRecipient(owner)],
+      metadata: {
+        completedAt: input.completedAt,
+        requiresNotarization: input.requiresNotarization,
+        nextDocumentStatus: input.nextDocumentStatus,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("all_signatures_complete_email", error, {
       documentId: input.documentId,
     });
     return null;

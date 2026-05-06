@@ -173,7 +173,11 @@ COPY apps/web/package*.json ./apps/web/
 RUN cd apps/web && npm ci
 COPY apps/web ./apps/web
 ARG NEXT_PUBLIC_API_BASE_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 RUN cd apps/web && npm run build
 
 FROM node:20-alpine AS runner
@@ -187,7 +191,7 @@ EXPOSE 3000
 CMD ["node_modules/.bin/next", "start"]
 ```
 
-`NEXT_PUBLIC_API_BASE_URL` is a build-time env var in Next.js (baked into the JS bundle). It must be passed as a Docker `--build-arg` at image build time, not at container startup. This is handled automatically by the GitHub Actions workflow in Phase 3.
+`NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are build-time env vars in Next.js (baked into the JS bundle). They must be passed as Docker `--build-arg` values at image build time, not only at container startup. This is handled automatically by the GitHub Actions workflow in Phase 3.
 
 ---
 
@@ -321,6 +325,7 @@ Authentication uses **GitHub OIDC → AWS IAM Role** — no static AWS access ke
   - `AWS_DEPLOY_ROLE_ARN=arn:aws:iam::427057633951:role/darci-github-actions-staging-deploy-role`
   - `STAGING_NEXT_PUBLIC_API_BASE_URL=https://api.staging.darciregistry.com`
   - `STAGING_HEALTH_URL=https://api.staging.darciregistry.com/health`
+- The workflow reads `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the AWS Secrets Manager `/darci/staging/app` secret and passes them as web Docker build args.
 
 Staging GitHub Actions variables now use `https://api.staging.darciregistry.com`; the web bundle must be rebuilt any time this public API base changes.
 

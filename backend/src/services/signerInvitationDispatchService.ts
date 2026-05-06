@@ -1,5 +1,6 @@
-import { createDocumentInvite } from "./documentInviteService";
+import { createDocumentInvite, resendDocumentInvite } from "./documentInviteService";
 import { runDueNotificationJobs } from "./notificationOutboxService";
+import { captureMessage } from "../utils/sentry";
 import {
   resolveRemainingSignerInvitationsAfterCreatorSignature,
   type RemainingSignerInvitationCandidate,
@@ -39,6 +40,12 @@ const getErrorMessage = (error: unknown) => {
   return error instanceof Error ? error.message : String(error);
 };
 
+const existingInviteStatusesEligibleForImmediateResend = new Set([
+  "draft",
+  "queued",
+  "failed",
+]);
+
 const queueCandidateInvite = async (input: {
   actorUserId: string | null;
   candidate: RemainingSignerInvitationCandidate;
@@ -55,19 +62,44 @@ const queueCandidateInvite = async (input: {
     expiresAt: null,
     idempotencyKey: input.candidate.idempotencyKey,
   });
+  const shouldResendExistingInvite =
+    result.existing &&
+    !result.notification &&
+    existingInviteStatusesEligibleForImmediateResend.has(result.invite.status);
+  const notificationResult = shouldResendExistingInvite
+    ? await resendDocumentInvite({
+        role: "service_role",
+        viewerUserId: input.actorUserId,
+        inviteId: result.invite.id,
+      })
+    : result;
 
   return {
     documentOutputSignerId: input.candidate.documentOutputSignerId,
     documentPartyId: input.candidate.documentPartyId,
     recipientEmail: input.candidate.recipientEmail,
     recipientName: input.candidate.recipientName,
-    inviteId: result.invite.id,
+    inviteId: notificationResult.invite.id,
     existing: result.existing,
-    notificationJobId: result.notification?.jobId ?? null,
-    notificationDeliveryId: result.notification?.deliveryId ?? null,
+    notificationJobId: notificationResult.notification?.jobId ?? null,
+    notificationDeliveryId: notificationResult.notification?.deliveryId ?? null,
     idempotencyKey: input.candidate.idempotencyKey,
   } satisfies RemainingSignerInviteDispatchSuccess;
 };
+
+const summarizeResolution = (resolution: RemainingSignerInvitationResolution) => ({
+  actorUserId: resolution.actorUserId,
+  actorEmail: resolution.actorEmail,
+  trigger: resolution.trigger,
+  candidateCount: resolution.candidates.length,
+  skipped: resolution.skipped.map((skip) => ({
+    documentOutputSignerId: skip.documentOutputSignerId,
+    partyRole: skip.partyRole,
+    partyName: skip.partyName,
+    reason: skip.reason,
+    activeInviteId: skip.activeInviteId ?? null,
+  })),
+});
 
 const flushQueuedInviteNotifications = async (input: {
   documentId: string;
@@ -81,13 +113,36 @@ const flushQueuedInviteNotifications = async (input: {
   }
 
   try {
-    await runDueNotificationJobs({
+    const result = await runDueNotificationJobs({
       limit: notificationJobIds.length,
       workerId: "signer-invite-immediate",
-      jobKind: "invite",
       documentId: input.documentId,
       notificationJobIds,
     });
+    const failedJobs = result.jobs.filter(
+      (job) => job.failedCount > 0 || job.status === "failed",
+    );
+    if (failedJobs.length > 0) {
+      console.warn("Immediate signer invite notification delivery failed", {
+        documentId: input.documentId,
+        notificationJobIds,
+        failedJobs,
+      });
+      captureMessage("Immediate signer invite notification delivery failed", {
+        level: "warning",
+        tags: {
+          component: "signer_invitation_dispatch",
+          jobKind: "invite",
+        },
+        contexts: {
+          notification: {
+            documentId: input.documentId,
+            notificationJobIds,
+            failedJobs,
+          },
+        },
+      });
+    }
   } catch (error) {
     console.warn("Immediate signer invite notification dispatch failed", {
       documentId: input.documentId,
@@ -115,6 +170,12 @@ export const queueRemainingSignerInvitesAfterCreatorSignature = async (input: {
   const failures: RemainingSignerInviteDispatchFailure[] = [];
 
   if (!resolution.trigger.shouldQueueInvites) {
+    console.info("Remaining signer invite dispatch skipped", {
+      documentId: input.documentId,
+      blockedReason: resolution.trigger.blockedReason,
+      resolution: summarizeResolution(resolution),
+    });
+
     return {
       documentId: input.documentId,
       triggeredAt: new Date().toISOString(),
@@ -143,11 +204,35 @@ export const queueRemainingSignerInvitesAfterCreatorSignature = async (input: {
     }
   }
 
+  if (failures.length > 0) {
+    console.warn("Remaining signer invite candidate dispatch failures", {
+      documentId: input.documentId,
+      failures,
+    });
+  }
+
+  if (invited.length === 0) {
+    console.info("Remaining signer invite dispatch found no invite candidates", {
+      documentId: input.documentId,
+      resolution: summarizeResolution(resolution),
+    });
+  }
+
+  const notificationJobIds = invited
+    .map((invite) => invite.notificationJobId)
+    .filter((jobId): jobId is string => Boolean(jobId));
+
+  if (invited.length > 0 && notificationJobIds.length === 0) {
+    console.info("Remaining signer invite dispatch produced no notification jobs", {
+      documentId: input.documentId,
+      invited,
+      resolution: summarizeResolution(resolution),
+    });
+  }
+
   await flushQueuedInviteNotifications({
     documentId: input.documentId,
-    notificationJobIds: invited
-      .map((invite) => invite.notificationJobId)
-      .filter((jobId): jobId is string => Boolean(jobId)),
+    notificationJobIds,
   });
 
   return {

@@ -9,6 +9,10 @@ export type MemberFieldLike = {
 
 export type FormValue = string | boolean | string[];
 
+export const parseMultilineArrayFormInput = (value: string): string[] => {
+  return value.split("\n").filter((entry) => entry.trim().length > 0);
+};
+
 export type PriorDocumentItem = {
   chronologyOrder: number;
   documentType: string;
@@ -414,13 +418,13 @@ export const serializePersonContact = (value: PersonContact): string => {
   );
 
   const nextValue = {
-    email: value.email.trim(),
+    email: value.email,
     phoneCountryIso2,
     phoneCountryCode: getPhoneCountryCodeByIso2(phoneCountryIso2),
-    phone: value.phone.trim(),
+    phone: value.phone,
   };
 
-  if (!nextValue.email && !nextValue.phone) {
+  if (!nextValue.email.trim() && !nextValue.phone.trim()) {
     return "";
   }
 
@@ -476,11 +480,11 @@ export const serializePersonListItems = (items: PersonListItem[]): string[] => {
       );
 
       return {
-        fullName: item.fullName.trim(),
-        email: item.email.trim(),
+        fullName: item.fullName,
+        email: item.email,
         phoneCountryIso2,
         phoneCountryCode: getPhoneCountryCodeByIso2(phoneCountryIso2),
-        phone: item.phone.trim(),
+        phone: item.phone,
         isSigningTrustee: Boolean(item.isSigningTrustee),
       };
     })
@@ -594,9 +598,9 @@ export const serializePriorDocumentItems = (items: PriorDocumentItem[]): string[
   return items
     .map((item, index) => {
       const documentType = item.documentType.trim();
-      const documentLabel = item.documentLabel.trim();
+      const documentLabel = item.documentLabel;
       const documentDate = item.documentDate;
-      const attachmentReference = item.attachmentReference.trim();
+      const attachmentReference = item.attachmentReference;
 
       return {
         chronology_order: index + 1,
@@ -613,9 +617,9 @@ export const serializePriorDocumentItems = (items: PriorDocumentItem[]): string[
     .filter((item) => {
       return (
         item.document_type.length > 0 ||
-        item.title.length > 0 ||
+        item.title.trim().length > 0 ||
         item.date.length > 0 ||
-        item.recording_reference.length > 0
+        item.recording_reference.trim().length > 0
       );
     })
     .map((item) => JSON.stringify(item));

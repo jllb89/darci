@@ -1,6 +1,14 @@
 import { NextFunction, Request, Response } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
+import {
+  appAccountInactiveError,
+  isActiveAppAccountStatus,
+  missingAppProfileError,
+  shouldAllowInactiveAccountRequest,
+  shouldAllowMissingIdentityRequest,
+  shouldFailClosedOnMissingIdentity,
+} from "../auth/authPolicy";
 import { getUserIdentityContextBySupabaseId, normalizeRuntimeRole } from "../services/userRoleService";
 
 const publicPaths = [
@@ -10,6 +18,16 @@ const publicPaths = [
   "/auth/login",
   "/auth/signup",
   "/auth/refresh",
+  "/auth/magic-link",
+  "/auth/otp/start",
+  "/auth/otp/verify",
+  "/auth/resend-confirmation",
+  "/auth/password/recovery",
+];
+
+const controllerVerifiedAuthPaths = [
+  "/auth/password/reset",
+  "/auth/session/sync",
 ];
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -27,6 +45,10 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction
 ) => {
+  if (controllerVerifiedAuthPaths.includes(req.path)) {
+    return next();
+  }
+
   const publicPath = isPublicPath(req.path);
 
   const authHeader = req.headers.authorization ?? "";
@@ -122,6 +144,15 @@ export const requireAuth = async (
           user.role = dbIdentityContext.role;
           user.availableRoles = dbIdentityContext.availableRoles;
           user.status = dbIdentityContext.status;
+        } else if (
+          shouldFailClosedOnMissingIdentity() &&
+          !shouldAllowMissingIdentityRequest(req.path)
+        ) {
+          console.warn("Auth DB identity missing", {
+            path: req.path,
+            supabaseUserId: user.id,
+          });
+          return res.status(403).json(missingAppProfileError);
         } else if (!user.role || user.role === "authenticated") {
           user.role = "member";
         }
@@ -142,6 +173,19 @@ export const requireAuth = async (
       }
     } else if (!user.role || user.role === "authenticated") {
       user.role = "member";
+    }
+
+    if (
+      user.role !== "service_role" &&
+      !shouldAllowInactiveAccountRequest(req.path) &&
+      !isActiveAppAccountStatus(user.status)
+    ) {
+      console.warn("Auth account is not active", {
+        path: req.path,
+        supabaseUserId: user.id,
+        status: user.status,
+      });
+      return res.status(403).json(appAccountInactiveError);
     }
 
     req.user = user;

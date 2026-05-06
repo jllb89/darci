@@ -110,6 +110,8 @@ Usage notes:
 1. Keep signing on the dedicated signing contract.
 2. Do not rebuild signing state from request read models.
 3. Use the signing response to render readiness, captured signatures, groups, and confirmability.
+4. Use `signing.viewerAccess.kind` to distinguish owner/admin/service-role access from `invited_signer`; invited signer responses are already scoped to the assigned `documentOutputSignerId`.
+5. Treat `remainingSignerInvites` and `signingCompletion` on signature capture/finalize responses as optional backend summaries. Do not trigger signer invitations client-side.
 
 ### Track 5 Invite Runtime
 
@@ -131,7 +133,7 @@ Usage notes:
 
 1. Invite links land on `/app/invite?token={token}`. Validate that token first through `GET /invites/public/{token}` before entering the document-signing session.
 2. Use `invite.status`, `invite.claimMode`, `invite.token.canClaim`, and `invite.latestClaim` from the public validate response as the source of truth for entry gating, signup prompts, and already-claimed messaging.
-3. When a logged-in session exists, pass the normal bearer token to the public invite endpoints so `existing_account_only` invites can be resolved without a second client-side identity check.
+3. When a logged-in session exists, pass the normal bearer token to the public invite endpoints so `existing_account_only` invites can be resolved without a second client-side identity check. Signing access still requires the authenticated account email to match the invite email recipient.
 4. Call `POST /invites/public/{token}/claim` when the signer chooses to continue, completes signup, or attaches an existing session to the invite.
 5. For document-owner tooling, use the protected `/invites` management routes for resend and revoke actions instead of inferring invite state from signer obligations or notification rows.
 6. There is no dedicated `/app/invites` page contract yet. When that UI is added later, start from `GET /invites` and the mutation routes above rather than inventing a parallel invite read model.

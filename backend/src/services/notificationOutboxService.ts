@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 import { renderNotificationTemplate } from "./notificationTemplateRenderService";
+import { captureException } from "../utils/sentry";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -837,9 +838,10 @@ const buildResendAdapter = (): NotificationProviderAdapter => {
       });
 
       if (error || !data) {
+        const resendErrorMessage = error?.message ?? "Resend returned no data";
         throw new NotificationProviderDispatchError(
           "resend_api_error",
-          error?.message ?? "Resend returned no data",
+          `Resend send failed from ${rendered.from}: ${resendErrorMessage}`,
         );
       }
 
@@ -1419,7 +1421,12 @@ const computeNotificationJobsMetrics = (input: {
     jobsByStatus[job.status] += 1;
     jobsByChannel[job.channel] += 1;
 
-    if (job.job_kind === "document_invite") {
+    if (
+      job.invite_id ||
+      job.job_kind === "document_invite" ||
+      job.job_kind === "invite" ||
+      job.job_kind === "invite_reminder"
+    ) {
       inviteJobIds.add(job.id);
       inviteJobsByStatus[job.status] += 1;
     }
@@ -1531,7 +1538,7 @@ const processClaimedNotificationJob = async (input: {
           ? attemptStartedAt
           : null;
 
-      await updateNotificationDelivery(delivery.id, {
+      const updatedDelivery = await updateNotificationDelivery(delivery.id, {
         provider: dispatch.provider,
         provider_message_id: dispatch.providerMessageId,
         status: dispatch.deliveryStatus,
@@ -1563,6 +1570,19 @@ const processClaimedNotificationJob = async (input: {
           }),
         ),
       );
+
+      for (const event of dispatch.events) {
+        await syncInviteLifecycleForNotificationEvent({
+          delivery: updatedDelivery,
+          job: input.job,
+          provider: dispatch.provider,
+          providerMessageId: dispatch.providerMessageId,
+          providerEventId: null,
+          eventType: event.eventType,
+          eventAt: event.eventAt,
+          payload: event.payload,
+        });
+      }
     } catch (error) {
       const errorCode =
         error instanceof NotificationProviderDispatchError
@@ -1570,7 +1590,39 @@ const processClaimedNotificationJob = async (input: {
           : "dispatch_failed";
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      await updateNotificationDelivery(delivery.id, {
+      console.warn("Notification delivery dispatch failed", {
+        jobId: input.job.id,
+        jobKind: input.job.job_kind,
+        documentId: input.job.document_id,
+        inviteId: input.job.invite_id,
+        deliveryId: delivery.id,
+        provider: delivery.provider,
+        errorCode,
+        errorMessage,
+      });
+      captureException(error, {
+        level: "warning",
+        tags: {
+          component: "notification_outbox",
+          provider: delivery.provider,
+          jobKind: input.job.job_kind,
+        },
+        contexts: {
+          notification: {
+            jobId: input.job.id,
+            documentId: input.job.document_id,
+            inviteId: input.job.invite_id,
+            deliveryId: delivery.id,
+            channel: delivery.channel,
+            errorCode,
+          },
+        },
+        extra: {
+          errorMessage,
+        },
+      });
+
+      const updatedDelivery = await updateNotificationDelivery(delivery.id, {
         status: "failed",
         attempt_number: effectiveAttemptNumber,
         failed_at: attemptStartedAt,
@@ -1597,6 +1649,20 @@ const processClaimedNotificationJob = async (input: {
           },
         }),
       ]);
+
+      await syncInviteLifecycleForNotificationEvent({
+        delivery: updatedDelivery,
+        job: input.job,
+        provider: delivery.provider,
+        providerMessageId: delivery.provider_message_id,
+        providerEventId: null,
+        eventType: "failed",
+        eventAt: attemptStartedAt,
+        payload: {
+          errorCode,
+          errorMessage,
+        },
+      });
     }
   }
 

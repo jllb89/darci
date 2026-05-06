@@ -69,6 +69,37 @@ type AuditEventRecord = {
   created_at: string;
 };
 
+export const findRecentAuditEventByEmail = async (input: {
+  actions: string[];
+  email: string;
+  since: string;
+}) => {
+  if (!input.actions.length) {
+    return null as AuditEventRecord | null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("audit_events")
+    .select("id, actor_id, entity_type, entity_id, action, metadata, created_at")
+    .eq("entity_type", "auth")
+    .in("action", input.actions)
+    .eq("metadata->>email", input.email)
+    .gte("created_at", input.since)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Recent auth audit lookup failed", {
+      actions: input.actions,
+      error: error.message,
+    });
+    return null;
+  }
+
+  return (data as AuditEventRecord | null) ?? null;
+};
+
 const buildAuditEventFilter = (documentIds: string[], actorId?: string) => {
   const ids = documentIds
     .map((id) => id.replace(/"/g, ""))
