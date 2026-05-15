@@ -135,8 +135,6 @@ const MEMBER_FORM_FALLBACK_HELP_TEXT_BY_FIELD_KEY: Readonly<Record<string, strin
     "Enter each Trustmaker who created the trust and owns trust assets. Trustmakers are distinct from Trustees.",
   trustees:
     "List the currently acting Trustee(s) who manage trust assets and can execute trust actions.",
-  revocability_status:
-    "Indicate whether the trust is revocable, irrevocable, or limited by specific conditions.",
   revocation_holders:
     "List any person(s) who hold authority to revoke or amend the trust under the governing instrument.",
   agent_signature_authority:

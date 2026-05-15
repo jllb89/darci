@@ -5,6 +5,17 @@ const resendMocks = vi.hoisted(() => ({
   verifyWebhookMock: vi.fn(),
 }));
 
+const snsMocks = vi.hoisted(() => ({
+  publishMock: vi.fn(),
+}));
+
+vi.mock("@aws-sdk/client-sns", () => ({
+  SNSClient: vi.fn().mockImplementation(() => ({
+    send: snsMocks.publishMock,
+  })),
+  PublishCommand: vi.fn((input) => ({ input })),
+}));
+
 vi.mock("resend", () => ({
   Resend: vi.fn().mockImplementation(() => ({
     emails: {
@@ -356,10 +367,13 @@ const seedOutbox = (overrides?: {
 describe("notification outbox Resend runtime", () => {
   beforeEach(() => {
     process.env.RESEND_API_KEY = "re_test_key";
+    process.env.AWS_REGION = "us-east-1";
     process.env.NOTIFICATION_OUTBOX_RETRY_BASE_SECONDS = "300";
     resendMocks.sendEmailMock.mockReset();
     resendMocks.verifyWebhookMock.mockReset();
+    snsMocks.publishMock.mockReset();
     __testUtils.resetResendAdapterCache();
+    __testUtils.resetSnsAdapterCache();
 
     supabaseMocks.state.document_access_invites = [];
     supabaseMocks.state.invite_recipients = [];
@@ -377,6 +391,10 @@ describe("notification outbox Resend runtime", () => {
   afterEach(() => {
     vi.useRealTimers();
     delete process.env.RESEND_API_KEY;
+    delete process.env.AWS_REGION;
+    delete process.env.SNS_REGION;
+    delete process.env.SNS_SMS_TYPE;
+    delete process.env.SNS_SMS_SENDER_ID;
     delete process.env.NOTIFICATION_OUTBOX_RETRY_BASE_SECONDS;
     delete process.env.NOTIFICATION_SIGNATURE_FROM;
     delete process.env.NOTIFICATION_REPLY_TO;
@@ -475,6 +493,57 @@ describe("notification outbox Resend runtime", () => {
     });
   });
 
+  it("publishes queued SMS deliveries through SNS", async () => {
+    process.env.SNS_SMS_SENDER_ID = "DARCI";
+    snsMocks.publishMock.mockResolvedValue({ MessageId: "sns-msg-1" });
+
+    const adapter = __testUtils.buildSnsAdapter();
+    const result = await adapter.send({
+      job: buildJob({
+        channel: "sms",
+        payload_json: { code: "123456" },
+      }),
+      delivery: buildDelivery({
+        channel: "sms",
+        recipient_address: "+15551234567",
+        provider: "sns",
+      }),
+      template: buildTemplate({
+        template_key: "auth_step_up_sms",
+        channel: "sms",
+        subject_template: null,
+        body_template: "Your DARCi code is {{code}}.",
+        body_format: "text",
+      }),
+      workerId: "worker-1",
+      now: nowIso,
+    } as any);
+
+    expect(snsMocks.publishMock).toHaveBeenCalledWith({
+      input: expect.objectContaining({
+        PhoneNumber: "+15551234567",
+        Message: "Your DARCi code is 123456.",
+        MessageAttributes: expect.objectContaining({
+          "AWS.SNS.SMS.SMSType": {
+            DataType: "String",
+            StringValue: "Transactional",
+          },
+          "AWS.SNS.SMS.SenderID": {
+            DataType: "String",
+            StringValue: "DARCI",
+          },
+        }),
+      }),
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: "sns",
+        providerMessageId: "sns-msg-1",
+        deliveryStatus: "sent",
+      }),
+    );
+  });
+
   it("runs due Resend deliveries and leaves webhook completion to lifecycle events", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(nowIso));
@@ -517,6 +586,63 @@ describe("notification outbox Resend runtime", () => {
         notification_delivery_id: "delivery-1",
         event_type: "sent",
         provider: "resend",
+        provider_event_id: null,
+      }),
+    ]);
+  });
+
+  it("runs due SNS SMS deliveries through the notification outbox", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: {
+        channel: "sms",
+        payload_json: { code: "987654" },
+      },
+      delivery: {
+        channel: "sms",
+        recipient_address: "+15551234567",
+        provider: "sns",
+      },
+      template: {
+        template_key: "auth_step_up_sms",
+        channel: "sms",
+        subject_template: null,
+        body_template: "Your DARCi code is {{code}}.",
+        body_format: "text",
+      },
+    });
+    snsMocks.publishMock.mockResolvedValue({ MessageId: "sns-msg-1" });
+
+    const result = await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        scannedCount: 1,
+        claimedCount: 1,
+        processedCount: 1,
+      }),
+    );
+    expect(snsMocks.publishMock).toHaveBeenCalledWith({
+      input: expect.objectContaining({
+        PhoneNumber: "+15551234567",
+        Message: "Your DARCi code is 987654.",
+      }),
+    });
+    expect(supabaseMocks.state.notification_deliveries[0]).toEqual(
+      expect.objectContaining({
+        status: "sent",
+        provider: "sns",
+        provider_message_id: "sns-msg-1",
+        sent_at: nowIso,
+        failed_at: null,
+      }),
+    );
+    expect(supabaseMocks.state.outbound_message_events).toEqual([
+      expect.objectContaining({
+        notification_delivery_id: "delivery-1",
+        event_type: "sent",
+        provider: "sns",
         provider_event_id: null,
       }),
     ]);

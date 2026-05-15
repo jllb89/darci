@@ -73,7 +73,7 @@ export default function AppLayout({
   const availableRoles = getAvailableRoles(user, role);
   const isPublicInviteRoute = pathname === "/app/invite";
   const profileName = "Name Placeholder";
-  const profileEmail = user?.email ?? "email@example.com";
+  const profileEmail = user?.email || user?.phone || "Profile";
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isSwitchingRole, setIsSwitchingRole] = useState(false);

@@ -89,7 +89,7 @@ const resolveViewerUserId = async (req: Request) => {
     return null;
   }
 
-  return getOrCreateUserId(req.user.id, req.user.email, req.user.role);
+  return getOrCreateUserId(req.user.id, req.user.email, req.user.role, req.user.phone);
 };
 
 const sendServiceError = (res: Response, error: unknown) => {

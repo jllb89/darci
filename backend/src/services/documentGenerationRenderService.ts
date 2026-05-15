@@ -184,21 +184,28 @@ const poaAuthorityKeyByLetter: Record<string, string> = {
 };
 
 const poaAuthorityKeyAliases: Record<string, string[]> = {
+  real_property: ["real_property_transactions"],
   personal_property: ["tangible_personal_property", "tangible_personal_property_transactions"],
+  stocks_and_bonds: ["stock_and_bond_transactions", "stocks_and_bond_transactions"],
+  commodities_and_options: ["commodity_and_option_transactions", "commodities_and_options_transactions"],
   banking_and_financial: [
     "banking_and_other_financial_institution_transactions",
     "banking_transactions",
   ],
+  business_operations: ["business_operating_transactions", "business_operations_transactions"],
+  insurance_and_annuities: ["insurance_and_annuity_transactions"],
   estate_trust_and_other_beneficiary_transactions: [
     "estate_trust_and_other_beneficiary_transactions",
     "estate_trust_and_other_beneficiary",
   ],
+  claims_and_litigation: ["claims_litigation"],
   personal_and_family_maintenance: ["personal_family_maintenance"],
   government_and_military_benefits: [
     "benefits_from_government_programs",
     "benefits_from_social_security_medicare_medicaid_or_other_governmental_programs_or_civil_or_military_service",
   ],
   retirement_plan_transactions: ["retirement_plans", "retirement_plan"],
+  tax_matters: ["tax_matter"],
   all_powers: ["all_of_the_powers_listed_above", "all_powers_listed_above"],
 };
 

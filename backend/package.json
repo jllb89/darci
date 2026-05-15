@@ -25,6 +25,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aws-sdk/client-sns": "^3.1045.0",
     "@darci/types": "file:../packages/types",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.52.1",
@@ -46,6 +47,7 @@
     "pdfkit": "^0.18.0",
     "pg": "^8.18.0",
     "resend": "^6.12.2",
+    "standardwebhooks": "^1.0.0",
     "swagger-ui-express": "^5.0.1",
     "yamljs": "^0.3.0",
     "zod": "^4.3.6"

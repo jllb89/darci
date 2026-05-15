@@ -1,56 +1,122 @@
+"use client";
+
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 
-const requests = [
-  {
-    id: "REQ-8812",
-    title: "Urgent notarization",
-    requestor: "Atlas Legal",
-    document: "Purchase Agreement - Elm St",
-    created: "Mar 20, 2026",
-    status: "Pending review",
-  },
-  {
-    id: "REQ-7741",
-    title: "IDN verification",
-    requestor: "Oakridge Title",
-    document: "Affidavit - Grant",
-    created: "Mar 19, 2026",
-    status: "In progress",
-  },
-  {
-    id: "REQ-6904",
-    title: "Witness scheduling",
-    requestor: "Cobalt Partners",
-    document: "Lease Renewal - Jacobs",
-    created: "Mar 18, 2026",
-    status: "Awaiting notary",
-  },
-];
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:4000";
 
-const requestLifecycle = [
-  { id: "review", label: "Review", actor: "ops" },
-  { id: "processing", label: "Processing", actor: "system" },
-  { id: "notary", label: "Notary", actor: "notary" },
-  { id: "completed", label: "Completed", actor: "system" },
-];
-
-const requestStatusToStep: Record<string, string> = {
-  "Pending review": "review",
-  "In progress": "processing",
-  "Awaiting notary": "notary",
-  Completed: "completed",
+type RequestListItem = {
+  id: string;
+  documentId: string;
+  workflowId: string | null;
+  status: string | null;
+  submittedAt: string | null;
+  meetingId: string | null;
+  meetingStatus: string | null;
+  meetingScheduledAt: string | null;
+  meetingTimezone: string | null;
+  meetingLocation: string | null;
 };
 
-const actorStyles: Record<string, string> = {
-  ops: "border-amber-200 bg-amber-50 text-amber-700",
-  system: "border-slate-200 bg-slate-50 text-slate-600",
-  notary: "border-emerald-200 bg-emerald-50 text-emerald-700",
+type RequestsPayload = {
+  requests: RequestListItem[];
+};
+
+const fetchWithTokenRefresh = async (
+  url: string,
+  accessToken: string,
+  init?: RequestInit,
+) => {
+  const requestWithToken = (token: string) => {
+    const headers = new Headers(init?.headers ?? {});
+    headers.set("Authorization", `Bearer ${token}`);
+
+    return fetch(url, {
+      ...init,
+      headers,
+    });
+  };
+
+  const response = await requestWithToken(accessToken);
+  if (response.status !== 401) {
+    return response;
+  }
+
+  try {
+    const refreshed = await refreshStoredAuth();
+    if (!refreshed?.accessToken) {
+      return response;
+    }
+
+    return requestWithToken(refreshed.accessToken);
+  } catch {
+    return response;
+  }
+};
+
+const formatDateTime = (value: string | null) => {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
 };
 
 export default function RequestsPage() {
+  const { accessToken } = useStoredAuth();
+  const [requests, setRequests] = useState<RequestListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadRequests = useCallback(async () => {
+    if (!accessToken) {
+      setRequests([]);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetchWithTokenRefresh(`${apiBaseUrl}/requests`, accessToken, {
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as RequestsPayload | null;
+
+      if (!response.ok || !payload?.requests) {
+        throw new Error("Failed to load requests.");
+      }
+
+      setRequests(payload.requests);
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to load requests.");
+      setRequests([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void loadRequests();
+  }, [loadRequests]);
+
   return (
     <div className="space-y-6">
       <div className="text-2xl font-medium">Requests</div>
+
+      {errorMessage ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMessage}
+        </div>
+      ) : null}
+
       <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
         <div className="text-sm font-medium">Active requests</div>
         <div className="mt-4 overflow-x-auto">
@@ -58,71 +124,42 @@ export default function RequestsPage() {
             <thead className="text-xs uppercase text-Color-Neutral">
               <tr>
                 <th className="px-3 py-2">Request</th>
-                <th className="px-3 py-2">Requestor</th>
                 <th className="px-3 py-2">Document</th>
-                <th className="px-3 py-2">Created</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Meeting</th>
+                <th className="px-3 py-2">Submitted</th>
                 <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
               {requests.map((item) => (
                 <tr key={item.id} className="border-t border-Color-Scheme-1-Border/40">
-                  <td className="px-3 py-3">
-                    <div className="font-medium">{item.title}</div>
-                    <div className="text-xs text-Color-Neutral">{item.id}</div>
+                  <td className="px-3 py-3 font-medium">{item.id}</td>
+                  <td className="px-3 py-3 text-Color-Neutral">{item.documentId}</td>
+                  <td className="px-3 py-3 text-Color-Neutral">{item.status ?? "-"}</td>
+                  <td className="px-3 py-3 text-Color-Neutral">
+                    {item.meetingStatus ?? "-"} • {formatDateTime(item.meetingScheduledAt)}
                   </td>
-                  <td className="px-3 py-3 text-Color-Neutral">{item.requestor}</td>
-                  <td className="px-3 py-3 text-Color-Neutral">{item.document}</td>
-                  <td className="px-3 py-3 text-Color-Neutral">{item.created}</td>
+                  <td className="px-3 py-3 text-Color-Neutral">{formatDateTime(item.submittedAt)}</td>
                   <td className="px-3 py-3">
-                    {(() => {
-                      const stepId = requestStatusToStep[item.status];
-                      const stepIndex = requestLifecycle.findIndex(
-                        (step) => step.id === stepId
-                      );
-                      const step =
-                        stepIndex >= 0 ? requestLifecycle[stepIndex] : requestLifecycle[0];
-                      const position = stepIndex >= 0 ? stepIndex + 1 : 1;
-
-                      return (
-                        <div className="flex items-center gap-2 whitespace-nowrap text-[10px] uppercase text-Color-Neutral">
-                          <span className="rounded-full border border-Color-Scheme-1-Border/40 px-2 py-0.5">
-                            {step.label}
-                          </span>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 ${
-                              actorStyles[step.actor] ??
-                              "border-Color-Scheme-1-Border/40 text-Color-Neutral"
-                            }`}
-                          >
-                            {step.actor}
-                          </span>
-                          <span className="rounded-full border border-Color-Scheme-1-Border/40 px-2 py-0.5">
-                            {position}/{requestLifecycle.length}
-                          </span>
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        className="rounded border border-Color-Scheme-1-Border/40 px-2 py-1 text-xs"
-                        href={`/app/requests/${item.id}`}
-                      >
-                        View
-                      </Link>
-                      <button className="rounded border border-Color-Scheme-1-Border/40 px-2 py-1 text-xs">
-                        Assign
-                      </button>
-                    </div>
+                    <Link
+                      className="rounded border border-Color-Scheme-1-Border/40 px-2 py-1 text-xs"
+                      href={`/app/requests/${item.id}`}
+                    >
+                      View
+                    </Link>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+
+        {!isLoading && requests.length === 0 ? (
+          <div className="mt-4 rounded border border-Color-Scheme-1-Border/40 px-3 py-2 text-sm text-Color-Neutral">
+            No requests found.
+          </div>
+        ) : null}
       </div>
     </div>
   );

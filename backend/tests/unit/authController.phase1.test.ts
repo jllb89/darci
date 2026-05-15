@@ -40,11 +40,13 @@ const buildProfile = () => ({
   id: "db-user-1",
   supabaseUserId: "auth-user-1",
   email: "member@example.com",
+  phone: null,
   role: "member",
   status: "active",
   firstName: "Dana",
   lastName: "Ray",
   emailConfirmedAt: "2026-04-30T16:00:00.000Z",
+  phoneConfirmedAt: null,
   lastSignInAt: "2026-04-30T16:01:00.000Z",
   lastAuthSyncedAt: "2026-04-30T16:02:00.000Z",
   availableRoles: ["member"],
@@ -458,6 +460,69 @@ describe("auth controller Phase 1", () => {
       expect.objectContaining({
         accessToken: "access-token",
         refreshToken: "refresh-token",
+      }),
+    );
+  });
+
+  it("syncs a phone OTP session into a phone-only DARCi profile mirror", async () => {
+    const getUserMock = vi.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: "auth-user-1",
+          email: null,
+          phone: "+15551234567",
+          app_metadata: { role: "member" },
+          user_metadata: {},
+          email_confirmed_at: null,
+          phone_confirmed_at: "2026-05-07T12:00:00.000Z",
+          confirmed_at: "2026-05-07T12:00:00.000Z",
+          last_sign_in_at: "2026-05-07T12:01:00.000Z",
+        },
+      },
+      error: null,
+    });
+    mocks.createClientMock.mockReturnValue({ auth: { getUser: getUserMock } });
+    mocks.ensureUserIdentityFromAuthMock.mockResolvedValue({
+      ...buildProfile(),
+      email: null,
+      phone: "+15551234567",
+      emailConfirmedAt: null,
+      phoneConfirmedAt: "2026-05-07T12:00:00.000Z",
+    });
+    mocks.toUserResponseMock.mockImplementation((profile: { email: string | null; phone: string | null }) => ({
+      id: "db-user-1",
+      email: profile.email ?? "",
+      phone: profile.phone,
+      role: "member",
+      status: "active",
+    }));
+
+    const { syncSession } = await import("../../src/controllers/authController.ts");
+    const { res, status, json } = buildResponse();
+    const req = {
+      headers: { authorization: "Bearer access-token" },
+      body: { refreshToken: "refresh-token", intent: "otp" },
+    } as unknown as Request;
+
+    await syncSession(req, res);
+
+    expect(mocks.ensureUserIdentityFromAuthMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        supabaseUserId: "auth-user-1",
+        email: null,
+        phone: "+15551234567",
+        emailConfirmedAt: null,
+        phoneConfirmedAt: "2026-05-07T12:00:00.000Z",
+        lastSignInAt: "2026-05-07T12:01:00.000Z",
+      }),
+    );
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          email: "",
+          phone: "+15551234567",
+        }),
       }),
     );
   });

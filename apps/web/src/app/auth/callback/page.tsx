@@ -50,7 +50,10 @@ function AuthCallbackContent() {
         accessToken: data.session.access_token,
         refreshToken: data.session.refresh_token,
         intent:
-          intent === "signup" || intent === "magic-link" || intent === "otp"
+          intent === "signup" ||
+          intent === "magic-link" ||
+          intent === "otp" ||
+          intent === "oauth"
             ? intent
             : null,
       });

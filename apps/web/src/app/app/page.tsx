@@ -1,429 +1,279 @@
 "use client";
 
-import { StoredUser, useStoredUser } from "@/lib/auth";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 
-const memberStats = [
-  { label: "In progress", value: 6 },
-  { label: "Awaiting notary", value: 2 },
-  { label: "Completed", value: 18 },
-];
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:4000";
 
-const recentDocuments = [
-  {
-    title: "Purchase Agreement - Elm St",
-    status: "Awaiting signatures",
-    updated: "12 min ago",
-  },
-  {
-    title: "Power of Attorney - Ramirez",
-    status: "Notary scheduled",
-    updated: "2 hours ago",
-  },
-  {
-    title: "Lease Renewal - Jacobs",
-    status: "Draft",
-    updated: "Yesterday",
-  },
-];
-
-const memberRequests = [
-  {
-    name: "Urgent notarization",
-    requestor: "Atlas Legal",
-    status: "Pending review",
-  },
-  {
-    name: "IDN verification",
-    requestor: "Oakridge Title",
-    status: "In progress",
-  },
-];
-
-const memberActivity = [
-  "IDN-29384 verified by Avery Stone",
-  "New document created: Purchase Agreement - Elm St",
-  "Request updated: Urgent notarization",
-];
-
-const memberSessions = [
-  {
-    title: "Elm St closing",
-    time: "Today · 3:30 PM",
-    host: "Notary: J. Patel",
-  },
-  {
-    title: "Ramirez POA",
-    time: "Tomorrow · 10:00 AM",
-    host: "Notary: L. Zhao",
-  },
-];
-
-const notaryStats = [
-  { label: "Pending review", value: 4 },
-  { label: "Scheduled today", value: 3 },
-  { label: "Completed this week", value: 11 },
-];
-
-const notaryQueue = [
-  {
-    id: "REQ-8812",
-    member: "Avery Stone",
-    document: "Purchase Agreement - Elm St",
-    status: "Time proposed",
-    scheduled: "Awaiting confirmation",
-  },
-  {
-    id: "REQ-7741",
-    member: "Rafael Grant",
-    document: "Affidavit - Grant",
-    status: "Scheduled",
-    scheduled: "Today · 2:00 PM",
-  },
-  {
-    id: "REQ-6904",
-    member: "Monica Jacobs",
-    document: "Lease Renewal - Jacobs",
-    status: "Needs reschedule",
-    scheduled: "Tomorrow · 9:30 AM",
-  },
-];
-
-const notaryActivity = [
-  "Meeting confirmed for REQ-7741",
-  "Identity verified for REQ-6628",
-  "Seal applied to DOC-6108",
-];
-
-const notaryAlerts = [
-  "REQ-8812 has new proposed slots",
-  "REQ-6904 requires reschedule decision",
-  "Two sessions start within the next hour",
-];
-
-const opsStats = [
-  { label: "Open escalations", value: 3 },
-  { label: "Audit events today", value: 128 },
-  { label: "Verification checks", value: 42 },
-];
-
-const opsFeed = [
-  "Public verification spike detected for IDN-20488",
-  "Meeting cancellation recorded on REQ-1120",
-  "Admin role update completed for user review",
-];
-
-const getDisplayName = (user: StoredUser | null) => {
-  if (!user) {
-    return "there";
-  }
-
-  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  if (fullName) {
-    return fullName;
-  }
-
-  return user.email;
+type DashboardMetric = {
+  key: string;
+  label: string;
+  value: number;
 };
 
-function MemberDashboard({ user }: { user: StoredUser | null }) {
-  return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="text-2xl font-medium">Dashboard</div>
-          <div className="text-sm text-Color-Neutral">Welcome back, {getDisplayName(user)}.</div>
-        </div>
-      </div>
+type DashboardDocument = {
+  id: string;
+  idn: string | null;
+  status: string | null;
+  documentType: string | null;
+  jurisdiction: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+};
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {memberStats.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-lg border border-Color-Scheme-1-Border/40 p-4"
-          >
-            <div className="text-xs uppercase text-Color-Neutral">{item.label}</div>
-            <div className="mt-2 text-2xl font-medium">{item.value}</div>
-          </div>
-        ))}
-      </div>
+type DashboardRequest = {
+  id: string;
+  documentId: string;
+  documentType: string | null;
+  jurisdiction: string | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  status: string | null;
+  submittedAt: string | null;
+  meetingId: string | null;
+  meetingScheduledAt: string | null;
+  meetingStatus: string | null;
+};
 
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="space-y-6">
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Documents</div>
-            <div className="mt-4 space-y-3">
-              {recentDocuments.map((doc) => (
-                <div key={doc.title} className="flex items-center justify-between text-sm">
-                  <div>
-                    <div className="font-medium">{doc.title}</div>
-                    <div className="text-xs text-Color-Neutral">{doc.status}</div>
-                  </div>
-                  <div className="text-xs text-Color-Neutral">{doc.updated}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+type DashboardMeeting = {
+  id: string;
+  requestId: string;
+  documentId: string | null;
+  documentType: string | null;
+  ownerName: string | null;
+  scheduledAt: string | null;
+  timezone: string | null;
+  location: string | null;
+  status: string | null;
+};
 
-        <div className="space-y-6">
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Requests</div>
-            <div className="mt-4 space-y-3 text-sm">
-              {memberRequests.map((item) => (
-                <div key={item.name} className="space-y-1">
-                  <div className="font-medium">{item.name}</div>
-                  <div className="text-xs text-Color-Neutral">
-                    {item.requestor} • {item.status}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Upcoming sessions</div>
-            <div className="mt-4 space-y-3 text-sm">
-              {memberSessions.map((session) => (
-                <div key={session.title} className="space-y-1">
-                  <div className="font-medium">{session.title}</div>
-                  <div className="text-xs text-Color-Neutral">
-                    {session.time} • {session.host}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Recent activity</div>
-            <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-              {memberActivity.map((item) => (
-                <div key={item}>{item}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+type DashboardActivity = {
+  action: string;
+  timestamp: string;
+  documentId: string | null;
+  entityType: string;
+  entityId: string | null;
+};
 
-function NotaryDashboard({ user }: { user: StoredUser | null }) {
+type DashboardAlert = {
+  key: string;
+  message: string;
+};
+
+type DashboardPayload = {
+  role: string;
+  metrics: DashboardMetric[];
+  documents: DashboardDocument[];
+  requests: DashboardRequest[];
+  meetings: DashboardMeeting[];
+  activity: DashboardActivity[];
+  alerts: DashboardAlert[];
+  nextAction: string | null;
+};
+
+const fetchWithTokenRefresh = async (
+  url: string,
+  accessToken: string,
+  init?: RequestInit,
+) => {
+  const requestWithToken = (token: string) => {
+    const headers = new Headers(init?.headers ?? {});
+    headers.set("Authorization", `Bearer ${token}`);
+
+    return fetch(url, {
+      ...init,
+      headers,
+    });
+  };
+
+  const response = await requestWithToken(accessToken);
+  if (response.status !== 401) {
+    return response;
+  }
+
+  try {
+    const refreshed = await refreshStoredAuth();
+    if (!refreshed?.accessToken) {
+      return response;
+    }
+
+    return requestWithToken(refreshed.accessToken);
+  } catch {
+    return response;
+  }
+};
+
+const formatDateTime = (value: string | null) => {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
+};
+
+export default function DashboardPage() {
+  const { accessToken, user } = useStoredAuth();
+  const [payload, setPayload] = useState<DashboardPayload | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadDashboard = useCallback(async () => {
+    if (!accessToken) {
+      setPayload(null);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetchWithTokenRefresh(`${apiBaseUrl}/dashboard`, accessToken, {
+        cache: "no-store",
+      });
+      const nextPayload = (await response.json().catch(() => null)) as DashboardPayload | null;
+
+      if (!response.ok || !nextPayload) {
+        throw new Error("Failed to load dashboard.");
+      }
+
+      setPayload(nextPayload);
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to load dashboard.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  const displayName =
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || "there";
+
   return (
     <div className="space-y-8">
       <div>
-        <div className="text-2xl font-medium">Notary Dashboard</div>
-        <div className="text-sm text-Color-Neutral">Queue and calendar for {getDisplayName(user)}.</div>
+        <div className="text-2xl font-medium">Dashboard</div>
+        <div className="text-sm text-Color-Neutral">Welcome back, {displayName}.</div>
       </div>
 
+      {errorMessage ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMessage}
+        </div>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-3">
-        {notaryStats.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-lg border border-Color-Scheme-1-Border/40 p-4"
-          >
-            <div className="text-xs uppercase text-Color-Neutral">{item.label}</div>
-            <div className="mt-2 text-2xl font-medium">{item.value}</div>
+        {(payload?.metrics ?? []).map((metric) => (
+          <div key={metric.key} className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-xs uppercase text-Color-Neutral">{metric.label}</div>
+            <div className="mt-2 text-2xl font-medium">{metric.value}</div>
           </div>
         ))}
       </div>
 
+      {!isLoading && payload?.metrics.length === 0 ? (
+        <div className="rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm text-Color-Neutral">
+          No dashboard metrics available yet.
+        </div>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-          <div className="text-sm font-medium">Pending requests</div>
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-xs uppercase text-Color-Neutral">
-                <tr>
-                  <th className="px-3 py-2">Request</th>
-                  <th className="px-3 py-2">Member</th>
-                  <th className="px-3 py-2">Document</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Scheduled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {notaryQueue.map((item) => (
-                  <tr key={item.id} className="border-t border-Color-Scheme-1-Border/40">
-                    <td className="px-3 py-3 font-medium">{item.id}</td>
-                    <td className="px-3 py-3 text-Color-Neutral">{item.member}</td>
-                    <td className="px-3 py-3 text-Color-Neutral">{item.document}</td>
-                    <td className="px-3 py-3">{item.status}</td>
-                    <td className="px-3 py-3 text-Color-Neutral">{item.scheduled}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="space-y-6">
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">Recent documents</div>
+              <Link className="text-xs underline" href="/app/documents">
+                View all
+              </Link>
+            </div>
+            <div className="mt-4 space-y-3">
+              {(payload?.documents ?? []).slice(0, 5).map((document) => (
+                <div key={document.id} className="flex items-center justify-between text-sm">
+                  <div>
+                    <div className="font-medium">{document.id}</div>
+                    <div className="text-xs text-Color-Neutral">
+                      {(document.documentType ?? "document").toUpperCase()} • {document.status ?? "-"}
+                    </div>
+                  </div>
+                  <div className="text-xs text-Color-Neutral">
+                    {formatDateTime(document.updatedAt ?? document.createdAt)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">Recent requests</div>
+              <Link className="text-xs underline" href="/app/requests">
+                View all
+              </Link>
+            </div>
+            <div className="mt-4 space-y-3 text-sm">
+              {(payload?.requests ?? []).slice(0, 5).map((request) => (
+                <div key={request.id} className="space-y-1">
+                  <div className="font-medium">{request.id}</div>
+                  <div className="text-xs text-Color-Neutral">
+                    {request.status ?? "-"} • {request.ownerName ?? "Unassigned"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-sm font-medium">Recent activity</div>
+            <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
+              {(payload?.activity ?? []).slice(0, 8).map((item) => (
+                <div key={`${item.entityType}-${item.entityId ?? item.timestamp}-${item.action}`}>
+                  {item.action} • {formatDateTime(item.timestamp)}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
         <div className="space-y-6">
+          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+            <div className="text-sm font-medium">Meetings</div>
+            <div className="mt-4 space-y-3 text-sm text-Color-Neutral">
+              {(payload?.meetings ?? []).slice(0, 5).map((meeting) => (
+                <div key={meeting.id}>
+                  {meeting.status ?? "-"} • {formatDateTime(meeting.scheduledAt)}
+                </div>
+              ))}
+              {(payload?.meetings ?? []).length === 0 ? <div>No meetings scheduled.</div> : null}
+            </div>
+          </div>
+
           <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
             <div className="text-sm font-medium">Alerts</div>
             <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-              {notaryAlerts.map((item) => (
-                <div key={item}>{item}</div>
+              {(payload?.alerts ?? []).map((alert) => (
+                <div key={alert.key}>{alert.message}</div>
               ))}
+              {(payload?.alerts ?? []).length === 0 ? <div>No alerts.</div> : null}
             </div>
           </div>
+
           <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Calendar</div>
-            <div className="mt-4 space-y-3 text-sm text-Color-Neutral">
-              <div>Today · 2:00 PM · Grant affidavit</div>
-              <div>Tomorrow · 9:30 AM · Jacobs lease renewal</div>
-              <div>Tomorrow · 1:15 PM · Elm St acknowledgment</div>
-            </div>
-          </div>
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Recent activity</div>
-            <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-              {notaryActivity.map((item) => (
-                <div key={item}>{item}</div>
-              ))}
+            <div className="text-sm font-medium">Next action</div>
+            <div className="mt-4 text-sm text-Color-Neutral">
+              {payload?.nextAction ?? "No action required."}
             </div>
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-function ProDashboard({ user }: { user: StoredUser | null }) {
-  return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="text-2xl font-medium">Pro Dashboard</div>
-          <div className="text-sm text-Color-Neutral">
-            Active client and document work for {getDisplayName(user)}.
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        {memberStats.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-lg border border-Color-Scheme-1-Border/40 p-4"
-          >
-            <div className="text-xs uppercase text-Color-Neutral">{item.label}</div>
-            <div className="mt-2 text-2xl font-medium">{item.value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="space-y-6">
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Documents</div>
-            <div className="mt-4 space-y-3">
-              {recentDocuments.map((doc) => (
-                <div key={doc.title} className="flex items-center justify-between text-sm">
-                  <div>
-                    <div className="font-medium">{doc.title}</div>
-                    <div className="text-xs text-Color-Neutral">{doc.status}</div>
-                  </div>
-                  <div className="text-xs text-Color-Neutral">{doc.updated}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Requests</div>
-            <div className="mt-4 space-y-3 text-sm">
-              {memberRequests.map((item) => (
-                <div key={item.name} className="space-y-1">
-                  <div className="font-medium">{item.name}</div>
-                  <div className="text-xs text-Color-Neutral">
-                    {item.requestor} • {item.status}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Upcoming sessions</div>
-            <div className="mt-4 space-y-3 text-sm">
-              {memberSessions.map((session) => (
-                <div key={session.title} className="space-y-1">
-                  <div className="font-medium">{session.title}</div>
-                  <div className="text-xs text-Color-Neutral">
-                    {session.time} • {session.host}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="text-sm font-medium">Recent activity</div>
-            <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-              {memberActivity.map((item) => (
-                <div key={item}>{item}</div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminDashboard({ user }: { user: StoredUser | null }) {
-  return (
-    <div className="space-y-8">
-      <div>
-        <div className="text-2xl font-medium">Operations Dashboard</div>
-        <div className="text-sm text-Color-Neutral">Admin view for {getDisplayName(user)}.</div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        {opsStats.map((item) => (
-          <div
-            key={item.label}
-            className="rounded-lg border border-Color-Scheme-1-Border/40 p-4"
-          >
-            <div className="text-xs uppercase text-Color-Neutral">{item.label}</div>
-            <div className="mt-2 text-2xl font-medium">{item.value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-          <div className="text-sm font-medium">Oversight feed</div>
-          <div className="mt-4 space-y-3 text-sm text-Color-Neutral">
-            {opsFeed.map((item) => (
-              <div key={item}>{item}</div>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-          <div className="text-sm font-medium">Next action</div>
-          <div className="mt-4 text-sm text-Color-Neutral">
-            Use the Ops Console to inspect audit events, compliance exceptions, and support escalations.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function DashboardPage() {
-  const user = useStoredUser();
-  const role = user?.role ?? null;
-
-  if (role === "pro") {
-    return <ProDashboard user={user} />;
-  }
-
-  if (role === "notary") {
-    return <NotaryDashboard user={user} />;
-  }
-
-  if (role === "admin") {
-    return <AdminDashboard user={user} />;
-  }
-
-  return <MemberDashboard user={user} />;
 }

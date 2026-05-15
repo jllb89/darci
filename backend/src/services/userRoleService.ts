@@ -17,11 +17,13 @@ type UserRow = {
   id: string;
   supabase_user_id: string;
   email: string | null;
+  phone: string | null;
   role: string | null;
   status: string | null;
   first_name: string | null;
   last_name: string | null;
   email_confirmed_at: string | null;
+  phone_confirmed_at: string | null;
   last_sign_in_at: string | null;
   last_auth_synced_at: string | null;
 };
@@ -55,11 +57,13 @@ export type UserIdentityContext = {
   id: string;
   supabaseUserId: string;
   email: string | null;
+  phone: string | null;
   role: RuntimeRole;
   status: string;
   firstName: string | null;
   lastName: string | null;
   emailConfirmedAt: string | null;
+  phoneConfirmedAt: string | null;
   lastSignInAt: string | null;
   lastAuthSyncedAt: string | null;
   availableRoles: RuntimeRole[];
@@ -136,7 +140,7 @@ const mapRoleAssignments = (rows: UserRoleRow[]): UserRoleAssignment[] => {
 };
 
 const baseUserSelect = "id, supabase_user_id, email, role, status, first_name, last_name";
-const authMirrorUserSelect = `${baseUserSelect}, email_confirmed_at, last_sign_in_at, last_auth_synced_at`;
+const authMirrorUserSelect = `${baseUserSelect}, phone, email_confirmed_at, phone_confirmed_at, last_sign_in_at, last_auth_synced_at`;
 
 let authMirrorColumnsAvailable = true;
 
@@ -148,8 +152,8 @@ const isMissingAuthMirrorColumnError = (error: SupabaseErrorLike | null | undefi
   const message = error.message ?? "";
   return (
     error.code === "42703" ||
-    /users\.(email_confirmed_at|last_sign_in_at|last_auth_synced_at)/i.test(message) ||
-    /(email_confirmed_at|last_sign_in_at|last_auth_synced_at).*does not exist/i.test(message)
+    /users\.(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)/i.test(message) ||
+    /(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at).*does not exist/i.test(message)
   );
 };
 
@@ -164,7 +168,9 @@ const normalizeUserRow = (row: Partial<UserRow> | null | undefined) => {
 
   return {
     ...row,
+    phone: row.phone ?? null,
     email_confirmed_at: row.email_confirmed_at ?? null,
+    phone_confirmed_at: row.phone_confirmed_at ?? null,
     last_sign_in_at: row.last_sign_in_at ?? null,
     last_auth_synced_at: row.last_auth_synced_at ?? null,
   } as UserRow;
@@ -278,11 +284,13 @@ const buildIdentityContext = async (userRow: UserRow) => {
     id: userRow.id,
     supabaseUserId: userRow.supabase_user_id,
     email: userRow.email,
+    phone: userRow.phone,
     role: activeRole,
     status: userRow.status ?? "active",
     firstName: userRow.first_name,
     lastName: userRow.last_name,
     emailConfirmedAt: userRow.email_confirmed_at,
+    phoneConfirmedAt: userRow.phone_confirmed_at,
     lastSignInAt: userRow.last_sign_in_at,
     lastAuthSyncedAt: userRow.last_auth_synced_at,
     availableRoles,
@@ -311,28 +319,34 @@ export const getUserIdentityContextByUserId = async (userId: string) => {
 export const ensureUserIdentityFromAuth = async (input: {
   supabaseUserId: string;
   email: string | null;
+  phone?: string | null;
   role?: string | null;
   firstName?: string | null;
   lastName?: string | null;
   emailConfirmedAt?: string | null;
+  phoneConfirmedAt?: string | null;
   lastSignInAt?: string | null;
   lastAuthSyncedAt?: string | null;
 }) => {
   const existingUser = await selectUserRowBySupabaseId(input.supabaseUserId);
 
   if (!existingUser) {
-    if (!input.email) {
-      throw new UserRoleServiceError(400, "Email is required to create the user record");
+    if (!input.email && !input.phone) {
+      throw new UserRoleServiceError(400, "Email or phone is required to create the user record");
     }
 
     const buildInsertPayload = (includeAuthMirrors: boolean) => ({
         supabase_user_id: input.supabaseUserId,
-        email: input.email,
+        email: input.email ?? null,
         role: normalizeRuntimeRole(input.role),
+        ...(includeAuthMirrors && input.phone !== undefined ? { phone: input.phone } : {}),
         ...(input.firstName !== undefined ? { first_name: input.firstName } : {}),
         ...(input.lastName !== undefined ? { last_name: input.lastName } : {}),
         ...(includeAuthMirrors && input.emailConfirmedAt !== undefined
           ? { email_confirmed_at: input.emailConfirmedAt }
+          : {}),
+        ...(includeAuthMirrors && input.phoneConfirmedAt !== undefined
+          ? { phone_confirmed_at: input.phoneConfirmedAt }
           : {}),
         ...(includeAuthMirrors && input.lastSignInAt !== undefined
           ? { last_sign_in_at: input.lastSignInAt }
@@ -362,12 +376,17 @@ export const ensureUserIdentityFromAuth = async (input: {
   }
 
   const nextEmail = input.email ?? existingUser.email;
+  const nextPhone = input.phone ?? existingUser.phone;
   const nextFirstName = input.firstName ?? existingUser.first_name;
   const nextLastName = input.lastName ?? existingUser.last_name;
   const nextEmailConfirmedAt =
     input.emailConfirmedAt !== undefined
       ? input.emailConfirmedAt
       : existingUser.email_confirmed_at;
+  const nextPhoneConfirmedAt =
+    input.phoneConfirmedAt !== undefined
+      ? input.phoneConfirmedAt
+      : existingUser.phone_confirmed_at;
   const nextLastSignInAt =
     input.lastSignInAt !== undefined ? input.lastSignInAt : existingUser.last_sign_in_at;
   const nextLastAuthSyncedAt =
@@ -380,9 +399,11 @@ export const ensureUserIdentityFromAuth = async (input: {
 
   const shouldUpdateUser =
     nextEmail !== existingUser.email ||
+    nextPhone !== existingUser.phone ||
     nextFirstName !== existingUser.first_name ||
     nextLastName !== existingUser.last_name ||
     nextEmailConfirmedAt !== existingUser.email_confirmed_at ||
+    nextPhoneConfirmedAt !== existingUser.phone_confirmed_at ||
     nextLastSignInAt !== existingUser.last_sign_in_at ||
     nextLastAuthSyncedAt !== existingUser.last_auth_synced_at ||
     existingRole !== existingUser.role;
@@ -391,10 +412,14 @@ export const ensureUserIdentityFromAuth = async (input: {
     const buildUpdatePayload = (includeAuthMirrors: boolean) => ({
       email: nextEmail,
       role: existingRole,
+      ...(includeAuthMirrors && nextPhone !== undefined ? { phone: nextPhone } : {}),
       ...(nextFirstName !== undefined ? { first_name: nextFirstName } : {}),
       ...(nextLastName !== undefined ? { last_name: nextLastName } : {}),
       ...(includeAuthMirrors && nextEmailConfirmedAt !== undefined
         ? { email_confirmed_at: nextEmailConfirmedAt }
+        : {}),
+      ...(includeAuthMirrors && nextPhoneConfirmedAt !== undefined
+        ? { phone_confirmed_at: nextPhoneConfirmedAt }
         : {}),
       ...(includeAuthMirrors && nextLastSignInAt !== undefined
         ? { last_sign_in_at: nextLastSignInAt }
@@ -572,6 +597,7 @@ export const upsertUserRoleAssignmentBySupabaseUserId = async (input: {
   const ensuredContext = await ensureUserIdentityFromAuth({
     supabaseUserId: input.supabaseUserId,
     email: authUser.data.user.email ?? null,
+    phone: authUser.data.user.phone ?? null,
     ...(typeof authRole === "string" ? { role: authRole } : {}),
     ...(typeof authFirstName === "string" ? { firstName: authFirstName } : {}),
     ...(typeof authLastName === "string" ? { lastName: authLastName } : {}),
@@ -628,12 +654,14 @@ export const toUserResponse = (context: UserIdentityContext) => {
   return {
     id: context.id,
     email: context.email ?? "",
+    phone: context.phone,
     role: context.role,
     availableRoles: context.availableRoles,
     status: context.status,
     firstName: context.firstName,
     lastName: context.lastName,
     emailConfirmedAt: context.emailConfirmedAt,
+    phoneConfirmedAt: context.phoneConfirmedAt,
     lastSignInAt: context.lastSignInAt,
     lastAuthSyncedAt: context.lastAuthSyncedAt,
   };

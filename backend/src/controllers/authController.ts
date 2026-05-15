@@ -79,7 +79,7 @@ const passwordResetSchema = z.object({
 
 const syncSessionSchema = z.object({
   refreshToken: z.string().trim().min(1).nullable().optional(),
-  intent: z.enum(["signup", "magic-link", "otp"]).optional(),
+  intent: z.enum(["signup", "magic-link", "otp", "oauth"]).optional(),
 });
 
 const ensureConfigured = (res: Response) => {
@@ -198,9 +198,11 @@ const ensureActiveAccount = (profile: UserIdentityContext, res: Response) => {
 type SupabaseAuthUserLike = {
   id: string;
   email?: string | null;
+  phone?: string | null;
   app_metadata?: Record<string, unknown>;
   user_metadata?: Record<string, unknown>;
   email_confirmed_at?: string | null;
+  phone_confirmed_at?: string | null;
   confirmed_at?: string | null;
   last_sign_in_at?: string | null;
 };
@@ -213,14 +215,21 @@ const getStringMetadata = (metadata: Record<string, unknown> | undefined, key: s
 const syncProfileFromAuthUser = async (input: {
   user: SupabaseAuthUserLike;
   emailFallback?: string | null;
+  phoneFallback?: string | null;
   firstNameFallback?: string | null;
   lastNameFallback?: string | null;
 }) => {
-  const emailConfirmedAt = input.user.email_confirmed_at ?? input.user.confirmed_at ?? null;
+  const emailConfirmedAt =
+    input.user.email_confirmed_at ??
+    (input.user.email ? input.user.confirmed_at ?? null : null);
+  const phoneConfirmedAt =
+    input.user.phone_confirmed_at ??
+    (input.user.phone ? input.user.confirmed_at ?? null : null);
 
   return ensureUserIdentityFromAuth({
     supabaseUserId: input.user.id,
     email: input.user.email ?? input.emailFallback ?? null,
+    phone: input.user.phone ?? input.phoneFallback ?? null,
     role: (input.user.app_metadata?.role as string | undefined) ?? "member",
     firstName:
       getStringMetadata(input.user.user_metadata, "first_name") ??
@@ -231,6 +240,7 @@ const syncProfileFromAuthUser = async (input: {
       input.lastNameFallback ??
       null,
     emailConfirmedAt,
+    phoneConfirmedAt,
     lastSignInAt: input.user.last_sign_in_at ?? null,
     lastAuthSyncedAt: new Date().toISOString(),
   });
@@ -467,7 +477,9 @@ export const signup = async (req: Request, res: Response) => {
       return;
     }
 
-    const emailConfirmedAt = data.user.email_confirmed_at ?? data.user.confirmed_at ?? null;
+    const emailConfirmedAt =
+      data.user.email_confirmed_at ??
+      (data.user.email ? data.user.confirmed_at ?? null : null);
     const session = emailConfirmedAt ? data.session : null;
     const requiresEmailConfirmation = !session;
 
@@ -943,7 +955,11 @@ export const syncSession = async (req: Request, res: Response) => {
       return;
     }
 
-    if (data.user.email_confirmed_at || data.user.confirmed_at) {
+    const hasEmailConfirmation = Boolean(
+      data.user.email_confirmed_at || (data.user.email && data.user.confirmed_at),
+    );
+
+    if (hasEmailConfirmation) {
       await recordAuthEvent({
         action: authAuditActionNames.emailConfirmed,
         actorSupabaseId: data.user.id,
@@ -958,6 +974,11 @@ export const syncSession = async (req: Request, res: Response) => {
     } else if (parsed.data.intent === "otp") {
       await recordAuthEvent({
         action: authAuditActionNames.otpVerified,
+        actorSupabaseId: data.user.id,
+      });
+    } else if (parsed.data.intent === "oauth") {
+      await recordAuthEvent({
+        action: authAuditActionNames.oauthCallbackExchanged,
         actorSupabaseId: data.user.id,
       });
     }

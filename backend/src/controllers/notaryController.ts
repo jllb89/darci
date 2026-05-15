@@ -298,7 +298,7 @@ const resolveActorUserId = async (req: Request) => {
     return null;
   }
 
-  return getOrCreateUserId(req.user.id, req.user.email, req.user.role);
+  return getOrCreateUserId(req.user.id, req.user.email, req.user.role, req.user.phone);
 };
 
 const isRequestReadyForReviewDecision = (status: string | null) => {
@@ -603,7 +603,8 @@ export const resolveCode = async (_req: Request, res: Response) => {
   const notaryId = await getOrCreateUserId(
     _req.user.id,
     _req.user.email,
-    _req.user.role
+    _req.user.role,
+    _req.user.phone,
   );
 
   const codeRecord = await getNotarizationCodeByValue(parsed.data.code);

@@ -2,7 +2,7 @@
 # Build context: repo root (docker build -f backend/Dockerfile .)
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 # Install packages/types first (referenced via file: link in backend)
@@ -20,7 +20,7 @@ COPY backend ./backend
 RUN cd backend && npm run build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV SERVICE_NAME=api

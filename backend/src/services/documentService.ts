@@ -10,6 +10,7 @@ type UserRecord = {
   id: string;
   supabase_user_id: string | null;
   email: string | null;
+  phone: string | null;
   role: string | null;
 };
 
@@ -420,7 +421,7 @@ export const isDocumentIntakeLocked = (document: {
 const fetchUserBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, supabase_user_id, email, role")
+    .select("id, supabase_user_id, email, phone, role")
     .eq("supabase_user_id", supabaseUserId)
     .limit(1)
     .maybeSingle();
@@ -440,7 +441,8 @@ export const getUserIdBySupabaseId = async (supabaseUserId: string) => {
 export const getOrCreateUserId = async (
   supabaseUserId: string,
   email?: string,
-  role?: string
+  role?: string,
+  phone?: string,
 ) => {
   const existing = await fetchUserBySupabaseId(supabaseUserId);
   if (existing?.id) {
@@ -452,6 +454,7 @@ export const getOrCreateUserId = async (
     .insert({
       supabase_user_id: supabaseUserId,
       email: email ?? null,
+      phone: phone ?? null,
       role: normalizeRuntimeRole(role),
     })
     .select("id")

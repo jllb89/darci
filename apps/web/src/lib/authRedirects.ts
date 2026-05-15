@@ -12,7 +12,7 @@ export const sanitizeAuthReturnTo = (value: string | null | undefined) => {
 
 export const buildAuthCallbackUrl = (input: {
   origin: string;
-  intent: "signup" | "recovery" | "magic-link" | "otp";
+  intent: "signup" | "recovery" | "magic-link" | "otp" | "oauth";
   returnTo?: string | null;
 }) => {
   const callbackUrl = new URL("/auth/callback", input.origin);

@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
-import { resolveEmailNotificationProvider } from "./notificationProviderPolicy";
+import {
+  resolveEmailNotificationProvider,
+  resolveSmsNotificationProvider,
+} from "./notificationProviderPolicy";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -53,6 +56,7 @@ type NotificationDocumentRecord = {
 type NotificationRecipient = {
   targetUserId?: string | null;
   email?: string | null;
+  phone?: string | null;
   displayName?: string | null;
   metadata?: Record<string, unknown>;
 };
@@ -322,21 +326,43 @@ const insertNotificationDeliveries = async (input: {
   const deliveryStatus = input.channel === "in_app" ? "delivered" : "queued";
   const eventType = input.channel === "in_app" ? "delivered" : "queued";
 
+  const getRecipientAddress = (recipient: NotificationRecipient) => {
+    if (input.channel === "in_app") {
+      return null;
+    }
+
+    if (input.channel === "sms") {
+      return recipient.phone?.trim() ?? null;
+    }
+
+    return recipient.email?.trim() ?? null;
+  };
+
+  const resolveProvider = (recipient: NotificationRecipient, index: number) => {
+    const rolloutKey =
+      recipient.targetUserId ??
+      recipient.email?.trim().toLowerCase() ??
+      recipient.phone?.trim() ??
+      `${input.jobId}:${index}`;
+
+    if (input.channel === "email") {
+      return resolveEmailNotificationProvider({ rolloutKey }).provider;
+    }
+
+    if (input.channel === "sms") {
+      return resolveSmsNotificationProvider({ rolloutKey }).provider;
+    }
+
+    return "internal";
+  };
+
   const deliveriesToInsert = input.recipients.map((recipient, index) => ({
     notification_job_id: input.jobId,
     target_user_id: recipient.targetUserId ?? null,
     channel: input.channel,
-    recipient_address: input.channel === "in_app" ? null : recipient.email?.trim() ?? null,
+    recipient_address: getRecipientAddress(recipient),
     recipient_display_name: recipient.displayName ?? null,
-    provider:
-      input.channel === "email"
-        ? resolveEmailNotificationProvider({
-            rolloutKey:
-              recipient.targetUserId ??
-              recipient.email?.trim().toLowerCase() ??
-              `${input.jobId}:${index}`,
-          }).provider
-        : "internal",
+    provider: resolveProvider(recipient, index),
     status: deliveryStatus,
     attempt_number: 1,
     queued_at: queuedAt,
@@ -402,6 +428,10 @@ const queueTemplatedNotification = async (
   const recipients = input.recipients.filter((recipient) => {
     if (template.channel === "email") {
       return Boolean(recipient.email?.trim());
+    }
+
+    if (template.channel === "sms") {
+      return Boolean(recipient.phone?.trim());
     }
 
     return Boolean(recipient.targetUserId);

@@ -24,6 +24,7 @@ export const getMe = async (req: Request, res: Response) => {
     const profile = await ensureUserIdentityFromAuth({
       supabaseUserId: req.user.id,
       email: req.user.email ?? null,
+      phone: req.user.phone ?? null,
       ...(req.user.role ? { role: req.user.role } : {}),
     });
 

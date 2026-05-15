@@ -35,7 +35,16 @@ export class NotificationTemplateRenderError extends Error {
 }
 
 const PLACEHOLDER_REGEX = /\{\{(\w+)\}\}/g;
-const STAGING_APP_BASE_URL = "https://app.staging.darciregistry.com";
+const resolveWebAppBaseUrl = () => {
+  return (
+    process.env.WEB_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim() ||
+    process.env.APP_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    "https://app.staging.darciregistry.dev"
+  ).replace(/\/+$/, "");
+};
 
 const collectPlaceholders = (template: string) => {
   const matches = template.matchAll(PLACEHOLDER_REGEX);
@@ -55,7 +64,7 @@ const interpolate = (template: string, payload: JsonObject): string =>
   });
 
 const getEmailLogoUrl = () => {
-  return `${STAGING_APP_BASE_URL}/icons/navbar/darci_white.svg`;
+  return `${resolveWebAppBaseUrl()}/icons/navbar/darci_white.svg`;
 };
 
 const wrapEmailHtml = (bodyHtml: string): string => `

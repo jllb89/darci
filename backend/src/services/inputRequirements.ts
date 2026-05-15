@@ -1757,23 +1757,6 @@ const deriveTrustContract = (
           default_source: "none",
         },
         {
-          key: "revocability_status",
-          label: "Revocability status",
-          semantic_type: "enum_single",
-          required: documentType !== "other",
-          data_type: "string",
-          collect_from: "member",
-          default_source: "none",
-          validation: {
-            allowed_values: [
-              "revocable",
-              "irrevocable",
-              "limited_or_conditional",
-              "unspecified_or_unknown",
-            ],
-          },
-        },
-        {
           key: "revocation_holders",
           label: "Revocation holders",
           semantic_type: "person_list",

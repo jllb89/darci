@@ -1,7 +1,7 @@
 # DARCi Auth Audit And Enhancement Roadmap
 
-Status: Phase 2 magic links and email OTP implemented; Phase 3 next
-Date: 2026-04-30
+Status: Phase 3 Option B complete; `/start` now uses Supabase email/phone OTP plus Google OAuth; staging dashboard activation pending
+Date: 2026-05-07
 
 ## Goal
 
@@ -29,11 +29,11 @@ What Phase 1 now covers:
 - Password recovery/reset is implemented through Supabase recovery links and a DARCi reset normalization endpoint.
 
 Remaining major gaps:
-- Magic links and email OTP are implemented for existing accounts. Phone OTP is not implemented.
+- Magic links and email OTP are implemented. Phone OTP is implemented as Supabase-owned Auth OTP delivered through the Supabase Send SMS Hook and AWS SNS; staging requires Supabase dashboard activation and hook secret configuration before SMS can send.
 - MFA and reauthentication before sensitive actions are not implemented.
-- Social OAuth is only represented by a disabled Google button.
+- Google OAuth is wired in the web flow, but the Supabase Google provider and redirect allow-list must be configured per environment.
 - Admin user invitations do not exist; admin role APIs only operate on existing Supabase users.
-- SMS schema exists, but no SMS provider adapter exists.
+- SMS schema exists, and AWS SNS is now wired as a DARCi-owned notification outbox provider when explicitly enabled. It is not used for Supabase Auth phone OTP.
 - Runtime auth rate limiting and full audit-event writes are not complete. Phase 0 now defines the rate-limit plan, audit action names, sensitive-action policy, logout scope semantics, and account status enforcement guardrails.
 
 ## Current Supabase Guidance To Carry Into Implementation
@@ -322,10 +322,10 @@ Missing coverage:
 | Email confirmation | Implemented with Supabase public signup, resend confirmation, browser PKCE callback, and backend session sync | Add end-to-end staging coverage and delivery observability |
 | Password recovery | Implemented with Supabase recovery email, browser recovery callback, backend reset normalization, and audit event | Add end-to-end staging coverage and provider delivery tracking |
 | Password reset while signed in | Missing | Require current password or step-up, then `updateUser({ password })` |
-| Email OTP | Implemented for existing accounts through Supabase `signInWithOtp` and `verifyOtp` | Add staging E2E coverage and delivery observability |
-| Phone/SMS OTP | Missing; SMS channel is schema-only | Prefer Supabase-supported SMS provider for phone auth, or explicitly build AWS SNS only for app-owned step-up/notifications |
+| Email OTP | Implemented through Supabase browser `signInWithOtp` and `verifyOtp` on `/start` | Add staging E2E coverage and delivery observability |
+| Phone/SMS OTP | Implemented through Supabase Auth phone OTP with DARCi's signed Send SMS Hook to AWS SNS | Activate Supabase dashboard settings, AWS hook secret, SNS spend/compliance, and staging E2E coverage |
 | Magic links | Implemented for existing accounts through Supabase `signInWithOtp`, browser PKCE callback exchange, and invite return target support | Add staging E2E coverage and delivery observability |
-| Social OAuth | Disabled Google button only | Supabase OAuth provider flow with callback, metadata sync, and account-linking rules |
+| Social OAuth | Google button wired through Supabase browser OAuth and DARCi session sync | Configure Google provider credentials, redirect allow-list, and account-linking rules in Supabase |
 | MFA | Missing | TOTP first for admins/notaries, optional for members/pro, policy-driven enforcement |
 | Reauth before sensitive action | Missing | Step-up challenge/assurance check before role grants, notary finalization, credential changes, and account security changes |
 | Invite users | Document signer invites only | Separate account/user invitation flow for admins, notaries, pro users, and organization/team use later |
@@ -542,6 +542,13 @@ Decision point:
 - Option C: use the Supabase Send SMS Hook with AWS SNS or another custom provider. This keeps Supabase Auth as the OTP/session authority, but DARCi owns hook delivery reliability, retry/fallback behavior, security monitoring, and provider operations.
 - Option D: build a custom AWS SNS phone-login service. This is not recommended for the first pass because DARCi would own OTP generation, replay protection, abuse controls, and session bridging.
 
+Decision selected on 2026-05-07:
+
+- DARCi is proceeding with Option B.
+- Phone login/phone OTP remains out of scope for Phase 3.
+- AWS SNS is available only through DARCi's notification outbox for SMS templates and future app-owned step-up challenges.
+- Supabase Auth remains the authority for login sessions; SNS messages must not create or imply Supabase sessions.
+
 Recommended decision:
 
 - Use Supabase-supported SMS provider for phone auth if phone login is a product requirement.
@@ -568,6 +575,18 @@ Notification work:
 - Add provider policy separate from the existing email-only Resend policy.
 - Add delivery event normalization for SMS if the provider supports callbacks.
 
+Implementation status on 2026-05-07:
+
+- [backend/src/services/notificationProviderPolicy.ts](../backend/src/services/notificationProviderPolicy.ts) now resolves SMS delivery separately from email delivery. `NOTIFICATION_SMS_PROVIDER=sns` enables SNS when environment and rollout gates allow it; otherwise SMS deliveries remain on the internal provider.
+- [backend/src/services/notificationService.ts](../backend/src/services/notificationService.ts) supports SMS recipients with phone numbers and writes SMS delivery addresses separately from email addresses.
+- [backend/src/services/notificationOutboxService.ts](../backend/src/services/notificationOutboxService.ts) now includes an AWS SNS adapter that publishes queued SMS deliveries with `Transactional` SMS type by default and records SNS message ids in the delivery ledger.
+- [supabase/migrations/20260507120000_add_sns_notification_provider.sql](../supabase/migrations/20260507120000_add_sns_notification_provider.sql) expands notification provider constraints to include `sns` for deliveries and outbound events.
+- The staging database has been updated with this migration and Supabase migration history repaired for version `20260507120000`.
+- The staging ECS API/worker task role has inline policy `darci-staging-task-sns-sms-publish`, allowing `sns:Publish` in `us-east-1`.
+- The staging app secret has inert SNS runtime config: `NOTIFICATION_SMS_PROVIDER=internal`, `NOTIFICATION_PROVIDER_SNS_ENABLED=false`, `SNS_REGION=us-east-1`, `SNS_SMS_TYPE=Transactional`, and blank `SNS_SMS_SENDER_ID`, so staging SMS remains disabled.
+- Staging API and worker services run task definition revision `:7`, which injects all SNS-related secret keys into both containers.
+- Step-up challenge tables/endpoints remain Phase 6 work. When mounted, they should use hashed challenge codes, expiry, attempt limits, and the existing sensitive-action policy; they should send through the SNS outbox provider rather than creating phone-login sessions.
+
 ### Phase 4: Social OAuth
 
 Purpose: reduce onboarding friction without weakening role gates.
@@ -575,8 +594,8 @@ Purpose: reduce onboarding friction without weakening role gates.
 Backend/frontend work:
 
 - Enable Google OAuth in Supabase first.
-- Add OAuth start/callback route, or adopt Supabase browser auth handling if we move to Supabase client auth.
-- Enable the disabled Google button on `/start`.
+- Adopt Supabase browser auth handling on `/start` and `/auth/callback`.
+- Enable the Google button on `/start`.
 - Sync OAuth user metadata into `public.users`.
 - Define account-linking rules when the same email exists through password auth.
 
@@ -591,6 +610,14 @@ Future providers:
 - Google first.
 - Microsoft next if admin/pro users are likely to use work identities.
 - Apple only if mobile/native becomes important.
+
+Implementation status on 2026-05-07:
+
+- [apps/web/src/app/start/page.tsx](../apps/web/src/app/start/page.tsx) now presents a single email-or-phone identifier input, detects email versus phone format, starts Supabase email or SMS OTP, verifies the OTP into a Supabase session, and then syncs that session through the DARCi backend.
+- The OTP step includes a password fallback. Email challenges prefill the email; phone challenges ask for email and password because Supabase password auth is email-based.
+- Google OAuth now calls Supabase browser auth with the DARCi `/auth/callback?intent=oauth` redirect and syncs the resulting session through `/auth/session/sync`.
+- [backend/src/controllers/supabaseAuthWebhookController.ts](../backend/src/controllers/supabaseAuthWebhookController.ts) exposes `POST /webhooks/supabase/auth/send-sms` for Supabase Auth Send SMS Hook delivery. The endpoint verifies Standard Webhooks signatures and publishes the OTP via AWS SNS.
+- [supabase/migrations/20260507133000_add_phone_auth_user_mirrors.sql](../supabase/migrations/20260507133000_add_phone_auth_user_mirrors.sql) allows phone-only `public.users` mirrors by dropping the email `not null` constraint and adding `phone` plus `phone_confirmed_at` mirrors.
 
 ### Phase 5: Admin User Invitations And Role Onboarding
 
@@ -721,10 +748,10 @@ Completed additive schema work:
 
 - `public.users.email_confirmed_at`.
 - `public.users.last_sign_in_at` and `public.users.last_auth_synced_at`.
+- `public.users.phone` and `public.users.phone_confirmed_at` for Supabase phone OTP accounts.
 
 Candidate additive schema work:
 
-- `public.users.phone` and `public.users.phone_confirmed_at` if phone auth/profile is mounted.
 - `public.users.requires_mfa` or policy-driven equivalent.
 - `public.users.last_reauthenticated_at` only if assurance is mirrored outside session state.
 - `public.user_account_invites` for account/role invitations.
@@ -741,8 +768,8 @@ Do not add auth-owned tables for Stripe customer, subscription, entitlement, or 
 
 1. Phase 0: clean spec, enforce account status, add stricter auth tests. Completed.
 2. Phase 1: email confirmation and password recovery/reset. Completed.
-3. Phase 2: magic links and email OTP, especially for invited signers.
-4. Phase 3: make the SMS provider decision before phone OTP.
+3. Phase 2: magic links and email OTP, especially for invited signers. Completed.
+4. Phase 3: choose Option B for SMS; wire AWS SNS only for DARCi-owned SMS notifications and future step-up challenges. Completed.
 5. Phase 4: Google OAuth.
 6. Phase 5: admin user invitations and role onboarding.
 7. Phase 6: MFA and reauth for admin/notary sensitive actions.
@@ -752,7 +779,6 @@ This order fixes the most basic account trust gaps first, then improves signer/m
 
 ## Immediate Next Tasks
 
-- Ensure local web dev and staging web builds receive `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`; confirmation/recovery browser PKCE cannot start without those values in the Next bundle.
-- Configure Supabase Auth redirect allow-list entries for the deployed `/auth/callback` URL and verify confirmation/recovery in staging against the real email provider.
-- Decide SMS direction: Supabase-supported provider for phone auth, AWS SNS for app-owned SMS, or both with clear boundaries.
-- Start Phase 2 with magic links/email OTP, especially for invited signer entry.
+- Apply migration `20260507133000` to staging and repair Supabase migration history after direct apply.
+- In AWS Secrets Manager `/darci/staging/app`, add `SUPABASE_AUTH_SMS_HOOK_SECRET`, set `SUPABASE_AUTH_SMS_HOOK_ENABLED=true` only after the Supabase hook is configured, and keep `SNS_REGION=us-east-1`, `SNS_SMS_TYPE=Transactional`, and optional `SNS_SMS_SENDER_ID` aligned with the task definition secrets.
+- In Supabase Auth dashboard, enable Phone, configure the Send SMS Hook URL `https://api.staging.darciregistry.com/webhooks/supabase/auth/send-sms`, copy the generated hook secret into AWS, enable Google, and allow `https://app.staging.darciregistry.com/auth/callback` plus local callback URLs for development.

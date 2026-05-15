@@ -1015,7 +1015,7 @@ const resolveRequestActorUserId = async (req: Request) => {
     return null;
   }
 
-  return getOrCreateUserId(req.user.id, req.user.email, req.user.role);
+  return getOrCreateUserId(req.user.id, req.user.email, req.user.role, req.user.phone);
 };
 
 const shouldExposeRemainingSignerInviteDispatch = (
@@ -1090,8 +1090,15 @@ const resolveReviewApprovalIdn = (document: { idn: string | null; status: string
   return generateFinalIdn();
 };
 
+const getVerificationBaseUrl = () => {
+  return (process.env.PUBLIC_VERIFICATION_BASE_URL?.trim() || "https://www.darciregistry.dev").replace(
+    /\/+$/,
+    "",
+  );
+};
+
 const buildVerificationUrl = (idn: string) => {
-  return `https://www.darciregistry.com/verify/${encodeURIComponent(idn)}`;
+  return `${getVerificationBaseUrl()}/verify/${encodeURIComponent(idn)}`;
 };
 
 const mapDocumentVersionSummary = (version: DocumentVersionRecord) => {
@@ -3126,6 +3133,7 @@ export const createDocument = async (req: Request, res: Response) => {
     req.user.id,
     req.user.email,
     req.user.role,
+    req.user.phone,
   );
   const documentId = randomUUID();
   const storagePath = `${ownerId}/${documentId}/v1/source.pdf`;
@@ -3212,6 +3220,7 @@ export const bootstrapDocumentIntakeDraft = async (req: Request, res: Response) 
     req.user.id,
     req.user.email,
     req.user.role,
+    req.user.phone,
   );
 
   const selection = await buildSelectionForMode(parsed.data.productFlowMode);

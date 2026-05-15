@@ -12,12 +12,14 @@ export type StoredUserRole = "member" | "pro" | "notary" | "admin";
 export type StoredUser = {
   id: string;
   email: string;
+  phone?: string | null;
   role: StoredUserRole;
   availableRoles?: StoredUserRole[];
   status: string;
   firstName?: string | null;
   lastName?: string | null;
   emailConfirmedAt?: string | null;
+  phoneConfirmedAt?: string | null;
   lastSignInAt?: string | null;
   lastAuthSyncedAt?: string | null;
 };
@@ -187,7 +189,7 @@ export const clearStoredAuth = () => {
 export const syncStoredAuthFromSession = async (input: {
   accessToken: string;
   refreshToken?: string | null;
-  intent?: "signup" | "magic-link" | "otp" | null;
+  intent?: "signup" | "magic-link" | "otp" | "oauth" | null;
 }) => {
   const response = await fetch(`${getApiBaseUrl()}/auth/session/sync`, {
     method: "POST",

@@ -3,7 +3,7 @@
 # Identical build to the API image — only the CMD differs.
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 COPY packages/types/package*.json ./packages/types/
@@ -18,7 +18,7 @@ COPY backend ./backend
 RUN cd backend && npm run build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV SERVICE_NAME=worker

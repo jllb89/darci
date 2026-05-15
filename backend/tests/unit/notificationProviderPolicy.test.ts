@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveEmailNotificationProvider } from "../../src/services/notificationProviderPolicy";
+import {
+  resolveEmailNotificationProvider,
+  resolveSmsNotificationProvider,
+} from "../../src/services/notificationProviderPolicy";
 
 const providerEnvKeys = [
   "NOTIFICATION_PROVIDER",
@@ -9,6 +12,17 @@ const providerEnvKeys = [
   "NOTIFICATION_RESEND_ALLOWED_ENVS",
   "NOTIFICATION_PROVIDER_RESEND_ROLLOUT_PERCENT",
   "NOTIFICATION_RESEND_ROLLOUT_PERCENT",
+  "NOTIFICATION_SMS_PROVIDER",
+  "SMS_NOTIFICATION_PROVIDER",
+  "NOTIFICATION_PROVIDER_SMS",
+  "NOTIFICATION_PROVIDER_SNS_ENABLED",
+  "NOTIFICATION_SNS_ENABLED",
+  "NOTIFICATION_SMS_ENABLED",
+  "NOTIFICATION_SMS_ALLOWED_ENVS",
+  "NOTIFICATION_SNS_ALLOWED_ENVS",
+  "NOTIFICATION_PROVIDER_SNS_ROLLOUT_PERCENT",
+  "NOTIFICATION_SNS_ROLLOUT_PERCENT",
+  "NOTIFICATION_SMS_ROLLOUT_PERCENT",
   "APP_ENV",
   "DARCI_ENV",
 ] as const;
@@ -113,5 +127,52 @@ describe("email notification provider policy", () => {
     expect(selectedAgain.provider).toBe(selected.provider);
     expect(notSelected.provider).toBe("internal");
     expect(notSelected.reason).toBe("rollout_key_not_selected");
+  });
+});
+
+describe("SMS notification provider policy", () => {
+  beforeEach(() => {
+    clearProviderEnv();
+  });
+
+  afterEach(() => {
+    restoreProviderEnv();
+  });
+
+  it("defaults to the internal provider", () => {
+    const resolution = resolveSmsNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("provider_not_sns");
+  });
+
+  it("uses SNS when explicitly configured", () => {
+    process.env.NOTIFICATION_SMS_PROVIDER = "sns";
+
+    const resolution = resolveSmsNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("sns");
+    expect(resolution.reason).toBe("rollout_percent_full");
+  });
+
+  it("supports an emergency SNS disable flag", () => {
+    process.env.NOTIFICATION_SMS_PROVIDER = "sns";
+    process.env.NOTIFICATION_PROVIDER_SNS_ENABLED = "false";
+
+    const resolution = resolveSmsNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("sns_disabled");
+  });
+
+  it("limits SNS to allowed environments when configured", () => {
+    process.env.NOTIFICATION_SMS_PROVIDER = "sns";
+    process.env.APP_ENV = "production";
+    process.env.NOTIFICATION_SMS_ALLOWED_ENVS = "staging";
+
+    const resolution = resolveSmsNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("environment_not_allowed");
   });
 });

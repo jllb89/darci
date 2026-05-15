@@ -65,7 +65,6 @@ const CANONICAL_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
   agent_signature_authority: "authority",
   trustee_signature_authority: "authority",
   revocation_authority: "authority",
-  revocability_status: "authority",
   incapacity_standard: "authority",
   trustee_incapacity_standard: "authority",
   tax_id_owner: "authority",

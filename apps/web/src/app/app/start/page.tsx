@@ -447,8 +447,8 @@ export default function StartDocumentPage() {
               latestPayload?.draft
             ) {
               const mergedFormValues = {
-                ...snapshot.formValues,
                 ...sanitizeFormValuesRecord(latestPayload.draft.answers),
+                ...snapshot.formValues,
               };
               const syncedCurrentFormStep = coerceDraftFormStep(
                 latestPayload.draft.currentStep,
@@ -466,7 +466,7 @@ export default function StartDocumentPage() {
             }
 
             const message =
-              "Draft changed in another session. Loaded the latest saved version.";
+              "Draft changed in another session. Synced latest draft without overriding your current edits.";
             setDraftSaveNotice(message);
             showToast({
               tone: "warning",

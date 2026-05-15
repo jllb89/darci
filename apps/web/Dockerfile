@@ -3,7 +3,7 @@
 #
 # NEXT_PUBLIC_* values are baked into the JS bundle at build time.
 # Pass it as a build argument:
-#   docker build --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.staging.darci.app \
+#   docker build --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.staging.darciregistry.dev \
 #                --build-arg NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
 #                --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
 #                --build-arg NEXT_PUBLIC_SENTRY_DSN=... \

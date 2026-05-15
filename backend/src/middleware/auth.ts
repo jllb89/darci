@@ -129,6 +129,9 @@ export const requireAuth = async (
     if (decoded.email) {
       user.email = decoded.email as string;
     }
+    if (decoded.phone) {
+      user.phone = decoded.phone as string;
+    }
     const roleFromToken = (roleFromMeta ?? decoded.role) as string | undefined;
     if (roleFromToken) {
       user.role = roleFromToken === "service_role"

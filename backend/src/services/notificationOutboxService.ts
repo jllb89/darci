@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 import { renderNotificationTemplate } from "./notificationTemplateRenderService";
@@ -17,6 +18,7 @@ export type NotificationProviderName =
   | "resend"
   | "sendgrid"
   | "ses"
+  | "sns"
   | "twilio"
   | "webhook";
 export type NotificationJobStatus =
@@ -870,6 +872,123 @@ const buildResendAdapter = (): NotificationProviderAdapter => {
   };
 };
 
+const interpolateTemplateText = (template: string, payload: JsonObject): string =>
+  template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    const value = payload[key];
+    return value != null ? String(value) : "";
+  });
+
+const resolveSnsRegion = () => {
+  const region =
+    process.env.SNS_REGION?.trim() ||
+    process.env.AWS_REGION?.trim() ||
+    process.env.AWS_DEFAULT_REGION?.trim();
+
+  if (!region) {
+    throw new NotificationProviderDispatchError(
+      "provider_misconfigured",
+      "SNS_REGION or AWS_REGION is required for SNS SMS delivery",
+    );
+  }
+
+  return region;
+};
+
+const buildSnsAdapter = (): NotificationProviderAdapter => {
+  const snsClient = new SNSClient({ region: resolveSnsRegion() });
+
+  return {
+    provider: "sns",
+    async send(input) {
+      const recipientPhone = input.delivery.recipient_address?.trim();
+      if (!recipientPhone) {
+        throw new NotificationProviderDispatchError(
+          "missing_recipient_address",
+          "Delivery has no recipient_address for SNS SMS send",
+        );
+      }
+
+      if (input.delivery.channel !== "sms") {
+        throw new NotificationProviderDispatchError(
+          "invalid_delivery_channel",
+          "SNS adapter only supports sms notification deliveries",
+        );
+      }
+
+      if (!input.template?.body_template) {
+        throw new NotificationProviderDispatchError(
+          "missing_template",
+          "SNS adapter requires a resolved SMS notification template with body_template",
+        );
+      }
+
+      const payload = input.job.payload_json as Record<string, unknown>;
+      const message = interpolateTemplateText(input.template.body_template, payload).trim();
+      if (!message) {
+        throw new NotificationProviderDispatchError(
+          "template_missing_content",
+          `Template ${input.template.template_key} rendered an empty SMS message`,
+        );
+      }
+
+      const messageAttributes: Record<
+        string,
+        { DataType: "String"; StringValue: string }
+      > = {
+        "AWS.SNS.SMS.SMSType": {
+          DataType: "String",
+          StringValue: process.env.SNS_SMS_TYPE?.trim() || "Transactional",
+        },
+      };
+
+      const senderId = process.env.SNS_SMS_SENDER_ID?.trim();
+      if (senderId) {
+        messageAttributes["AWS.SNS.SMS.SenderID"] = {
+          DataType: "String",
+          StringValue: senderId,
+        };
+      }
+
+      const response = await snsClient.send(
+        new PublishCommand({
+          PhoneNumber: recipientPhone,
+          Message: message,
+          MessageAttributes: messageAttributes,
+        }),
+      );
+
+      if (!response.MessageId) {
+        throw new NotificationProviderDispatchError(
+          "sns_api_error",
+          "SNS publish returned no MessageId",
+        );
+      }
+
+      return {
+        provider: "sns",
+        providerMessageId: response.MessageId,
+        deliveryStatus: "sent",
+        metadata: {
+          snsMessageId: response.MessageId,
+          templateKey: input.template.template_key,
+          workerId: input.workerId ?? null,
+        },
+        events: [
+          {
+            eventType: "sent",
+            eventAt: input.now,
+            payload: {
+              recipientAddress: recipientPhone,
+              recipientDisplayName: input.delivery.recipient_display_name ?? null,
+              snsMessageId: response.MessageId,
+            },
+          },
+        ],
+      };
+    },
+  };
+};
+
 // Cache the adapter instance to avoid reconstructing on every delivery.
 // The API key is read once at first use; a server restart is required to
 // pick up a key rotation.
@@ -879,6 +998,14 @@ const getResendAdapter = (): NotificationProviderAdapter => {
     _resendAdapter = buildResendAdapter();
   }
   return _resendAdapter;
+};
+
+let _snsAdapter: NotificationProviderAdapter | null = null;
+const getSnsAdapter = (): NotificationProviderAdapter => {
+  if (!_snsAdapter) {
+    _snsAdapter = buildSnsAdapter();
+  }
+  return _snsAdapter;
 };
 
 // ---------------------------------------------------------------------------
@@ -892,6 +1019,10 @@ const resolveProviderAdapter = (delivery: NotificationDeliveryRecord) => {
 
   if (delivery.provider === "resend") {
     return getResendAdapter();
+  }
+
+  if (delivery.provider === "sns") {
+    return getSnsAdapter();
   }
 
   throw new NotificationProviderDispatchError(
@@ -2066,7 +2197,11 @@ export const __testUtils = {
   summarizeDeliveryCounts,
   computeNotificationJobsMetrics,
   buildResendAdapter,
+  buildSnsAdapter,
   resetResendAdapterCache: () => {
     _resendAdapter = null;
+  },
+  resetSnsAdapterCache: () => {
+    _snsAdapter = null;
   },
 };

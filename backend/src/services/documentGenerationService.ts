@@ -166,6 +166,12 @@ const formatLongDate = (value: unknown) => {
     timeZone: "UTC",
   });
 };
+const getVerificationBaseUrl = () => {
+  return (process.env.PUBLIC_VERIFICATION_BASE_URL?.trim() || "https://www.darciregistry.dev").replace(
+    /\/+$/,
+    "",
+  );
+};
 
 const toJsonPrimitive = (value: unknown): string | number | boolean | null => {
   if (
@@ -869,6 +875,16 @@ const getSystemPlaceholderKey = (placeholder: string) => {
       return "verification_url";
     case "CA_Notarial_Acknowledgment_Block":
       return "ca_notarial_ack_template";
+    case "County":
+    case "Day":
+    case "Month":
+    case "Year":
+    case "Illuminotary":
+    case "day.[ordinal]":
+    case "month":
+    case "year":
+    case "NotaryState":
+      return "notary_certificate_context";
     default:
       return null;
   }
@@ -940,7 +956,7 @@ export const ensureDocumentSystemValues = async (input: {
   const verificationUrl =
     registryNumber.length > 0
       ? asTrimmedString(existingByKey.get("verification_url")?.value_json) ||
-        `https://www.darciregistry.com/verify/${encodeURIComponent(registryNumber)}`
+        `${getVerificationBaseUrl()}/verify/${encodeURIComponent(registryNumber)}`
       : "";
   if (
     verificationUrl.length > 0 &&
@@ -1336,7 +1352,9 @@ export const buildGenerationRunBlockers = (input: {
       const systemKey = getSystemPlaceholderKey(binding.placeholder);
       const canDeferForReview =
         input.allowReviewDeferredSystemValues === true &&
-        (systemKey === "registry_number" || systemKey === "verification_url");
+        (systemKey === "registry_number" ||
+          systemKey === "verification_url" ||
+          systemKey === "notary_certificate_context");
 
       if (canDeferForReview) {
         requirements.push({

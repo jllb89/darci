@@ -172,7 +172,7 @@ const claimInvite = async (input: {
 
 const getDisplayName = (user: StoredUser | null) => {
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
-  return fullName || user?.email || "there";
+  return fullName || user?.email || user?.phone || "there";
 };
 
 function InviteLandingPageContent() {

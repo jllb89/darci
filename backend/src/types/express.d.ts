@@ -6,6 +6,7 @@ declare module "express" {
       id?: string;
       dbUserId?: string;
       email?: string;
+      phone?: string;
       role?: "member" | "pro" | "notary" | "admin" | "service_role" | string;
       availableRoles?: Array<"member" | "pro" | "notary" | "admin">;
       status?: string;
