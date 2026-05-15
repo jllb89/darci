@@ -3035,6 +3035,33 @@ const normalizeCanonicalKey = (canonicalKey: string) => {
   return canonicalKey.replace(/__\d+$/, "");
 };
 
+const TRUST_REVOCABILITY_CANONICAL_KEY = "revocability_status";
+const TRUST_REVOCABILITY_FORCED_VALUE = "revocable";
+
+const enforceTrustRevocabilityForPersistence = (input: {
+  families: string[];
+  answers: Record<string, unknown>;
+  canonicalAnswers?: Record<string, unknown>;
+}) => {
+  if (!input.families.includes("trust")) {
+    return {
+      answers: input.answers,
+      canonicalAnswers: input.canonicalAnswers,
+    };
+  }
+
+  return {
+    answers: {
+      ...input.answers,
+      [TRUST_REVOCABILITY_CANONICAL_KEY]: TRUST_REVOCABILITY_FORCED_VALUE,
+    },
+    canonicalAnswers: {
+      ...(input.canonicalAnswers ?? {}),
+      [TRUST_REVOCABILITY_CANONICAL_KEY]: TRUST_REVOCABILITY_FORCED_VALUE,
+    },
+  };
+};
+
 const buildCanonicalPayload = (
   contract: MemberFormRulesContract | null,
   answers: Record<string, unknown>,
@@ -4268,6 +4295,23 @@ export const saveDocumentIntakeDraft = async (req: Request, res: Response) => {
   const rulesSnapshotVersion =
     parsed.data.rulesSnapshotVersion ?? "member_form_rules_contract_v1";
   const createdBy = document.owner_id;
+  const selection = await buildMemberFormSelectionForDocument(documentProductFlowMode);
+  const revocabilityPersistenceInput: {
+    families: string[];
+    answers: Record<string, unknown>;
+    canonicalAnswers?: Record<string, unknown>;
+  } = {
+    families: selection.families,
+    answers: parsed.data.answers,
+  };
+
+  if (parsed.data.canonicalAnswers !== undefined) {
+    revocabilityPersistenceInput.canonicalAnswers = parsed.data.canonicalAnswers;
+  }
+
+  const persistedPayload = enforceTrustRevocabilityForPersistence(
+    revocabilityPersistenceInput,
+  );
 
   const saveInput: SaveDocumentIntakeDraftInput = {
     documentId: document.id,
@@ -4275,7 +4319,7 @@ export const saveDocumentIntakeDraft = async (req: Request, res: Response) => {
     productFlowMode: documentProductFlowMode,
     jurisdiction: documentJurisdiction,
     rulesSnapshotVersion,
-    answers: parsed.data.answers,
+    answers: persistedPayload.answers,
     createdBy,
     eventType: "autosave",
   };
@@ -4288,7 +4332,20 @@ export const saveDocumentIntakeDraft = async (req: Request, res: Response) => {
     Object.prototype.hasOwnProperty.call(parsed.data, "canonicalAnswers") &&
     parsed.data.canonicalAnswers !== undefined
   ) {
-    saveInput.canonicalAnswers = parsed.data.canonicalAnswers;
+    if (persistedPayload.canonicalAnswers !== undefined) {
+      saveInput.canonicalAnswers = persistedPayload.canonicalAnswers;
+    }
+  }
+
+  if (
+    selection.families.includes("trust") &&
+    (!saveInput.canonicalAnswers ||
+      typeof saveInput.canonicalAnswers !== "object" ||
+      Array.isArray(saveInput.canonicalAnswers))
+  ) {
+    saveInput.canonicalAnswers = {
+      [TRUST_REVOCABILITY_CANONICAL_KEY]: TRUST_REVOCABILITY_FORCED_VALUE,
+    };
   }
 
   if (
@@ -4369,7 +4426,13 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     });
   }
 
-  const normalizedAnswers = toMemberFormSubmissionValueRecord(parsed.data.answers);
+  const persistedSubmissionPayload = enforceTrustRevocabilityForPersistence({
+    families: selection.families,
+    answers: parsed.data.answers,
+  });
+  const normalizedAnswers = toMemberFormSubmissionValueRecord(
+    persistedSubmissionPayload.answers,
+  );
   const validation = validateMemberFormSubmission(
     rulesResult.contract,
     normalizedAnswers,
@@ -4386,7 +4449,16 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
   const rulesSnapshotVersion =
     parsed.data.rulesSnapshotVersion ?? "member_form_rules_contract_v1";
   const createdBy = document.owner_id;
-  const canonicalPayload = buildCanonicalPayload(rulesResult.contract, parsed.data.answers);
+  const canonicalPayloadBase = buildCanonicalPayload(
+    rulesResult.contract,
+    persistedSubmissionPayload.answers,
+  );
+  const persistedPayload = enforceTrustRevocabilityForPersistence({
+    families: selection.families,
+    answers: persistedSubmissionPayload.answers,
+    canonicalAnswers: canonicalPayloadBase,
+  });
+  const canonicalPayload = persistedPayload.canonicalAnswers ?? canonicalPayloadBase;
 
   const saveInput: SaveDocumentIntakeDraftInput = {
     documentId: document.id,
@@ -4394,7 +4466,7 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     productFlowMode: documentProductFlowMode,
     jurisdiction: documentJurisdiction,
     rulesSnapshotVersion,
-    answers: parsed.data.answers,
+    answers: persistedPayload.answers,
     canonicalAnswers: canonicalPayload,
     createdBy,
     eventType: "submit",

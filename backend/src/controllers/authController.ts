@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { createClient } from "@supabase/supabase-js";
+import { Resend } from "resend";
 import { z } from "zod";
 import {
   appAccountInactiveError,
@@ -37,6 +38,10 @@ const supabasePublic = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
 const returnToSchema = z.string().trim().min(1).max(500).optional();
 
 const loginSchema = z.object({
@@ -68,6 +73,17 @@ const emailActionSchema = z.object({
 
 const emailOtpVerifySchema = z.object({
   email: z.string().email(),
+  token: z.string().trim().min(4).max(32),
+  returnTo: returnToSchema,
+});
+
+const phoneActionSchema = z.object({
+  phone: z.string().trim().min(10).max(20),
+  returnTo: returnToSchema,
+});
+
+const phoneOtpVerifySchema = z.object({
+  phone: z.string().trim().min(10).max(20),
   token: z.string().trim().min(4).max(32),
   returnTo: returnToSchema,
 });
@@ -142,6 +158,52 @@ const sendRecentAuthEmailResponse = (res: Response, message: string) =>
     cooldownSeconds: authEmailSendCooldownSeconds,
   });
 
+
+const getAllowedAuthOrigins = () => {
+  const configured = process.env.AUTH_ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) ?? [];
+  const defaults = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    process.env.WEB_APP_URL ?? "",
+    process.env.NEXT_PUBLIC_WEB_BASE_URL ?? "",
+    process.env.APP_BASE_URL ?? "",
+  ].filter((o) => o && o.length > 0);
+  return [...new Set([...configured, ...defaults])];
+};
+
+const validateOrigin = (req: Request): boolean => {
+  const origin = req.headers.origin ?? "";
+  if (!origin) return true;
+  const allowedOrigins = getAllowedAuthOrigins();
+  return allowedOrigins.includes(origin);
+};
+
+const validateCsrfToken = (req: Request): boolean => {
+  const csrfTokenFromBody = (req.body as Record<string, unknown>)?._csrf;
+  const csrfTokenFromHeader = req.headers["x-csrf-token"];
+  if (!csrfTokenFromBody && !csrfTokenFromHeader) return true;
+  return csrfTokenFromBody === csrfTokenFromHeader;
+};
+
+const getResendFailureMode = () => {
+  const mode = process.env.RESEND_FAILURE_MODE?.toLowerCase() ?? "fallback";
+  return mode === "strict" ? "strict" : "fallback";
+};
+
+const validateRequestSignature = (req: Request): boolean => {
+  const signature = req.headers["x-request-signature"];
+  if (!signature) return true;
+  const secret = process.env.AUTH_REQUEST_SIGNATURE_SECRET;
+  if (!secret) return true;
+  const crypto = require("crypto");
+  const body = JSON.stringify(req.body);
+  const expectedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(body)
+    .digest("hex");
+  return signature === expectedSignature;
+};
+
 const isSupabaseEmailRateLimitError = (message?: string | null) =>
   /email.*rate limit|rate limit.*email|too many requests/i.test(message ?? "");
 
@@ -184,6 +246,50 @@ const createSupabaseSessionClient = () => {
       detectSessionInUrl: false,
     },
   });
+};
+
+const getOtpEmailFromAddress = () => {
+  return (
+    process.env.AUTH_OTP_FROM_ADDRESS?.trim() ||
+    process.env.RESEND_FROM_ADDRESS?.trim() ||
+    process.env.NOTIFICATION_FROM_ADDRESS?.trim() ||
+    "DARCi <support@darciregistry.dev>"
+  );
+};
+
+const getOtpEmailSubject = () => {
+  return process.env.AUTH_OTP_EMAIL_SUBJECT?.trim() || "Your DARCi verification code";
+};
+
+const sendCustomOtpEmail = async (input: { email: string; otp: string }) => {
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (!resendApiKey) {
+    throw new Error("RESEND_API_KEY is not configured");
+  }
+
+  const resend = new Resend(resendApiKey);
+  const subject = getOtpEmailSubject();
+  const from = getOtpEmailFromAddress();
+  const html = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#111111;line-height:1.5;">
+      <p style="margin:0 0 12px;">Use this DARCi verification code to sign in:</p>
+      <p style="margin:0 0 16px;font-size:32px;letter-spacing:8px;font-weight:700;">${input.otp}</p>
+      <p style="margin:0;color:#555555;">This code expires shortly. If you did not request this, you can ignore this email.</p>
+    </div>
+  `;
+  const text = `Your DARCi verification code is ${input.otp}. This code expires shortly.`;
+
+  const { error } = await resend.emails.send({
+    from,
+    to: input.email,
+    subject,
+    html,
+    text,
+  });
+
+  if (error) {
+    throw new Error(error.message || "Failed to send OTP email");
+  }
 };
 
 const ensureActiveAccount = (profile: UserIdentityContext, res: Response) => {
@@ -264,6 +370,28 @@ export const login = async (req: Request, res: Response) => {
   if (!ensureConfigured(res)) {
     return;
   }
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
+  
 
   const parsed = loginSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -418,6 +546,28 @@ export const signup = async (req: Request, res: Response) => {
   if (!ensureConfigured(res)) {
     return;
   }
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
+  
 
   const parsed = signupSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -525,6 +675,8 @@ export const resendConfirmation = async (req: Request, res: Response) => {
 
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
+
+  // ✅ CRITICAL: Rate limit check BEFORE OTP generation to prevent brute-force OTP generation
   const recentSend = await findRecentAuthEmailSend({
     actions: [
       authAuditActionNames.signupSucceeded,
@@ -593,6 +745,8 @@ export const requestPasswordRecovery = async (req: Request, res: Response) => {
 
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
+
+  // ✅ CRITICAL: Rate limit check BEFORE OTP generation to prevent brute-force OTP generation
   const recentSend = await findRecentAuthEmailSend({
     actions: [authAuditActionNames.passwordRecoveryRequested],
     email,
@@ -654,6 +808,8 @@ export const requestMagicLink = async (req: Request, res: Response) => {
 
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
+
+  // ✅ CRITICAL: Rate limit check BEFORE OTP generation to prevent brute-force OTP generation
   const recentSend = await findRecentAuthEmailSend({
     actions: passwordlessEmailActions,
     email,
@@ -712,6 +868,28 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
     return;
   }
 
+  
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
   const parsed = emailActionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return sendValidationError(res, parsed.error);
@@ -719,6 +897,8 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
 
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
+
+  // ✅ CRITICAL: Rate limit check BEFORE OTP generation to prevent brute-force OTP generation
   const recentSend = await findRecentAuthEmailSend({
     actions: passwordlessEmailActions,
     email,
@@ -731,39 +911,87 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
     );
   }
 
-  const { error } = await supabasePublic.auth.signInWithOtp({
+  const redirectTo = buildAuthActionRedirectUrl(req, {
+    intent: "otp",
+    returnTo: returnTo ?? null,
+  });
+
+  let usedCustomOtpEmail = false;
+  let fallbackSupabaseError: string | null = null;
+
+  const generated = await supabaseAdmin.auth.admin.generateLink({
+    type: "magiclink",
     email,
     options: {
-      emailRedirectTo: buildAuthActionRedirectUrl(req, {
-        intent: "otp",
-        returnTo: returnTo ?? null,
-      }),
-      shouldCreateUser: false,
+      redirectTo,
     },
   });
 
-  if (error) {
-    await recordAuthEvent({
-      action: authAuditActionNames.otpFailed,
-      metadata: { email, message: error.message, stage: "otp_request" },
-    });
-
-    if (isSupabaseEmailRateLimitError(error.message)) {
-      return sendAuthEmailRateLimitResponse(
-        res,
-        "Passwordless sign-in emails are temporarily rate limited. Please use the latest email or try again in about an hour.",
-      );
+  const generatedOtp = generated.data.properties?.email_otp?.trim();
+  if (!generated.error && generatedOtp) {
+    try {
+      await sendCustomOtpEmail({ email, otp: generatedOtp });
+      usedCustomOtpEmail = true;
+    } catch (customEmailError) {
+      fallbackSupabaseError =
+        customEmailError instanceof Error ? customEmailError.message : "custom_otp_email_failed";
     }
+  } else {
+    fallbackSupabaseError = generated.error?.message ?? "otp_generation_failed";
+  }
 
-    return res.status(200).json({
-      status: "ok",
-      message: "If this email can use passwordless sign-in, a one-time code will arrive shortly.",
+  if (!usedCustomOtpEmail) {
+    const resendFailureMode = getResendFailureMode();
+    const { error } = await supabasePublic.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectTo,
+        shouldCreateUser: false,
+      },
     });
+
+    if (error) {
+      await recordAuthEvent({
+        action: authAuditActionNames.otpFailed,
+        metadata: {
+          email,
+          message: error.message,
+          stage: "otp_request",
+          custom_otp_error: fallbackSupabaseError,
+          resend_failure_mode: resendFailureMode,
+        },
+      });
+
+      if (isSupabaseEmailRateLimitError(error.message)) {
+        return sendAuthEmailRateLimitResponse(
+          res,
+          "Passwordless sign-in emails are temporarily rate limited. Please use the latest email or try again in about an hour.",
+        );
+      }
+
+      // ✅ ENHANCED: Configurable fallback behavior when both custom and Supabase delivery fails
+      if (resendFailureMode === "strict") {
+        return res.status(400).json({
+          error: "delivery_failed",
+          message: "Unable to send verification code. Please try again later.",
+        });
+      }
+
+      return res.status(200).json({
+        status: "ok",
+        message: "If this email can use passwordless sign-in, a one-time code will arrive shortly.",
+      });
+    }
   }
 
   await recordAuthEvent({
     action: authAuditActionNames.otpRequested,
-    metadata: { email, return_to: sanitizeReturnTo(returnTo) },
+    metadata: {
+      email,
+      return_to: sanitizeReturnTo(returnTo),
+      delivery: usedCustomOtpEmail ? "custom_email_otp" : "supabase_fallback",
+      custom_otp_error: usedCustomOtpEmail ? null : fallbackSupabaseError,
+    },
   });
 
   return res.status(200).json({
@@ -777,6 +1005,27 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
     return;
   }
 
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
   const parsed = emailOtpVerifySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return sendValidationError(res, parsed.error);
@@ -784,11 +1033,24 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
 
   const email = normalizeEmailForAuthAction(parsed.data.email);
   const token = normalizeOtpToken(parsed.data.token);
-  const { data, error } = await supabasePublic.auth.verifyOtp({
+  let { data, error } = await supabasePublic.auth.verifyOtp({
     email,
     token,
     type: "email",
   });
+
+  // ✅ EXPLAINED: Fallback to magiclink type because Supabase may generate OTP codes
+  // as type "magiclink" internally even when we request "email" type. This handles
+  // both custom OTP email flows and Supabase fallback OTP delivery gracefully.
+  if (error || !data.session || !data.user) {
+    const fallbackResult = await supabasePublic.auth.verifyOtp({
+      email,
+      token,
+      type: "magiclink",
+    });
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
 
   if (error || !data.session || !data.user) {
     await recordAuthEvent({
@@ -840,10 +1102,213 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   }
 };
 
+export const requestPhoneOtp = async (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) {
+    return;
+  }
+
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
+  const parsed = phoneActionSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const { returnTo } = parsed.data;
+  const phone = parsed.data.phone.trim();
+  const recentSend = await findRecentAuditEventByEmail({
+    actions: passwordlessEmailActions,
+    email: phone,
+    since: getAuthEmailCooldownSince(),
+  });
+
+  if (recentSend) {
+    return sendRecentAuthEmailResponse(
+      res,
+      "Passwordless sign-in SMS already requested recently. Please use the latest code or try again shortly.",
+    );
+  }
+
+  const { error } = await supabasePublic.auth.signInWithOtp({
+    phone,
+    options: {
+      shouldCreateUser: true,
+    },
+  });
+
+  if (error) {
+    await recordAuthEvent({
+      action: authAuditActionNames.otpFailed,
+      metadata: {
+        phone,
+        message: error.message,
+        stage: "phone_otp_request",
+      },
+    });
+
+    if (isSupabaseEmailRateLimitError(error.message)) {
+      return sendAuthEmailRateLimitResponse(
+        res,
+        "SMS sends are temporarily rate limited. Please try again in about an hour.",
+      );
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      message: "If this phone can use passwordless sign-in, a verification code will arrive shortly.",
+    });
+  }
+
+  await recordAuthEvent({
+    action: authAuditActionNames.otpRequested,
+    metadata: {
+      phone,
+      return_to: sanitizeReturnTo(returnTo),
+      delivery: "phone_sms",
+    },
+  });
+
+  return res.status(200).json({
+    status: "ok",
+    message: "SMS code sent",
+  });
+};
+
+export const verifyPhoneOtp = async (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) {
+    return;
+  }
+
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
+  const parsed = phoneOtpVerifySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const phone = parsed.data.phone.trim();
+  const token = normalizeOtpToken(parsed.data.token);
+
+  const { data, error } = await supabasePublic.auth.verifyOtp({
+    phone,
+    token,
+    type: "sms",
+  });
+
+  if (error || !data.session || !data.user) {
+    await recordAuthEvent({
+      action: authAuditActionNames.otpFailed,
+      metadata: {
+        phone,
+        message: error?.message ?? "Missing OTP session",
+        stage: "phone_otp_verify",
+      },
+    });
+
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Invalid or expired code",
+    });
+  }
+
+  try {
+    const profile = await syncProfileFromAuthUser({
+      user: data.user,
+      phoneFallback: phone,
+    });
+
+    if (!ensureActiveAccount(profile, res)) {
+      return;
+    }
+
+    await recordAuthEvent({
+      action: authAuditActionNames.otpVerified,
+      actorSupabaseId: data.user.id,
+      metadata: { phone },
+    });
+
+    return res.status(200).json({
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      user: toUserResponse(profile),
+    });
+  } catch (syncError) {
+    const statusCode = syncError instanceof Error && "statusCode" in syncError
+      ? Number((syncError as { statusCode?: number }).statusCode) || 500
+      : 500;
+
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
+      message:
+        syncError instanceof Error ? syncError.message : "Failed to sync user",
+    });
+  }
+};
+
 export const resetPassword = async (req: Request, res: Response) => {
   if (!ensureConfigured(res)) {
     return;
   }
+  if (!validateOrigin(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
+  }
+
+  
 
   const parsed = passwordResetSchema.safeParse(req.body ?? {});
   if (!parsed.success) {

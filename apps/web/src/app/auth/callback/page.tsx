@@ -17,6 +17,8 @@ function AuthCallbackContent() {
   useEffect(() => {
     const completeCallback = async () => {
       const code = searchParams.get("code");
+      const tokenHash = searchParams.get("token_hash");
+      const callbackType = searchParams.get("type");
       const intent = searchParams.get("intent");
       const returnTo = sanitizeAuthReturnTo(searchParams.get("returnTo"));
       const errorDescription = searchParams.get("error_description") ?? searchParams.get("error");
@@ -25,36 +27,58 @@ function AuthCallbackContent() {
         throw new Error(errorDescription);
       }
 
-      if (!code) {
-        throw new Error("Missing auth callback code");
-      }
-
       const supabase = getSupabaseBrowserClient();
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      let accessToken: string | null = null;
+      let refreshToken: string | null = null;
 
-      if (error) {
-        throw error;
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          throw error;
+        }
+
+        accessToken = data.session?.access_token ?? null;
+        refreshToken = data.session?.refresh_token ?? null;
+      } else if (tokenHash) {
+        const verifyType = callbackType === "recovery" ? "recovery" : "magiclink";
+        const { data, error } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: verifyType,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        accessToken = data.session?.access_token ?? null;
+        refreshToken = data.session?.refresh_token ?? null;
+      } else {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        accessToken = hashParams.get("access_token");
+        refreshToken = hashParams.get("refresh_token");
       }
 
-      if (!data.session?.access_token) {
+      if (!accessToken) {
         throw new Error("Missing auth session");
       }
 
-      if (intent === "recovery") {
+      const resolvedIntent = intent ?? (callbackType === "recovery" ? "recovery" : "magic-link");
+
+      if (resolvedIntent === "recovery") {
         router.replace(`/auth/reset-password?returnTo=${encodeURIComponent(returnTo)}`);
         return;
       }
 
       setMessage("Preparing your workspace...");
       await syncStoredAuthFromSession({
-        accessToken: data.session.access_token,
-        refreshToken: data.session.refresh_token,
+        accessToken,
+        refreshToken,
         intent:
-          intent === "signup" ||
-          intent === "magic-link" ||
-          intent === "otp" ||
-          intent === "oauth"
-            ? intent
+          resolvedIntent === "signup" ||
+          resolvedIntent === "magic-link" ||
+          resolvedIntent === "otp" ||
+          resolvedIntent === "oauth"
+            ? resolvedIntent
             : null,
       });
       router.replace(returnTo);

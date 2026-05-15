@@ -4,6 +4,7 @@ import {
 	logout,
 	requestEmailOtp,
 	requestMagicLink,
+	requestPhoneOtp,
 	refresh,
 	requestPasswordRecovery,
 	resendConfirmation,
@@ -11,6 +12,7 @@ import {
 	signup,
 	syncSession,
 	verifyEmailOtp,
+	verifyPhoneOtp,
 } from "../controllers/authController";
 
 const router = Router();
@@ -20,6 +22,8 @@ router.post("/logout", logout);
 router.post("/magic-link", requestMagicLink);
 router.post("/otp/start", requestEmailOtp);
 router.post("/otp/verify", verifyEmailOtp);
+router.post("/otp/phone/start", requestPhoneOtp);
+router.post("/otp/phone/verify", verifyPhoneOtp);
 router.post("/password/recovery", requestPasswordRecovery);
 router.post("/password/reset", resetPassword);
 router.post("/refresh", refresh);

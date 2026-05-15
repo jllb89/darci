@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -24,6 +24,7 @@ type IdentifierChallenge = {
 };
 
 type AuthStep = "identifier" | "otp" | "password";
+const OTP_LENGTH = 6;
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -59,13 +60,18 @@ function StartAuthPageContent() {
   const [authStep, setAuthStep] = useState<AuthStep>("identifier");
   const [identifier, setIdentifier] = useState("");
   const [challenge, setChallenge] = useState<IdentifierChallenge | null>(null);
-  const [otpCode, setOtpCode] = useState("");
+  const [otpDigits, setOtpDigits] = useState<string[]>(() =>
+    Array.from({ length: OTP_LENGTH }, () => ""),
+  );
   const [passwordEmail, setPasswordEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRecoverySubmitting, setIsRecoverySubmitting] = useState(false);
+  const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  const otpCode = useMemo(() => otpDigits.join(""), [otpDigits]);
 
   const resolvedIdentifier = useMemo(
     () => resolveIdentifier(identifier),
@@ -97,38 +103,62 @@ function StartAuthPageContent() {
       throw new Error("Enter a valid email address or phone number.");
     }
 
-    const supabase = getSupabaseBrowserClient();
-
     if (nextChallenge.kind === "email") {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: nextChallenge.value,
-        options: {
-          emailRedirectTo: getActionRedirectTo("otp"),
-          shouldCreateUser: true,
-        },
+      const response = await fetch(`${apiBaseUrl}/auth/otp/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: nextChallenge.value,
+          returnTo,
+        }),
       });
 
-      if (error) {
-        throw error;
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            message?: string;
+            details?: Array<{ message?: string }>;
+          }
+        | null;
+
+      if (!response.ok) {
+        const validationMessage = payload?.details?.[0]?.message;
+        throw new Error(payload?.message || validationMessage || "Failed to send code");
       }
+
+      setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     } else {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: nextChallenge.value,
-        options: {
-          shouldCreateUser: true,
-        },
+      // ✅ FIXED: Phone OTP now uses backend endpoint (server-side like email OTP)
+      const response = await fetch(`${apiBaseUrl}/auth/otp/phone/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: nextChallenge.value,
+          returnTo,
+        }),
       });
 
-      if (error) {
-        throw error;
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            message?: string;
+            details?: Array<{ message?: string }>;
+          }
+        | null;
+
+      if (!response.ok) {
+        const validationMessage = payload?.details?.[0]?.message;
+        throw new Error(payload?.message || validationMessage || "Failed to send code");
       }
+
+      setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     }
 
     setChallenge(nextChallenge);
-    setOtpCode("");
+    setOtpDigits(Array.from({ length: OTP_LENGTH }, () => ""));
     setPasswordEmail(nextChallenge.kind === "email" ? nextChallenge.value : "");
     setAuthStep("otp");
-    setNoticeMessage(`Code sent to ${nextChallenge.displayValue}.`);
+    requestAnimationFrame(() => {
+      otpInputRefs.current[0]?.focus();
+    });
   };
 
   const verifyOtpChallenge = async () => {
@@ -142,31 +172,173 @@ function StartAuthPageContent() {
       throw new Error("Enter the code we sent you.");
     }
 
-    const supabase = getSupabaseBrowserClient();
-    const result = challenge.kind === "email"
-      ? await supabase.auth.verifyOtp({
+    if (challenge.kind === "email") {
+      const response = await fetch(`${apiBaseUrl}/auth/otp/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           email: challenge.value,
           token,
-          type: "email",
-        })
-      : await supabase.auth.verifyOtp({
+          returnTo,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            accessToken?: string | null;
+            refreshToken?: string | null;
+            user?: unknown;
+            message?: string;
+            details?: Array<{ message?: string }>;
+          }
+        | null;
+
+      if (!response.ok || !payload?.accessToken || !payload.user) {
+        const validationMessage = payload?.details?.[0]?.message;
+        throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
+      }
+
+      setStoredAuth({
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken ?? null,
+        user: payload.user,
+      });
+    } else {
+      // ✅ FIXED: Phone OTP verify now uses backend endpoint (server-side like email OTP)
+      const response = await fetch(`${apiBaseUrl}/auth/otp/phone/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           phone: challenge.value,
           token,
-          type: "sms",
-        });
+          returnTo,
+        }),
+      });
 
-    if (result.error || !result.data.session?.access_token) {
-      throw new Error(result.error?.message || "Invalid or expired code.");
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            accessToken?: string | null;
+            refreshToken?: string | null;
+            user?: unknown;
+            message?: string;
+            details?: Array<{ message?: string }>;
+          }
+        | null;
+
+      if (!response.ok || !payload?.accessToken || !payload.user) {
+        const validationMessage = payload?.details?.[0]?.message;
+        throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
+      }
+
+      setStoredAuth({
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken ?? null,
+        user: payload.user,
+      });
     }
-
-    await syncStoredAuthFromSession({
-      accessToken: result.data.session.access_token,
-      refreshToken: result.data.session.refresh_token,
-      intent: "otp",
-    });
 
     router.push(returnTo);
   };
+
+  const updateOtpDigitsFromInput = (value: string, index: number) => {
+    const digitsOnly = value.replace(/\D/g, "");
+
+    setOtpDigits((currentDigits) => {
+      const nextDigits = [...currentDigits];
+
+      if (!digitsOnly) {
+        nextDigits[index] = "";
+        return nextDigits;
+      }
+
+      for (let offset = 0; offset < digitsOnly.length; offset += 1) {
+        const targetIndex = index + offset;
+        if (targetIndex >= nextDigits.length) {
+          break;
+        }
+
+        nextDigits[targetIndex] = digitsOnly[offset] ?? "";
+      }
+
+      return nextDigits;
+    });
+
+    const nextFocusIndex = Math.min(
+      index + Math.max(digitsOnly.length, 1),
+      OTP_LENGTH - 1,
+    );
+    requestAnimationFrame(() => {
+      otpInputRefs.current[nextFocusIndex]?.focus();
+    });
+  };
+
+  const handleOtpDigitKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+    index: number,
+  ) => {
+    if (event.key === "Backspace" && !otpDigits[index] && index > 0) {
+      event.preventDefault();
+      otpInputRefs.current[index - 1]?.focus();
+    }
+
+    if (event.key === "ArrowLeft" && index > 0) {
+      event.preventDefault();
+      otpInputRefs.current[index - 1]?.focus();
+    }
+
+    if (event.key === "ArrowRight" && index < OTP_LENGTH - 1) {
+      event.preventDefault();
+      otpInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (
+    event: React.ClipboardEvent<HTMLInputElement>,
+    index: number,
+  ) => {
+    const pastedDigits = event.clipboardData.getData("text").replace(/\D/g, "");
+    if (!pastedDigits) {
+      return;
+    }
+
+    event.preventDefault();
+    updateOtpDigitsFromInput(pastedDigits, index);
+  };
+
+  useEffect(() => {
+    if (authStep !== "otp" || isSubmitting) {
+      return;
+    }
+
+    if (!otpDigits.every((digit) => digit.length === 1)) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const runVerify = async () => {
+      resetMessages();
+      setIsSubmitting(true);
+
+      try {
+        await verifyOtpChallenge();
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(error instanceof Error ? error.message : "Request failed");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSubmitting(false);
+        }
+      }
+    };
+
+    runVerify();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authStep, isSubmitting, otpDigits]);
 
   const signInWithPassword = async () => {
     const email = passwordEmail.trim().toLowerCase();
@@ -288,7 +460,7 @@ function StartAuthPageContent() {
     resetMessages();
     setAuthStep("identifier");
     setChallenge(null);
-    setOtpCode("");
+    setOtpDigits(Array.from({ length: OTP_LENGTH }, () => ""));
     setPassword("");
   };
 
@@ -307,6 +479,13 @@ function StartAuthPageContent() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-white text-Color-Scheme-1-Text">
       <div className="relative flex h-full w-full flex-col">
+        {noticeMessage ? (
+          <div className="pointer-events-none fixed inset-x-0 top-0 z-[120]">
+            <div className="mx-auto mt-3 w-[min(92vw,32rem)] rounded-md bg-black px-4 py-2 text-center text-xs font-medium text-white shadow-[0_16px_36px_rgba(0,0,0,0.3)]">
+              {noticeMessage}
+            </div>
+          </div>
+        ) : null}
         <header className="absolute left-0 right-0 top-0 z-10 flex h-20 items-center bg-transparent px-8 md:px-12">
           <Link href="/" aria-label="DARCi home">
             <Image
@@ -348,30 +527,34 @@ function StartAuthPageContent() {
                       onChange={(event) => setIdentifier(event.target.value)}
                       required
                     />
-                    {identifier.trim() && resolvedIdentifier ? (
-                      <p className="mt-2 text-xs text-Color-Neutral">
-                        {resolvedIdentifier.kind === "email" ? "Email" : "SMS"} code to {resolvedIdentifier.displayValue}
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
 
                 {authStep === "otp" && challenge ? (
                   <div>
                     <label className="mb-2 block text-sm font-medium">Code</label>
-                    <input
-                      autoComplete="one-time-code"
-                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                      inputMode="numeric"
-                      placeholder="123456"
-                      type="text"
-                      value={otpCode}
-                      onChange={(event) => setOtpCode(event.target.value)}
-                      required
-                    />
-                    <p className="mt-2 text-xs text-Color-Neutral">
-                      Sent to {challenge.displayValue}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      {otpDigits.map((digit, index) => (
+                        <input
+                          key={`otp-digit-${index}`}
+                          ref={(element) => {
+                            otpInputRefs.current[index] = element;
+                          }}
+                          autoComplete={index === 0 ? "one-time-code" : "off"}
+                          className="h-12 w-10 border border-Color-Scheme-1-Border text-center text-lg outline-none transition focus:border-Color-Scheme-1-Text md:h-14 md:w-11"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          type="text"
+                          maxLength={1}
+                          value={digit}
+                          onChange={(event) => updateOtpDigitsFromInput(event.target.value, index)}
+                          onKeyDown={(event) => handleOtpDigitKeyDown(event, index)}
+                          onPaste={(event) => handleOtpPaste(event, index)}
+                          disabled={isSubmitting}
+                          required
+                        />
+                      ))}
+                    </div>
                   </div>
                 ) : null}
 
@@ -411,12 +594,6 @@ function StartAuthPageContent() {
                       {isRecoverySubmitting ? "Sending reset..." : "Reset your password"}
                     </button>
                   </>
-                ) : null}
-
-                {noticeMessage ? (
-                  <div className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                    {noticeMessage}
-                  </div>
                 ) : null}
 
                 {errorMessage ? (
