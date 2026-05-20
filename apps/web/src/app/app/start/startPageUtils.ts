@@ -259,14 +259,17 @@ export const getSectionMicrocopy = (sectionKey: string) => {
   return sectionMicrocopyByKey[sectionKey] ?? null;
 };
 
-export const toStringArrayValue = (value: FormValue | undefined) => {
+export const toStringArrayValue = (
+  value: FormValue | undefined,
+  options: { trim?: boolean } = {},
+) => {
   if (!Array.isArray(value)) {
     return [] as string[];
   }
 
-  return value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim());
+  const shouldTrim = options.trim ?? true;
+  const values = value.filter((item): item is string => typeof item === "string");
+  return shouldTrim ? values.map((item) => item.trim()) : values;
 };
 
 export const normalizeNameForComparison = (value: string) => {

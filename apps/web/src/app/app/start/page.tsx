@@ -2209,7 +2209,7 @@ export default function StartDocumentPage() {
     );
     setJurisdictions([]);
     setSelectedJurisdiction("");
-    setIsMockDataEnabled(true);
+    setIsMockDataEnabled(false);
     setMemberForm(null);
     setFormValues({});
     setCurrentFormStep(getDefaultFormStep(normalizedMode));
@@ -2223,7 +2223,7 @@ export default function StartDocumentPage() {
     setSelectedJurisdiction(nextJurisdiction);
 
     if (!nextJurisdiction) {
-      setIsMockDataEnabled(true);
+      setIsMockDataEnabled(false);
       setMemberForm(null);
       setFormValues({});
       setCurrentFormStep(getDefaultFormStep(selectedProductFlowMode));
@@ -2634,7 +2634,7 @@ export default function StartDocumentPage() {
     }
 
     if (controlKind === "repeatable-text-list") {
-      const values = toStringArrayValue(fieldValue);
+      const values = toStringArrayValue(fieldValue, { trim: false });
       const isTrustmakerListField = normalizedCanonicalKey === "grantors";
 
       return (

@@ -197,15 +197,18 @@ const poaAuthorityKeyAliases: Record<string, string[]> = {
   estate_trust_and_other_beneficiary_transactions: [
     "estate_trust_and_other_beneficiary_transactions",
     "estate_trust_and_other_beneficiary",
+    "estates_trusts_and_beneficial_interests",
+    "estates_trusts_and_other_beneficial_interests",
   ],
   claims_and_litigation: ["claims_litigation"],
   personal_and_family_maintenance: ["personal_family_maintenance"],
   government_and_military_benefits: [
+    "government_benefits",
     "benefits_from_government_programs",
     "benefits_from_social_security_medicare_medicaid_or_other_governmental_programs_or_civil_or_military_service",
   ],
   retirement_plan_transactions: ["retirement_plans", "retirement_plan"],
-  tax_matters: ["tax_matter"],
+  tax_matters: ["taxes", "tax_matter"],
   all_powers: ["all_of_the_powers_listed_above", "all_powers_listed_above"],
 };
 
@@ -1112,6 +1115,72 @@ const formatRenderableValue = (value: unknown): string | null => {
   return null;
 };
 
+const fallbackField = (canonicalAnswers: CanonicalAnswers, canonicalKey: string) => {
+  return formatRenderableValue(toRenderableMemberValue(canonicalKey, canonicalAnswers)) ?? "________________";
+};
+
+const fallbackPersonNames = (value: unknown) => {
+  const names = parsePersonNames(value);
+  return names.length > 0 ? names.join(", ") : "________________";
+};
+
+const buildAuthorityTemplateLines = () => {
+  return Object.entries(poaAuthorityKeyByLetter).map(([letter, key]) => {
+    return `_____ (${letter}) ${poaAuthorityDisplayLabels[key] ?? humanizeOptionKey(key)}`;
+  });
+};
+
+const buildFallbackTemplateSource = (input: {
+  documentKey: string;
+  templateLabel: string;
+  canonicalAnswers: CanonicalAnswers;
+}) => {
+  if (input.documentKey === "poa_general") {
+    return [
+      `# ${input.templateLabel || "Power of Attorney"}`,
+      "",
+      `Principal: ${fallbackField(input.canonicalAnswers, "principal_full_name")}`,
+      `Principal contact: ${fallbackField(input.canonicalAnswers, "principal_contact")}`,
+      `Agent: ${fallbackField(input.canonicalAnswers, "agent_full_name")}`,
+      `Agent contact: ${fallbackField(input.canonicalAnswers, "agent_contact")}`,
+      `Successor agent(s): ${fallbackPersonNames(
+        input.canonicalAnswers.successor_agent_list ?? input.canonicalAnswers.successor_agents,
+      )}`,
+      "",
+      "Authority scope:",
+      ...buildAuthorityTemplateLines(),
+      "",
+      `Special instructions: ${fallbackField(input.canonicalAnswers, "special_instructions")}`,
+      "",
+      `${BLOCK_SIGNATURE_DATE_PREFIX}${fallbackField(input.canonicalAnswers, "principal_full_name")}`,
+    ].join("\n");
+  }
+
+  if (input.documentKey === "trust_rrr" || input.documentKey === "trust_certificate") {
+    return [
+      `# ${input.templateLabel || "Trust Document"}`,
+      "",
+      `Trust name: ${fallbackField(input.canonicalAnswers, "trust_name")}`,
+      `Trust date: ${fallbackField(input.canonicalAnswers, "trust_date")}`,
+      `Trustmaker(s): ${fallbackPersonNames(input.canonicalAnswers.grantors)}`,
+      `Trustee(s): ${fallbackPersonNames(input.canonicalAnswers.trustees)}`,
+      `Successor trustee(s): ${fallbackPersonNames(input.canonicalAnswers.successor_trustees)}`,
+      `Revocability: ${fallbackField(input.canonicalAnswers, "revocability_status")}`,
+      `Revocation authority: ${fallbackField(input.canonicalAnswers, "revocation_holders")}`,
+      `Trustee powers: ${fallbackField(input.canonicalAnswers, "trustee_powers")}`,
+      "",
+      ...parsePersonNames(input.canonicalAnswers.grantors).map(
+        (name) => `${BLOCK_SIGNATURE_DATE_PREFIX}${name}`,
+      ),
+      ...parsePersonNames(input.canonicalAnswers.trustees).map(
+        (name) => `${BLOCK_SIGNATURE_DATE_PREFIX}${name}`,
+      ),
+    ].join("\n");
+  }
+
+  return null;
+};
+
 const containsAlphabeticCharacters = (value: string) => /[A-Za-z]/.test(value);
 
 const parseSelectedOptionKeys = (value: unknown): string[] => {
@@ -1199,6 +1268,37 @@ const matchesSelectionKey = (
 
   const normalizedLabel = normalizeOptionComparisonText(label);
   return selectedLabels.has(normalizedLabel);
+};
+
+const getMatchingSelectedAuthorityKeys = (
+  selectedKeys: Set<string>,
+  selectedLabels: Set<string>,
+  labelMap: Record<string, string>,
+  label: string,
+  key: string,
+  aliases: string[] = [],
+) => {
+  const normalizedLabel = normalizeOptionComparisonText(label);
+  const acceptedKeys = new Set([key, ...aliases]);
+  const matches = new Set<string>();
+
+  for (const selectedKey of selectedKeys) {
+    if (acceptedKeys.has(selectedKey)) {
+      matches.add(selectedKey);
+      continue;
+    }
+
+    const selectedLabel = labelMap[selectedKey] ?? humanizeOptionKey(selectedKey);
+    if (normalizeOptionComparisonText(selectedLabel) === normalizedLabel) {
+      matches.add(selectedKey);
+    }
+  }
+
+  if (matches.size === 0 && selectedLabels.has(normalizedLabel)) {
+    matches.add(key);
+  }
+
+  return matches;
 };
 
 const previewFallbackCopy: Record<string, string> = {
@@ -1424,14 +1524,25 @@ const transformPoaAuthorityLines = (
 
     const key = poaAuthorityKeyByLetter[parsed.letter] ?? "";
     const aliases = poaAuthorityKeyAliases[key] ?? [];
+    const matchedKeys = getMatchingSelectedAuthorityKeys(
+      selectedKeys,
+      selectedLabels,
+      labelMap,
+      parsed.label,
+      key,
+      aliases,
+    );
     const checked =
       allPowersSelected ||
-      matchesSelectionKey(selectedKeys, selectedLabels, parsed.label, key, aliases);
+      matchedKeys.size > 0;
 
     if (checked) {
       matchedSelectedKeys.add(key);
       for (const alias of aliases) {
         matchedSelectedKeys.add(alias);
+      }
+      for (const matchedKey of matchedKeys) {
+        matchedSelectedKeys.add(matchedKey);
       }
     }
 
@@ -2006,7 +2117,6 @@ const buildRenderedPdf = async (input: {
   artifact: TemplateArtifactRecord;
   signers: DocumentOutputSignerRecord[];
 }) => {
-  const templateSource = await loadTemplateSource(input.artifact);
   const metadata = getArtifactMetadata(input.artifact);
   const templateLabel = asTrimmedString(metadata.templateLabel) || input.run.template_key;
   const placeholders = getPlaceholderValues(input.run);
@@ -2014,6 +2124,13 @@ const buildRenderedPdf = async (input: {
   const selectionCatalogs = getSelectionCatalogs(input.run);
   const isPreview = input.document.status !== "pending_signature";
   const brandAssets = await loadPdfBrandAssets();
+  const templateSource =
+    (await loadTemplateSource(input.artifact)) ??
+    buildFallbackTemplateSource({
+      documentKey: input.run.document_key,
+      templateLabel,
+      canonicalAnswers,
+    });
 
   if (!templateSource) {
     throw new Error(

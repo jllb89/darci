@@ -1177,8 +1177,13 @@ describe("GET documents endpoints", () => {
         documentId: "doc-1",
         eventType: "submit",
         expectedRevision: 6,
+        answers: expect.objectContaining({
+          trust_name: "Family Trust",
+          revocability_status: "revocable",
+        }),
         canonicalAnswers: {
           trust_name: "Family Trust",
+          revocability_status: "revocable",
         },
       }),
     );
@@ -1186,6 +1191,7 @@ describe("GET documents endpoints", () => {
       documentId: "doc-1",
       canonicalAnswers: {
         trust_name: "Family Trust",
+        revocability_status: "revocable",
       },
     });
     expect(response.body).toEqual({
@@ -1208,6 +1214,7 @@ describe("GET documents endpoints", () => {
       },
       canonicalPayload: {
         trust_name: "Family Trust",
+        revocability_status: "revocable",
       },
     });
   });

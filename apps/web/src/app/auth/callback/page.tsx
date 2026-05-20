@@ -56,6 +56,17 @@ function AuthCallbackContent() {
         const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
         accessToken = hashParams.get("access_token");
         refreshToken = hashParams.get("refresh_token");
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (error) {
+            throw error;
+          }
+        }
       }
 
       if (!accessToken) {

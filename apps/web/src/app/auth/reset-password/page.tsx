@@ -4,14 +4,36 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { syncStoredAuthFromSession } from "@/lib/auth";
+import { getApiBaseUrl, setStoredAuth } from "@/lib/auth";
 import { sanitizeAuthReturnTo } from "@/lib/authRedirects";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+
+const getRecoveryHashSession = () => {
+  if (typeof window === "undefined" || !window.location.hash) {
+    return null;
+  }
+
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const accessToken = hashParams.get("access_token");
+  const refreshToken = hashParams.get("refresh_token");
+  const errorDescription = hashParams.get("error_description") ?? hashParams.get("error");
+
+  if (errorDescription) {
+    throw new Error(errorDescription);
+  }
+
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  return { accessToken, refreshToken };
+};
 
 function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = sanitizeAuthReturnTo(searchParams.get("returnTo"));
+  const apiBaseUrl = getApiBaseUrl();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -22,7 +44,27 @@ function ResetPasswordContent() {
   useEffect(() => {
     const loadSession = async () => {
       try {
-        const { data, error } = await getSupabaseBrowserClient().auth.getSession();
+        const supabase = getSupabaseBrowserClient();
+        const recoveryHashSession = getRecoveryHashSession();
+
+        if (recoveryHashSession) {
+          const { error } = await supabase.auth.setSession({
+            access_token: recoveryHashSession.accessToken,
+            refresh_token: recoveryHashSession.refreshToken,
+          });
+
+          if (error) {
+            throw error;
+          }
+
+          window.history.replaceState(
+            null,
+            document.title,
+            `${window.location.pathname}${window.location.search}`,
+          );
+        }
+
+        const { data, error } = await supabase.auth.getSession();
         if (error) {
           throw error;
         }
@@ -57,20 +99,32 @@ function ResetPasswordContent() {
 
     setIsSubmitting(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        throw error;
+      const response = await fetch(`${apiBaseUrl}/auth/password/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ password, refreshToken }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            accessToken?: string | null;
+            refreshToken?: string | null;
+            user?: unknown;
+            message?: string;
+          }
+        | null;
+
+      if (!response.ok || !payload?.accessToken || !payload.user) {
+        throw new Error(payload?.message || "Password reset failed");
       }
 
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      await syncStoredAuthFromSession({
-        accessToken: sessionData.session?.access_token ?? accessToken,
-        refreshToken: sessionData.session?.refresh_token ?? refreshToken,
+      setStoredAuth({
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken ?? refreshToken,
+        user: payload.user,
       });
       router.replace(returnTo);
     } catch (error) {

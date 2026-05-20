@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClientMock: vi.fn(),
+  resendSendMock: vi.fn(),
   ensureUserIdentityFromAuthMock: vi.fn(),
   toUserResponseMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
@@ -11,6 +12,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (...args: unknown[]) => mocks.createClientMock(...args),
+}));
+
+vi.mock("resend", () => ({
+  Resend: vi.fn().mockImplementation(() => ({
+    emails: { send: mocks.resendSendMock },
+  })),
 }));
 
 vi.mock("../../src/services/userRoleService", () => ({
@@ -60,7 +67,11 @@ describe("auth controller Phase 1", () => {
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_ANON_KEY = "anon-key";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
-    delete process.env.WEB_APP_URL;
+    process.env.RESEND_API_KEY = "resend-test-key";
+    process.env.WEB_APP_URL = "https://app.example.com";
+    delete process.env.AUTH_ALLOWED_ORIGINS;
+    delete process.env.AUTH_REQUEST_SIGNATURE_SECRET;
+    delete process.env.RESEND_FAILURE_MODE;
 
     mocks.ensureUserIdentityFromAuthMock.mockResolvedValue(buildProfile());
     mocks.toUserResponseMock.mockImplementation((profile: { email: string }) => ({
@@ -71,6 +82,7 @@ describe("auth controller Phase 1", () => {
     }));
     mocks.recordAuditEventMock.mockResolvedValue(undefined);
     mocks.findRecentAuditEventByEmailMock.mockResolvedValue(null);
+    mocks.resendSendMock.mockResolvedValue({ error: null });
   });
 
   it("creates a confirmation-aware signup without bypassing Supabase email confirmation", async () => {
@@ -295,11 +307,19 @@ describe("auth controller Phase 1", () => {
     });
   });
 
-  it("requests an email OTP without creating passwordless accounts", async () => {
+  it("requests an email OTP through custom delivery without creating passwordless accounts", async () => {
     const signInWithOtpMock = vi.fn().mockResolvedValue({ error: null });
-    mocks.createClientMock.mockReturnValue({
-      auth: { signInWithOtp: signInWithOtpMock },
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          email_otp: "123456",
+        },
+      },
+      error: null,
     });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: { signInWithOtp: signInWithOtpMock } })
+      .mockReturnValueOnce({ auth: { admin: { generateLink: generateLinkMock } } });
 
     const { requestEmailOtp } = await import(
       "../../src/controllers/authController.ts"
@@ -312,14 +332,21 @@ describe("auth controller Phase 1", () => {
 
     await requestEmailOtp(req, res);
 
-    expect(signInWithOtpMock).toHaveBeenCalledWith({
+    expect(generateLinkMock).toHaveBeenCalledWith({
+      type: "magiclink",
       email: "member@example.com",
       options: {
-        emailRedirectTo:
-          "https://app.example.com/auth/callback?intent=otp&returnTo=%2Fapp",
-        shouldCreateUser: false,
+        redirectTo: "https://app.example.com/auth/callback?intent=otp&returnTo=%2Fapp",
       },
     });
+    expect(mocks.resendSendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "member@example.com",
+        subject: "Your DARCi verification code",
+        text: "Your DARCi verification code is 123456. This code expires shortly.",
+      }),
+    );
+    expect(signInWithOtpMock).not.toHaveBeenCalled();
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       status: "ok",
@@ -351,6 +378,7 @@ describe("auth controller Phase 1", () => {
     const { verifyEmailOtp } = await import("../../src/controllers/authController.ts");
     const { res, status, json } = buildResponse();
     const req = {
+      headers: {},
       body: { email: "member@example.com", token: "123 456", returnTo: "/app" },
     } as unknown as Request;
 

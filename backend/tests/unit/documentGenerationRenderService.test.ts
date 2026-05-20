@@ -271,6 +271,43 @@ describe("documentGenerationRenderService", () => {
     expect(rendered).toContain("[[DARCI_CHECKED]] Make gifts");
   });
 
+  it("maps seeded CA/OH POA authority keys without appending duplicate lines", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "_____ (K) Benefits from Social Security, Medicare, Medicaid, or other governmental programs, or civil or military service",
+        "_____ (L) Retirement plan transactions",
+        "_____ (M) Tax matters",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        authority_scope_selection: ["government_benefits", "retirement_plans", "taxes"],
+      },
+      selectionCatalogs: {
+        authority_scope_selection: {
+          allowedValues: ["government_benefits", "retirement_plans", "taxes"],
+          allowedValueLabels: {
+            government_benefits: "Benefits from governmental programs or military service",
+            retirement_plans: "Retirement plans",
+            taxes: "Taxes",
+          },
+        },
+      },
+      isPreview: true,
+    });
+
+    const checkedLines = rendered
+      .split("\n")
+      .filter((line) => line.startsWith("[[DARCI_CHECKED]]"));
+
+    expect(checkedLines).toHaveLength(3);
+    expect(rendered).toContain("[[DARCI_CHECKED]] (K) Benefits from Social Security");
+    expect(rendered).toContain("[[DARCI_CHECKED]] (L) Retirement plan transactions");
+    expect(rendered).toContain("[[DARCI_CHECKED]] (M) Tax matters");
+    expect(rendered).not.toContain("[[DARCI_CHECKED]] Benefits from governmental programs");
+    expect(rendered).not.toContain("[[DARCI_CHECKED]] Retirement plans");
+    expect(rendered).not.toContain("[[DARCI_CHECKED]] Taxes");
+  });
+
   it("preserves the PDF cursor when applying the preview watermark", () => {
     const fakeDocument = {
       x: 54,
