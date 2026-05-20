@@ -1,6 +1,6 @@
 # Resend Email Incident Runbook
 
-Last updated: 2026-04-29
+Last updated: 2026-05-19
 
 ## Goal
 
@@ -16,7 +16,59 @@ This runbook covers email notifications sent through the persisted outbox pipeli
 4. `POST /webhooks/resend`
 5. Admin notification job and metrics endpoints
 
-It does not cover SMS, in-app notifications, template copy approval, or Resend account billing issues except when they block email delivery.
+It does not cover SMS, in-app notifications, template copy approval, or Resend account billing issues except when they block email delivery. Passwordless auth OTP uses a separate backend path, but this runbook includes the local auth OTP probe because it is a Resend send-side diagnostic.
+
+## Local Passwordless OTP Probe
+
+Use this before waiting for ECS or GitHub Actions when passwordless login email delivery is unclear.
+
+Safe no-send probe:
+
+```sh
+cd backend
+npm run probe:auth-otp
+```
+
+This intentionally sends an invalid email payload. It should not call Supabase or Resend. It proves the local route, ingress logger, controller logger, CORS headers, and strict-mode config are loaded. Expected output includes:
+
+1. `[auth.email_otp.probe] starting`
+2. `[auth.email_otp.ingress] request_seen`
+3. `[auth.email_otp] request_received`
+4. `[auth.email_otp] request_rejected_validation_error`
+5. `[auth.email_otp.ingress] response_finished`
+6. `x-darci-auth-otp-logger: ingress-v1`
+7. `x-darci-auth-otp-trace-id: <request-id>`
+
+Real local send probe:
+
+```sh
+cd backend
+npm run probe:auth-otp -- --send --email person@example.com
+```
+
+This uses `.env.staging`, calls the local Express app in-process, and may send a real Resend email. Use a controlled recipient. With `RESEND_FAILURE_MODE=strict`, failed custom delivery must return `delivery_failed` and must not fall back to Supabase magic-link delivery.
+
+Auth OTP sender config is required. Set one of these runtime variables to a sender whose domain is verified in Resend:
+
+1. `AUTH_OTP_FROM_ADDRESS`
+2. `RESEND_FROM_ADDRESS`
+3. `NOTIFICATION_FROM_ADDRESS`
+
+Prefer `AUTH_OTP_FROM_ADDRESS` for passwordless login so auth delivery can be changed without changing notification senders. If Resend returns `The <domain> domain is not verified`, fix the Resend domain verification or change the sender to a verified domain. Do not rely on Supabase fallback to hide this failure.
+
+Local browser flow:
+
+```sh
+cd backend
+npm run start:staging
+```
+
+```sh
+cd apps/web
+npm run dev:local-api
+```
+
+Open `http://localhost:3000/start`. The web app is forced to call `http://localhost:4000` by `dev:local-api`, avoiding hosted staging while testing the auth UI.
 
 ## Runtime Surfaces
 

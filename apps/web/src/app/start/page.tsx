@@ -24,11 +24,31 @@ type IdentifierChallenge = {
 };
 
 type AuthStep = "identifier" | "otp" | "password";
-const OTP_LENGTH = 6;
+type OtpStartResponsePayload = {
+  message?: string;
+  otpLength?: number | null;
+  details?: Array<{ message?: string }>;
+};
+
+const DEFAULT_OTP_LENGTH = 6;
+const MIN_OTP_LENGTH = 4;
+const MAX_OTP_LENGTH = 12;
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeOtpToken = (value: string) => value.replace(/\s+/g, "").trim();
+
+const normalizeOtpLength = (value: unknown) => {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return DEFAULT_OTP_LENGTH;
+  }
+
+  if (value < MIN_OTP_LENGTH || value > MAX_OTP_LENGTH) {
+    return DEFAULT_OTP_LENGTH;
+  }
+
+  return value;
+};
 
 const resolveIdentifier = (value: string): IdentifierChallenge | null => {
   const trimmed = value.trim();
@@ -61,7 +81,7 @@ function StartAuthPageContent() {
   const [identifier, setIdentifier] = useState("");
   const [challenge, setChallenge] = useState<IdentifierChallenge | null>(null);
   const [otpDigits, setOtpDigits] = useState<string[]>(() =>
-    Array.from({ length: OTP_LENGTH }, () => ""),
+    Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""),
   );
   const [passwordEmail, setPasswordEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -103,6 +123,8 @@ function StartAuthPageContent() {
       throw new Error("Enter a valid email address or phone number.");
     }
 
+    let nextOtpLength = DEFAULT_OTP_LENGTH;
+
     if (nextChallenge.kind === "email") {
       const response = await fetch(`${apiBaseUrl}/auth/otp/start`, {
         method: "POST",
@@ -114,10 +136,7 @@ function StartAuthPageContent() {
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | {
-            message?: string;
-            details?: Array<{ message?: string }>;
-          }
+        | OtpStartResponsePayload
         | null;
 
       if (!response.ok) {
@@ -125,6 +144,7 @@ function StartAuthPageContent() {
         throw new Error(payload?.message || validationMessage || "Failed to send code");
       }
 
+      nextOtpLength = normalizeOtpLength(payload?.otpLength);
       setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     } else {
       // ✅ FIXED: Phone OTP now uses backend endpoint (server-side like email OTP)
@@ -138,10 +158,7 @@ function StartAuthPageContent() {
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | {
-            message?: string;
-            details?: Array<{ message?: string }>;
-          }
+        | OtpStartResponsePayload
         | null;
 
       if (!response.ok) {
@@ -149,11 +166,12 @@ function StartAuthPageContent() {
         throw new Error(payload?.message || validationMessage || "Failed to send code");
       }
 
+      nextOtpLength = normalizeOtpLength(payload?.otpLength);
       setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     }
 
     setChallenge(nextChallenge);
-    setOtpDigits(Array.from({ length: OTP_LENGTH }, () => ""));
+    setOtpDigits(Array.from({ length: nextOtpLength }, () => ""));
     setPasswordEmail(nextChallenge.kind === "email" ? nextChallenge.value : "");
     setAuthStep("otp");
     requestAnimationFrame(() => {
@@ -265,7 +283,7 @@ function StartAuthPageContent() {
 
     const nextFocusIndex = Math.min(
       index + Math.max(digitsOnly.length, 1),
-      OTP_LENGTH - 1,
+      otpDigits.length - 1,
     );
     requestAnimationFrame(() => {
       otpInputRefs.current[nextFocusIndex]?.focus();
@@ -286,7 +304,7 @@ function StartAuthPageContent() {
       otpInputRefs.current[index - 1]?.focus();
     }
 
-    if (event.key === "ArrowRight" && index < OTP_LENGTH - 1) {
+    if (event.key === "ArrowRight" && index < otpDigits.length - 1) {
       event.preventDefault();
       otpInputRefs.current[index + 1]?.focus();
     }
@@ -460,7 +478,7 @@ function StartAuthPageContent() {
     resetMessages();
     setAuthStep("identifier");
     setChallenge(null);
-    setOtpDigits(Array.from({ length: OTP_LENGTH }, () => ""));
+    setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
     setPassword("");
   };
 

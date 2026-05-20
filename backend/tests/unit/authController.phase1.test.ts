@@ -68,10 +68,13 @@ describe("auth controller Phase 1", () => {
     process.env.SUPABASE_ANON_KEY = "anon-key";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
     process.env.RESEND_API_KEY = "resend-test-key";
+    process.env.AUTH_OTP_FROM_ADDRESS = "DARCi <verified@example.com>";
     process.env.WEB_APP_URL = "https://app.example.com";
     delete process.env.AUTH_ALLOWED_ORIGINS;
     delete process.env.AUTH_REQUEST_SIGNATURE_SECRET;
     delete process.env.RESEND_FAILURE_MODE;
+    delete process.env.RESEND_FROM_ADDRESS;
+    delete process.env.NOTIFICATION_FROM_ADDRESS;
 
     mocks.ensureUserIdentityFromAuthMock.mockResolvedValue(buildProfile());
     mocks.toUserResponseMock.mockImplementation((profile: { email: string }) => ({
@@ -312,7 +315,7 @@ describe("auth controller Phase 1", () => {
     const generateLinkMock = vi.fn().mockResolvedValue({
       data: {
         properties: {
-          email_otp: "123456",
+          email_otp: "12345678",
         },
       },
       error: null,
@@ -343,7 +346,7 @@ describe("auth controller Phase 1", () => {
       expect.objectContaining({
         to: "member@example.com",
         subject: "Your DARCi verification code",
-        text: "Your DARCi verification code is 123456. This code expires shortly.",
+        text: "Your DARCi verification code is 12345678. This code expires shortly.",
       }),
     );
     expect(signInWithOtpMock).not.toHaveBeenCalled();
@@ -351,6 +354,114 @@ describe("auth controller Phase 1", () => {
     expect(json).toHaveBeenCalledWith({
       status: "ok",
       message: "Email code sent",
+      otpLength: 8,
+    });
+  });
+
+  it("blocks Supabase fallback when strict Resend OTP delivery fails", async () => {
+    process.env.RESEND_FAILURE_MODE = "strict";
+    const signInWithOtpMock = vi.fn().mockResolvedValue({ error: null });
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          email_otp: "123456",
+        },
+      },
+      error: null,
+    });
+    mocks.resendSendMock.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Invalid from address" },
+    });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: { signInWithOtp: signInWithOtpMock } })
+      .mockReturnValueOnce({ auth: { admin: { generateLink: generateLinkMock } } });
+
+    const { requestEmailOtp } = await import(
+      "../../src/controllers/authController.ts"
+    );
+    const { res, status, json } = buildResponse();
+    const req = {
+      headers: { origin: "https://app.example.com" },
+      method: "POST",
+      path: "/auth/otp/start",
+      originalUrl: "/auth/otp/start",
+      body: { email: "member@example.com", returnTo: "/app" },
+    } as unknown as Request;
+
+    await requestEmailOtp(req, res);
+
+    expect(generateLinkMock).toHaveBeenCalled();
+    expect(mocks.resendSendMock).toHaveBeenCalled();
+    expect(signInWithOtpMock).not.toHaveBeenCalled();
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "auth.otp_failed",
+        metadata: expect.objectContaining({
+          email: "member@example.com",
+          stage: "custom_otp_delivery",
+          resend_failure_mode: "strict",
+          fallback_blocked: true,
+        }),
+      }),
+    );
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      error: "delivery_failed",
+      message: "Unable to send verification code. Please try again later.",
+    });
+  });
+
+  it("blocks provider calls when strict email OTP sender config is missing", async () => {
+    process.env.RESEND_FAILURE_MODE = "strict";
+    delete process.env.AUTH_OTP_FROM_ADDRESS;
+    delete process.env.RESEND_FROM_ADDRESS;
+    delete process.env.NOTIFICATION_FROM_ADDRESS;
+    const signInWithOtpMock = vi.fn().mockResolvedValue({ error: null });
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          email_otp: "123456",
+        },
+      },
+      error: null,
+    });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: { signInWithOtp: signInWithOtpMock } })
+      .mockReturnValueOnce({ auth: { admin: { generateLink: generateLinkMock } } });
+
+    const { requestEmailOtp } = await import(
+      "../../src/controllers/authController.ts"
+    );
+    const { res, status, json } = buildResponse();
+    const req = {
+      headers: { origin: "https://app.example.com" },
+      method: "POST",
+      path: "/auth/otp/start",
+      originalUrl: "/auth/otp/start",
+      body: { email: "member@example.com", returnTo: "/app" },
+    } as unknown as Request;
+
+    await requestEmailOtp(req, res);
+
+    expect(generateLinkMock).not.toHaveBeenCalled();
+    expect(mocks.resendSendMock).not.toHaveBeenCalled();
+    expect(signInWithOtpMock).not.toHaveBeenCalled();
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "auth.otp_failed",
+        metadata: expect.objectContaining({
+          email: "member@example.com",
+          stage: "sender_config",
+          resend_failure_mode: "strict",
+          fallback_blocked: true,
+        }),
+      }),
+    );
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      error: "delivery_failed",
+      message: "Unable to send verification code. Please try again later.",
     });
   });
 

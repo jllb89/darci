@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import { z } from "zod";
@@ -135,6 +136,119 @@ const sanitizeReturnTo = (value?: string | null) => {
 const normalizeEmailForAuthAction = (email: string) => email.trim().toLowerCase();
 const normalizeOtpToken = (token: string) => token.replace(/\s+/g, "").trim();
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const getHeaderValue = (value: string | string[] | undefined) => {
+  if (Array.isArray(value)) {
+    return value.find((entry) => entry.trim().length > 0)?.trim() ?? null;
+  }
+
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+};
+
+const maskEmailForLogs = (email: string) => {
+  const [localPart = "", domain = ""] = email.split("@");
+  const visibleLocal = localPart.slice(0, 2);
+  const visibleDomain = domain.split(".")[0]?.slice(0, 1) ?? "";
+  const topLevelDomain = domain.includes(".") ? domain.split(".").pop() ?? "" : "";
+  return `${visibleLocal || "**"}***@${visibleDomain || "*"}***${topLevelDomain ? `.${topLevelDomain}` : ""}`;
+};
+
+const hashEmailForLogs = (email: string) => {
+  return createHash("sha256").update(email).digest("hex").slice(0, 16);
+};
+
+const getRequestTraceId = (req: Request) => {
+  const requestWithTrace = req as Request & { authOtpRequestId?: string };
+  if (requestWithTrace.authOtpRequestId) {
+    return requestWithTrace.authOtpRequestId;
+  }
+
+  const requestId =
+    getHeaderValue(req.headers["x-request-id"]) ??
+    getHeaderValue(req.headers["x-amzn-trace-id"]) ??
+    randomUUID();
+
+  requestWithTrace.authOtpRequestId = requestId;
+  return requestId;
+};
+
+const getErrorLogDetails = (error: unknown) => {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+    };
+  }
+
+  if (isRecord(error)) {
+    const details: Record<string, unknown> = {};
+    for (const key of ["name", "message", "statusCode", "status", "code"] as const) {
+      const value = error[key];
+      if (typeof value === "string" || typeof value === "number") {
+        details[key] = value;
+      }
+    }
+
+    return Object.keys(details).length > 0 ? details : { message: "Unknown provider error" };
+  }
+
+  return { message: String(error) };
+};
+
+type AuthOtpLogContext = {
+  requestId: string;
+  emailHash?: string;
+  emailMasked?: string;
+  origin?: string | null;
+  returnTo?: string | null;
+};
+
+const buildAuthOtpLogContext = (
+  req: Request,
+  input: { email?: string; returnTo?: string | null } = {},
+): AuthOtpLogContext => {
+  const email = input.email ? normalizeEmailForAuthAction(input.email) : null;
+
+  return {
+    requestId: getRequestTraceId(req),
+    origin: getHeaderValue(req.headers.origin),
+    returnTo: input.returnTo ? sanitizeReturnTo(input.returnTo) : null,
+    ...(email
+      ? {
+          emailHash: hashEmailForLogs(email),
+          emailMasked: maskEmailForLogs(email),
+        }
+      : {}),
+  };
+};
+
+const logAuthOtpEvent = (
+  level: "info" | "warn" | "error",
+  event: string,
+  metadata: Record<string, unknown>,
+) => {
+  const payload = {
+    component: "auth.email_otp",
+    event,
+    ...metadata,
+  };
+
+  if (level === "error") {
+    console.error("[auth.email_otp]", payload);
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn("[auth.email_otp]", payload);
+    return;
+  }
+
+  console.info("[auth.email_otp]", payload);
+};
+
 const passwordlessEmailActions = [
   authAuditActionNames.magicLinkRequested,
   authAuditActionNames.otpRequested,
@@ -195,10 +309,8 @@ const validateRequestSignature = (req: Request): boolean => {
   if (!signature) return true;
   const secret = process.env.AUTH_REQUEST_SIGNATURE_SECRET;
   if (!secret) return true;
-  const crypto = require("crypto");
   const body = JSON.stringify(req.body);
-  const expectedSignature = crypto
-    .createHmac("sha256", secret)
+  const expectedSignature = createHmac("sha256", secret)
     .update(body)
     .digest("hex");
   return signature === expectedSignature;
@@ -248,20 +360,84 @@ const createSupabaseSessionClient = () => {
   });
 };
 
-const getOtpEmailFromAddress = () => {
-  return (
-    process.env.AUTH_OTP_FROM_ADDRESS?.trim() ||
-    process.env.RESEND_FROM_ADDRESS?.trim() ||
-    process.env.NOTIFICATION_FROM_ADDRESS?.trim() ||
-    "DARCi <support@darciregistry.dev>"
-  );
+const otpEmailFromAddressEnvKeys = [
+  "AUTH_OTP_FROM_ADDRESS",
+  "RESEND_FROM_ADDRESS",
+  "NOTIFICATION_FROM_ADDRESS",
+] as const;
+
+type OtpEmailFromAddressSource = (typeof otpEmailFromAddressEnvKeys)[number];
+
+type OtpEmailSenderConfig = {
+  from: string | null;
+  source: OtpEmailFromAddressSource | null;
+  senderEmail: string | null;
+  senderDomain: string | null;
+  configured: boolean;
+};
+
+type ConfiguredOtpEmailSenderConfig = OtpEmailSenderConfig & {
+  from: string;
+  source: OtpEmailFromAddressSource;
+};
+
+const getSenderEmailAddress = (from: string) => {
+  const bracketedAddress = from.match(/<([^<>]+)>/)?.[1]?.trim();
+  const candidate = bracketedAddress || from.trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) ? candidate.toLowerCase() : null;
+};
+
+const getOtpEmailSenderConfig = (): OtpEmailSenderConfig => {
+  for (const key of otpEmailFromAddressEnvKeys) {
+    const from = process.env[key]?.trim();
+    if (!from) {
+      continue;
+    }
+
+    const senderEmail = getSenderEmailAddress(from);
+    return {
+      from,
+      source: key,
+      senderEmail,
+      senderDomain: senderEmail?.split("@")[1] ?? null,
+      configured: true,
+    };
+  }
+
+  return {
+    from: null,
+    source: null,
+    senderEmail: null,
+    senderDomain: null,
+    configured: false,
+  };
+};
+
+const isConfiguredOtpEmailSenderConfig = (
+  config: OtpEmailSenderConfig,
+): config is ConfiguredOtpEmailSenderConfig => Boolean(config.from && config.source);
+
+const requireOtpEmailSenderConfig = () => {
+  const config = getOtpEmailSenderConfig();
+  if (!isConfiguredOtpEmailSenderConfig(config)) {
+    throw new Error(
+      "AUTH_OTP_FROM_ADDRESS, RESEND_FROM_ADDRESS, or NOTIFICATION_FROM_ADDRESS must be configured with a verified Resend sender",
+    );
+  }
+
+  return config;
 };
 
 const getOtpEmailSubject = () => {
   return process.env.AUTH_OTP_EMAIL_SUBJECT?.trim() || "Your DARCi verification code";
 };
 
-const sendCustomOtpEmail = async (input: { email: string; otp: string }) => {
+const sendCustomOtpEmail = async (input: {
+  email: string;
+  otp: string;
+  logContext: AuthOtpLogContext;
+  senderConfig?: ConfiguredOtpEmailSenderConfig;
+}) => {
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
   if (!resendApiKey) {
     throw new Error("RESEND_API_KEY is not configured");
@@ -269,7 +445,8 @@ const sendCustomOtpEmail = async (input: { email: string; otp: string }) => {
 
   const resend = new Resend(resendApiKey);
   const subject = getOtpEmailSubject();
-  const from = getOtpEmailFromAddress();
+  const senderConfig = input.senderConfig ?? requireOtpEmailSenderConfig();
+  const from = senderConfig.from;
   const html = `
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#111111;line-height:1.5;">
       <p style="margin:0 0 12px;">Use this DARCi verification code to sign in:</p>
@@ -279,7 +456,18 @@ const sendCustomOtpEmail = async (input: { email: string; otp: string }) => {
   `;
   const text = `Your DARCi verification code is ${input.otp}. This code expires shortly.`;
 
-  const { error } = await resend.emails.send({
+  logAuthOtpEvent("info", "resend_send_start", {
+    ...input.logContext,
+    from,
+    fromSource: senderConfig.source,
+    fromDomain: senderConfig.senderDomain,
+    subject,
+    toDomain: input.email.split("@")[1] ?? null,
+    htmlLength: html.length,
+    textLength: text.length,
+  });
+
+  const result = await resend.emails.send({
     from,
     to: input.email,
     subject,
@@ -287,9 +475,24 @@ const sendCustomOtpEmail = async (input: { email: string; otp: string }) => {
     text,
   });
 
+  const error = result.error;
+  const data = result.data;
+  const messageId = isRecord(data) && typeof data.id === "string" ? data.id : null;
+
   if (error) {
+    logAuthOtpEvent("error", "resend_send_failed", {
+      ...input.logContext,
+      error: getErrorLogDetails(error),
+    });
     throw new Error(error.message || "Failed to send OTP email");
   }
+
+  logAuthOtpEvent("info", "resend_send_succeeded", {
+    ...input.logContext,
+    resendMessageId: messageId,
+  });
+
+  return { resendMessageId: messageId };
 };
 
 const ensureActiveAccount = (profile: UserIdentityContext, res: Response) => {
@@ -864,12 +1067,29 @@ export const requestMagicLink = async (req: Request, res: Response) => {
 };
 
 export const requestEmailOtp = async (req: Request, res: Response) => {
+  const requestLogContext = buildAuthOtpLogContext(req);
+  logAuthOtpEvent("info", "request_received", {
+    ...requestLogContext,
+    method: req.method,
+    path: req.originalUrl ?? req.path,
+    bodyKeys: isRecord(req.body) ? Object.keys(req.body).sort() : [],
+  });
+
   if (!ensureConfigured(res)) {
+    logAuthOtpEvent("error", "request_rejected_missing_supabase_config", {
+      ...requestLogContext,
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      hasSupabaseAnonKey: Boolean(supabaseAnonKey),
+      hasSupabaseServiceRoleKey: Boolean(supabaseServiceRoleKey),
+    });
     return;
   }
 
-  
   if (!validateOrigin(req)) {
+    logAuthOtpEvent("warn", "request_rejected_invalid_origin", {
+      ...requestLogContext,
+      allowedOrigins: getAllowedAuthOrigins(),
+    });
     return res.status(403).json({
       error: "forbidden",
       message: "Invalid request origin",
@@ -877,6 +1097,7 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
   }
 
   if (!validateCsrfToken(req)) {
+    logAuthOtpEvent("warn", "request_rejected_invalid_csrf", requestLogContext);
     return res.status(403).json({
       error: "forbidden",
       message: "Invalid CSRF token",
@@ -884,6 +1105,11 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
   }
 
   if (!validateRequestSignature(req)) {
+    logAuthOtpEvent("warn", "request_rejected_invalid_signature", {
+      ...requestLogContext,
+      hasSignatureHeader: Boolean(req.headers["x-request-signature"]),
+      signatureSecretConfigured: Boolean(process.env.AUTH_REQUEST_SIGNATURE_SECRET),
+    });
     return res.status(403).json({
       error: "forbidden",
       message: "Invalid request signature",
@@ -892,11 +1118,61 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
 
   const parsed = emailActionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
+    logAuthOtpEvent("warn", "request_rejected_validation_error", {
+      ...requestLogContext,
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        code: issue.code,
+        message: issue.message,
+      })),
+    });
     return sendValidationError(res, parsed.error);
   }
 
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
+  const logContext = buildAuthOtpLogContext(req, { email, returnTo: returnTo ?? null });
+  const resendFailureMode = getResendFailureMode();
+  const otpEmailSenderConfig = getOtpEmailSenderConfig();
+
+  logAuthOtpEvent("info", "request_validated", {
+    ...logContext,
+    cooldownSeconds: authEmailSendCooldownSeconds,
+    resendFailureMode,
+    resendApiKeyConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
+    otpFromAddressConfigured: otpEmailSenderConfig.configured,
+    otpFromAddress: otpEmailSenderConfig.from,
+    otpFromAddressSource: otpEmailSenderConfig.source,
+    otpFromDomain: otpEmailSenderConfig.senderDomain,
+    otpSubjectConfigured: Boolean(process.env.AUTH_OTP_EMAIL_SUBJECT?.trim()),
+  });
+
+  if (!isConfiguredOtpEmailSenderConfig(otpEmailSenderConfig) && resendFailureMode === "strict") {
+    const message =
+      "AUTH_OTP_FROM_ADDRESS, RESEND_FROM_ADDRESS, or NOTIFICATION_FROM_ADDRESS must be configured with a verified Resend sender";
+    logAuthOtpEvent("error", "request_rejected_missing_otp_sender_config", {
+      ...logContext,
+      message,
+      resendFailureMode,
+    });
+
+    await recordAuthEvent({
+      action: authAuditActionNames.otpFailed,
+      metadata: {
+        email,
+        request_id: logContext.requestId,
+        stage: "sender_config",
+        message,
+        resend_failure_mode: resendFailureMode,
+        fallback_blocked: true,
+      },
+    });
+
+    return res.status(400).json({
+      error: "delivery_failed",
+      message: "Unable to send verification code. Please try again later.",
+    });
+  }
 
   // ✅ CRITICAL: Rate limit check BEFORE OTP generation to prevent brute-force OTP generation
   const recentSend = await findRecentAuthEmailSend({
@@ -905,6 +1181,12 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
   });
 
   if (recentSend) {
+    logAuthOtpEvent("warn", "cooldown_hit_before_provider_call", {
+      ...logContext,
+      recentAuditEventId: recentSend.id,
+      recentAuditAction: recentSend.action,
+      recentAuditCreatedAt: recentSend.created_at,
+    });
     return sendRecentAuthEmailResponse(
       res,
       "Passwordless sign-in email already requested recently. Please use the latest email before requesting another.",
@@ -916,65 +1198,165 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
     returnTo: returnTo ?? null,
   });
 
-  let usedCustomOtpEmail = false;
-  let fallbackSupabaseError: string | null = null;
-
-  const generated = await supabaseAdmin.auth.admin.generateLink({
-    type: "magiclink",
-    email,
-    options: {
-      redirectTo,
-    },
+  logAuthOtpEvent("info", "redirect_resolved", {
+    ...logContext,
+    redirectHost: new URL(redirectTo).host,
+    redirectPath: new URL(redirectTo).pathname,
   });
 
-  const generatedOtp = generated.data.properties?.email_otp?.trim();
-  if (!generated.error && generatedOtp) {
-    try {
-      await sendCustomOtpEmail({ email, otp: generatedOtp });
-      usedCustomOtpEmail = true;
-    } catch (customEmailError) {
-      fallbackSupabaseError =
-        customEmailError instanceof Error ? customEmailError.message : "custom_otp_email_failed";
-    }
-  } else {
-    fallbackSupabaseError = generated.error?.message ?? "otp_generation_failed";
-  }
+  let usedCustomOtpEmail = false;
+  let fallbackSupabaseError: string | null = null;
+  let resendMessageId: string | null = null;
+  let generatedOtp = "";
 
-  if (!usedCustomOtpEmail) {
-    const resendFailureMode = getResendFailureMode();
-    const { error } = await supabasePublic.auth.signInWithOtp({
+  logAuthOtpEvent("info", "supabase_generate_link_start", {
+    ...logContext,
+    linkType: "magiclink",
+  });
+
+  try {
+    const generated = await supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
       email,
       options: {
-        emailRedirectTo: redirectTo,
-        shouldCreateUser: false,
+        redirectTo,
       },
     });
 
-    if (error) {
+    generatedOtp = generated.data.properties?.email_otp?.trim() ?? "";
+    if (generated.error) {
+      fallbackSupabaseError = generated.error.message ?? "supabase_generate_link_failed";
+      logAuthOtpEvent("error", "supabase_generate_link_failed", {
+        ...logContext,
+        error: getErrorLogDetails(generated.error),
+        hasEmailOtp: false,
+      });
+    } else {
+      logAuthOtpEvent(generatedOtp ? "info" : "warn", "supabase_generate_link_completed", {
+        ...logContext,
+        hasEmailOtp: Boolean(generatedOtp),
+        otpLength: generatedOtp.length || null,
+      });
+    }
+  } catch (generateError) {
+    fallbackSupabaseError =
+      generateError instanceof Error ? generateError.message : "supabase_generate_link_threw";
+    logAuthOtpEvent("error", "supabase_generate_link_threw", {
+      ...logContext,
+      error: getErrorLogDetails(generateError),
+    });
+  }
+
+  if (generatedOtp) {
+    try {
+      const customOtpEmailResult = await sendCustomOtpEmail({
+        email,
+        otp: generatedOtp,
+        logContext,
+        ...(isConfiguredOtpEmailSenderConfig(otpEmailSenderConfig)
+          ? { senderConfig: otpEmailSenderConfig }
+          : {}),
+      });
+      usedCustomOtpEmail = true;
+      resendMessageId = customOtpEmailResult.resendMessageId;
+    } catch (customEmailError) {
+      fallbackSupabaseError =
+        customEmailError instanceof Error ? customEmailError.message : "custom_otp_email_failed";
+      logAuthOtpEvent("error", "custom_otp_delivery_failed", {
+        ...logContext,
+        error: getErrorLogDetails(customEmailError),
+        resendFailureMode,
+      });
+    }
+  } else {
+    fallbackSupabaseError = fallbackSupabaseError ?? "otp_generation_missing_email_otp";
+    logAuthOtpEvent("warn", "custom_otp_delivery_skipped_no_code", {
+      ...logContext,
+      resendFailureMode,
+      reason: fallbackSupabaseError,
+    });
+  }
+
+  if (!usedCustomOtpEmail) {
+    if (resendFailureMode === "strict") {
+      logAuthOtpEvent("error", "strict_mode_blocks_supabase_fallback", {
+        ...logContext,
+        customOtpError: fallbackSupabaseError,
+      });
+
       await recordAuthEvent({
         action: authAuditActionNames.otpFailed,
         metadata: {
           email,
-          message: error.message,
+          request_id: logContext.requestId,
+          stage: "custom_otp_delivery",
+          message: fallbackSupabaseError,
+          custom_otp_error: fallbackSupabaseError,
+          resend_failure_mode: resendFailureMode,
+          fallback_blocked: true,
+        },
+      });
+
+      return res.status(400).json({
+        error: "delivery_failed",
+        message: "Unable to send verification code. Please try again later.",
+      });
+    }
+
+    logAuthOtpEvent("warn", "supabase_fallback_start", {
+      ...logContext,
+      customOtpError: fallbackSupabaseError,
+      resendFailureMode,
+    });
+
+    let fallbackError: { message?: string } | null = null;
+    try {
+      const fallbackResult = await supabasePublic.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: redirectTo,
+          shouldCreateUser: false,
+        },
+      });
+
+      fallbackError = fallbackResult.error;
+    } catch (fallbackThrownError) {
+      fallbackError = {
+        message:
+          fallbackThrownError instanceof Error
+            ? fallbackThrownError.message
+            : "supabase_fallback_threw",
+      };
+      logAuthOtpEvent("error", "supabase_fallback_threw", {
+        ...logContext,
+        error: getErrorLogDetails(fallbackThrownError),
+      });
+    }
+
+    if (fallbackError) {
+      logAuthOtpEvent("error", "supabase_fallback_failed", {
+        ...logContext,
+        error: getErrorLogDetails(fallbackError),
+        customOtpError: fallbackSupabaseError,
+      });
+
+      await recordAuthEvent({
+        action: authAuditActionNames.otpFailed,
+        metadata: {
+          email,
+          request_id: logContext.requestId,
+          message: fallbackError.message,
           stage: "otp_request",
           custom_otp_error: fallbackSupabaseError,
           resend_failure_mode: resendFailureMode,
         },
       });
 
-      if (isSupabaseEmailRateLimitError(error.message)) {
+      if (isSupabaseEmailRateLimitError(fallbackError.message)) {
         return sendAuthEmailRateLimitResponse(
           res,
           "Passwordless sign-in emails are temporarily rate limited. Please use the latest email or try again in about an hour.",
         );
-      }
-
-      // ✅ ENHANCED: Configurable fallback behavior when both custom and Supabase delivery fails
-      if (resendFailureMode === "strict") {
-        return res.status(400).json({
-          error: "delivery_failed",
-          message: "Unable to send verification code. Please try again later.",
-        });
       }
 
       return res.status(200).json({
@@ -982,21 +1364,37 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
         message: "If this email can use passwordless sign-in, a one-time code will arrive shortly.",
       });
     }
+
+    logAuthOtpEvent("warn", "supabase_fallback_succeeded", {
+      ...logContext,
+      customOtpError: fallbackSupabaseError,
+      resendFailureMode,
+    });
   }
 
   await recordAuthEvent({
     action: authAuditActionNames.otpRequested,
     metadata: {
       email,
+      request_id: logContext.requestId,
       return_to: sanitizeReturnTo(returnTo),
       delivery: usedCustomOtpEmail ? "custom_email_otp" : "supabase_fallback",
       custom_otp_error: usedCustomOtpEmail ? null : fallbackSupabaseError,
+      resend_message_id: resendMessageId,
     },
+  });
+
+  logAuthOtpEvent("info", "request_completed", {
+    ...logContext,
+    delivery: usedCustomOtpEmail ? "custom_email_otp" : "supabase_fallback",
+    resendMessageId,
+    otpLength: usedCustomOtpEmail ? generatedOtp.length : null,
   });
 
   return res.status(200).json({
     status: "ok",
     message: "Email code sent",
+    otpLength: usedCustomOtpEmail ? generatedOtp.length : null,
   });
 };
 

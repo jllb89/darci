@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "worker": "ts-node --preferTsExts src/worker/index.ts",
     "worker:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/worker/index.ts",
+    "probe:auth-otp": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/probe-auth-otp.ts",
     "test:smoke:upload": "OTEL_SDK_DISABLED=1 ts-node --preferTsExts scripts/smoke-document-upload.ts",
     "test:smoke:phase4": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase4-notarization.ts",
     "test:smoke:phase5": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase5-meeting.ts",

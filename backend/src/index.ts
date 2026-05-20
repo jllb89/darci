@@ -1,5 +1,6 @@
 import "./instrument";
 import express, { Request, Response, NextFunction } from "express";
+import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import * as Sentry from "@sentry/node";
@@ -33,15 +34,88 @@ const allowedOrigins = [
     : []),
 ];
 
+const getHeaderValue = (value: string | string[] | undefined) => {
+  if (Array.isArray(value)) {
+    return value.find((entry) => entry.trim().length > 0)?.trim() ?? null;
+  }
+
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+};
+
+const getAuthOtpIngressRequestId = (req: Request) => {
+  const requestWithTrace = req as Request & { authOtpRequestId?: string };
+  if (requestWithTrace.authOtpRequestId) {
+    return requestWithTrace.authOtpRequestId;
+  }
+
+  const requestId =
+    getHeaderValue(req.headers["x-request-id"]) ??
+    getHeaderValue(req.headers["x-amzn-trace-id"]) ??
+    randomUUID();
+
+  requestWithTrace.authOtpRequestId = requestId;
+  req.headers["x-request-id"] = requestId;
+  return requestId;
+};
+
+const logAuthOtpIngressEvent = (event: string, metadata: Record<string, unknown>) => {
+  console.info("[auth.email_otp.ingress]", {
+    component: "auth.email_otp.ingress",
+    event,
+    ...metadata,
+  });
+};
+
 app.use(
   cors({
     origin: allowedOrigins,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token",
+      "X-Request-Id",
+      "X-Request-Signature",
+    ],
+    exposedHeaders: ["X-DARCI-Auth-Otp-Logger", "X-DARCI-Auth-Otp-Trace-Id"],
   })
 );
 
 app.use("/webhooks", webhooksRoutes);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path !== "/auth/otp/start") {
+    next();
+    return;
+  }
+
+  const requestId = getAuthOtpIngressRequestId(req);
+  const startedAt = Date.now();
+
+  res.setHeader("X-DARCI-Auth-Otp-Logger", "ingress-v1");
+  res.setHeader("X-DARCI-Auth-Otp-Trace-Id", requestId);
+
+  logAuthOtpIngressEvent("request_seen", {
+    requestId,
+    method: req.method,
+    path: req.originalUrl,
+    origin: getHeaderValue(req.headers.origin),
+    contentType: getHeaderValue(req.headers["content-type"]),
+    contentLength: getHeaderValue(req.headers["content-length"]),
+  });
+
+  res.on("finish", () => {
+    logAuthOtpIngressEvent("response_finished", {
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+
+  next();
+});
 
 app.use(express.json());
 
