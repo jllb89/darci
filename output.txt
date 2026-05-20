@@ -1,0 +1,16 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   127  100    78  100    49     91     57 --:--:-- --:--:-- --:--:--   148100   127  100    78  100    49     91     57 --:--:-- --:--:-- --:--:--   148
+HTTP/2 200 
+date: Wed, 20 May 2026 17:05:52 GMT
+content-type: application/json; charset=utf-8
+content-length: 78
+x-powered-by: Express
+access-control-allow-origin: https://app.staging.darciregistry.dev
+vary: Origin
+access-control-expose-headers: X-DARCI-Auth-Otp-Logger,X-DARCI-Auth-Otp-Trace-Id
+x-darci-auth-otp-logger: ingress-v1
+x-darci-auth-otp-trace-id: Root=1-6a0de9f0-1ed1384047cbb63a3044028c
+etag: W/"4e-i96ku+4UzUissrCIBsOPZq07nfE"
+
+{"status":"ok","message":"Email code sent","otpLength":8,"cooldownSeconds":60}
