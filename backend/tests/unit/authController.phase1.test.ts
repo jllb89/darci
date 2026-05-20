@@ -184,6 +184,7 @@ describe("auth controller Phase 1", () => {
       data: {
         properties: {
           action_link: "https://example.supabase.co/auth/v1/verify?token=recovery-token&type=recovery&redirect_to=https%3A%2F%2Fapp.example.com%2Fauth%2Freset-password",
+          hashed_token: "hashed-recovery-token",
         },
       },
       error: null,
@@ -215,9 +216,14 @@ describe("auth controller Phase 1", () => {
       expect.objectContaining({
         to: "member@example.com",
         subject: "Reset your DARCi password",
-        text: expect.stringContaining("recovery-token"),
+        text: expect.stringContaining(
+          "https://app.example.com/auth/reset-password?returnTo=%2Fapp%2Fsettings&token_hash=hashed-recovery-token&type=recovery",
+        ),
       }),
     );
+    const resendPayload = mocks.resendSendMock.mock.calls[0]?.[0] as { html?: string };
+    expect(resendPayload.html).toContain("/auth/reset-password?returnTo=%2Fapp%2Fsettings&amp;token_hash=hashed-recovery-token&amp;type=recovery");
+    expect(resendPayload.html).not.toContain("example.supabase.co/auth/v1/verify");
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       status: "ok",
@@ -230,6 +236,7 @@ describe("auth controller Phase 1", () => {
       data: {
         properties: {
           action_link: "https://example.supabase.co/auth/v1/verify?token=recovery-token&type=recovery&redirect_to=https%3A%2F%2Fapp.example.com%2Fauth%2Freset-password",
+          hashed_token: "hashed-recovery-token",
         },
       },
       error: null,

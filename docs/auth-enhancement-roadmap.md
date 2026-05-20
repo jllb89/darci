@@ -26,7 +26,7 @@ What exists today:
 What Phase 1 now covers:
 
 - Email confirmation is enforced through Supabase public signup and browser PKCE callback handling.
-- Password recovery/reset is implemented through Supabase recovery links and a DARCi reset normalization endpoint.
+- Password recovery/reset is implemented through Supabase recovery tokens, Resend delivery, and a DARCi reset normalization endpoint.
 
 Remaining major gaps:
 - Magic links and email OTP are implemented. Phone OTP is implemented as Supabase-owned Auth OTP delivered through the Supabase Send SMS Hook and AWS SNS; staging requires Supabase dashboard activation and hook secret configuration before SMS can send.
@@ -43,8 +43,8 @@ This roadmap was refreshed against current Supabase Auth documentation on 2026-0
 - Public self-signup should use Supabase's confirmation flow instead of `auth.admin.createUser({ email_confirm: true })`. When Confirm email is enabled, Supabase `signUp` returns a user with a null session; DARCi should show a confirmation-required state and should not grant normal app access until confirmation completes.
 - Supabase admin `createUser` does not send a confirmation email. It should be reserved for trusted server/admin flows where DARCi intentionally creates or confirms a user, not for public self-signup.
 - Email confirmation, password recovery, magic links, and OAuth redirects should use an explicit callback strategy. If we use PKCE, the browser that starts the flow must be able to exchange the returned code with `exchangeCodeForSession`; a backend-only proxy should not assume it can complete PKCE without preserving the verifier in a secure same-browser context.
-- Password recovery is a two-step flow: `resetPasswordForEmail` sends the recovery email, then the callback establishes a recovery session and `updateUser({ password })` changes the password. DARCi should not create custom recovery-token tables unless Supabase cannot support a required product behavior.
-- Confirmation resend should use Supabase `resend({ type: "signup" })`. Passwordless sign-in resends should call `signInWithOtp` again, and password recovery resends should call `resetPasswordForEmail` again.
+- Password recovery is a two-step flow: Supabase owns recovery token verification, then the reset page establishes a recovery session and `updateUser({ password })` changes the password. DARCi sends recovery emails through Resend without adding custom recovery-token tables.
+- Confirmation resend should use Supabase `resend({ type: "signup" })`. Passwordless sign-in resends should call `signInWithOtp` again, and password recovery resends should generate a recovery token and deliver the DARCi reset link through Resend.
 - Passwordless `signInWithOtp` can create users by default. For invite/login flows where DARCi must not silently create accounts, set `shouldCreateUser: false`.
 - Server-side authorization must be based on verified JWTs or Supabase `getUser`. Supabase `getSession` is not an authorization primitive on the server because it reads session storage rather than validating with Auth.
 - Supabase `signOut()` defaults to global sign-out. For a normal app sign-out button, local sign-out is usually the expected behavior; DARCi should either change the default logout contract to local or expose separate local/global sign-out actions.
@@ -140,7 +140,7 @@ Implemented flows:
 - `login`: validates email/password, calls `supabase.auth.signInWithPassword`, syncs DARCi user identity, returns access and refresh tokens.
 - `signup`: calls Supabase public `auth.signUp` with a confirmation redirect, creates or updates the DARCi profile mirror, and returns a confirmation-required response when Supabase returns no session.
 - `resendConfirmation`: calls Supabase `auth.resend({ type: "signup" })` with the DARCi callback URL.
-- `requestPasswordRecovery`: generates a Supabase recovery link with the DARCi recovery callback URL and sends the reset email through Resend.
+- `requestPasswordRecovery`: generates a Supabase recovery token and sends a direct DARCi reset-page token URL through Resend.
 - `resetPassword`: remains available as a backend normalization endpoint for API clients with a valid Supabase recovery session.
 - `syncSession`: validates a browser Supabase PKCE session with `getUser`, syncs the DARCi profile mirror, and returns DARCi's stored auth shape. Browser recovery pages update the password with Supabase `updateUser({ password })`, then call session sync.
 - `refresh`: calls `supabase.auth.refreshSession`, syncs DARCi identity, returns new tokens.
@@ -320,7 +320,7 @@ Missing coverage:
 | Feature | Current State | Target State |
 | --- | --- | --- |
 | Email confirmation | Implemented with Supabase public signup, resend confirmation, browser PKCE callback, and backend session sync | Add end-to-end staging coverage and delivery observability |
-| Password recovery | Implemented with Supabase recovery links, Resend delivery, browser recovery callback, backend reset normalization, and audit event | Add end-to-end staging coverage and provider delivery tracking |
+| Password recovery | Implemented with Supabase recovery tokens, Resend delivery, browser reset-page verification, backend reset normalization, and audit event | Add end-to-end staging coverage and provider delivery tracking |
 | Password reset while signed in | Missing | Require current password or step-up, then `updateUser({ password })` |
 | Email OTP | Implemented through Supabase browser `signInWithOtp` and `verifyOtp` on `/start` | Add staging E2E coverage and delivery observability |
 | Phone/SMS OTP | Implemented through Supabase Auth phone OTP with DARCi's signed Send SMS Hook to AWS SNS | Activate Supabase dashboard settings, AWS hook secret, SNS spend/compliance, and staging E2E coverage |
@@ -460,7 +460,7 @@ Backend work:
 - Change signup away from `supabaseAdmin.auth.admin.createUser({ email_confirm: true })` for public self-signup.
 - Use Supabase's confirmation flow so confirmation emails are sent.
 - Add `POST /auth/resend-confirmation` if backend-proxied API clients need it; otherwise wire the web flow directly to Supabase `auth.resend`.
-- Add `POST /auth/password/recovery` if backend-proxied API clients need it; otherwise wire the web flow directly to Supabase `resetPasswordForEmail`.
+- Add `POST /auth/password/recovery` if backend-proxied API clients need it; otherwise wire the web flow directly to Supabase recovery-token generation and DARCi email delivery.
 - Add a callback/session exchange path for confirmation and recovery links. For PKCE, use a Supabase browser client so the same browser can exchange the code with `exchangeCodeForSession`.
 - Add `POST /auth/password/reset` only as a backend-owned normalization layer if needed; the Supabase password update itself should happen from a valid recovery session using `updateUser({ password })`.
 - Sync confirmation state into `public.users` if we add mirror columns.

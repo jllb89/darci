@@ -384,6 +384,17 @@ const buildPasswordRecoveryRedirectUrl = (
   return redirectUrl.toString();
 };
 
+const buildPasswordRecoveryResetUrl = (
+  req: Request,
+  input: { returnTo?: string | null; tokenHash: string },
+) => {
+  const resetUrl = new URL("/auth/reset-password", getWebBaseUrl(req));
+  resetUrl.searchParams.set("returnTo", sanitizeReturnTo(input.returnTo));
+  resetUrl.searchParams.set("token_hash", input.tokenHash);
+  resetUrl.searchParams.set("type", "recovery");
+  return resetUrl.toString();
+};
+
 const createSupabaseSessionClient = () => {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
@@ -1284,13 +1295,20 @@ export const requestPasswordRecovery = async (req: Request, res: Response) => {
 
   const generatedProperties = generated.data.properties as unknown;
   const properties: Record<string, unknown> = isRecord(generatedProperties) ? generatedProperties : {};
-  const resetUrl = typeof properties.action_link === "string" ? properties.action_link : "";
+  const tokenHash = typeof properties.hashed_token === "string" ? properties.hashed_token : "";
+  const actionLink = typeof properties.action_link === "string" ? properties.action_link : "";
+  const resetUrl = tokenHash
+    ? buildPasswordRecoveryResetUrl(req, { returnTo: returnTo ?? null, tokenHash })
+    : "";
 
   if (generated.error || !resetUrl) {
-    const message = generated.error?.message ?? "Missing password recovery action link";
+    const message = generated.error?.message ?? "Missing password recovery token hash";
     logPasswordRecoveryEvent("error", "supabase_generate_link_failed", {
       ...logContext,
       error: generated.error ? getErrorLogDetails(generated.error) : { message },
+      propertyKeys: Object.keys(properties).sort(),
+      hasActionLink: Boolean(actionLink),
+      hasTokenHash: Boolean(tokenHash),
       hasResetUrl: Boolean(resetUrl),
     });
 
@@ -1315,7 +1333,11 @@ export const requestPasswordRecovery = async (req: Request, res: Response) => {
   logPasswordRecoveryEvent("info", "supabase_generate_link_completed", {
     ...logContext,
     hasResetUrl: true,
+    hasActionLink: Boolean(actionLink),
+    hasTokenHash: true,
+    resetUrlMode: "token_hash",
     resetHost: new URL(resetUrl).host,
+    resetPath: new URL(resetUrl).pathname,
   });
 
   let resendMessageId: string | null = null;
