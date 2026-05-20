@@ -25,7 +25,7 @@ const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseAnonKey =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const defaultAuthEmailSendCooldownSeconds = 5 * 60;
+const defaultAuthEmailSendCooldownSeconds = 60;
 const configuredAuthEmailSendCooldownSeconds = Number(
   process.env.AUTH_EMAIL_SEND_COOLDOWN_SECONDS,
 );
@@ -249,6 +249,30 @@ const logAuthOtpEvent = (
   console.info("[auth.email_otp]", payload);
 };
 
+const logPasswordRecoveryEvent = (
+  level: "info" | "warn" | "error",
+  event: string,
+  metadata: Record<string, unknown>,
+) => {
+  const payload = {
+    component: "auth.password_recovery",
+    event,
+    ...metadata,
+  };
+
+  if (level === "error") {
+    console.error("[auth.password_recovery]", payload);
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn("[auth.password_recovery]", payload);
+    return;
+  }
+
+  console.info("[auth.password_recovery]", payload);
+};
+
 const passwordlessEmailActions = [
   authAuditActionNames.magicLinkRequested,
   authAuditActionNames.otpRequested,
@@ -350,6 +374,16 @@ const buildAuthActionRedirectUrl = (
   return redirectUrl.toString();
 };
 
+const buildPasswordRecoveryRedirectUrl = (
+  req: Request,
+  input: { returnTo?: string | null },
+) => {
+  const redirectUrl = new URL("/auth/callback", getWebBaseUrl(req));
+  redirectUrl.searchParams.set("intent", "recovery");
+  redirectUrl.searchParams.set("returnTo", sanitizeReturnTo(input.returnTo));
+  return redirectUrl.toString();
+};
+
 const createSupabaseSessionClient = () => {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
@@ -432,6 +466,147 @@ const getOtpEmailSubject = () => {
   return process.env.AUTH_OTP_EMAIL_SUBJECT?.trim() || "Your DARCi verification code";
 };
 
+const getPasswordRecoveryEmailSubject = () => {
+  return process.env.AUTH_PASSWORD_RESET_EMAIL_SUBJECT?.trim() || "Reset your DARCi password";
+};
+
+const escapeEmailHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const getAuthEmailLogoUrl = () => {
+  const baseUrl = (
+    process.env.WEB_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim() ||
+    process.env.APP_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    "https://app.staging.darciregistry.dev"
+  ).replace(/\/+$/, "");
+
+  return `${baseUrl}/icons/navbar/darci_white.svg`;
+};
+
+const renderOtpEmailHtml = (otp: string) => {
+  const escapedOtp = escapeEmailHtml(otp);
+  const logoUrl = getAuthEmailLogoUrl();
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+  <body style="margin:0;padding:0;background:#f2f2f2;font-family:Arial,'Helvetica Neue',sans-serif;font-weight:500;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+      <tr>
+        <td align="center">
+          <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #d8d8d8;max-width:640px;width:100%;">
+            <tr>
+              <td style="padding:28px 34px;background:#000000;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td align="left">
+                      <img src="${logoUrl}" width="91" height="20" alt="DARCi" style="display:block;border:0;outline:none;text-decoration:none;width:91px;height:auto;color:#ffffff;font-size:16px;line-height:20px;" />
+                    </td>
+                    <td align="right" style="font-size:12px;line-height:16px;color:#ffffff;font-weight:500;">
+                      Verification code
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:34px;color:#191919;font-size:14px;line-height:1.65;font-weight:500;">
+                <p style="margin:0 0 18px;">Use this DARCi verification code to sign in.</p>
+                <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border:1px solid #d8d8d8;background:#f7f7f7;">
+                  <tr>
+                    <td style="padding:18px 20px;">
+                      <div style="text-align:center;font-size:32px;line-height:40px;letter-spacing:8px;font-weight:700;color:#191919;font-family:Arial,'Helvetica Neue',sans-serif;-webkit-user-select:all;user-select:all;">
+                        ${escapedOtp}
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0;color:#555555;">This code expires shortly. If you did not request it, you can ignore this email.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f2f2f2;padding:22px 34px;border-top:1px solid #d8d8d8;">
+                <p style="margin:0;color:#7f7f7f;font-size:12px;line-height:18px;font-weight:500;">
+                  DARCi authentication<br/>
+                  Questions? Contact <a href="mailto:support@darciregistry.com" style="color:#191919;text-decoration:underline;">support@darciregistry.com</a>.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`.trim();
+};
+
+const renderPasswordRecoveryEmailHtml = (resetUrl: string) => {
+  const escapedResetUrl = escapeEmailHtml(resetUrl);
+  const logoUrl = getAuthEmailLogoUrl();
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+  <body style="margin:0;padding:0;background:#f2f2f2;font-family:Arial,'Helvetica Neue',sans-serif;font-weight:500;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+      <tr>
+        <td align="center">
+          <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #d8d8d8;max-width:640px;width:100%;">
+            <tr>
+              <td style="padding:28px 34px;background:#000000;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td align="left">
+                      <img src="${logoUrl}" width="91" height="20" alt="DARCi" style="display:block;border:0;outline:none;text-decoration:none;width:91px;height:auto;color:#ffffff;font-size:16px;line-height:20px;" />
+                    </td>
+                    <td align="right" style="font-size:12px;line-height:16px;color:#ffffff;font-weight:500;">
+                      Password reset
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:34px;color:#191919;font-size:14px;line-height:1.65;font-weight:500;">
+                <p style="margin:0 0 18px;">Use this secure link to set a new DARCi password.</p>
+                <p style="margin:0 0 20px;">
+                  <a href="${escapedResetUrl}" style="display:inline-block;margin:6px 0 8px;padding:13px 18px;background:#0aff4a;color:#191919 !important;text-decoration:none;font-weight:500;border:0;">Reset password</a>
+                </p>
+                <p style="margin:0;color:#555555;">This link expires shortly. If you did not request it, you can ignore this email.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f2f2f2;padding:22px 34px;border-top:1px solid #d8d8d8;">
+                <p style="margin:0;color:#7f7f7f;font-size:12px;line-height:18px;font-weight:500;">
+                  DARCi authentication<br/>
+                  Questions? Contact <a href="mailto:support@darciregistry.com" style="color:#191919;text-decoration:underline;">support@darciregistry.com</a>.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`.trim();
+};
+
 const sendCustomOtpEmail = async (input: {
   email: string;
   otp: string;
@@ -447,13 +622,7 @@ const sendCustomOtpEmail = async (input: {
   const subject = getOtpEmailSubject();
   const senderConfig = input.senderConfig ?? requireOtpEmailSenderConfig();
   const from = senderConfig.from;
-  const html = `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#111111;line-height:1.5;">
-      <p style="margin:0 0 12px;">Use this DARCi verification code to sign in:</p>
-      <p style="margin:0 0 16px;font-size:32px;letter-spacing:8px;font-weight:700;">${input.otp}</p>
-      <p style="margin:0;color:#555555;">This code expires shortly. If you did not request this, you can ignore this email.</p>
-    </div>
-  `;
+  const html = renderOtpEmailHtml(input.otp);
   const text = `Your DARCi verification code is ${input.otp}. This code expires shortly.`;
 
   logAuthOtpEvent("info", "resend_send_start", {
@@ -488,6 +657,64 @@ const sendCustomOtpEmail = async (input: {
   }
 
   logAuthOtpEvent("info", "resend_send_succeeded", {
+    ...input.logContext,
+    resendMessageId: messageId,
+  });
+
+  return { resendMessageId: messageId };
+};
+
+const sendPasswordRecoveryEmail = async (input: {
+  email: string;
+  resetUrl: string;
+  logContext: AuthOtpLogContext;
+  senderConfig?: ConfiguredOtpEmailSenderConfig;
+}) => {
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (!resendApiKey) {
+    throw new Error("RESEND_API_KEY is not configured");
+  }
+
+  const resend = new Resend(resendApiKey);
+  const subject = getPasswordRecoveryEmailSubject();
+  const senderConfig = input.senderConfig ?? requireOtpEmailSenderConfig();
+  const from = senderConfig.from;
+  const html = renderPasswordRecoveryEmailHtml(input.resetUrl);
+  const text = `Reset your DARCi password: ${input.resetUrl}`;
+
+  logPasswordRecoveryEvent("info", "resend_send_start", {
+    ...input.logContext,
+    from,
+    fromSource: senderConfig.source,
+    fromDomain: senderConfig.senderDomain,
+    subject,
+    toDomain: input.email.split("@")[1] ?? null,
+    resetHost: new URL(input.resetUrl).host,
+    htmlLength: html.length,
+    textLength: text.length,
+  });
+
+  const result = await resend.emails.send({
+    from,
+    to: input.email,
+    subject,
+    html,
+    text,
+  });
+
+  const error = result.error;
+  const data = result.data;
+  const messageId = isRecord(data) && typeof data.id === "string" ? data.id : null;
+
+  if (error) {
+    logPasswordRecoveryEvent("error", "resend_send_failed", {
+      ...input.logContext,
+      error: getErrorLogDetails(error),
+    });
+    throw new Error(error.message || "Failed to send password reset email");
+  }
+
+  logPasswordRecoveryEvent("info", "resend_send_succeeded", {
     ...input.logContext,
     resendMessageId: messageId,
   });
@@ -937,60 +1164,201 @@ export const resendConfirmation = async (req: Request, res: Response) => {
 };
 
 export const requestPasswordRecovery = async (req: Request, res: Response) => {
+  const requestLogContext = buildAuthOtpLogContext(req);
+  logPasswordRecoveryEvent("info", "request_received", {
+    ...requestLogContext,
+    method: req.method,
+    path: req.originalUrl ?? req.path,
+    bodyKeys: isRecord(req.body) ? Object.keys(req.body).sort() : [],
+  });
+
   if (!ensureConfigured(res)) {
+    logPasswordRecoveryEvent("error", "request_rejected_missing_supabase_config", {
+      ...requestLogContext,
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      hasSupabaseAnonKey: Boolean(supabaseAnonKey),
+      hasSupabaseServiceRoleKey: Boolean(supabaseServiceRoleKey),
+    });
     return;
+  }
+
+  if (!validateOrigin(req)) {
+    logPasswordRecoveryEvent("warn", "request_rejected_invalid_origin", {
+      ...requestLogContext,
+      allowedOrigins: getAllowedAuthOrigins(),
+    });
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request origin",
+    });
+  }
+
+  if (!validateCsrfToken(req)) {
+    logPasswordRecoveryEvent("warn", "request_rejected_invalid_csrf", requestLogContext);
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid CSRF token",
+    });
+  }
+
+  if (!validateRequestSignature(req)) {
+    logPasswordRecoveryEvent("warn", "request_rejected_invalid_signature", {
+      ...requestLogContext,
+      hasSignatureHeader: Boolean(req.headers["x-request-signature"]),
+      signatureSecretConfigured: Boolean(process.env.AUTH_REQUEST_SIGNATURE_SECRET),
+    });
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Invalid request signature",
+    });
   }
 
   const parsed = emailActionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
+    logPasswordRecoveryEvent("warn", "request_rejected_validation_error", {
+      ...requestLogContext,
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        code: issue.code,
+        message: issue.message,
+      })),
+    });
     return sendValidationError(res, parsed.error);
   }
 
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
-
-  // ✅ CRITICAL: Rate limit check BEFORE OTP generation to prevent brute-force OTP generation
-  const recentSend = await findRecentAuthEmailSend({
-    actions: [authAuditActionNames.passwordRecoveryRequested],
-    email,
+  const logContext = buildAuthOtpLogContext(req, { email, returnTo: returnTo ?? null });
+  const senderConfig = getOtpEmailSenderConfig();
+  const redirectTo = buildPasswordRecoveryRedirectUrl(req, {
+    returnTo: returnTo ?? null,
   });
 
-  if (recentSend) {
-    return sendRecentAuthEmailResponse(
-      res,
-      "Password recovery email already requested recently. Please use the latest email before requesting another.",
-    );
-  }
-
-  const { error } = await supabasePublic.auth.resetPasswordForEmail(email, {
-    redirectTo: buildAuthActionRedirectUrl(req, {
-      intent: "recovery",
-      returnTo: returnTo ?? null,
-    }),
+  logPasswordRecoveryEvent("info", "request_validated", {
+    ...logContext,
+    resendApiKeyConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
+    fromAddressConfigured: senderConfig.configured,
+    fromAddress: senderConfig.from,
+    fromAddressSource: senderConfig.source,
+    fromDomain: senderConfig.senderDomain,
+    redirectHost: new URL(redirectTo).host,
+    redirectPath: new URL(redirectTo).pathname,
   });
 
-  if (error) {
-    await recordAuthEvent({
-      action: authAuditActionNames.reauthenticationFailed,
-      metadata: { email, message: error.message, stage: "password_recovery" },
+  if (!isConfiguredOtpEmailSenderConfig(senderConfig)) {
+    const message =
+      "AUTH_OTP_FROM_ADDRESS, RESEND_FROM_ADDRESS, or NOTIFICATION_FROM_ADDRESS must be configured with a verified Resend sender";
+    logPasswordRecoveryEvent("error", "request_rejected_missing_sender_config", {
+      ...logContext,
+      message,
     });
 
-    if (isSupabaseEmailRateLimitError(error.message)) {
+    await recordAuthEvent({
+      action: authAuditActionNames.reauthenticationFailed,
+      metadata: {
+        email,
+        request_id: logContext.requestId,
+        stage: "password_recovery_sender_config",
+        message,
+      },
+    });
+
+    return res.status(400).json({
+      error: "delivery_failed",
+      message: "Unable to send password reset email. Please try again later.",
+    });
+  }
+
+  logPasswordRecoveryEvent("info", "supabase_generate_link_start", {
+    ...logContext,
+    linkType: "recovery",
+  });
+
+  const generated = await supabaseAdmin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: {
+      redirectTo,
+    },
+  });
+
+  const generatedProperties = generated.data.properties as unknown;
+  const properties: Record<string, unknown> = isRecord(generatedProperties) ? generatedProperties : {};
+  const resetUrl = typeof properties.action_link === "string" ? properties.action_link : "";
+
+  if (generated.error || !resetUrl) {
+    const message = generated.error?.message ?? "Missing password recovery action link";
+    logPasswordRecoveryEvent("error", "supabase_generate_link_failed", {
+      ...logContext,
+      error: generated.error ? getErrorLogDetails(generated.error) : { message },
+      hasResetUrl: Boolean(resetUrl),
+    });
+
+    await recordAuthEvent({
+      action: authAuditActionNames.reauthenticationFailed,
+      metadata: { email, request_id: logContext.requestId, message, stage: "password_recovery_link" },
+    });
+
+    if (isSupabaseEmailRateLimitError(message)) {
       return sendAuthEmailRateLimitResponse(
         res,
-        "Password recovery email sends are temporarily rate limited. Please use the latest email or try again shortly.",
+        "Password recovery links are temporarily rate limited. Please use the latest email or try again shortly.",
       );
     }
 
     return res.status(400).json({
       error: "validation_error",
-      message: error.message,
+      message,
+    });
+  }
+
+  logPasswordRecoveryEvent("info", "supabase_generate_link_completed", {
+    ...logContext,
+    hasResetUrl: true,
+    resetHost: new URL(resetUrl).host,
+  });
+
+  let resendMessageId: string | null = null;
+  try {
+    const emailResult = await sendPasswordRecoveryEmail({
+      email,
+      resetUrl,
+      logContext,
+      senderConfig,
+    });
+    resendMessageId = emailResult.resendMessageId;
+  } catch (deliveryError) {
+    const message = deliveryError instanceof Error ? deliveryError.message : "password_recovery_email_failed";
+    logPasswordRecoveryEvent("error", "custom_delivery_failed", {
+      ...logContext,
+      error: getErrorLogDetails(deliveryError),
+    });
+
+    await recordAuthEvent({
+      action: authAuditActionNames.reauthenticationFailed,
+      metadata: {
+        email,
+        request_id: logContext.requestId,
+        message,
+        stage: "password_recovery_delivery",
+      },
+    });
+
+    return res.status(400).json({
+      error: "delivery_failed",
+      message: "Unable to send password reset email. Please try again later.",
     });
   }
 
   await recordAuthEvent({
     action: authAuditActionNames.passwordRecoveryRequested,
-    metadata: { email },
+    metadata: { email, request_id: logContext.requestId, delivery: "custom_password_recovery", resend_message_id: resendMessageId },
+  });
+
+  logPasswordRecoveryEvent("info", "request_completed", {
+    ...logContext,
+    delivery: "custom_password_recovery",
+    resendMessageId,
   });
 
   return res.status(200).json({
@@ -1395,6 +1763,7 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
     status: "ok",
     message: "Email code sent",
     otpLength: usedCustomOtpEmail ? generatedOtp.length : null,
+    cooldownSeconds: authEmailSendCooldownSeconds,
   });
 };
 

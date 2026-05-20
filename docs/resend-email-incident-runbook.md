@@ -16,7 +16,7 @@ This runbook covers email notifications sent through the persisted outbox pipeli
 4. `POST /webhooks/resend`
 5. Admin notification job and metrics endpoints
 
-It does not cover SMS, in-app notifications, template copy approval, or Resend account billing issues except when they block email delivery. Passwordless auth OTP uses a separate backend path, but this runbook includes the local auth OTP probe because it is a Resend send-side diagnostic.
+It does not cover SMS, in-app notifications, template copy approval, or Resend account billing issues except when they block email delivery. Passwordless auth OTP and password recovery use separate backend auth paths, but this runbook includes the local auth OTP probe because it is a Resend send-side diagnostic.
 
 ## Local Passwordless OTP Probe
 
@@ -54,7 +54,11 @@ Auth OTP sender config is required. Set one of these runtime variables to a send
 2. `RESEND_FROM_ADDRESS`
 3. `NOTIFICATION_FROM_ADDRESS`
 
-Prefer `AUTH_OTP_FROM_ADDRESS` for passwordless login so auth delivery can be changed without changing notification senders. If Resend returns `The <domain> domain is not verified`, fix the Resend domain verification or change the sender to a verified domain. Do not rely on Supabase fallback to hide this failure.
+Prefer `AUTH_OTP_FROM_ADDRESS=DARCi <no-reply@darciregistry.com>` for passwordless login so auth delivery can be changed without changing notification senders. Set `AUTH_EMAIL_SEND_COOLDOWN_SECONDS=60` when the UI should show a 60-second resend timer. If Resend returns `The <domain> domain is not verified`, fix the Resend domain verification or change the sender to a verified domain. Do not rely on Supabase fallback to hide this failure.
+
+Password reset emails are separate from OTP resend cooldown. The backend generates recovery links with the Supabase admin API and sends them through Resend, so reset-link delivery does not call Supabase's email sender after an OTP request. Supabase Auth redirect URLs must include the deployed callback page, for example `https://app.staging.darciregistry.dev/auth/callback`; the callback recognizes recovery sessions and routes users to `/auth/reset-password`.
+
+Password recovery logs use the `[auth.password_recovery]` prefix. Look for `request_received`, `request_validated`, `supabase_generate_link_start`, `supabase_generate_link_completed`, `resend_send_start`, `resend_send_succeeded`, and `request_completed`. Failures log the same request id with `request_rejected_*`, `supabase_generate_link_failed`, or `custom_delivery_failed`.
 
 Local browser flow:
 
@@ -67,6 +71,8 @@ npm run start:staging
 cd apps/web
 npm run dev:local-api
 ```
+
+`npm run dev` also points the web app at `http://localhost:4000`. Use the staging deploy workflow for staging, where `STAGING_NEXT_PUBLIC_API_BASE_URL` is baked into the web image as `NEXT_PUBLIC_API_BASE_URL`.
 
 Open `http://localhost:3000/start`. The web app is forced to call `http://localhost:4000` by `dev:local-api`, avoiding hosted staging while testing the auth UI.
 

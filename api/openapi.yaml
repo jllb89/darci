@@ -269,7 +269,7 @@ paths:
   /auth/password/recovery:
     post:
       summary: Request password recovery
-      description: Sends a Supabase password-recovery email with the configured DARCi callback URL.
+      description: Generates a Supabase recovery link and sends a DARCi password-reset email through Resend with the configured DARCi callback URL.
       security: []
       requestBody:
         required: true

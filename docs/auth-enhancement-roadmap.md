@@ -140,7 +140,7 @@ Implemented flows:
 - `login`: validates email/password, calls `supabase.auth.signInWithPassword`, syncs DARCi user identity, returns access and refresh tokens.
 - `signup`: calls Supabase public `auth.signUp` with a confirmation redirect, creates or updates the DARCi profile mirror, and returns a confirmation-required response when Supabase returns no session.
 - `resendConfirmation`: calls Supabase `auth.resend({ type: "signup" })` with the DARCi callback URL.
-- `requestPasswordRecovery`: calls Supabase `resetPasswordForEmail` with the DARCi recovery callback URL.
+- `requestPasswordRecovery`: generates a Supabase recovery link with the DARCi recovery callback URL and sends the reset email through Resend.
 - `resetPassword`: remains available as a backend normalization endpoint for API clients with a valid Supabase recovery session.
 - `syncSession`: validates a browser Supabase PKCE session with `getUser`, syncs the DARCi profile mirror, and returns DARCi's stored auth shape. Browser recovery pages update the password with Supabase `updateUser({ password })`, then call session sync.
 - `refresh`: calls `supabase.auth.refreshSession`, syncs DARCi identity, returns new tokens.
@@ -320,7 +320,7 @@ Missing coverage:
 | Feature | Current State | Target State |
 | --- | --- | --- |
 | Email confirmation | Implemented with Supabase public signup, resend confirmation, browser PKCE callback, and backend session sync | Add end-to-end staging coverage and delivery observability |
-| Password recovery | Implemented with Supabase recovery email, browser recovery callback, backend reset normalization, and audit event | Add end-to-end staging coverage and provider delivery tracking |
+| Password recovery | Implemented with Supabase recovery links, Resend delivery, browser recovery callback, backend reset normalization, and audit event | Add end-to-end staging coverage and provider delivery tracking |
 | Password reset while signed in | Missing | Require current password or step-up, then `updateUser({ password })` |
 | Email OTP | Implemented through Supabase browser `signInWithOtp` and `verifyOtp` on `/start` | Add staging E2E coverage and delivery observability |
 | Phone/SMS OTP | Implemented through Supabase Auth phone OTP with DARCi's signed Send SMS Hook to AWS SNS | Activate Supabase dashboard settings, AWS hook secret, SNS spend/compliance, and staging E2E coverage |

@@ -29,6 +29,15 @@ const getRecoveryHashSession = () => {
   return { accessToken, refreshToken };
 };
 
+const getRecoveryHashError = () => {
+  if (typeof window === "undefined" || !window.location.hash) {
+    return null;
+  }
+
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return hashParams.get("error_description") ?? hashParams.get("error");
+};
+
 function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -45,6 +54,13 @@ function ResetPasswordContent() {
     const loadSession = async () => {
       try {
         const supabase = getSupabaseBrowserClient();
+        const searchError = searchParams.get("error_description") ?? searchParams.get("error");
+        const hashError = getRecoveryHashError();
+
+        if (searchError || hashError) {
+          throw new Error(searchError ?? hashError ?? "Password reset unavailable");
+        }
+
         const recoveryHashSession = getRecoveryHashSession();
 
         if (recoveryHashSession) {
@@ -62,6 +78,37 @@ function ResetPasswordContent() {
             document.title,
             `${window.location.pathname}${window.location.search}`,
           );
+        } else {
+          const code = searchParams.get("code");
+          const tokenHash = searchParams.get("token_hash");
+
+          if (code) {
+            const { error } = await supabase.auth.exchangeCodeForSession(code);
+            if (error) {
+              throw error;
+            }
+
+            window.history.replaceState(
+              null,
+              document.title,
+              `${window.location.pathname}?returnTo=${encodeURIComponent(returnTo)}`,
+            );
+          } else if (tokenHash) {
+            const { error } = await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type: "recovery",
+            });
+
+            if (error) {
+              throw error;
+            }
+
+            window.history.replaceState(
+              null,
+              document.title,
+              `${window.location.pathname}?returnTo=${encodeURIComponent(returnTo)}`,
+            );
+          }
         }
 
         const { data, error } = await supabase.auth.getSession();
@@ -70,7 +117,7 @@ function ResetPasswordContent() {
         }
 
         if (!data.session?.access_token || !data.session.refresh_token) {
-          throw new Error("Password reset session expired");
+          throw new Error("Password reset link expired. Request a new reset link.");
         }
 
         setAccessToken(data.session.access_token);

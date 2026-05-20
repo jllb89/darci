@@ -27,12 +27,15 @@ type AuthStep = "identifier" | "otp" | "password";
 type OtpStartResponsePayload = {
   message?: string;
   otpLength?: number | null;
+  cooldownSeconds?: number | null;
   details?: Array<{ message?: string }>;
 };
 
 const DEFAULT_OTP_LENGTH = 6;
 const MIN_OTP_LENGTH = 4;
 const MAX_OTP_LENGTH = 12;
+const DEFAULT_RESEND_COOLDOWN_SECONDS = 60;
+const MAX_RESEND_COOLDOWN_SECONDS = 10 * 60;
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -45,6 +48,18 @@ const normalizeOtpLength = (value: unknown) => {
 
   if (value < MIN_OTP_LENGTH || value > MAX_OTP_LENGTH) {
     return DEFAULT_OTP_LENGTH;
+  }
+
+  return value;
+};
+
+const normalizeResendCooldownSeconds = (value: unknown) => {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return DEFAULT_RESEND_COOLDOWN_SECONDS;
+  }
+
+  if (value < 0 || value > MAX_RESEND_COOLDOWN_SECONDS) {
+    return DEFAULT_RESEND_COOLDOWN_SECONDS;
   }
 
   return value;
@@ -89,6 +104,7 @@ function StartAuthPageContent() {
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRecoverySubmitting, setIsRecoverySubmitting] = useState(false);
+  const [resendCountdownSeconds, setResendCountdownSeconds] = useState(0);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   const otpCode = useMemo(() => otpDigits.join(""), [otpDigits]);
@@ -117,13 +133,9 @@ function StartAuthPageContent() {
     setNoticeMessage(null);
   };
 
-  const startOtpChallenge = async () => {
-    const nextChallenge = resolveIdentifier(identifier);
-    if (!nextChallenge) {
-      throw new Error("Enter a valid email address or phone number.");
-    }
-
+  const requestOtpForChallenge = async (nextChallenge: IdentifierChallenge) => {
     let nextOtpLength = DEFAULT_OTP_LENGTH;
+    let nextCooldownSeconds = DEFAULT_RESEND_COOLDOWN_SECONDS;
 
     if (nextChallenge.kind === "email") {
       const response = await fetch(`${apiBaseUrl}/auth/otp/start`, {
@@ -145,6 +157,7 @@ function StartAuthPageContent() {
       }
 
       nextOtpLength = normalizeOtpLength(payload?.otpLength);
+      nextCooldownSeconds = normalizeResendCooldownSeconds(payload?.cooldownSeconds);
       setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     } else {
       // ✅ FIXED: Phone OTP now uses backend endpoint (server-side like email OTP)
@@ -167,8 +180,21 @@ function StartAuthPageContent() {
       }
 
       nextOtpLength = normalizeOtpLength(payload?.otpLength);
+      nextCooldownSeconds = normalizeResendCooldownSeconds(payload?.cooldownSeconds);
       setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     }
+
+    setResendCountdownSeconds(nextCooldownSeconds);
+    return nextOtpLength;
+  };
+
+  const startOtpChallenge = async () => {
+    const nextChallenge = resolveIdentifier(identifier);
+    if (!nextChallenge) {
+      throw new Error("Enter a valid email address or phone number.");
+    }
+
+    const nextOtpLength = await requestOtpForChallenge(nextChallenge);
 
     setChallenge(nextChallenge);
     setOtpDigits(Array.from({ length: nextOtpLength }, () => ""));
@@ -177,6 +203,27 @@ function StartAuthPageContent() {
     requestAnimationFrame(() => {
       otpInputRefs.current[0]?.focus();
     });
+  };
+
+  const requestAnotherCode = async () => {
+    if (!challenge || resendCountdownSeconds > 0 || isSubmitting) {
+      return;
+    }
+
+    resetMessages();
+    setIsSubmitting(true);
+
+    try {
+      const nextOtpLength = await requestOtpForChallenge(challenge);
+      setOtpDigits(Array.from({ length: nextOtpLength }, () => ""));
+      requestAnimationFrame(() => {
+        otpInputRefs.current[0]?.focus();
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Request failed");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const verifyOtpChallenge = async () => {
@@ -322,6 +369,18 @@ function StartAuthPageContent() {
     event.preventDefault();
     updateOtpDigitsFromInput(pastedDigits, index);
   };
+
+  useEffect(() => {
+    if (authStep !== "otp" || resendCountdownSeconds <= 0) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setResendCountdownSeconds((currentSeconds) => Math.max(currentSeconds - 1, 0));
+    }, 1000);
+
+    return () => window.clearTimeout(timerId);
+  }, [authStep, resendCountdownSeconds]);
 
   useEffect(() => {
     if (authStep !== "otp" || isSubmitting) {
@@ -479,8 +538,15 @@ function StartAuthPageContent() {
     setAuthStep("identifier");
     setChallenge(null);
     setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
+    setResendCountdownSeconds(0);
     setPassword("");
   };
+
+  const supportingCopy = authStep === "otp" && challenge
+    ? `Verification code sent to ${challenge.displayValue}`
+    : returnTo.startsWith("/app/invite")
+      ? "Sign in to continue to the document signature."
+      : "Sign in to continue your workspace.";
 
   const submitLabel = isSubmitting
     ? authStep === "identifier"
@@ -519,14 +585,23 @@ function StartAuthPageContent() {
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-2">
           <section className="relative flex min-h-0 items-center justify-center bg-white px-8 pb-10 pt-24 md:px-12 md:pb-16 md:pt-28">
             <div className="w-full max-w-md">
+              {authStep !== "identifier" ? (
+                <button
+                  type="button"
+                  className="mb-8 text-xs font-medium text-Color-Neutral underline underline-offset-4 disabled:opacity-50"
+                  onClick={useDifferentIdentifier}
+                  disabled={isSubmitting}
+                >
+                  go back
+                </button>
+              ) : null}
+
               <div>
                 <h1 className="font-display text-4xl font-medium md:text-5xl">
                   Access DARCi
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-Color-Neutral">
-                  {returnTo.startsWith("/app/invite")
-                    ? "Sign in to continue to the document signature."
-                    : "Sign in to continue your workspace."}
+                  {supportingCopy}
                 </p>
               </div>
 
@@ -551,7 +626,7 @@ function StartAuthPageContent() {
                 {authStep === "otp" && challenge ? (
                   <div>
                     <label className="mb-2 block text-sm font-medium">Code</label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full items-center justify-between gap-2">
                       {otpDigits.map((digit, index) => (
                         <input
                           key={`otp-digit-${index}`}
@@ -559,7 +634,7 @@ function StartAuthPageContent() {
                             otpInputRefs.current[index] = element;
                           }}
                           autoComplete={index === 0 ? "one-time-code" : "off"}
-                          className="h-12 w-10 border border-Color-Scheme-1-Border text-center text-lg outline-none transition focus:border-Color-Scheme-1-Text md:h-14 md:w-11"
+                          className="h-12 min-w-0 flex-1 border border-Color-Scheme-1-Border text-center text-lg outline-none transition focus:border-Color-Scheme-1-Text md:h-14"
                           inputMode="numeric"
                           pattern="[0-9]*"
                           type="text"
@@ -573,6 +648,16 @@ function StartAuthPageContent() {
                         />
                       ))}
                     </div>
+                    <button
+                      type="button"
+                      className="mt-3 text-xs text-Color-Neutral underline underline-offset-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
+                      onClick={requestAnotherCode}
+                      disabled={isSubmitting || resendCountdownSeconds > 0}
+                    >
+                      {resendCountdownSeconds > 0
+                        ? `Request another code in... ${resendCountdownSeconds} seconds`
+                        : "Request another code"}
+                    </button>
                   </div>
                 ) : null}
 
@@ -651,17 +736,6 @@ function StartAuthPageContent() {
                       disabled={isSubmitting}
                     >
                       Use code instead
-                    </button>
-                  ) : null}
-
-                  {authStep !== "identifier" ? (
-                    <button
-                      type="button"
-                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm font-medium"
-                      onClick={useDifferentIdentifier}
-                      disabled={isSubmitting}
-                    >
-                      Use different email or phone
                     </button>
                   ) : null}
 

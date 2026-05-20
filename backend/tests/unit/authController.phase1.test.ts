@@ -179,11 +179,18 @@ describe("auth controller Phase 1", () => {
     });
   });
 
-  it("requests Supabase password recovery with the recovery callback", async () => {
-    const resetPasswordForEmailMock = vi.fn().mockResolvedValue({ error: null });
-    mocks.createClientMock.mockReturnValue({
-      auth: { resetPasswordForEmail: resetPasswordForEmailMock },
+  it("requests password recovery with a custom Resend email", async () => {
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          action_link: "https://example.supabase.co/auth/v1/verify?token=recovery-token&type=recovery&redirect_to=https%3A%2F%2Fapp.example.com%2Fauth%2Freset-password",
+        },
+      },
+      error: null,
     });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: {} })
+      .mockReturnValueOnce({ auth: { admin: { generateLink: generateLinkMock } } });
 
     const { requestPasswordRecovery } = await import(
       "../../src/controllers/authController.ts"
@@ -196,10 +203,21 @@ describe("auth controller Phase 1", () => {
 
     await requestPasswordRecovery(req, res);
 
-    expect(resetPasswordForEmailMock).toHaveBeenCalledWith("member@example.com", {
-      redirectTo:
-        "https://app.example.com/auth/callback?intent=recovery&returnTo=%2Fapp%2Fsettings",
+    expect(generateLinkMock).toHaveBeenCalledWith({
+      type: "recovery",
+      email: "member@example.com",
+      options: {
+        redirectTo:
+          "https://app.example.com/auth/callback?intent=recovery&returnTo=%2Fapp%2Fsettings",
+      },
     });
+    expect(mocks.resendSendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "member@example.com",
+        subject: "Reset your DARCi password",
+        text: expect.stringContaining("recovery-token"),
+      }),
+    );
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       status: "ok",
@@ -207,11 +225,18 @@ describe("auth controller Phase 1", () => {
     });
   });
 
-  it("does not call Supabase when a password recovery email was recently sent", async () => {
-    const resetPasswordForEmailMock = vi.fn();
-    mocks.createClientMock.mockReturnValue({
-      auth: { resetPasswordForEmail: resetPasswordForEmailMock },
+  it("does not block password recovery on local recent-send audit events", async () => {
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: {
+        properties: {
+          action_link: "https://example.supabase.co/auth/v1/verify?token=recovery-token&type=recovery&redirect_to=https%3A%2F%2Fapp.example.com%2Fauth%2Freset-password",
+        },
+      },
+      error: null,
     });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: {} })
+      .mockReturnValueOnce({ auth: { admin: { generateLink: generateLinkMock } } });
     mocks.findRecentAuditEventByEmailMock.mockResolvedValue({
       id: "audit-1",
       actor_id: null,
@@ -233,30 +258,31 @@ describe("auth controller Phase 1", () => {
 
     await requestPasswordRecovery(req, res);
 
-    expect(mocks.findRecentAuditEventByEmailMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actions: ["auth.password_recovery_requested"],
-        email: "member@example.com",
-      }),
-    );
-    expect(resetPasswordForEmailMock).not.toHaveBeenCalled();
+    expect(mocks.findRecentAuditEventByEmailMock).not.toHaveBeenCalled();
+    expect(generateLinkMock).toHaveBeenCalledWith({
+      type: "recovery",
+      email: "member@example.com",
+      options: {
+        redirectTo:
+          "https://app.example.com/auth/callback?intent=recovery&returnTo=%2Fapp%2Fsettings",
+      },
+    });
+    expect(mocks.resendSendMock).toHaveBeenCalled();
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       status: "ok",
-      message:
-        "Password recovery email already requested recently. Please use the latest email before requesting another.",
-      recentlySent: true,
-      cooldownSeconds: 300,
+      message: "Password recovery email sent",
     });
   });
 
-  it("maps Supabase password recovery email rate limits", async () => {
-    const resetPasswordForEmailMock = vi.fn().mockResolvedValue({
+  it("maps password recovery link generation rate limits", async () => {
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: { properties: {} },
       error: { message: "Email rate limit exceeded" },
     });
-    mocks.createClientMock.mockReturnValue({
-      auth: { resetPasswordForEmail: resetPasswordForEmailMock },
-    });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: {} })
+      .mockReturnValueOnce({ auth: { admin: { generateLink: generateLinkMock } } });
 
     const { requestPasswordRecovery } = await import(
       "../../src/controllers/authController.ts"
@@ -273,8 +299,8 @@ describe("auth controller Phase 1", () => {
     expect(json).toHaveBeenCalledWith({
       error: "rate_limited",
       message:
-        "Password recovery email sends are temporarily rate limited. Please use the latest email or try again shortly.",
-      cooldownSeconds: 300,
+        "Password recovery links are temporarily rate limited. Please use the latest email or try again shortly.",
+      cooldownSeconds: 60,
     });
   });
 
@@ -349,12 +375,18 @@ describe("auth controller Phase 1", () => {
         text: "Your DARCi verification code is 12345678. This code expires shortly.",
       }),
     );
+    const resendPayload = mocks.resendSendMock.mock.calls[0]?.[0] as { html?: string };
+    expect(resendPayload.html).toContain("Verification code");
+    expect(resendPayload.html).toContain("text-align:center");
+    expect(resendPayload.html).not.toContain("Copy");
+    expect(resendPayload.html).toContain("DARCi authentication");
     expect(signInWithOtpMock).not.toHaveBeenCalled();
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       status: "ok",
       message: "Email code sent",
       otpLength: 8,
+      cooldownSeconds: 60,
     });
   });
 
