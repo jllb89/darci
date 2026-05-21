@@ -96,7 +96,7 @@ export const receiveSupabaseAuthSmsHook = async (req: Request, res: Response) =>
       userId: parsed.data.user.id ?? null,
     });
 
-    return res.status(200).send();
+    return res.status(200).json({});
   } catch (error) {
     if (error instanceof SupabaseAuthSmsHookError) {
       captureException(error, {

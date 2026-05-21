@@ -82,7 +82,8 @@ describe("Supabase Auth SMS hook", () => {
     const response = await postSignedSmsHook(rawBody);
 
     expect(response.status).toBe(200);
-    expect(response.text).toBe("");
+    expect(response.body).toEqual({});
+    expect(response.headers["content-type"]).toContain("application/json");
     expect(snsMocks.publishMock).toHaveBeenCalledWith({
       input: expect.objectContaining({
         PhoneNumber: "+15551234567",
