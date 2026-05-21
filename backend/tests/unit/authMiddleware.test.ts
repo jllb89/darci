@@ -63,6 +63,12 @@ const buildApp = async () => {
   app.post("/auth/password/reset", (req, res) => {
     res.status(200).json({ user: req.user });
   });
+  app.post("/auth/otp/phone/start", (req, res) => {
+    res.status(200).json({ user: req.user ?? null });
+  });
+  app.post("/auth/otp/phone/verify", (req, res) => {
+    res.status(200).json({ user: req.user ?? null });
+  });
 
   return app;
 };
@@ -172,6 +178,21 @@ describe("auth middleware Phase 0 guardrails", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({});
+    expect(mocks.getUserIdentityContextBySupabaseIdMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "/auth/otp/phone/start",
+    "/auth/otp/phone/verify",
+  ])("allows public phone OTP requests to reach the controller: %s", async (path) => {
+    process.env.NODE_ENV = "production";
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(null);
+
+    const app = await buildApp();
+    const response = await request(app).post(path).send({});
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ user: null });
     expect(mocks.getUserIdentityContextBySupabaseIdMock).not.toHaveBeenCalled();
   });
 });
