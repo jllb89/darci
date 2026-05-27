@@ -7,6 +7,7 @@ import {
   listSharedRequests,
   RequestReadModelServiceError,
 } from "../services/requestReadModelService";
+import { listSigningRequestCards } from "../services/documentInviteService";
 import type { RequestRole } from "../services/userRoleService";
 
 const listRequestsQuerySchema = z.object({
@@ -15,6 +16,10 @@ const listRequestsQuerySchema = z.object({
   notaryId: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
+});
+
+const listSigningRequestsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 const requestIdParamsSchema = z.object({
@@ -70,6 +75,22 @@ export const listRequests = async (req: Request, res: Response) => {
 
     throw error;
   }
+};
+
+export const listSigningRequests = async (req: Request, res: Response) => {
+  const parsed = listSigningRequestsQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const requests = await listSigningRequestCards({
+    role: resolveRole(req),
+    viewerUserId: req.user?.dbUserId ?? null,
+    viewerEmail: req.user?.email ?? null,
+    limit: parsed.data.limit,
+  });
+
+  return res.status(200).json(requests);
 };
 
 export const getRequest = async (req: Request, res: Response) => {

@@ -37,8 +37,13 @@ const BREADCRUMB_RULES: BreadcrumbRule[] = [
   },
   {
     kind: "prefix",
+    path: "/app/activity",
+    breadcrumb: { section: "Activity", current: "Activity" },
+  },
+  {
+    kind: "prefix",
     path: "/app/notifications",
-    breadcrumb: { section: "Activity", current: "Notifications" },
+    breadcrumb: { section: "Activity", current: "Activity" },
   },
   {
     kind: "prefix",

@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import type { StoredUserRole } from "@/lib/auth";
+import { useRouter } from "next/navigation";
+import { refreshStoredAuth, useStoredAuth, type StoredUserRole } from "@/lib/auth";
+
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:4000";
 
 type NavIcon = "start" | "documents" | "verify" | "notifications" | "requests" | "settings";
 
@@ -21,6 +26,46 @@ type SidebarConfig = {
   showNewDocument: boolean;
 };
 
+type VerificationLookupItem = {
+  idn: string;
+};
+
+type VerificationLookupPayload = {
+  verifications?: VerificationLookupItem[];
+};
+
+const fetchWithTokenRefresh = async (
+  url: string,
+  accessToken: string,
+  init?: RequestInit,
+) => {
+  const requestWithToken = (token: string) => {
+    const headers = new Headers(init?.headers ?? {});
+    headers.set("Authorization", `Bearer ${token}`);
+
+    return fetch(url, {
+      ...init,
+      headers,
+    });
+  };
+
+  const response = await requestWithToken(accessToken);
+  if (response.status !== 401) {
+    return response;
+  }
+
+  try {
+    const refreshed = await refreshStoredAuth();
+    if (!refreshed?.accessToken) {
+      return response;
+    }
+
+    return requestWithToken(refreshed.accessToken);
+  } catch {
+    return response;
+  }
+};
+
 const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
   member: {
     primaryItems: [
@@ -33,8 +78,8 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
       },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
       {
-        label: "Notifications",
-        href: "/app/notifications",
+        label: "Activity",
+        href: "/app/activity",
         icon: "notifications",
         sectionLabel: "Activity",
       },
@@ -55,8 +100,8 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
       },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
       {
-        label: "Notifications",
-        href: "/app/notifications",
+        label: "Activity",
+        href: "/app/activity",
         icon: "notifications",
         sectionLabel: "Activity",
       },
@@ -77,8 +122,8 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
       },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
       {
-        label: "Notifications",
-        href: "/app/notifications",
+        label: "Activity",
+        href: "/app/activity",
         icon: "notifications",
         sectionLabel: "Activity",
       },
@@ -99,8 +144,8 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
       },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
       {
-        label: "Notifications",
-        href: "/app/notifications",
+        label: "Activity",
+        href: "/app/activity",
         icon: "notifications",
         sectionLabel: "Activity",
       },
@@ -236,10 +281,90 @@ export default function AppSidebar({
   profileName,
   profileEmail,
 }: AppSidebarProps) {
+  const router = useRouter();
+  const { accessToken } = useStoredAuth();
   const config = ROLE_SIDEBAR_CONFIG[role];
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
+  const [isVerificationLookupOpen, setIsVerificationLookupOpen] = useState(false);
+  const [verificationQuery, setVerificationQuery] = useState("");
+  const [isVerificationLookupLoading, setIsVerificationLookupLoading] = useState(false);
+  const [verificationLookupMessage, setVerificationLookupMessage] = useState<string | null>(null);
+  const verificationLookupRef = useRef<HTMLDivElement | null>(null);
 
   const rolesToDisplay = availableRoles.length > 1 ? availableRoles : [];
+
+  const closeVerificationLookup = useCallback(() => {
+    setIsVerificationLookupOpen(false);
+    setVerificationQuery("");
+    setVerificationLookupMessage(null);
+  }, []);
+
+  useEffect(() => {
+    if (!isVerificationLookupOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!verificationLookupRef.current?.contains(event.target as Node)) {
+        closeVerificationLookup();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeVerificationLookup();
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeVerificationLookup, isVerificationLookupOpen]);
+
+  const runVerificationLookup = useCallback(async () => {
+    const idn = verificationQuery.trim();
+    if (!idn) {
+      setVerificationLookupMessage("Enter an IDN to verify.");
+      return;
+    }
+
+    if (!accessToken) {
+      setVerificationLookupMessage("Sign in again to verify an IDN.");
+      return;
+    }
+
+    setIsVerificationLookupLoading(true);
+    setVerificationLookupMessage(null);
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/verification?idn=${encodeURIComponent(idn)}&limit=1`,
+        accessToken,
+        { cache: "no-store" },
+      );
+      const payload = (await response.json().catch(() => null)) as VerificationLookupPayload | null;
+
+      if (!response.ok || !payload?.verifications) {
+        throw new Error("Verification lookup failed.");
+      }
+
+      const result = payload.verifications[0] ?? null;
+      if (!result) {
+        setVerificationLookupMessage("No document was found for the entered IDN.");
+        return;
+      }
+
+      closeVerificationLookup();
+      router.push(`/app/verification/${encodeURIComponent(result.idn)}`);
+    } catch (error) {
+      setVerificationLookupMessage(error instanceof Error ? error.message : "Verification lookup failed.");
+    } finally {
+      setIsVerificationLookupLoading(false);
+    }
+  }, [accessToken, closeVerificationLookup, router, verificationQuery]);
 
   return (
     <aside className="hidden h-screen w-60 flex-shrink-0 flex-col border-r border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest md:flex">
@@ -281,27 +406,110 @@ export default function AppSidebar({
           <nav className="flex flex-col gap-1.5">
             {config.primaryItems.map((item) => {
               const isActive = isNavItemActive(pathname, item.href);
+              const isVerificationItem = item.icon === "verify";
+              const navItemClassName = `flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-display font-medium transition-colors duration-200 ease-in-out ${
+                isActive || (isVerificationItem && isVerificationLookupOpen)
+                  ? "bg-Color-Neutral-Lighter/60 text-Color-Scheme-1-Text"
+                  : "text-Color-Neutral hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
+              }`;
 
               return (
-                <div key={item.href} className="flex flex-col">
+                <div
+                  key={item.href}
+                  className="relative flex flex-col"
+                  ref={isVerificationItem ? verificationLookupRef : undefined}
+                >
                   {item.sectionLabel ? (
                     <div className="px-2.5 pb-1.5 pt-3 text-[10px] font-medium uppercase tracking-[0.08em] text-Color-Neutral/80">
                       {item.sectionLabel}
                     </div>
                   ) : null}
 
-                  <Link
-                    className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-display font-medium transition-colors duration-200 ease-in-out ${
-                      isActive
-                        ? "bg-Color-Neutral-Lighter/60 text-Color-Scheme-1-Text"
-                        : "text-Color-Neutral hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
-                    }`}
-                    href={item.href}
-                    prefetch={false}
-                  >
-                    <span className="text-current">{renderNavIcon(item.icon)}</span>
-                    {item.label}
-                  </Link>
+                  {isVerificationItem ? (
+                    <>
+                      <button
+                        aria-controls="sidebar-verification-lookup"
+                        aria-expanded={isVerificationLookupOpen}
+                        className={navItemClassName}
+                        onClick={() => {
+                          if (isVerificationLookupOpen) {
+                            closeVerificationLookup();
+                            return;
+                          }
+
+                          setVerificationLookupMessage(null);
+                          setIsVerificationLookupOpen(true);
+                        }}
+                        type="button"
+                      >
+                        <span className="text-current">{renderNavIcon(item.icon)}</span>
+                        {item.label}
+                      </button>
+                      {isVerificationLookupOpen ? (
+                        <div
+                          id="sidebar-verification-lookup"
+                          className="absolute left-[calc(100%+0.75rem)] top-1/2 z-[70] w-80 -translate-y-1/2 rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-4 shadow-[0_22px_54px_rgba(0,0,0,0.16)]"
+                        >
+                          <form
+                            className="space-y-3"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void runVerificationLookup();
+                            }}
+                          >
+                            <div>
+                              <div className="text-sm font-medium text-Color-Scheme-1-Text">Verify a document</div>
+                              <div className="mt-1 text-xs leading-relaxed text-Color-Neutral">
+                                Enter the document IDN to open its verification record.
+                              </div>
+                            </div>
+                            <label className="block text-xs font-medium text-Color-Neutral-Darkest">
+                              IDN
+                              <input
+                                className="mt-2 h-9 w-full rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-3 text-xs text-Color-Scheme-1-Text outline-none transition-colors placeholder:text-Color-Neutral focus-visible:border-Color-Scheme-1-Text"
+                                onChange={(event) => {
+                                  setVerificationQuery(event.target.value);
+                                  setVerificationLookupMessage(null);
+                                }}
+                                placeholder="Enter IDN"
+                                value={verificationQuery}
+                              />
+                            </label>
+                            {verificationLookupMessage ? (
+                              <div className="text-xs leading-relaxed text-Color-Neutral">
+                                {verificationLookupMessage}
+                              </div>
+                            ) : null}
+                            <div className="flex items-center justify-between gap-3">
+                              <button
+                                className="inline-flex h-9 items-center justify-center bg-Green px-3 text-xs font-medium text-Color-Neutral-Darkest transition-colors hover:bg-Green-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={isVerificationLookupLoading}
+                                type="submit"
+                              >
+                                {isVerificationLookupLoading ? "Checking..." : "Verify"}
+                              </button>
+                              <button
+                                className="border-0 bg-transparent p-0 text-xs font-medium text-Color-Neutral underline-offset-4 transition-colors hover:text-Color-Neutral-Darkest hover:underline"
+                                onClick={closeVerificationLookup}
+                                type="button"
+                              >
+                                Close
+                              </button>
+                            </div>
+                          </form>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Link
+                      className={navItemClassName}
+                      href={item.href}
+                      prefetch={false}
+                    >
+                      <span className="text-current">{renderNavIcon(item.icon)}</span>
+                      {item.label}
+                    </Link>
+                  )}
                 </div>
               );
             })}

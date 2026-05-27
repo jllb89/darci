@@ -55,3 +55,17 @@ supabase/.temp/
 *.tgz
 *.swp
 *.swo
+
+# Local diagnostics / secret-scan scratch files
+/ecs_check.json
+/secret.txt
+/secret_string.json
+/secrets_check.json
+/status.json
+/step1_result.json
+/remotes.txt
+/tsc_output.txt
+/verification_page.html
+/backend/probe_res.txt
+/backend/results.txt
+/backend/test_output.txt

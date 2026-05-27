@@ -12,6 +12,7 @@ import {
 } from "../auth/authPolicy";
 import {
   ensureUserIdentityFromAuth,
+  getUserIdentityContextBySupabaseId,
   type UserIdentityContext,
   toUserResponse,
 } from "../services/userRoleService";
@@ -1858,10 +1859,12 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   }
 
   try {
+    const existingProfile = await getUserIdentityContextBySupabaseId(data.user.id);
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       emailFallback: email,
     });
+    const profileCompletionRequired = !existingProfile;
 
     if (!ensureActiveAccount(profile, res)) {
       return;
@@ -1877,6 +1880,7 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
       user: toUserResponse(profile),
+      profileCompletionRequired,
     });
   } catch (syncError) {
     const statusCode = syncError instanceof Error && "statusCode" in syncError
@@ -1979,6 +1983,8 @@ export const requestPhoneOtp = async (req: Request, res: Response) => {
   return res.status(200).json({
     status: "ok",
     message: "SMS code sent",
+    otpLength: 8,
+    cooldownSeconds: authEmailSendCooldownSeconds,
   });
 };
 
@@ -2039,10 +2045,12 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
   }
 
   try {
+    const existingProfile = await getUserIdentityContextBySupabaseId(data.user.id);
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       phoneFallback: phone,
     });
+    const profileCompletionRequired = !existingProfile;
 
     if (!ensureActiveAccount(profile, res)) {
       return;
@@ -2058,6 +2066,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
       user: toUserResponse(profile),
+      profileCompletionRequired,
     });
   } catch (syncError) {
     const statusCode = syncError instanceof Error && "statusCode" in syncError

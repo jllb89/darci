@@ -8,12 +8,6 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
 
-type DashboardMetric = {
-  key: string;
-  label: string;
-  value: number;
-};
-
 type DashboardDocumentRouteSource = {
   id: string;
   status: string | null;
@@ -22,47 +16,11 @@ type DashboardDocumentRouteSource = {
 type DashboardDocumentLabelSource = {
   documentType: string | null;
   documentTypeLabel?: string;
-  productFlowMode?: string;
+  productFlowMode?: string | null;
   selectedFamilies?: string[];
 };
 
 type DashboardAlertDocument = DashboardDocumentRouteSource & DashboardDocumentLabelSource;
-
-type DashboardDocument = DashboardAlertDocument & {
-  id: string;
-  idn: string | null;
-  status: string | null;
-  principalName?: string | null;
-  jurisdiction: string | null;
-  createdAt: string;
-  updatedAt: string | null;
-};
-
-type DashboardRequest = {
-  id: string;
-  documentId: string;
-  documentType: string | null;
-  jurisdiction: string | null;
-  ownerId: string | null;
-  ownerName: string | null;
-  status: string | null;
-  submittedAt: string | null;
-  meetingId: string | null;
-  meetingScheduledAt: string | null;
-  meetingStatus: string | null;
-};
-
-type DashboardMeeting = {
-  id: string;
-  requestId: string;
-  documentId: string | null;
-  documentType: string | null;
-  ownerName: string | null;
-  scheduledAt: string | null;
-  timezone: string | null;
-  location: string | null;
-  status: string | null;
-};
 
 type DashboardActivity = {
   action: string;
@@ -71,6 +29,21 @@ type DashboardActivity = {
   entityType: string;
   entityId: string | null;
   document?: DashboardAlertDocument;
+};
+
+type DashboardPayload = {
+  activity: DashboardActivity[];
+};
+
+type DocumentListItem = DashboardDocumentRouteSource & DashboardDocumentLabelSource & {
+  idn: string | null;
+  principalName?: string | null;
+  jurisdiction: string | null;
+  createdAt: string;
+};
+
+type DocumentsPayload = {
+  documents: DocumentListItem[];
 };
 
 type ActivityCopy = {
@@ -105,34 +78,7 @@ type ActivityTimeline = {
   timelineWidth: number;
 };
 
-type DashboardAlert = {
-  key: string;
-  message: string;
-  documentIds?: string[];
-  documents?: DashboardAlertDocument[];
-};
-
-type DashboardPrimaryAction = {
-  code: string;
-  label: string;
-  description: string;
-  targetPath: string;
-  priority: "high" | "medium" | "low";
-};
-
-type DashboardPayload = {
-  role: string;
-  metrics: DashboardMetric[];
-  documents: DashboardDocument[];
-  requests: DashboardRequest[];
-  meetings: DashboardMeeting[];
-  activity: DashboardActivity[];
-  alerts: DashboardAlert[];
-  nextAction: string | null;
-  primaryAction?: DashboardPrimaryAction | null;
-};
-
-type SectionIconName = "documents" | "activity" | "signature" | "alerts" | "next";
+type SectionIconName = "documents" | "activity";
 
 const SectionIcon = ({ name }: { name: SectionIconName }) => {
   const commonProps = {
@@ -157,37 +103,9 @@ const SectionIcon = ({ name }: { name: SectionIconName }) => {
     );
   }
 
-  if (name === "activity") {
-    return (
-      <svg {...commonProps}>
-        <path d="M4 12h4l2-5 4 10 2-5h4" />
-      </svg>
-    );
-  }
-
-  if (name === "signature") {
-    return (
-      <svg {...commonProps}>
-        <path d="m16 4 4 4L8 20H4v-4L16 4Z" />
-        <path d="M4 21h16" />
-      </svg>
-    );
-  }
-
-  if (name === "alerts") {
-    return (
-      <svg {...commonProps}>
-        <path d="M12 3 22 20H2L12 3Z" />
-        <path d="M12 9v4" />
-        <path d="M12 17h.01" />
-      </svg>
-    );
-  }
-
   return (
     <svg {...commonProps}>
-      <path d="M5 12h14" />
-      <path d="m13 6 6 6-6 6" />
+      <path d="M4 12h4l2-5 4 10 2-5h4" />
     </svg>
   );
 };
@@ -389,36 +307,6 @@ const getDocumentRouteByStatus = (document: DashboardDocumentRouteSource) => {
   return `/app/sign?documentId=${encodeURIComponent(document.id)}`;
 };
 
-const getDocumentCardActionLabel = (document: DashboardDocument) => {
-  const status = normalizeStatusText(document.status);
-
-  if (status.includes("draft") || status.includes("intake")) {
-    return "Continue intake";
-  }
-
-  if (status.includes("blocked")) {
-    return "Fix blockers";
-  }
-
-  if (status.includes("review")) {
-    return "Review";
-  }
-
-  if (status.includes("signature") || (status.includes("sign") && !status.includes("signed"))) {
-    return "Send reminder";
-  }
-
-  if (status.includes("notary") || status.includes("notar")) {
-    return "Track notary";
-  }
-
-  if (status.includes("complete") || status.includes("final")) {
-    return "View";
-  }
-
-  return "Open";
-};
-
 const makeActivityCopy = (title: string): ActivityCopy => ({
   title,
   detail: `${title}.`,
@@ -481,60 +369,13 @@ const getTimelineWindowStartMs = (windowEndMs: number) => {
   return windowEndMs - timelineWindowDays * 24 * 60 * 60 * 1000;
 };
 
-const getAlertDocumentHref = (
-  alertKey: string,
-  documentId: string,
-  document?: DashboardDocumentRouteSource,
-) => {
-  if (document) {
-    return getDocumentRouteByStatus(document);
-  }
-
-  if (alertKey === "awaiting-signatures") {
-    return `/app/sign?documentId=${encodeURIComponent(documentId)}`;
-  }
-
-  if (alertKey === "awaiting-review") {
-    return `/app/review?documentId=${encodeURIComponent(documentId)}`;
-  }
-
-  return "/app/documents";
-};
-
-const getAlertViewAllHref = (alertKey: string) => {
-  if (alertKey === "awaiting-signatures") {
-    return "/app/documents?status=pending_signature";
-  }
-
-  if (alertKey === "awaiting-review") {
-    return "/app/documents?status=pending_review";
-  }
-
-  if (alertKey === "awaiting-notary") {
-    return "/app/documents?status=pending_notary";
-  }
-
-  return "/app/documents";
-};
-
-const formatAlertDocumentLabel = (
-  documentId: string,
-  document?: DashboardDocumentLabelSource,
-) => {
-  const reference = formatReference(documentId, "DOC");
-  if (!document) {
-    return `Document - ${reference}`;
-  }
-
-  return `${formatDocumentTitle(document)} - ${reference}`;
-};
-
-export default function DashboardPage() {
+export default function ActivityPage() {
   const { accessToken, user } = useStoredAuth();
-  const [payload, setPayload] = useState<DashboardPayload | null>(null);
+  const [dashboardPayload, setDashboardPayload] = useState<DashboardPayload | null>(null);
+  const [documents, setDocuments] = useState<DocumentListItem[]>([]);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [hasMounted, setHasMounted] = useState(false);
   const [visibleActivityLimit, setVisibleActivityLimit] = useState(activityPageSize);
   const [isActivityLoadingMore, setIsActivityLoadingMore] = useState(false);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
@@ -542,64 +383,85 @@ export default function DashboardPage() {
   const hasAutoScrolledTimelineRef = useRef(false);
   const activityLoadTimeoutRef = useRef<number | null>(null);
 
-  const loadDashboard = useCallback(async () => {
+  const loadActivity = useCallback(async () => {
     if (!accessToken) {
-      setPayload(null);
+      setDashboardPayload(null);
+      setDocuments([]);
+      setSelectedDocumentId(null);
       return;
     }
 
     setIsLoading(true);
     try {
-      const response = await fetchWithTokenRefresh(`${apiBaseUrl}/dashboard`, accessToken, {
-        cache: "no-store",
-      });
-      const nextPayload = (await response.json().catch(() => null)) as DashboardPayload | null;
+      const [dashboardResponse, documentsResponse] = await Promise.all([
+        fetchWithTokenRefresh(`${apiBaseUrl}/dashboard`, accessToken, {
+          cache: "no-store",
+        }),
+        fetchWithTokenRefresh(`${apiBaseUrl}/documents`, accessToken, {
+          cache: "no-store",
+        }),
+      ]);
+      const [nextDashboardPayload, documentsPayload] = await Promise.all([
+        dashboardResponse.json().catch(() => null) as Promise<DashboardPayload | null>,
+        documentsResponse.json().catch(() => null) as Promise<DocumentsPayload | null>,
+      ]);
 
-      if (!response.ok || !nextPayload) {
-        throw new Error("Failed to load dashboard.");
+      if (!dashboardResponse.ok || !nextDashboardPayload || !documentsResponse.ok || !documentsPayload?.documents) {
+        throw new Error("Failed to load activity.");
       }
 
-      setPayload(nextPayload);
+      setDashboardPayload(nextDashboardPayload);
+      setDocuments(documentsPayload.documents);
       setErrorMessage(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load dashboard.");
+      setErrorMessage(error instanceof Error ? error.message : "Failed to load activity.");
+      setDashboardPayload(null);
+      setDocuments([]);
+      setSelectedDocumentId(null);
     } finally {
       setIsLoading(false);
     }
   }, [accessToken]);
 
   useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+    void loadActivity();
+  }, [loadActivity]);
 
   useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      setHasMounted(true);
-    });
+    if (documents.length === 0) {
+      setSelectedDocumentId(null);
+      return;
+    }
 
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, []);
+    setSelectedDocumentId((currentDocumentId) => {
+      if (currentDocumentId && documents.some((document) => document.id === currentDocumentId)) {
+        return currentDocumentId;
+      }
+
+      const documentIdWithActivity = dashboardPayload?.activity.find((activity) => {
+        return activity.documentId && documents.some((document) => document.id === activity.documentId);
+      })?.documentId;
+
+      return documentIdWithActivity ?? documents[0]?.id ?? null;
+    });
+  }, [dashboardPayload?.activity, documents]);
 
   const displayName =
     [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || "there";
 
-  const recentDocuments = useMemo(() => {
-    return (payload?.documents ?? []).slice(0, 10);
-  }, [payload?.documents]);
+  const documentsById = useMemo(() => {
+    return new Map(documents.map((document) => [document.id, document]));
+  }, [documents]);
 
-  const documentById = useMemo(() => {
-    return new Map(recentDocuments.map((document) => [document.id, document]));
-  }, [recentDocuments]);
+  const selectedDocument = selectedDocumentId ? documentsById.get(selectedDocumentId) ?? null : null;
 
   const activityTimeline = useMemo<ActivityTimeline>(() => {
     const eventsByDocumentId = new Map<string, ActivityTimelineRow>();
     const windowEndMs = Date.now();
     const windowStartMs = getTimelineWindowStartMs(windowEndMs);
-    const timelineEvents = (payload?.activity ?? [])
+    const timelineEvents = (dashboardPayload?.activity ?? [])
       .map((item) => {
-        if (!item.documentId) {
+        if (!item.documentId || item.documentId !== selectedDocumentId) {
           return null;
         }
 
@@ -617,7 +479,7 @@ export default function DashboardPage() {
           return null;
         }
 
-        const document = documentById.get(item.documentId) ?? item.document;
+        const document = documentsById.get(item.documentId) ?? item.document;
         if (!document) {
           return null;
         }
@@ -681,7 +543,7 @@ export default function DashboardPage() {
       slotCount,
       timelineWidth: Math.max(timelineMinimumWidth, slotCount * timelineSlotWidth),
     };
-  }, [documentById, payload?.activity, visibleActivityLimit]);
+  }, [dashboardPayload?.activity, documentsById, selectedDocumentId, visibleActivityLimit]);
 
   useEffect(() => {
     if (activityLoadTimeoutRef.current !== null) {
@@ -693,7 +555,7 @@ export default function DashboardPage() {
     setIsActivityLoadingMore(false);
     hasAutoScrolledTimelineRef.current = false;
     previousTimelineWidthRef.current = 0;
-  }, [payload?.activity]);
+  }, [dashboardPayload?.activity, selectedDocumentId]);
 
   useEffect(() => {
     return () => {
@@ -747,27 +609,20 @@ export default function DashboardPage() {
       activityLoadTimeoutRef.current = null;
     }, activityLoadDelayMs);
   }, [activityTimeline.hasMoreEvents, activityTimeline.totalEventCount, isActivityLoadingMore]);
-  const primaryAction = payload?.primaryAction ?? null;
 
   return (
-    <div className="flex flex-col gap-8 lg:h-full lg:min-h-0">
+    <div className="flex flex-col gap-6 lg:h-full lg:min-h-0">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
-          <div className="text-2xl font-medium">Dashboard</div>
-          <div className="text-sm text-Color-Neutral">Welcome back, {displayName}.</div>
-        </div>
-        {(payload?.metrics.length ?? 0) > 0 ? (
-          <div className="grid min-w-[320px] grid-cols-3 overflow-hidden rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest text-sm">
-            {(payload?.metrics ?? []).map((metric, index) => (
-              <div
-                key={metric.key}
-                className={`${index < (payload?.metrics.length ?? 0) - 1 ? "border-r border-Color-Scheme-1-Border/40" : ""} px-3 py-2`}
-              >
-                <div className="text-xs text-Color-Neutral">{metric.label}</div>
-                <div className="mt-1 font-medium">{metric.value}</div>
-              </div>
-            ))}
+          <div className="text-2xl font-medium">Activity</div>
+          <div className="text-sm text-Color-Neutral">
+            Select a document to inspect its recent workflow events.
           </div>
+        </div>
+        {selectedDocument ? (
+          <Link className="text-sm text-Color-Neutral-Darkest underline" href={getDocumentRouteByStatus(selectedDocument)}>
+            Open selected document
+          </Link>
         ) : null}
       </div>
 
@@ -777,130 +632,122 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {!isLoading && payload?.metrics.length === 0 ? (
-        <div className="rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm text-Color-Neutral">
-          No dashboard metrics available yet.
-        </div>
-      ) : null}
+      <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="min-h-[420px] rounded-lg border border-Color-Scheme-1-Border/40 p-4 lg:min-h-0 lg:overflow-hidden">
+          <div className="flex items-center justify-between gap-2">
+            <SectionTitle icon="documents" title="Documents" />
+            <div className="rounded-full bg-Color-Neutral-Lighter px-2.5 py-1 text-[11px] font-medium text-Color-Neutral-Darkest">
+              {documents.length}
+            </div>
+          </div>
+          <div className="mt-4 space-y-3 lg:max-h-full lg:overflow-y-auto lg:pr-1">
+            {documents.map((document) => {
+              const isSelected = document.id === selectedDocumentId;
+              const documentLabel = formatDocumentTitle(document);
+              const documentReference = formatReference(document.id, "DOC");
 
-      <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,2fr)_1fr] lg:overflow-hidden">
-        <div className="min-w-0 space-y-6 lg:flex lg:min-h-0 lg:flex-col">
-          <div className="space-y-4 lg:shrink-0">
-            <div className="flex items-center justify-between gap-2">
-              <SectionTitle icon="documents" title="Recent documents" />
-              <Link className="text-xs underline" href="/app/documents">
-                View all
-              </Link>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {recentDocuments.slice(0, 5).map((document, index) => (
-                <Link
+              return (
+                <button
                   key={document.id}
-                  href={getDocumentRouteByStatus(document)}
-                  className={`relative w-full cursor-pointer rounded-xl border border-Color-Scheme-1-Border px-5 py-5 text-left transition-[opacity,transform,border-color] duration-200 ease-out hover:border-Color-Scheme-1-Text sm:w-[360px] sm:min-h-[144px] ${
-                    hasMounted ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+                  type="button"
+                  className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
+                    isSelected
+                      ? "border-Color-Neutral-Darkest/50 bg-Color-Neutral-Lighter"
+                      : "border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest hover:border-Color-Neutral-Darkest/30"
                   }`}
-                  style={{
-                    transitionDelay: hasMounted ? `${index * 55}ms` : `${index * 35}ms`,
-                  }}
+                  onClick={() => setSelectedDocumentId(document.id)}
                 >
-                  <div className="pr-24 font-display text-sm font-medium text-Color-Scheme-1-Text">
-                    {formatDocumentTitle(document)}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-display text-sm font-medium text-Color-Scheme-1-Text">
+                        {documentLabel}
+                      </div>
+                      <div className="mt-1 text-xs text-Color-Neutral">{documentReference}</div>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${getStatusBadgeClass(document.status)}`}>
+                      {formatStatusLabel(document.status)}
+                    </span>
                   </div>
-                  <span className={`absolute right-4 top-4 rounded-full px-2.5 py-1 text-[11px] font-medium ${getStatusBadgeClass(document.status)}`}>
-                    {formatStatusLabel(document.status)}
-                  </span>
-                  <div className="mt-2 text-xs leading-relaxed text-Color-Neutral">
-                    Principal: {document.principalName ?? displayName}
+                  <div className="mt-3 space-y-1 text-xs text-Color-Neutral">
+                    <div className="truncate">Principal: {document.principalName ?? displayName}</div>
+                    <div>Created {formatDateOnly(document.createdAt)}</div>
                   </div>
-                  <div className="mt-1 text-xs leading-relaxed text-Color-Neutral">
-                    Updated {formatDateOnly(document.updatedAt ?? document.createdAt)}
-                  </div>
-                  <div className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-Color-Scheme-1-Text">
-                    <span>{getDocumentCardActionLabel(document)}</span>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 20 20" aria-hidden="true">
-                      <path
-                        d="m7.5 5.5 5 4.5-5 4.5"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="1.8"
-                      />
-                    </svg>
-                  </div>
-                </Link>
-              ))}
-            </div>
-            {recentDocuments.length === 0 ? (
+                </button>
+              );
+            })}
+            {!isLoading && documents.length === 0 ? (
               <div className="rounded-md border border-dashed border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3 text-xs text-Color-Neutral">
-                No recent documents yet.
+                No documents yet.
               </div>
             ) : null}
           </div>
+        </aside>
 
-          <div className="flex min-h-[520px] min-w-0 flex-col rounded-lg border border-Color-Scheme-1-Border/40 p-4 lg:min-h-0 lg:flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <SectionTitle icon="activity" title="Recent activity" />
-              <Link className="text-xs underline" href="/app/activity">
-                View all
-              </Link>
-            </div>
+        <div className="flex min-h-[620px] min-w-0 flex-col rounded-lg border border-Color-Scheme-1-Border/40 p-4 lg:min-h-0 lg:flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <SectionTitle icon="activity" title="Recent activity" />
+            {selectedDocument ? (
+              <div className="min-w-0 truncate text-xs text-Color-Neutral">
+                {formatDocumentTitle(selectedDocument)} • {formatReference(selectedDocument.id, "DOC")}
+              </div>
+            ) : null}
+          </div>
+          <div
+            ref={timelineScrollRef}
+            className="mt-4 max-w-full flex-1 overflow-x-auto pb-3 lg:min-h-0"
+            onScroll={handleActivityTimelineScroll}
+          >
             <div
-              ref={timelineScrollRef}
-              className="mt-4 max-w-full flex-1 overflow-x-auto pb-3 lg:min-h-0"
-              onScroll={handleActivityTimelineScroll}
+              className="relative flex min-h-full flex-col overflow-visible rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/55"
+              style={{ width: activityTimeline.timelineWidth, ...timelineBackgroundStyle }}
             >
-              <div
-                className="relative flex min-h-full flex-col overflow-visible rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/55"
-                style={{ width: activityTimeline.timelineWidth, ...timelineBackgroundStyle }}
-              >
-                {isActivityLoadingMore ? (
-                  <div className="sticky left-3 top-3 z-30 h-0">
-                    <div className="inline-flex -translate-y-1/2 items-center gap-2 rounded-full border border-Color-Scheme-1-Border/60 bg-Color-White px-3 py-1.5 text-[11px] font-medium text-Color-Neutral-Darkest shadow-[0_12px_28px_rgba(0,0,0,0.12)]">
-                      <span className="h-3 w-3 animate-spin rounded-full border border-Color-Scheme-1-Border border-t-Color-Neutral-Darkest" />
-                      Loading older activity
-                    </div>
+              {isActivityLoadingMore ? (
+                <div className="sticky left-3 top-3 z-30 h-0">
+                  <div className="inline-flex -translate-y-1/2 items-center gap-2 rounded-full border border-Color-Scheme-1-Border/60 bg-Color-White px-3 py-1.5 text-[11px] font-medium text-Color-Neutral-Darkest shadow-[0_12px_28px_rgba(0,0,0,0.12)]">
+                    <span className="h-3 w-3 animate-spin rounded-full border border-Color-Scheme-1-Border border-t-Color-Neutral-Darkest" />
+                    Loading older activity
                   </div>
-                ) : null}
-                <div className="rounded-t-lg border-b border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest text-[11px] uppercase tracking-wide text-Color-Neutral">
-                  {activityTimeline.timeMarks.length > 0 ? (
-                    <div
-                      className="grid gap-2 px-3 py-2"
-                      style={{ gridTemplateColumns: `repeat(${activityTimeline.slotCount}, minmax(${timelineSlotWidth - 24}px, 1fr))` }}
-                    >
-                      {activityTimeline.timeMarks.map((mark, index) => (
-                        <div key={`${mark}-${index}`} className="min-w-0 truncate text-center">
-                          {mark}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="px-3 py-2">No activity</div>
-                  )}
                 </div>
-                <div className="flex flex-1 flex-col justify-center">
-                  {activityTimeline.rows.map((row, rowIndex) => {
-                    const principalName = row.document.principalName ?? displayName;
-                    const documentLabel = formatDocumentTitle(row.document);
-                    const documentReference = formatReference(row.document.id, "DOC");
-                    const firstEventSlotIndex = Math.min(...row.events.map((event) => event.slotIndex));
-                    const lastEventSlotIndex = Math.max(...row.events.map((event) => event.slotIndex));
-                    const lineStartRatio = (firstEventSlotIndex + 0.5) / activityTimeline.slotCount;
-                    const lineEndRatio = (lastEventSlotIndex + 0.5) / activityTimeline.slotCount;
-                    const progressLineStyle = {
-                      left: `calc(0.75rem + ${lineStartRatio * 100}% - ${lineStartRatio * 1.5}rem)`,
-                      right: `calc(0.75rem + ${(1 - lineEndRatio) * 100}% - ${(1 - lineEndRatio) * 1.5}rem)`,
-                    };
+              ) : null}
+              <div className="rounded-t-lg border-b border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest text-[11px] uppercase tracking-wide text-Color-Neutral">
+                {activityTimeline.timeMarks.length > 0 ? (
+                  <div
+                    className="grid gap-2 px-3 py-2"
+                    style={{ gridTemplateColumns: `repeat(${activityTimeline.slotCount}, minmax(${timelineSlotWidth - 24}px, 1fr))` }}
+                  >
+                    {activityTimeline.timeMarks.map((mark, index) => (
+                      <div key={`${mark}-${index}`} className="min-w-0 truncate text-center">
+                        {mark}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-3 py-2">No activity</div>
+                )}
+              </div>
+              <div className="flex flex-1 flex-col justify-center">
+                {activityTimeline.rows.map((row, rowIndex) => {
+                  const principalName = row.document.principalName ?? displayName;
+                  const documentLabel = formatDocumentTitle(row.document);
+                  const documentReference = formatReference(row.document.id, "DOC");
+                  const firstEventSlotIndex = Math.min(...row.events.map((event) => event.slotIndex));
+                  const lastEventSlotIndex = Math.max(...row.events.map((event) => event.slotIndex));
+                  const lineStartRatio = (firstEventSlotIndex + 0.5) / activityTimeline.slotCount;
+                  const lineEndRatio = (lastEventSlotIndex + 0.5) / activityTimeline.slotCount;
+                  const progressLineStyle = {
+                    left: `calc(0.75rem + ${lineStartRatio * 100}% - ${lineStartRatio * 1.5}rem)`,
+                    right: `calc(0.75rem + ${(1 - lineEndRatio) * 100}% - ${(1 - lineEndRatio) * 1.5}rem)`,
+                  };
 
-                    return (
+                  return (
+                    <div
+                      key={row.document.id}
+                      className="border-b border-Color-Scheme-1-Border/30 last:border-b-0"
+                    >
                       <div
-                        key={row.document.id}
-                        className="border-b border-Color-Scheme-1-Border/30 last:border-b-0"
+                        className="relative min-h-[104px] overflow-visible px-3 py-4"
+                        aria-label={`${documentLabel} ${documentReference}`}
                       >
-                        <div
-                          className="relative min-h-[104px] overflow-visible px-3 py-4"
-                          aria-label={`${documentLabel} ${documentReference}`}
-                        >
                         <span className="sr-only">{documentLabel} {documentReference}</span>
                         <div className="absolute top-1/2 h-px bg-Color-Scheme-1-Border/50" style={progressLineStyle} />
                         <div
@@ -947,108 +794,22 @@ export default function DashboardPage() {
                     </div>
                   );
                 })}
-                  {activityTimeline.rows.length === 0 ? (
-                    <div className="px-3 py-3 text-sm text-Color-Neutral">No recent activity yet.</div>
-                  ) : null}
-                </div>
+                {activityTimeline.rows.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-Color-Neutral">
+                    {selectedDocument ? "No recent activity for this document yet." : "Select a document to view recent activity."}
+                  </div>
+                ) : null}
               </div>
             </div>
-          </div>
-        </div>
-
-        <div className="space-y-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <div className="flex items-center justify-between gap-2">
-              <SectionTitle icon="signature" title="Signature requests" />
-              <Link className="text-xs underline" href="/app/requests">
-                View all
-              </Link>
-            </div>
-            <div className="mt-4 space-y-3 text-xs">
-              {(payload?.requests ?? []).slice(0, 5).map((request) => (
-                <div key={request.id} className="space-y-1">
-                  <div className="font-medium">{formatReference(request.id, "REQ")}</div>
-                  <div className="text-xs text-Color-Neutral">
-                    {resolveFriendlyDocumentType(request.documentType)} • Principal: {request.ownerName ?? displayName}
-                  </div>
-                  <div className="text-xs text-Color-Neutral">
-                    {formatStatusLabel(request.status)} • Signature requested on {formatReference(request.documentId, "DOC")}
-                  </div>
-                </div>
-              ))}
-              {(payload?.requests ?? []).length === 0 ? <div className="text-Color-Neutral">No signature requests.</div> : null}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <SectionTitle icon="alerts" title="Alerts" />
-            <div className="mt-4 space-y-4 text-xs text-Color-Neutral">
-              {(payload?.alerts ?? []).map((alert) => {
-                const alertDocumentIds = alert.documentIds ?? [];
-                const alertDocumentsById = new Map(
-                  (alert.documents ?? []).map((document) => [document.id, document]),
-                );
-                const visibleDocumentIds = alertDocumentIds.slice(0, 3);
-                const hiddenDocumentCount = Math.max(alertDocumentIds.length - visibleDocumentIds.length, 0);
-
-                return (
-                  <div key={alert.key} className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>{alert.message}</div>
-                      {hiddenDocumentCount > 0 ? (
-                        <Link
-                          href={getAlertViewAllHref(alert.key)}
-                          className="shrink-0 text-xs font-medium text-Color-Neutral underline-offset-4 transition-colors hover:text-Color-Neutral-Darkest hover:underline"
-                        >
-                          View all
-                        </Link>
-                      ) : null}
-                    </div>
-                    {visibleDocumentIds.length > 0 ? (
-                      <div className="space-y-2">
-                        {visibleDocumentIds.map((documentId) => {
-                        const document = documentById.get(documentId) ?? alertDocumentsById.get(documentId);
-
-                        return (
-                          <Link
-                            key={`${alert.key}-${documentId}`}
-                            href={getAlertDocumentHref(alert.key, documentId, document)}
-                            className="group flex items-center justify-between gap-3 rounded-md border border-Color-Scheme-1-Border/40 px-3 py-2 text-xs text-Color-Neutral transition-colors hover:bg-Color-White hover:text-Color-Neutral-Darkest"
-                          >
-                            <span>{formatAlertDocumentLabel(documentId, document)}</span>
-                            <span className="text-Color-Neutral transition-colors group-hover:text-Color-Neutral-Darkest">Open</span>
-                          </Link>
-                        );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {(payload?.alerts ?? []).length === 0 ? <div>No alerts.</div> : null}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-            <SectionTitle icon="next" title="Next action" />
-            {primaryAction ? (
-              <div className="mt-4 space-y-3 text-xs text-Color-Neutral">
-                <div>{primaryAction.description}</div>
-                <Link
-                  className="inline-flex rounded border border-Color-Scheme-1-Border/40 px-3 py-1.5 text-xs font-medium text-Color-Scheme-1-Text"
-                  href={primaryAction.targetPath}
-                >
-                  {primaryAction.label}
-                </Link>
-              </div>
-            ) : (
-              <div className="mt-4 text-xs text-Color-Neutral">
-                {payload?.nextAction ?? "No action required."}
-              </div>
-            )}
           </div>
         </div>
       </div>
+
+      {isLoading ? (
+        <div className="rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm text-Color-Neutral">
+          Loading activity.
+        </div>
+      ) : null}
     </div>
   );
 }

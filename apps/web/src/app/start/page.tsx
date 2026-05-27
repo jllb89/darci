@@ -4,11 +4,12 @@ import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { parsePhoneNumberFromString } from "libphonenumber-js";
+import { AsYouType, parsePhoneNumberFromString } from "libphonenumber-js";
 import {
   hasStoredSession,
   setStoredAuth,
   syncStoredAuthFromSession,
+  type StoredUser,
 } from "@/lib/auth";
 import { buildAuthCallbackUrl, sanitizeAuthReturnTo } from "@/lib/authRedirects";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
@@ -23,15 +24,34 @@ type IdentifierChallenge = {
   displayValue: string;
 };
 
-type AuthStep = "identifier" | "otp" | "password";
+type AuthStep = "identifier" | "otp" | "password" | "profile";
 type OtpStartResponsePayload = {
   message?: string;
   otpLength?: number | null;
   cooldownSeconds?: number | null;
   details?: Array<{ message?: string }>;
 };
+type AuthSessionResponsePayload = {
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  user?: StoredUser | null;
+  profileCompletionRequired?: boolean;
+  message?: string;
+  details?: Array<{ message?: string }>;
+};
+type PendingAuthSession = {
+  accessToken: string;
+  refreshToken: string | null;
+  user: StoredUser;
+};
+type ProfileFormState = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+};
 
-const DEFAULT_OTP_LENGTH = 6;
+const DEFAULT_OTP_LENGTH = 8;
 const MIN_OTP_LENGTH = 4;
 const MAX_OTP_LENGTH = 12;
 const DEFAULT_RESEND_COOLDOWN_SECONDS = 60;
@@ -88,6 +108,15 @@ const resolveIdentifier = (value: string): IdentifierChallenge | null => {
   return null;
 };
 
+const formatPhoneInputValue = (value: string) => {
+  const trimmed = value.trimStart();
+  if (!trimmed) {
+    return "";
+  }
+
+  return new AsYouType("US").input(trimmed);
+};
+
 function StartAuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -100,6 +129,13 @@ function StartAuthPageContent() {
   );
   const [passwordEmail, setPasswordEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [pendingAuthSession, setPendingAuthSession] = useState<PendingAuthSession | null>(null);
+  const [profileForm, setProfileForm] = useState<ProfileFormState>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -131,6 +167,45 @@ function StartAuthPageContent() {
   const resetMessages = () => {
     setErrorMessage(null);
     setNoticeMessage(null);
+  };
+
+  const finishVerifiedSession = (
+    payload: AuthSessionResponsePayload,
+    verifiedChallenge: IdentifierChallenge,
+  ) => {
+    if (!payload.accessToken || !payload.user) {
+      const validationMessage = payload.details?.[0]?.message;
+      throw new Error(payload.message || validationMessage || "Invalid or expired code.");
+    }
+
+    const refreshToken = payload.refreshToken ?? null;
+
+    if (payload.profileCompletionRequired) {
+      setPendingAuthSession({
+        accessToken: payload.accessToken,
+        refreshToken,
+        user: payload.user,
+      });
+      setProfileForm({
+        firstName: payload.user.firstName ?? "",
+        lastName: payload.user.lastName ?? "",
+        email: payload.user.email || (verifiedChallenge.kind === "email" ? verifiedChallenge.value : ""),
+        phone: formatPhoneInputValue(
+          payload.user.phone ?? (verifiedChallenge.kind === "phone" ? verifiedChallenge.value : ""),
+        ),
+      });
+      setNoticeMessage("Complete your profile to continue.");
+      setIsSubmitting(false);
+      setAuthStep("profile");
+      return;
+    }
+
+    setStoredAuth({
+      accessToken: payload.accessToken,
+      refreshToken,
+      user: payload.user,
+    });
+    router.push(returnTo);
   };
 
   const requestOtpForChallenge = async (nextChallenge: IdentifierChallenge) => {
@@ -249,13 +324,7 @@ function StartAuthPageContent() {
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | {
-            accessToken?: string | null;
-            refreshToken?: string | null;
-            user?: unknown;
-            message?: string;
-            details?: Array<{ message?: string }>;
-          }
+        | AuthSessionResponsePayload
         | null;
 
       if (!response.ok || !payload?.accessToken || !payload.user) {
@@ -263,11 +332,7 @@ function StartAuthPageContent() {
         throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
       }
 
-      setStoredAuth({
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken ?? null,
-        user: payload.user,
-      });
+      finishVerifiedSession(payload, challenge);
     } else {
       // ✅ FIXED: Phone OTP verify now uses backend endpoint (server-side like email OTP)
       const response = await fetch(`${apiBaseUrl}/auth/otp/phone/verify`, {
@@ -281,13 +346,7 @@ function StartAuthPageContent() {
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | {
-            accessToken?: string | null;
-            refreshToken?: string | null;
-            user?: unknown;
-            message?: string;
-            details?: Array<{ message?: string }>;
-          }
+        | AuthSessionResponsePayload
         | null;
 
       if (!response.ok || !payload?.accessToken || !payload.user) {
@@ -295,14 +354,8 @@ function StartAuthPageContent() {
         throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
       }
 
-      setStoredAuth({
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken ?? null,
-        user: payload.user,
-      });
+      finishVerifiedSession(payload, challenge);
     }
-
-    router.push(returnTo);
   };
 
   const updateOtpDigitsFromInput = (value: string, index: number) => {
@@ -451,6 +504,60 @@ function StartAuthPageContent() {
     router.push(returnTo);
   };
 
+  const completeProfile = async () => {
+    if (!pendingAuthSession) {
+      throw new Error("Verify your code before completing your profile.");
+    }
+
+    const firstName = profileForm.firstName.trim();
+    const lastName = profileForm.lastName.trim();
+    const email = profileForm.email.trim().toLowerCase();
+    const parsedPhone = parsePhoneNumberFromString(profileForm.phone.trim(), "US");
+
+    if (!firstName || !lastName) {
+      throw new Error("Enter your first and last name.");
+    }
+
+    if (!emailPattern.test(email)) {
+      throw new Error("Enter a valid email address.");
+    }
+
+    if (!parsedPhone?.isValid()) {
+      throw new Error("Enter a valid phone number.");
+    }
+
+    const response = await fetch(`${apiBaseUrl}/users/me`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${pendingAuthSession.accessToken}`,
+      },
+      body: JSON.stringify({
+        firstName,
+        lastName,
+        email,
+        phone: parsedPhone.number,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { user?: StoredUser | null; message?: string; details?: Array<{ message?: string }> }
+      | null;
+
+    if (!response.ok || !payload?.user) {
+      const validationMessage = payload?.details?.[0]?.message;
+      throw new Error(payload?.message || validationMessage || "Failed to complete profile.");
+    }
+
+    setStoredAuth({
+      accessToken: pendingAuthSession.accessToken,
+      refreshToken: pendingAuthSession.refreshToken,
+      user: payload.user,
+    });
+    setPendingAuthSession(null);
+    router.push(returnTo);
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     resetMessages();
@@ -461,6 +568,8 @@ function StartAuthPageContent() {
         await startOtpChallenge();
       } else if (authStep === "otp") {
         await verifyOtpChallenge();
+      } else if (authStep === "profile") {
+        await completeProfile();
       } else {
         await signInWithPassword();
       }
@@ -537,27 +646,35 @@ function StartAuthPageContent() {
     resetMessages();
     setAuthStep("identifier");
     setChallenge(null);
+    setPendingAuthSession(null);
     setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
     setResendCountdownSeconds(0);
     setPassword("");
   };
 
-  const supportingCopy = authStep === "otp" && challenge
+  const supportingCopy = authStep === "profile"
+    ? "Add your name and contact details before entering your workspace."
+    : authStep === "otp" && challenge
     ? `Verification code sent to ${challenge.displayValue}`
     : returnTo.startsWith("/app/invite")
       ? "Sign in to continue to the document signature."
       : "Sign in to continue your workspace.";
+  const headingLabel = authStep === "profile" ? "Complete your profile" : "Access DARCi";
 
   const submitLabel = isSubmitting
     ? authStep === "identifier"
       ? "Sending code..."
       : authStep === "otp"
         ? "Verifying code..."
+        : authStep === "profile"
+          ? "Saving profile..."
         : "Signing in..."
     : authStep === "identifier"
       ? "Send code"
       : authStep === "otp"
         ? "Verify code"
+        : authStep === "profile"
+          ? "Continue"
         : "Sign in";
 
   return (
@@ -585,7 +702,7 @@ function StartAuthPageContent() {
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-2">
           <section className="relative flex min-h-0 items-center justify-center bg-white px-8 pb-10 pt-24 md:px-12 md:pb-16 md:pt-28">
             <div className="w-full max-w-md">
-              {authStep !== "identifier" ? (
+              {authStep !== "identifier" && authStep !== "profile" ? (
                 <button
                   type="button"
                   className="mb-8 text-xs font-medium text-Color-Neutral underline underline-offset-4 disabled:opacity-50"
@@ -598,7 +715,7 @@ function StartAuthPageContent() {
 
               <div>
                 <h1 className="font-display text-4xl font-medium md:text-5xl">
-                  Access DARCi
+                  {headingLabel}
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-Color-Neutral">
                   {supportingCopy}
@@ -699,6 +816,84 @@ function StartAuthPageContent() {
                   </>
                 ) : null}
 
+                {authStep === "profile" ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium">First name</label>
+                        <input
+                          autoComplete="given-name"
+                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                          type="text"
+                          value={profileForm.firstName}
+                          onChange={(event) =>
+                            setProfileForm((current) => ({
+                              ...current,
+                              firstName: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium">Last name</label>
+                        <input
+                          autoComplete="family-name"
+                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                          type="text"
+                          value={profileForm.lastName}
+                          onChange={(event) =>
+                            setProfileForm((current) => ({
+                              ...current,
+                              lastName: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium">Email</label>
+                      <input
+                        autoComplete="email"
+                        className={`w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text ${
+                          challenge?.kind === "email" ? "bg-Color-Neutral-Lightest text-Color-Neutral" : ""
+                        }`}
+                        type="email"
+                        value={profileForm.email}
+                        onChange={(event) =>
+                          setProfileForm((current) => ({
+                            ...current,
+                            email: event.target.value,
+                          }))
+                        }
+                        readOnly={challenge?.kind === "email"}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium">Phone number</label>
+                      <input
+                        autoComplete="tel"
+                        className={`w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text ${
+                          challenge?.kind === "phone" ? "bg-Color-Neutral-Lightest text-Color-Neutral" : ""
+                        }`}
+                        placeholder="(555) 555-1234"
+                        type="tel"
+                        value={profileForm.phone}
+                        onChange={(event) =>
+                          setProfileForm((current) => ({
+                            ...current,
+                            phone: formatPhoneInputValue(event.target.value),
+                          }))
+                        }
+                        readOnly={challenge?.kind === "phone"}
+                        required
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
                 {errorMessage ? (
                   <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     {errorMessage}
@@ -740,10 +935,12 @@ function StartAuthPageContent() {
                   ) : null}
 
                   <button
-                    className="flex w-full items-center justify-center gap-3 border border-Color-Scheme-1-Border bg-white px-4 py-3 text-sm font-medium text-Color-Scheme-1-Text disabled:opacity-60"
+                    className="flex w-full cursor-not-allowed items-center justify-center gap-3 border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-3 text-sm font-medium text-Color-Neutral disabled:opacity-70"
                     type="button"
                     onClick={handleGoogleAuth}
-                    disabled={isSubmitting}
+                    disabled
+                    aria-disabled="true"
+                    title="Google sign-in is temporarily unavailable"
                   >
                     <svg
                       aria-hidden="true"

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   resendSendMock: vi.fn(),
   ensureUserIdentityFromAuthMock: vi.fn(),
+  getUserIdentityContextBySupabaseIdMock: vi.fn(),
   toUserResponseMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   findRecentAuditEventByEmailMock: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("resend", () => ({
 
 vi.mock("../../src/services/userRoleService", () => ({
   ensureUserIdentityFromAuth: mocks.ensureUserIdentityFromAuthMock,
+  getUserIdentityContextBySupabaseId: mocks.getUserIdentityContextBySupabaseIdMock,
   toUserResponse: mocks.toUserResponseMock,
 }));
 
@@ -77,6 +79,7 @@ describe("auth controller Phase 1", () => {
     delete process.env.NOTIFICATION_FROM_ADDRESS;
 
     mocks.ensureUserIdentityFromAuthMock.mockResolvedValue(buildProfile());
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(buildProfile());
     mocks.toUserResponseMock.mockImplementation((profile: { email: string }) => ({
       id: "db-user-1",
       email: profile.email,
@@ -549,7 +552,54 @@ describe("auth controller Phase 1", () => {
         role: "member",
         status: "active",
       },
+      profileCompletionRequired: false,
     });
+  });
+
+  it("flags email OTP sessions that need account profile completion", async () => {
+    const verifyOtpMock = vi.fn().mockResolvedValue({
+      data: {
+        session: {
+          access_token: "otp-access-token",
+          refresh_token: "otp-refresh-token",
+        },
+        user: {
+          id: "auth-user-1",
+          email: "new@example.com",
+          app_metadata: { role: "member" },
+          user_metadata: {},
+          email_confirmed_at: "2026-04-30T16:00:00.000Z",
+          confirmed_at: "2026-04-30T16:00:00.000Z",
+          last_sign_in_at: "2026-04-30T16:01:00.000Z",
+        },
+      },
+      error: null,
+    });
+    mocks.createClientMock.mockReturnValue({ auth: { verifyOtp: verifyOtpMock } });
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(null);
+    mocks.ensureUserIdentityFromAuthMock.mockResolvedValue({
+      ...buildProfile(),
+      email: "new@example.com",
+      firstName: null,
+      lastName: null,
+      phone: null,
+    });
+
+    const { verifyEmailOtp } = await import("../../src/controllers/authController.ts");
+    const { res, json } = buildResponse();
+    const req = {
+      headers: {},
+      body: { email: "new@example.com", token: "123456", returnTo: "/app" },
+    } as unknown as Request;
+
+    await verifyEmailOtp(req, res);
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "otp-access-token",
+        profileCompletionRequired: true,
+      }),
+    );
   });
 
   it("resets a password through an authenticated recovery session", async () => {

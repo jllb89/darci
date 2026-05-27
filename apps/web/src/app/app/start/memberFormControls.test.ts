@@ -3,6 +3,7 @@ import {
   DEFAULT_PHONE_COUNTRY_CODE,
   DEFAULT_PHONE_COUNTRY_ISO2,
   PHONE_COUNTRY_CODE_OPTIONS,
+  formatPhoneInput,
   getMemberFieldControlKind,
   getPhoneCountryCodeByIso2,
   hasSigningTrustee,
@@ -308,6 +309,11 @@ describe("memberFormControls", () => {
 
     expect(isValidPhoneFormat("555-111-2222")).toBe(true);
     expect(isValidPhoneFormat("123")).toBe(false);
+  });
+
+  it("formats phone numbers as the user types", () => {
+    expect(formatPhoneInput("4155550103", "US")).toBe("(415) 555-0103");
+    expect(formatPhoneInput("02079460056", "GB")).toBe("020 7946 0056");
   });
 
   it("preserves spaces while converting multiline array input", () => {

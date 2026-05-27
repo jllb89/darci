@@ -13,8 +13,42 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 
 const ACTIVITY_LIMIT = 20;
 const DOCUMENT_LIMIT = 10;
+const MEMBER_TIMELINE_ACTIVITY_QUERY_LIMIT = 250;
+const MEMBER_TIMELINE_LOOKBACK_DAYS = 7;
 const REQUEST_LIMIT = 10;
 const MEETING_LIMIT = 10;
+
+const memberDashboardTimelineActions = new Set([
+  "member.document_upload_started",
+  "system.document_created",
+  "member.document_upload_completed",
+  "system.document_ready_for_review",
+  "member.document_review_approved",
+  "system.document_idn_assigned",
+  "system.document_signing_prepared",
+  "member.signature_capture_completed",
+  "member.document_signatures_confirmed",
+  "system.signature_completion_workflow_applied",
+  "system.signature_completion_workflow_failed",
+  "system.invites_issued_for_remaining_signers",
+  "system.remaining_signer_invite_dispatch_failed",
+  "member.signature_reminder_sent",
+  "member.signature_reminder_failed",
+  "member.notarization_submit_started",
+  "member.notarization_submitted",
+  "member.notary_selected",
+  "notary.code_resolved",
+  "system.request_assigned_to_notary",
+  "notary.request_approved",
+  "notary.request_rejected",
+  "notary.request_changes_requested",
+  "notary.meeting_started",
+  "notary.meeting_completed",
+  "system.meeting_no_show_recorded",
+  "notary.identity_verified",
+  "system.notarized_document_created",
+  "system.ledger_anchor_completed",
+]);
 
 type AuditEventRecord = {
   id: string;
@@ -28,7 +62,16 @@ type AuditEventRecord = {
 
 type DashboardDocumentRecord = Pick<
   DocumentRecord,
-  "id" | "owner_id" | "idn" | "status" | "document_type" | "jurisdiction" | "created_at" | "updated_at"
+  | "id"
+  | "owner_id"
+  | "idn"
+  | "status"
+  | "document_type"
+  | "jurisdiction"
+  | "product_flow_mode"
+  | "selected_families"
+  | "created_at"
+  | "updated_at"
 >;
 
 type DashboardRequestRecord = {
@@ -70,6 +113,7 @@ export type DashboardActivity = {
   documentId: string | null;
   entityType: string;
   entityId: string | null;
+  document?: DashboardAlertDocumentSummary;
 };
 
 export type DashboardDocumentSummary = {
@@ -78,9 +122,16 @@ export type DashboardDocumentSummary = {
   status: string | null;
   documentType: string | null;
   jurisdiction: string | null;
+  productFlowMode?: string;
+  selectedFamilies?: string[];
   createdAt: string;
   updatedAt: string | null;
 };
+
+export type DashboardAlertDocumentSummary = Pick<
+  DashboardDocumentSummary,
+  "id" | "status" | "documentType" | "productFlowMode" | "selectedFamilies"
+>;
 
 export type DashboardRequestSummary = {
   id: string;
@@ -111,6 +162,22 @@ export type DashboardMeetingSummary = {
 export type DashboardAlert = {
   key: string;
   message: string;
+  documentIds?: string[];
+  documents?: DashboardAlertDocumentSummary[];
+};
+
+export type DashboardPrimaryAction = {
+  code:
+    | "continue_drafts"
+    | "review_documents"
+    | "collect_signatures"
+    | "track_notary_queue"
+    | "review_notary_requests"
+    | "inspect_open_documents";
+  label: string;
+  description: string;
+  targetPath: string;
+  priority: "high" | "medium" | "low";
 };
 
 export type RoleAwareDashboardResponse = {
@@ -122,6 +189,7 @@ export type RoleAwareDashboardResponse = {
   activity: DashboardActivity[];
   alerts: DashboardAlert[];
   nextAction: string | null;
+  primaryAction: DashboardPrimaryAction | null;
 };
 
 export type MemberDashboardCounts = {
@@ -147,7 +215,96 @@ type MemberLikeDashboardData = {
   activity: DashboardActivity[];
   alerts: DashboardAlert[];
   nextAction: string | null;
+  primaryAction: DashboardPrimaryAction | null;
   metrics: DashboardMetric[];
+};
+
+const buildMemberPrimaryAction = (counts: MemberDashboardCounts): DashboardPrimaryAction | null => {
+  if (counts.pendingSignature > 0) {
+    return {
+      code: "collect_signatures",
+      label: "Manage signatures",
+      description: `${counts.pendingSignature} ${counts.pendingSignature === 1 ? "document is" : "documents are"} waiting on signatures.`,
+      targetPath: "/app/documents?status=pending_signature",
+      priority: "high",
+    };
+  }
+
+  if (counts.pendingReview > 0) {
+    return {
+      code: "review_documents",
+      label: "Review documents",
+      description: `${counts.pendingReview} ${counts.pendingReview === 1 ? "document is" : "documents are"} ready for review.`,
+      targetPath: "/app/documents?status=pending_review",
+      priority: "medium",
+    };
+  }
+
+  if (counts.draft > 0) {
+    return {
+      code: "continue_drafts",
+      label: "Continue drafts",
+      description: `${counts.draft} draft ${counts.draft === 1 ? "document needs" : "documents need"} intake details.`,
+      targetPath: "/app/documents?status=draft",
+      priority: "medium",
+    };
+  }
+
+  if (counts.pendingNotary > 0) {
+    return {
+      code: "track_notary_queue",
+      label: "Track notary queue",
+      description: `${counts.pendingNotary} ${counts.pendingNotary === 1 ? "document is" : "documents are"} waiting on notary completion.`,
+      targetPath: "/app/requests",
+      priority: "low",
+    };
+  }
+
+  return null;
+};
+
+const normalizeDashboardStatus = (value: string | null | undefined) =>
+  value?.trim().toLowerCase() ?? "";
+
+const isDraftDocument = (document: DashboardDocumentRecord) => {
+  const status = normalizeDashboardStatus(document.status);
+  return status === "draft" || status.includes("intake");
+};
+
+const isPendingReviewDocument = (document: DashboardDocumentRecord) => {
+  const status = normalizeDashboardStatus(document.status);
+  return status === "pending_review" || status.includes("review") || status.includes("blocked");
+};
+
+const isPendingSignatureDocument = (document: DashboardDocumentRecord) => {
+  const status = normalizeDashboardStatus(document.status);
+  return status === "pending_signature" || status.includes("signature");
+};
+
+const isPendingNotaryDocument = (document: DashboardDocumentRecord) => {
+  const status = normalizeDashboardStatus(document.status);
+  return status === "pending_notary" || status.includes("notary");
+};
+
+const isCompletedDocument = (document: DashboardDocumentRecord) => {
+  const status = normalizeDashboardStatus(document.status);
+  return status === "completed" || status === "notarized" || status.includes("final");
+};
+
+const documentCountMessage = (count: number, message: string) => {
+  return `${count} ${count === 1 ? "document" : "documents"} ${message}`;
+};
+
+const daysAgoIso = (days: number) => {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+};
+
+const isDashboardTimelineAuditEvent = (event: AuditEventRecord) => {
+  if (event.entity_type === "generation_run" || event.action.includes("generation_run")) {
+    return false;
+  }
+
+  return memberDashboardTimelineActions.has(event.action);
 };
 
 const resolveDocumentId = (event: {
@@ -164,21 +321,32 @@ const resolveDocumentId = (event: {
       : null;
 };
 
-const toDashboardActivity = (event: AuditEventRecord): DashboardActivity => {
-  return {
+const toDashboardActivity = (
+  event: AuditEventRecord,
+  documentsById?: Map<string, DashboardDocumentRecord>,
+): DashboardActivity => {
+  const documentId = resolveDocumentId(event);
+  const document = documentId ? documentsById?.get(documentId) : undefined;
+  const summary: DashboardActivity = {
     action: event.action,
     timestamp: event.created_at,
-    documentId: resolveDocumentId(event),
+    documentId,
     entityType: event.entity_type,
     entityId: event.entity_id,
   };
+
+  if (document) {
+    summary.document = toDashboardAlertDocumentSummary(document);
+  }
+
+  return summary;
 };
 
 const toDashboardDocumentSummary = (
   document: DashboardDocumentRecord,
   viewerRole: RuntimeRole,
 ): DashboardDocumentSummary => {
-  return {
+  const summary: DashboardDocumentSummary = {
     id: document.id,
     idn: getVisibleDocumentIdn({
       idn: document.idn,
@@ -191,6 +359,36 @@ const toDashboardDocumentSummary = (
     createdAt: document.created_at,
     updatedAt: document.updated_at,
   };
+
+  if (typeof document.product_flow_mode === "string" && document.product_flow_mode.length > 0) {
+    summary.productFlowMode = document.product_flow_mode;
+  }
+
+  if (Array.isArray(document.selected_families) && document.selected_families.length > 0) {
+    summary.selectedFamilies = document.selected_families;
+  }
+
+  return summary;
+};
+
+const toDashboardAlertDocumentSummary = (
+  document: DashboardDocumentRecord,
+): DashboardAlertDocumentSummary => {
+  const summary: DashboardAlertDocumentSummary = {
+    id: document.id,
+    status: document.status,
+    documentType: document.document_type,
+  };
+
+  if (typeof document.product_flow_mode === "string" && document.product_flow_mode.length > 0) {
+    summary.productFlowMode = document.product_flow_mode;
+  }
+
+  if (Array.isArray(document.selected_families) && document.selected_families.length > 0) {
+    summary.selectedFamilies = document.selected_families;
+  }
+
+  return summary;
 };
 
 const toDisplayName = (user: DashboardUserRecord | undefined) => {
@@ -403,6 +601,8 @@ const buildMemberLikeDashboardData = async (input: {
 
   const documents = await listDocuments(ownerId);
   const documentIds = documents.map((document) => document.id);
+  const documentsById = new Map(documents.map((document) => [document.id, document]));
+  const recentDocuments = documents.slice(0, DOCUMENT_LIMIT);
   const includeWorkflowState = input.includeWorkflowState ?? true;
   const requests = includeWorkflowState
     ? await listNotarizationRequestsByDocumentIds(documentIds)
@@ -411,33 +611,33 @@ const buildMemberLikeDashboardData = async (input: {
     ? await listMeetingsByRequestIds(requests.map((request) => request.id))
     : [];
   const auditEvents = documentIds.length
-    ? await listRecentAuditEventsForDocumentIds(documentIds, ACTIVITY_LIMIT, ownerId)
+    ? (await listRecentAuditEventsForDocumentIds(
+        documentIds,
+        MEMBER_TIMELINE_ACTIVITY_QUERY_LIMIT,
+        undefined,
+        daysAgoIso(MEMBER_TIMELINE_LOOKBACK_DAYS),
+        {
+          excludeActionLike: ["%generation_run%"],
+          excludeEntityTypes: ["generation_run"],
+          includeActions: Array.from(memberDashboardTimelineActions),
+        },
+      )).filter(isDashboardTimelineAuditEvent)
     : [];
 
+  const draftDocuments = documents.filter(isDraftDocument);
+  const pendingReviewDocuments = documents.filter(isPendingReviewDocument);
+  const pendingSignatureDocuments = documents.filter(isPendingSignatureDocument);
+  const pendingNotaryDocuments = documents.filter(isPendingNotaryDocument);
+  const completedDocuments = documents.filter(isCompletedDocument);
   const counts: MemberDashboardCounts = {
-    draft: 0,
-    pendingReview: 0,
-    pendingSignature: 0,
-    pendingNotary: 0,
-    completed: 0,
+    draft: draftDocuments.length,
+    pendingReview: pendingReviewDocuments.length,
+    pendingSignature: pendingSignatureDocuments.length,
+    pendingNotary: pendingNotaryDocuments.length,
+    completed: completedDocuments.length,
     total: documents.length,
   };
 
-  for (const document of documents) {
-    if (document.status === "draft") {
-      counts.draft += 1;
-    } else if (document.status === "pending_review") {
-      counts.pendingReview += 1;
-    } else if (document.status === "pending_signature") {
-      counts.pendingSignature += 1;
-    } else if (document.status === "pending_notary") {
-      counts.pendingNotary += 1;
-    } else if (document.status === "completed" || document.status === "notarized") {
-      counts.completed += 1;
-    }
-  }
-
-  const documentsById = new Map(documents.map((document) => [document.id, document]));
   const meetingsByRequestId = new Map(meetings.map((meeting) => [meeting.request_id, meeting]));
   const usersById = new Map<string, DashboardUserRecord>();
   const requestsSummary = buildRequestSummaries({
@@ -455,10 +655,28 @@ const buildMemberLikeDashboardData = async (input: {
   }).filter((meeting) => meeting.status !== "cancelled" && meeting.status !== "no_show");
 
   const alerts: DashboardAlert[] = [];
+  if (pendingSignatureDocuments.length > 0) {
+    alerts.push({
+      key: "awaiting-signatures",
+      message: documentCountMessage(pendingSignatureDocuments.length, "waiting on signatures."),
+      documentIds: pendingSignatureDocuments.map((document) => document.id),
+      documents: pendingSignatureDocuments.map(toDashboardAlertDocumentSummary),
+    });
+  }
+  if (pendingReviewDocuments.length > 0) {
+    alerts.push({
+      key: "awaiting-review",
+      message: documentCountMessage(pendingReviewDocuments.length, "ready for review."),
+      documentIds: pendingReviewDocuments.map((document) => document.id),
+      documents: pendingReviewDocuments.map(toDashboardAlertDocumentSummary),
+    });
+  }
   if (counts.pendingNotary > 0) {
     alerts.push({
       key: "awaiting-notary",
-      message: `${counts.pendingNotary} document(s) are awaiting notary completion.`,
+      message: documentCountMessage(pendingNotaryDocuments.length, "waiting on notary completion."),
+      documentIds: pendingNotaryDocuments.map((document) => document.id),
+      documents: pendingNotaryDocuments.map(toDashboardAlertDocumentSummary),
     });
   }
   if (upcomingMeetings.length > 0) {
@@ -485,17 +703,17 @@ const buildMemberLikeDashboardData = async (input: {
       value: counts.completed,
     },
   ];
+  const primaryAction = buildMemberPrimaryAction(counts);
 
   return {
     counts,
-    documents: documents
-      .slice(0, DOCUMENT_LIMIT)
-      .map((document) => toDashboardDocumentSummary(document, input.role)),
+    documents: recentDocuments.map((document) => toDashboardDocumentSummary(document, input.role)),
     requests: requestsSummary,
     meetings: upcomingMeetings,
-    activity: auditEvents.map(toDashboardActivity),
+    activity: auditEvents.map((event) => toDashboardActivity(event, documentsById)),
     alerts,
-    nextAction: null,
+    nextAction: primaryAction?.description ?? null,
+    primaryAction,
     metrics,
   } satisfies MemberLikeDashboardData;
 };
@@ -561,6 +779,15 @@ const buildNotaryDashboardData = async (input: {
       message: `${changesRequestedCount} request(s) were rejected and may need follow-up.`,
     });
   }
+  const primaryAction: DashboardPrimaryAction | null = pendingCount > 0
+    ? {
+        code: "review_notary_requests",
+        label: "Review notary requests",
+        description: `${pendingCount} request(s) are waiting for notary review.`,
+        targetPath: "/app/requests?status=pending",
+        priority: "high",
+      }
+    : null;
 
   return {
     role: "notary" as const,
@@ -582,9 +809,10 @@ const buildNotaryDashboardData = async (input: {
       documentsById,
       usersById,
     }),
-    activity: auditEvents.map(toDashboardActivity),
+    activity: auditEvents.map((event) => toDashboardActivity(event, documentsById)),
     alerts,
-    nextAction: null,
+    nextAction: primaryAction?.description ?? null,
+    primaryAction,
   } satisfies RoleAwareDashboardResponse;
 };
 
@@ -602,9 +830,10 @@ const buildAdminDashboardData = async () => {
 
   const alerts: DashboardAlert[] = [];
   if (openDocuments > 0) {
+    const openDocumentsMessage = `${openDocuments} ${openDocuments === 1 ? "document is" : "documents are"} still in flight across the system.`;
     alerts.push({
       key: "open-documents",
-      message: `${openDocuments} document(s) are still in flight across the system.`,
+      message: openDocumentsMessage,
     });
   }
   if (verificationChecksToday > 0) {
@@ -613,6 +842,15 @@ const buildAdminDashboardData = async () => {
       message: `${verificationChecksToday} public verification check(s) were recorded today.`,
     });
   }
+  const primaryAction: DashboardPrimaryAction | null = openDocuments > 0
+    ? {
+        code: "inspect_open_documents",
+        label: "Inspect open documents",
+        description: `${openDocuments} ${openDocuments === 1 ? "document is" : "documents are"} still in flight across the system.`,
+        targetPath: "/app/documents",
+        priority: "medium",
+      }
+    : null;
 
   return {
     role: "admin" as const,
@@ -624,9 +862,12 @@ const buildAdminDashboardData = async () => {
     documents: [],
     requests: [],
     meetings: [],
-    activity: recentAuditEvents.map(toDashboardActivity),
+    activity: recentAuditEvents.map((event) => toDashboardActivity(event)),
     alerts,
-    nextAction: "Use the Ops Console to inspect audit events, compliance exceptions, and support escalations.",
+    nextAction:
+      primaryAction?.description ??
+      "Use the Ops Console to inspect audit events, compliance exceptions, and support escalations.",
+    primaryAction,
   } satisfies RoleAwareDashboardResponse;
 };
 
@@ -675,6 +916,7 @@ export const buildRoleAwareDashboard = async (input: {
       activity: dashboard.activity,
       alerts: dashboard.alerts,
       nextAction: dashboard.nextAction,
+      primaryAction: dashboard.primaryAction,
     } satisfies RoleAwareDashboardResponse;
   }
 

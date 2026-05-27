@@ -180,6 +180,53 @@ describe("memberFormValidationService", () => {
     ).toBe(true);
   });
 
+  it("fails when more than two trustmakers are submitted", () => {
+    const contract = buildTrustContract();
+    const grantorCarol = JSON.stringify({
+      fullName: "Carol Trustmaker",
+      isSigningTrustee: false,
+      email: "carol.trustmaker@example.com",
+    });
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        grantors: [...(buildFormValues({}).grantors as string[]), grantorCarol],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.code === "trustmakers_max_two")).toBe(
+      true,
+    );
+  });
+
+  it("fails when trustmakers reuse the same email address", () => {
+    const contract = buildTrustContract();
+    const grantorAlice = JSON.stringify({
+      fullName: "Alice Trustmaker",
+      isSigningTrustee: false,
+      email: "shared.trustmaker@example.com",
+    });
+    const grantorBob = JSON.stringify({
+      fullName: "Bob Trustmaker",
+      isSigningTrustee: false,
+      email: "shared.trustmaker@example.com",
+    });
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        grantors: [grantorAlice, grantorBob],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) => error.code === "trustmakers_email_unique"),
+    ).toBe(true);
+  });
+
   it("passes when trustmaker-bound tax ID owner matches entered trustmakers", () => {
     const contract = buildTrustContract();
 

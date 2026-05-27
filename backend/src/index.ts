@@ -73,6 +73,7 @@ app.use(
     allowedHeaders: [
       "Content-Type",
       "Authorization",
+      "Idempotency-Key",
       "X-CSRF-Token",
       "X-Request-Id",
       "X-Request-Signature",

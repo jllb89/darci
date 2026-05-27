@@ -9,6 +9,7 @@ import {
   getDocumentGenerationRun,
   getDocumentIntakeDraft,
   getDocumentReview,
+  getDocumentNextAction,
   listDocumentGenerationRuns,
   finalizeDocumentUpload,
   getDocument,
@@ -22,8 +23,12 @@ import {
   listDocuments,
   captureSignature,
   finalizeSignatureUpload,
+  previewBulkSignatureReminders,
+  previewDocumentSignatureReminders,
   requestSignatureUpload,
   resaveDocumentIntakeDraft,
+  sendBulkSignatureReminders,
+  sendDocumentSignatureReminders,
   submitDocumentIntakeDraft,
   getDocumentIntakePayload,
   signDocument,
@@ -44,7 +49,32 @@ router.post(
 );
 router.post("/:id/upload-finalize", finalizeDocumentUpload);
 router.get("/", listDocuments);
+router.post(
+  "/signature-reminders/preview",
+  requireRole(["member", "pro", "admin", "service_role"]),
+  previewBulkSignatureReminders,
+);
+router.post(
+  "/signature-reminders",
+  requireRole(["member", "pro", "admin", "service_role"]),
+  sendBulkSignatureReminders,
+);
+router.get(
+  "/:id/next-action",
+  requireRole(["member", "pro", "admin", "service_role"]),
+  getDocumentNextAction,
+);
 router.get("/:id", getDocument);
+router.post(
+  "/:id/signature-reminders/preview",
+  requireRole(["member", "pro", "admin", "service_role"]),
+  previewDocumentSignatureReminders,
+);
+router.post(
+  "/:id/signature-reminders",
+  requireRole(["member", "pro", "admin", "service_role"]),
+  sendDocumentSignatureReminders,
+);
 router.get(
   "/:id/review",
   requireRole(["member", "admin", "service_role"]),

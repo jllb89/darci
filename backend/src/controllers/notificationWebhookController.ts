@@ -76,6 +76,14 @@ const isMappableEmailEvent = (
 
 const sendServiceError = (res: Response, error: unknown) => {
   if (error instanceof NotificationOutboxServiceError) {
+    if (error.statusCode === 404) {
+      return res.status(202).json({
+        received: true,
+        ignored: true,
+        reason: error.message,
+      });
+    }
+
     const errorCode = error.statusCode === 404 ? "not_found" : "bad_request";
     return res.status(error.statusCode).json({
       error: errorCode,

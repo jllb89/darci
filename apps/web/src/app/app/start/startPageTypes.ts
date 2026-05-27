@@ -199,6 +199,7 @@ export type DocumentIntakeDraftResponsePayload = {
   draft?: DocumentIntakeDraft | null;
   message?: string;
   currentRevision?: number;
+  intakeStatus?: string;
 };
 
 export type DocumentIntakeBootstrapResponsePayload = {

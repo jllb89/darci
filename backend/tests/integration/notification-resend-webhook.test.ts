@@ -50,6 +50,7 @@ vi.mock("../../src/services/notificationOutboxService", async () => {
 });
 
 import { app } from "../../src/index";
+import { NotificationOutboxServiceError } from "../../src/services/notificationOutboxService";
 
 const postResendWebhook = (body: string) => {
   return request(app)
@@ -197,6 +198,31 @@ describe("Resend webhook ingestion", () => {
       received: true,
       ignored: true,
       reason: "No notification delivery matched provider_message_id unknown-resend-msg",
+    });
+  });
+
+  it("acknowledges stale delivery_id tagged events without disabling provider webhooks", async () => {
+    resendMocks.verifyWebhookMock.mockReturnValue({
+      type: "email.delivered",
+      created_at: "2026-05-20T17:42:00.000Z",
+      data: {
+        email_id: "resend-msg-stale-delivery",
+        tags: {
+          delivery_id: "missing-delivery-id",
+        },
+      },
+    });
+    serviceMocks.recordNotificationDeliveryEventMock.mockRejectedValue(
+      new NotificationOutboxServiceError(404, "Notification delivery not found"),
+    );
+
+    const response = await postResendWebhook(JSON.stringify({ type: "email.delivered" }));
+
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual({
+      received: true,
+      ignored: true,
+      reason: "Notification delivery not found",
     });
   });
 

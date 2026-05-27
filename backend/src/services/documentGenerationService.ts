@@ -115,6 +115,11 @@ const normalizeCanonicalAnswersForGeneration = (
   return normalizedAnswers;
 };
 
+const getNumberMetadata = (metadata: Record<string, unknown>, key: string) => {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+};
+
 export type PreparedGenerationRun = {
   document: DocumentRecord;
   documentKey: string;
@@ -326,6 +331,37 @@ const parsePersonList = (value: unknown) => {
   return value
     .map((entry) => parsePersonValue(entry))
     .filter((entry) => entry.fullName.length > 0);
+};
+
+const resolveCanonicalAnswersForOutput = (input: {
+  canonicalAnswers: CanonicalAnswers;
+  outputMetadata: Record<string, unknown>;
+}) => {
+  if (input.outputMetadata.principalSource !== "grantor") {
+    return input.canonicalAnswers;
+  }
+
+  const grantorIndex = getNumberMetadata(input.outputMetadata, "grantorIndex");
+  if (grantorIndex === null || grantorIndex < 0) {
+    return input.canonicalAnswers;
+  }
+
+  const grantor = parsePersonList(input.canonicalAnswers.grantors)[grantorIndex] ?? null;
+  if (!grantor) {
+    return input.canonicalAnswers;
+  }
+
+  return {
+    ...input.canonicalAnswers,
+    principal_full_name: grantor.fullName,
+    principal_contact: {
+      email: grantor.email,
+      phone: grantor.phone,
+      phoneCountryCode: grantor.phoneCountryCode,
+      source: "grantor",
+      grantorIndex,
+    },
+  } satisfies CanonicalAnswers;
 };
 
 const buildPartyUpsert = (input: {
@@ -651,6 +687,7 @@ const getRequiredSignerPartyRoles = (documentKey: string) => {
 
 const buildSignerObligation = (input: {
   party: DocumentPartyRecord;
+  partyRole?: DocumentOutputSignerUpsertInput["party_role"];
   outputKey: string;
   documentKey: string;
   obligationType: DocumentOutputSignerUpsertInput["obligation_type"];
@@ -664,7 +701,7 @@ const buildSignerObligation = (input: {
     document_party_id: input.party.id,
     output_key: input.outputKey,
     document_key: input.documentKey,
-    party_role: input.party.party_role,
+    party_role: input.partyRole ?? input.party.party_role,
     party_name: input.party.full_name,
     obligation_type: input.obligationType,
     signing_group: input.signingGroup ?? null,
@@ -673,7 +710,8 @@ const buildSignerObligation = (input: {
     sort_order: input.sortOrder,
     metadata: {
       ...(input.metadata ?? {}),
-      partyRole: input.party.party_role,
+      partyRole: input.partyRole ?? input.party.party_role,
+      sourcePartyRole: input.party.party_role,
     },
   };
 };
@@ -683,10 +721,26 @@ export const deriveSignerObligationsForRun = (input: {
   documentKey: string;
   parties: DocumentPartyRecord[];
   canonicalAnswers: CanonicalAnswers;
+  outputMetadata?: Record<string, unknown>;
 }): DocumentOutputSignerUpsertInput[] => {
   const grantors = input.parties.filter((party) => party.party_role === "grantor");
   const trustees = input.parties.filter((party) => party.party_role === "trustee");
   const principal = input.parties.find((party) => party.party_role === "principal") ?? null;
+  const grantorIndex = getNumberMetadata(input.outputMetadata ?? {}, "grantorIndex");
+  const grantorPrincipal =
+    input.documentKey === "poa_general" &&
+    input.outputMetadata?.principalSource === "grantor" &&
+    grantorIndex !== null
+      ? grantors[grantorIndex] ?? null
+      : null;
+  const poaPrincipal = grantorPrincipal ?? principal;
+  const trustmakerPrincipalMetadata = grantorPrincipal
+    ? {
+        principalSource: "grantor",
+        grantorIndex,
+        principalEmail: grantorPrincipal.email,
+      }
+    : null;
   const obligations: DocumentOutputSignerUpsertInput[] = [];
   let sortOrder = 0;
 
@@ -698,10 +752,11 @@ export const deriveSignerObligationsForRun = (input: {
     sortOrder += 1;
   };
 
-  if (input.documentKey === "poa_general" && principal) {
+  if (input.documentKey === "poa_general" && poaPrincipal) {
     append({
       ...buildSignerObligation({
-        party: principal,
+        party: poaPrincipal,
+        partyRole: "principal",
         outputKey: input.outputKey,
         documentKey: input.documentKey,
         obligationType: "signer",
@@ -709,12 +764,14 @@ export const deriveSignerObligationsForRun = (input: {
         isRequired: true,
         resolutionSource: "template",
         sortOrder: 0,
+        ...(trustmakerPrincipalMetadata ? { metadata: trustmakerPrincipalMetadata } : {}),
       }),
     });
 
     append({
       ...buildSignerObligation({
-        party: principal,
+        party: poaPrincipal,
+        partyRole: "principal",
         outputKey: input.outputKey,
         documentKey: input.documentKey,
         obligationType: "acknowledger",
@@ -722,6 +779,7 @@ export const deriveSignerObligationsForRun = (input: {
         isRequired: true,
         resolutionSource: "template",
         sortOrder: 0,
+        ...(trustmakerPrincipalMetadata ? { metadata: trustmakerPrincipalMetadata } : {}),
       }),
     });
 
@@ -1422,10 +1480,13 @@ export const prepareGenerationRun = async (input: {
   templateHash: string;
   extractionPayload: MemberFormDocumentExtractionPayload;
 }) => {
-  const canonicalAnswers = normalizeCanonicalAnswersForGeneration(
-    input.draft.canonical_answers_json,
-    input.draft,
-  );
+  const canonicalAnswers = resolveCanonicalAnswersForOutput({
+    canonicalAnswers: normalizeCanonicalAnswersForGeneration(
+      input.draft.canonical_answers_json,
+      input.draft,
+    ),
+    outputMetadata: input.outputMetadata,
+  });
   let parties = await listDocumentParties(input.document.id);
   if (parties.length === 0 && Object.keys(canonicalAnswers).length > 0) {
     parties = await syncDocumentPartiesFromCanonicalAnswers({
@@ -1456,6 +1517,7 @@ export const prepareGenerationRun = async (input: {
     documentKey,
     parties,
     canonicalAnswers,
+    outputMetadata: input.outputMetadata,
   });
 
   const placeholders = Object.fromEntries(

@@ -458,7 +458,7 @@ export default function ReviewPage() {
       return;
     }
 
-    router.push(`/app/start?documentId=${encodeURIComponent(documentId)}`);
+    router.push(`/app/start?documentId=${encodeURIComponent(documentId)}&from=review`);
   }, [documentId, router]);
 
   const saveDraftSnapshot = useCallback(async () => {
@@ -771,8 +771,17 @@ export default function ReviewPage() {
 
     if (hasBlockedOutputs) {
       return (
-        <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] border border-dashed border-red-200 bg-[#fdf6f6] px-6 text-center text-sm leading-6 text-red-700`}>
-          One or more review outputs are blocked. Check the blocker details in the left column to resolve them before approval.
+        <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center gap-4 rounded-[20px] border border-dashed border-red-200 bg-[#fdf6f6] px-6 text-center text-sm leading-6 text-red-700`}>
+          <p>
+            One or more review outputs are blocked. Check the blocker details in the left column to resolve them before approval.
+          </p>
+          <button
+            type="button"
+            onClick={backToForm}
+            className="inline-flex items-center justify-center rounded-full border border-red-300 bg-white px-4 py-2 text-xs font-medium text-red-700 transition hover:bg-red-50"
+          >
+            Back to form to fix blockers
+          </button>
         </div>
       );
     }

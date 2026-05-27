@@ -496,6 +496,99 @@ describe("signer invitation resolver", () => {
     );
   });
 
+  it("invites the other trustmaker POA signer after the creator signs their trustmaker POA", async () => {
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      buildGenerationRun({
+        id: "run-poa-1",
+        output_key: "poa_document_tm1",
+        document_key: "poa_general",
+      }),
+      buildGenerationRun({
+        id: "run-poa-2",
+        output_key: "poa_document_tm2",
+        document_key: "poa_general",
+      }),
+    ]);
+    mocks.listDocumentPartiesMock.mockResolvedValue([
+      buildParty({
+        id: "party-trustmaker-1",
+        full_name: "Alice Trustmaker",
+        email: "owner@example.com",
+      }),
+      buildParty({
+        id: "party-trustmaker-2",
+        full_name: "Bob Trustmaker",
+        email: "bob.trustmaker@example.com",
+        sort_order: 1,
+      }),
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      buildSigner({
+        id: "poa-trustmaker-1",
+        generation_run_id: "run-poa-1",
+        document_party_id: "party-trustmaker-1",
+        output_key: "poa_document_tm1",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Alice Trustmaker",
+        metadata: {
+          principalSource: "grantor",
+          grantorIndex: 0,
+          principalEmail: "owner@example.com",
+          sourcePartyRole: "grantor",
+        },
+      }),
+      buildSigner({
+        id: "poa-trustmaker-2",
+        generation_run_id: "run-poa-2",
+        document_party_id: "party-trustmaker-2",
+        output_key: "poa_document_tm2",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Bob Trustmaker",
+        metadata: {
+          principalSource: "grantor",
+          grantorIndex: 1,
+          principalEmail: "bob.trustmaker@example.com",
+          sourcePartyRole: "grantor",
+        },
+        sort_order: 1,
+      }),
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      buildSignature({
+        id: "sig-poa-trustmaker-1",
+        generation_run_id: "run-poa-1",
+        document_output_signer_id: "poa-trustmaker-1",
+      }),
+    ]);
+
+    const result = await resolveRemainingSignerInvitationsAfterCreatorSignature({
+      documentId: "doc-1",
+      actorUserId: "owner-1",
+      actorEmail: "owner@example.com",
+      completedOutputSignerId: "poa-trustmaker-1",
+      completedSignatureId: "sig-poa-trustmaker-1",
+    });
+
+    expect(result.trigger.shouldQueueInvites).toBe(true);
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        documentOutputSignerId: "poa-trustmaker-2",
+        documentPartyId: "party-trustmaker-2",
+        recipientEmail: "bob.trustmaker@example.com",
+      }),
+    ]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          documentOutputSignerId: "poa-trustmaker-1",
+          reason: "creator_obligation",
+        }),
+      ]),
+    );
+  });
+
   it("returns active-invite signers for dispatch while skipping signed and satisfied group signers", async () => {
     mocks.listDocumentPartiesMock.mockResolvedValue([
       buildParty({ id: "party-owner", email: "owner@example.com" }),

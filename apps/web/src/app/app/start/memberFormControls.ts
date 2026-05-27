@@ -1,4 +1,4 @@
-import { getCountries, getCountryCallingCode, type CountryCode } from "libphonenumber-js/min";
+import { AsYouType, getCountries, getCountryCallingCode, type CountryCode } from "libphonenumber-js/min";
 
 export type MemberFieldLike = {
   canonical_key: string;
@@ -181,6 +181,19 @@ export const isValidPhoneCountryCode = (value: string): boolean => {
 export const isValidPhoneFormat = (value: string): boolean => {
   const digits = normalizePhoneDigits(value);
   return digits.length >= 7 && digits.length <= 15;
+};
+
+export const formatPhoneInput = (value: string, countryIso2?: string): string => {
+  if (!value) {
+    return "";
+  }
+
+  const phoneCountryIso2 = normalizePhoneCountryIso2(countryIso2 ?? DEFAULT_PHONE_COUNTRY_ISO2);
+  try {
+    return new AsYouType(phoneCountryIso2 as CountryCode).input(value);
+  } catch {
+    return value;
+  }
 };
 
 export type MemberFieldControlKind =

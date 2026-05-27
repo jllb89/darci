@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildGenerationRunBlockers } from "../../src/services/documentGenerationService";
+import {
+  buildGenerationRunBlockers,
+  deriveSignerObligationsForRun,
+} from "../../src/services/documentGenerationService";
+import type { DocumentPartyRecord } from "../../src/services/documentService";
 import type {
   DocumentExtractionContract,
   DocumentTemplateBinding,
@@ -40,6 +44,22 @@ const buildExtractionDocument = (
 });
 
 const signerObligations = [{ obligation_type: "signer" }] as never[];
+
+const buildParty = (overrides: Partial<DocumentPartyRecord>): DocumentPartyRecord => ({
+  id: "party-1",
+  document_id: "doc-1",
+  party_role: "grantor",
+  full_name: "Alex Trustmaker",
+  email: "alex.trustmaker@example.com",
+  phone_country_code: "+1",
+  phone: null,
+  is_signing_party: true,
+  sort_order: 0,
+  metadata: {},
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+  ...overrides,
+});
 
 describe("documentGenerationService blockers", () => {
   it("does not block member-form bindings that resolve despite missing coverage", () => {
@@ -169,5 +189,63 @@ describe("documentGenerationService blockers", () => {
     });
 
     expect(blockers).toEqual([]);
+  });
+});
+
+describe("documentGenerationService signer obligations", () => {
+  it("uses the selected trustmaker as principal for trustmaker POA outputs", () => {
+    const firstTrustmaker = buildParty({
+      id: "party-grantor-1",
+      full_name: "Alice Trustmaker",
+      email: "alice.trustmaker@example.com",
+      sort_order: 0,
+    });
+    const secondTrustmaker = buildParty({
+      id: "party-grantor-2",
+      full_name: "Bob Trustmaker",
+      email: "bob.trustmaker@example.com",
+      sort_order: 1,
+    });
+    const fallbackPrincipal = buildParty({
+      id: "party-principal",
+      party_role: "principal",
+      full_name: "Platform Creator",
+      email: "creator@example.com",
+      sort_order: 2,
+    });
+
+    const obligations = deriveSignerObligationsForRun({
+      outputKey: "poa_document_tm2",
+      documentKey: "poa_general",
+      parties: [firstTrustmaker, secondTrustmaker, fallbackPrincipal],
+      canonicalAnswers: {},
+      outputMetadata: {
+        principalSource: "grantor",
+        grantorIndex: 1,
+      },
+    });
+
+    expect(obligations).toEqual([
+      expect.objectContaining({
+        document_party_id: "party-grantor-2",
+        output_key: "poa_document_tm2",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Bob Trustmaker",
+        obligation_type: "signer",
+        metadata: expect.objectContaining({
+          principalSource: "grantor",
+          grantorIndex: 1,
+          principalEmail: "bob.trustmaker@example.com",
+          sourcePartyRole: "grantor",
+        }),
+      }),
+      expect.objectContaining({
+        document_party_id: "party-grantor-2",
+        party_role: "principal",
+        party_name: "Bob Trustmaker",
+        obligation_type: "acknowledger",
+      }),
+    ]);
   });
 });

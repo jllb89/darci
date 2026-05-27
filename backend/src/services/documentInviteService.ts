@@ -332,6 +332,39 @@ export type ListDocumentInvitesResponse = {
   };
 };
 
+export type SigningRequestCardDirection = "incoming" | "outgoing";
+
+export type SigningRequestCard = {
+  id: string;
+  inviteId: string;
+  direction: SigningRequestCardDirection;
+  documentId: string;
+  documentLabel: string;
+  documentTypeLabel: string;
+  signerName: string | null;
+  signerEmail: string | null;
+  signerPhone: string | null;
+  senderName: string | null;
+  senderEmail: string | null;
+  roleLabel: string;
+  status: DocumentInviteStatus;
+  sentAt: string | null;
+  updatedAt: string;
+  expiresAt: string | null;
+  completedAt: string | null;
+  firstOpenedAt: string | null;
+  firstClickedAt: string | null;
+  resendCount: number;
+  actionHref: string | null;
+  actionLabel: string;
+  detail: string;
+};
+
+export type ListSigningRequestCardsResponse = {
+  incoming: SigningRequestCard[];
+  outgoing: SigningRequestCard[];
+};
+
 export type InviteNotificationDispatch = {
   jobId: string;
   deliveryId: string;
@@ -504,6 +537,21 @@ const terminalInviteStatuses = new Set<DocumentInviteStatus>([
   "completed",
   "failed",
 ]);
+
+const actionableIncomingInviteStatuses = new Set<DocumentInviteStatus>([
+  "claimed",
+  "accepted",
+]);
+
+const completedInviteStatuses = new Set<DocumentInviteStatus>([
+  "completed",
+]);
+
+const normalizeEmailAddress = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+
+const uniqueStrings = (values: Array<string | null | undefined>) => {
+  return Array.from(new Set(values.map((value) => value?.trim() ?? "").filter(Boolean)));
+};
 
 const findActiveInviteForSigner = async (input: {
   documentId: string;
@@ -1110,6 +1158,260 @@ export const listDocumentInvites = async (input: {
   } satisfies ListDocumentInvitesResponse;
 };
 
+const listIncomingSigningInviteIds = async (input: {
+  viewerUserId: string;
+  viewerEmail: string;
+  limit: number;
+}) => {
+  const inviteIds = new Set<string>();
+  const claimedInvitesResult = await supabaseAdmin
+    .from("document_access_invites")
+    .select("id")
+    .eq("invite_kind", "document_signing")
+    .eq("claimed_user_id", input.viewerUserId)
+    .order("updated_at", { ascending: false })
+    .limit(input.limit);
+  const targetedRecipientsResult = await supabaseAdmin
+    .from("invite_recipients")
+    .select("invite_id")
+    .eq("target_user_id", input.viewerUserId)
+    .order("updated_at", { ascending: false })
+    .limit(input.limit);
+  const emailRecipientsResult = input.viewerEmail
+    ? await supabaseAdmin
+        .from("invite_recipients")
+        .select("invite_id")
+        .eq("channel", "email")
+        .ilike("delivery_address", input.viewerEmail)
+        .order("updated_at", { ascending: false })
+        .limit(input.limit)
+    : null;
+  const results = [claimedInvitesResult, targetedRecipientsResult, emailRecipientsResult].filter(
+    (result): result is NonNullable<typeof result> => result !== null,
+  );
+  for (const result of results) {
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+
+    for (const row of result.data ?? []) {
+      const candidate = row as { id?: string | null; invite_id?: string | null };
+      const inviteId = candidate.id ?? candidate.invite_id ?? null;
+      if (inviteId) {
+        inviteIds.add(inviteId);
+      }
+    }
+  }
+
+  return Array.from(inviteIds);
+};
+
+const loadOutgoingSigningInviteRows = async (input: {
+  viewerUserId: string;
+  limit: number;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_access_invites")
+    .select(documentInviteSelect)
+    .eq("invite_kind", "document_signing")
+    .eq("created_by_user_id", input.viewerUserId)
+    .order("updated_at", { ascending: false })
+    .limit(input.limit);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as unknown as DocumentInviteRow[];
+};
+
+const loadDocumentMapForInvites = async (invites: DocumentInviteDetail[]) => {
+  const documentIds = uniqueStrings(invites.map((invite) => invite.documentId));
+  const documents = await Promise.all(documentIds.map((documentId) => getDocumentById(documentId)));
+  const documentsById = new Map<string, DocumentRecord>();
+
+  for (const document of documents) {
+    if (document) {
+      documentsById.set(document.id, document);
+    }
+  }
+
+  return documentsById;
+};
+
+const loadDocumentPartyMapForInvites = async (invites: DocumentInviteDetail[]) => {
+  const documentIds = uniqueStrings(invites.map((invite) => invite.documentId));
+  const partyLists = await Promise.all(documentIds.map((documentId) => listDocumentParties(documentId)));
+  const partiesById = new Map<string, DocumentPartyRecord>();
+
+  for (const parties of partyLists) {
+    for (const party of parties) {
+      partiesById.set(party.id, party);
+    }
+  }
+
+  return partiesById;
+};
+
+const loadUserMapForInvites = async (invites: DocumentInviteDetail[]) => {
+  const userIds = uniqueStrings(invites.map((invite) => invite.createdByUserId));
+  const users = await Promise.all(userIds.map((userId) => getUserById(userId)));
+  const usersById = new Map<string, UserRow>();
+
+  for (const user of users) {
+    if (user) {
+      usersById.set(user.id, user);
+    }
+  }
+
+  return usersById;
+};
+
+const getPrimaryRecipient = (invite: DocumentInviteDetail) => {
+  return invite.recipients.find((recipient) => recipient.isPrimary) ?? invite.recipients[0] ?? null;
+};
+
+const formatPartyPhone = (party: DocumentPartyRecord | null) => {
+  const phone = party?.phone?.trim() ?? "";
+  if (!phone) {
+    return null;
+  }
+
+  const countryCode = party?.phone_country_code?.trim() ?? "";
+  return [countryCode, phone].filter(Boolean).join(" ");
+};
+
+const getSigningRequestAction = (input: {
+  direction: SigningRequestCardDirection;
+  invite: DocumentInviteDetail;
+}) => {
+  if (input.direction === "incoming") {
+    if (actionableIncomingInviteStatuses.has(input.invite.status) || completedInviteStatuses.has(input.invite.status)) {
+      return {
+        actionHref: `/app/sign?documentId=${encodeURIComponent(input.invite.documentId)}`,
+        actionLabel: completedInviteStatuses.has(input.invite.status) ? "View" : "Sign document",
+      };
+    }
+
+    return {
+      actionHref: null,
+      actionLabel: "Open invite email",
+    };
+  }
+
+  return {
+    actionHref: `/app/sign?documentId=${encodeURIComponent(input.invite.documentId)}`,
+    actionLabel: completedInviteStatuses.has(input.invite.status) ? "View" : "Track request",
+  };
+};
+
+const mapSigningRequestCard = (input: {
+  direction: SigningRequestCardDirection;
+  invite: DocumentInviteDetail;
+  document: DocumentRecord | null;
+  party: DocumentPartyRecord | null;
+  sender: UserRow | null;
+}) => {
+  const primaryRecipient = getPrimaryRecipient(input.invite);
+  const signerName = input.invite.recipientName ?? primaryRecipient?.displayName ?? input.party?.full_name ?? null;
+  const signerEmail = primaryRecipient?.deliveryAddress ?? input.party?.email ?? null;
+  const signerPhone = formatPartyPhone(input.party);
+  const senderName = toDisplayName(input.sender);
+  const senderEmail = input.sender?.email ?? null;
+  const roleLabel = getRoleLabel({
+    partyRole: input.invite.partyRole,
+    obligationType: input.invite.obligationType,
+  });
+  const documentLabel = input.document ? getDocumentLabel(input.document) : "document";
+  const documentTypeLabel = input.document ? getDocumentTypeLabel(input.document) : "Document";
+  const action = getSigningRequestAction({ direction: input.direction, invite: input.invite });
+  const counterparty = input.direction === "incoming"
+    ? senderName ?? "DARCi"
+    : signerName ?? signerEmail ?? "Signer";
+  const detail = input.direction === "incoming"
+    ? `${counterparty} requested your ${roleLabel.toLowerCase()} signature.`
+    : `Waiting on ${counterparty} to complete the ${roleLabel.toLowerCase()} signature.`;
+
+  return {
+    id: `${input.direction}-${input.invite.id}`,
+    inviteId: input.invite.id,
+    direction: input.direction,
+    documentId: input.invite.documentId,
+    documentLabel,
+    documentTypeLabel,
+    signerName,
+    signerEmail,
+    signerPhone,
+    senderName,
+    senderEmail,
+    roleLabel,
+    status: input.invite.status,
+    sentAt: input.invite.sentAt,
+    updatedAt: input.invite.updatedAt,
+    expiresAt: input.invite.expiresAt,
+    completedAt: input.invite.completedAt,
+    firstOpenedAt: input.invite.firstOpenedAt,
+    firstClickedAt: input.invite.firstClickedAt,
+    resendCount: input.invite.resendCount,
+    ...action,
+    detail,
+  } satisfies SigningRequestCard;
+};
+
+export const listSigningRequestCards = async (input: {
+  role: RequestRole;
+  viewerUserId?: string | null;
+  viewerEmail?: string | null;
+  limit: number;
+}) => {
+  if (!isPrivilegedRole(input.role)) {
+    requireViewerUserId({ role: input.role, viewerUserId: input.viewerUserId });
+  }
+
+  const viewerUserId = input.viewerUserId?.trim() ?? "";
+  if (!viewerUserId) {
+    return { incoming: [], outgoing: [] } satisfies ListSigningRequestCardsResponse;
+  }
+
+  const viewerEmail = normalizeEmailAddress(input.viewerEmail);
+  const [outgoingRows, incomingInviteIds] = await Promise.all([
+    loadOutgoingSigningInviteRows({ viewerUserId, limit: input.limit }),
+    listIncomingSigningInviteIds({ viewerUserId, viewerEmail, limit: input.limit }),
+  ]);
+  const incomingRows = (await loadInviteRowsByIds(incomingInviteIds))
+    .filter((invite) => invite.invite_kind === "document_signing")
+    .sort((first, second) => second.updated_at.localeCompare(first.updated_at))
+    .slice(0, input.limit);
+
+  const [incoming, outgoing] = await Promise.all([
+    loadInviteDetails(incomingRows),
+    loadInviteDetails(outgoingRows),
+  ]);
+  const allInvites = [...incoming, ...outgoing];
+  const [documentsById, usersById] = await Promise.all([
+    loadDocumentMapForInvites(allInvites),
+    loadUserMapForInvites(allInvites),
+  ]);
+  const partiesById = await loadDocumentPartyMapForInvites(allInvites);
+
+  return {
+    incoming: incoming.map((invite) => mapSigningRequestCard({
+      direction: "incoming",
+      invite,
+      document: documentsById.get(invite.documentId) ?? null,
+      party: invite.documentPartyId ? partiesById.get(invite.documentPartyId) ?? null : null,
+      sender: invite.createdByUserId ? usersById.get(invite.createdByUserId) ?? null : null,
+    })),
+    outgoing: outgoing.map((invite) => mapSigningRequestCard({
+      direction: "outgoing",
+      invite,
+      document: documentsById.get(invite.documentId) ?? null,
+      party: invite.documentPartyId ? partiesById.get(invite.documentPartyId) ?? null : null,
+      sender: invite.createdByUserId ? usersById.get(invite.createdByUserId) ?? null : null,
+    })),
+  } satisfies ListSigningRequestCardsResponse;
+};
+
 const signerCompletionEligibleInviteStatuses = new Set<DocumentInviteStatus>([
   "draft",
   "queued",
@@ -1502,7 +1804,7 @@ export const resendDocumentInvite = async (input: {
     viewerUserId: input.viewerUserId,
   });
 
-  if (["claimed", "accepted", "completed", "declined", "revoked"].includes(context.invite.status)) {
+  if (["completed", "declined", "revoked"].includes(context.invite.status)) {
     throw new DocumentInviteServiceError(409, "Invite cannot be resent in its current state");
   }
 

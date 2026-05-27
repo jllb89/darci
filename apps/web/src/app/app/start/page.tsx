@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppToast } from "@/components/app/AppToastContext";
 import { captureAppException, captureAppMessage } from "@/lib/clientTelemetry";
@@ -20,6 +21,7 @@ import {
   DEFAULT_PHONE_COUNTRY_CODE,
   DEFAULT_PHONE_COUNTRY_ISO2,
   PHONE_COUNTRY_CODE_OPTIONS,
+  formatPhoneInput,
   getPhoneCountryCodeByIso2,
   getMemberFieldControlKind,
   hasSigningTrustee,
@@ -131,6 +133,222 @@ const fetchWithTokenRefresh = async (
   } catch {
     return response;
   }
+};
+
+const parseCalendarDateValue = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatCalendarDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getCalendarMonthStart = (date: Date) => {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+const addCalendarMonths = (date: Date, amount: number) => {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+};
+
+const getCalendarDays = (visibleMonth: Date) => {
+  const firstOfMonth = getCalendarMonthStart(visibleMonth);
+  const firstVisibleDate = new Date(firstOfMonth);
+  firstVisibleDate.setDate(firstOfMonth.getDate() - firstOfMonth.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(firstVisibleDate);
+    date.setDate(firstVisibleDate.getDate() + index);
+    return date;
+  });
+};
+
+const formatCalendarDateLabel = (value: string, placeholder: string) => {
+  const parsed = parseCalendarDateValue(value);
+  if (!parsed) {
+    return placeholder;
+  }
+
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const IntakeDatePicker = ({
+  value,
+  onChange,
+  className,
+  placeholder = "Select date",
+  ariaLabel = "Select date",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className: string;
+  placeholder?: string;
+  ariaLabel?: string;
+}) => {
+  const selectedDate = parseCalendarDateValue(value);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    getCalendarMonthStart(selectedDate ?? new Date()),
+  );
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
+
+  const updatePopoverPosition = useCallback(() => {
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) {
+      return;
+    }
+
+    const popoverWidth = 288;
+    const leftBoundary = 16;
+    const rightBoundary = window.innerWidth - popoverWidth - leftBoundary;
+    setPopoverPosition({
+      left: Math.max(leftBoundary, Math.min(triggerRect.left, rightBoundary)),
+      top: triggerRect.bottom + 8,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (selectedDate) {
+      setVisibleMonth(getCalendarMonthStart(selectedDate));
+    }
+  }, [value]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    updatePopoverPosition();
+    window.addEventListener("resize", updatePopoverPosition);
+    window.addEventListener("scroll", updatePopoverPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePopoverPosition);
+      window.removeEventListener("scroll", updatePopoverPosition, true);
+    };
+  }, [isOpen, updatePopoverPosition]);
+
+  const selectedKey = selectedDate ? formatCalendarDateKey(selectedDate) : null;
+  const currentMonth = visibleMonth.getMonth();
+  const monthLabel = visibleMonth.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+  const calendarPopover =
+    isOpen && popoverPosition && portalTarget
+      ? createPortal(
+          <div
+            className="fixed z-[120] w-72 rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-4 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
+            style={{ left: popoverPosition.left, top: popoverPosition.top }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White transition-colors hover:bg-Color-Neutral-Lightest/70"
+                aria-label="Previous month"
+                onClick={() => setVisibleMonth((current) => addCalendarMonths(current, -1))}
+              >
+                <span aria-hidden="true" className="h-2 w-2 rotate-[135deg] border-b border-r border-Color-Neutral-Darkest" />
+              </button>
+              <div className="text-sm font-medium text-Color-Scheme-1-Text">{monthLabel}</div>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White transition-colors hover:bg-Color-Neutral-Lightest/70"
+                aria-label="Next month"
+                onClick={() => setVisibleMonth((current) => addCalendarMonths(current, 1))}
+              >
+                <span aria-hidden="true" className="h-2 w-2 -rotate-45 border-b border-r border-Color-Neutral-Darkest" />
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-7 gap-1.5 text-center text-[11px] uppercase text-Color-Neutral">
+              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+                <div key={day}>{day}</div>
+              ))}
+            </div>
+            <div className="mt-2 grid grid-cols-7 gap-1.5">
+              {days.map((day) => {
+                const dayKey = formatCalendarDateKey(day);
+                const isSelected = dayKey === selectedKey;
+                const isMuted = day.getMonth() !== currentMonth;
+
+                return (
+                  <button
+                    key={dayKey}
+                    type="button"
+                    className={`h-8 rounded-md border text-xs transition-colors ${
+                      isSelected
+                        ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                        : "border-transparent bg-Color-White/70 hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                    } ${isMuted ? "text-Color-Neutral" : "text-Color-Scheme-1-Text"}`}
+                    onClick={() => {
+                      onChange(dayKey);
+                      setIsOpen(false);
+                      triggerRef.current?.blur();
+                    }}
+                  >
+                    {day.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+
+            {value ? (
+              <button
+                type="button"
+                className="mt-4 w-full rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-2 py-2 text-xs text-Color-Neutral-Darkest transition-colors hover:bg-Color-Neutral-Lightest/70"
+                onClick={() => {
+                  onChange("");
+                  setIsOpen(false);
+                  triggerRef.current?.blur();
+                }}
+              >
+                Clear date
+              </button>
+            ) : null}
+          </div>,
+          portalTarget,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`${className} flex items-center justify-between gap-3 text-left`}
+        aria-label={ariaLabel}
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (!isOpen) {
+            updatePopoverPosition();
+          }
+          setIsOpen(!isOpen);
+        }}
+      >
+        <span className={value ? undefined : "text-Color-Neutral"}>
+          {formatCalendarDateLabel(value, placeholder)}
+        </span>
+        <span aria-hidden="true" className="h-1.5 w-1.5 rotate-45 border-b border-r border-Color-Neutral" />
+      </button>
+      {calendarPopover}
+    </>
+  );
 };
 
 const getDefaultFormStep = (
@@ -424,6 +642,20 @@ export default function StartDocumentPage() {
           }
 
           if (response.status === 409) {
+            if (typeof payload?.intakeStatus === "string" && payload.intakeStatus.length > 0) {
+              const message =
+                payload?.message ??
+                "Intake is already submitted and can no longer be edited from the form.";
+              setDraftSaveNotice(message);
+              showToast({
+                tone: "warning",
+                message,
+                durationMs: 5000,
+              });
+              router.push(`/app/review?documentId=${encodeURIComponent(snapshot.documentId)}`);
+              return false;
+            }
+
             const currentRevision =
               typeof payload?.currentRevision === "number"
                 ? payload.currentRevision
@@ -514,7 +746,7 @@ export default function StartDocumentPage() {
 
       return queuedSave;
     },
-    [showToast, syncDraftRevision],
+    [router, showToast, syncDraftRevision],
   );
 
   const waitForQueuedDraftSaves = useCallback(async () => {
@@ -1101,16 +1333,8 @@ export default function StartDocumentPage() {
   const uploadRequiredByMode = uploadColumnBehavior.uploadRequired;
 
   const hasDocumentsUploadValue = useMemo(() => {
-    const value = formValues.prior_document_items;
-    if (typeof value === "string") {
-      return value.trim().length > 0;
-    }
-
-    if (Array.isArray(value)) {
-      return value.some((item) => typeof item === "string" && item.trim().length > 0);
-    }
-
-    return false;
+    const items = parsePriorDocumentItems(formValues.prior_document_items);
+    return getFilledPriorDocumentRows(items).length > 0;
   }, [formValues.prior_document_items]);
 
   const isDocumentsColumnComplete =
@@ -1242,7 +1466,7 @@ export default function StartDocumentPage() {
   }, [formValues.grantors]);
 
   const getResolvedAllowedValues = useCallback((field: MemberFacingField) => {
-    if (isTaxIdOwnerSelectionBoundToTrustmakers(field) && trustmakerNames.length > 1) {
+    if (isTaxIdOwnerSelectionBoundToTrustmakers(field) && trustmakerNames.length > 0) {
       return trustmakerNames;
     }
 
@@ -1253,7 +1477,7 @@ export default function StartDocumentPage() {
     field: MemberFacingField,
     allowedValues: string[],
   ) => {
-    if (isTaxIdOwnerSelectionBoundToTrustmakers(field) && trustmakerNames.length > 1) {
+    if (isTaxIdOwnerSelectionBoundToTrustmakers(field) && trustmakerNames.length > 0) {
       return Object.fromEntries(allowedValues.map((value) => [value, value])) as Record<
         string,
         string
@@ -1278,7 +1502,7 @@ export default function StartDocumentPage() {
     }
 
     const requiresTrustmakerSelection =
-      isTaxIdOwnerSelectionBoundToTrustmakers(taxIdOwnerField) && trustmakerNames.length > 1;
+      isTaxIdOwnerSelectionBoundToTrustmakers(taxIdOwnerField) && trustmakerNames.length > 0;
 
     if (!requiresTrustmakerSelection) {
       return {
@@ -1391,6 +1615,20 @@ export default function StartDocumentPage() {
       namedSignerModeConflict,
     };
   }, [formValues, requiresNamedSigningTrusteeSelection]);
+
+  const trustmakerValidation = useMemo(() => {
+    const rows = parsePersonListItems(formValues.grantors);
+    const filledRows = getFilledPersonRows(rows);
+    const emails = filledRows
+      .map((item) => item.email.trim().toLowerCase())
+      .filter((email) => email.length > 0);
+
+    return {
+      filledCount: filledRows.length,
+      tooMany: filledRows.length > 2,
+      duplicateEmailCount: emails.length - new Set(emails).size,
+    };
+  }, [formValues.grantors]);
 
   const successorTrusteeValidation = useMemo(() => {
     const rows = parsePersonListItems(formValues.successor_trustees);
@@ -1641,7 +1879,7 @@ export default function StartDocumentPage() {
 
           if (
             isTaxIdOwnerSelectionBoundToTrustmakers(field) &&
-            trustmakerNames.length > 1 &&
+            trustmakerNames.length > 0 &&
             !isNameInList(fieldValue, trustmakerNames)
           ) {
             addMessage(`${fieldLabel}: select one of the listed Trustmakers.`);
@@ -1710,6 +1948,14 @@ export default function StartDocumentPage() {
     addContactMessages("Principal contact", principalContactValidation);
     addContactMessages("Agent contact", agentContactValidation);
 
+    if (trustmakerValidation.tooMany) {
+      addMessage("Trustmakers: add no more than two Trustmakers.");
+    }
+
+    if (trustmakerValidation.duplicateEmailCount > 0) {
+      addMessage("Trustmakers: each Trustmaker must use a unique email address.");
+    }
+
     if (trusteeValidation.incompleteCount > 0) {
       addMessage("Trustees: complete name, email, and phone for each started trustee row.");
     }
@@ -1767,6 +2013,7 @@ export default function StartDocumentPage() {
     priorDocumentItemsValidation,
     successorTrusteeValidation,
     taxIdOwnerValidation.isValid,
+    trustmakerValidation,
     trusteeValidation,
   ]);
 
@@ -1872,19 +2119,39 @@ export default function StartDocumentPage() {
   };
 
   const continueToNextSectionGroup = () => {
-    if (!nextFormStep) {
+    if (formStepDefinitions.length === 0) {
       return;
     }
 
-    setCurrentFormStep(nextFormStep.stepKey);
+    const currentIndex = formStepDefinitions.findIndex(
+      (stepDefinition) => stepDefinition.stepKey === currentFormStep,
+    );
+
+    if (currentIndex < 0 || currentIndex >= formStepDefinitions.length - 1) {
+      return;
+    }
+
+    setCurrentFormStep(formStepDefinitions[currentIndex + 1]!.stepKey);
+    setSubmissionErrorMessage(null);
+    setShowContinueValidationDetails(false);
   };
 
   const returnToPreviousSectionGroup = () => {
-    if (!previousFormStep) {
+    if (formStepDefinitions.length === 0) {
       return;
     }
 
-    setCurrentFormStep(previousFormStep.stepKey);
+    const currentIndex = formStepDefinitions.findIndex(
+      (stepDefinition) => stepDefinition.stepKey === currentFormStep,
+    );
+
+    if (currentIndex <= 0) {
+      return;
+    }
+
+    setCurrentFormStep(formStepDefinitions[currentIndex - 1]!.stepKey);
+    setSubmissionErrorMessage(null);
+    setShowContinueValidationDetails(false);
   };
 
   const submitMemberFormOnServer = useCallback(async () => {
@@ -1974,6 +2241,20 @@ export default function StartDocumentPage() {
       }
 
       if (response.status === 409) {
+        if (typeof payload?.intakeStatus === "string") {
+          const message =
+            payload.message ??
+            "Intake is already submitted and can no longer be edited from this form.";
+          setSubmissionErrorMessage(message);
+          showToast({
+            tone: "warning",
+            message,
+            durationMs: 5000,
+          });
+          router.push(`/app/review?documentId=${encodeURIComponent(draftDocumentId)}`);
+          return false;
+        }
+
         if (typeof payload?.currentRevision === "number") {
           syncDraftRevision(payload.currentRevision);
         }
@@ -2375,6 +2656,7 @@ export default function StartDocumentPage() {
                         ...contact,
                         phoneCountryIso2: nextPhoneCountryIso2,
                         phoneCountryCode: getPhoneCountryCodeByIso2(nextPhoneCountryIso2),
+                        phone: formatPhoneInput(contact.phone, nextPhoneCountryIso2),
                       }),
                     );
                   }}
@@ -2403,7 +2685,7 @@ export default function StartDocumentPage() {
                     field.canonical_key,
                     serializePersonContact({
                       ...contact,
-                      phone: event.target.value,
+                      phone: formatPhoneInput(event.target.value, contact.phoneCountryIso2),
                     }),
                   );
                 }}
@@ -2582,10 +2864,9 @@ export default function StartDocumentPage() {
 
     if (controlKind === "date") {
       return (
-        <input
-          className={`${baseInputClassName} platform-date-input`}
-          onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
-          type="date"
+        <IntakeDatePicker
+          className={baseInputClassName}
+          onChange={(value) => handleFieldChange(field.canonical_key, value)}
           value={typeof fieldValue === "string" ? fieldValue : ""}
         />
       );
@@ -2707,6 +2988,7 @@ export default function StartDocumentPage() {
           : "Add person";
 
       const filledRows = getFilledPersonRows(items);
+      const canAddAnotherPerson = !isGrantorField || filledRows.length < 2;
       const incompleteCount = getIncompletePersonRowCount(items);
       const invalidFormatCount = getInvalidPersonRowFormatCount(items);
       const signingTrusteeCount = filledRows.filter(
@@ -2778,6 +3060,7 @@ export default function StartDocumentPage() {
                             ...item,
                             phoneCountryIso2: nextPhoneCountryIso2,
                             phoneCountryCode: getPhoneCountryCodeByIso2(nextPhoneCountryIso2),
+                            phone: formatPhoneInput(item.phone, nextPhoneCountryIso2),
                           };
                           updateItems(nextItems);
                         }}
@@ -2805,7 +3088,7 @@ export default function StartDocumentPage() {
                         const nextItems = [...items];
                         nextItems[index] = {
                           ...item,
-                          phone: event.target.value,
+                          phone: formatPhoneInput(event.target.value, item.phoneCountryIso2),
                         };
                         updateItems(nextItems);
                       }}
@@ -2899,25 +3182,29 @@ export default function StartDocumentPage() {
             </div>
           ) : null}
 
-          <button
-            className={subtleButtonClassName}
-            onClick={() => {
-              updateItems([
-                ...items,
-                {
-                  fullName: "",
-                  email: "",
-                  phoneCountryIso2: DEFAULT_PHONE_COUNTRY_ISO2,
-                  phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
-                  phone: "",
-                  isSigningTrustee: false,
-                },
-              ]);
-            }}
-            type="button"
-          >
-            {addButtonLabel}
-          </button>
+          {canAddAnotherPerson ? (
+            <button
+              className={subtleButtonClassName}
+              onClick={() => {
+                updateItems([
+                  ...items,
+                  {
+                    fullName: "",
+                    email: "",
+                    phoneCountryIso2: DEFAULT_PHONE_COUNTRY_ISO2,
+                    phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
+                    phone: "",
+                    isSigningTrustee: false,
+                  },
+                ]);
+              }}
+              type="button"
+            >
+              {addButtonLabel}
+            </button>
+          ) : (
+            <p className="text-xs text-Color-Neutral">A trust package supports up to two Trustmakers.</p>
+          )}
         </div>
       );
     }
@@ -3023,17 +3310,16 @@ export default function StartDocumentPage() {
                     <label className={fieldLabelClassName}>
                       Signed date
                     </label>
-                    <input
-                      className={`${baseInputClassName} platform-date-input`}
-                      onChange={(event) => {
+                    <IntakeDatePicker
+                      className={baseInputClassName}
+                      onChange={(value) => {
                         const nextItems = [...items];
                         nextItems[index] = {
                           ...item,
-                          documentDate: event.target.value,
+                          documentDate: value,
                         };
                         updateItems(nextItems);
                       }}
-                      type="date"
                       value={item.documentDate}
                     />
                   </div>
@@ -3186,7 +3472,7 @@ export default function StartDocumentPage() {
       const isTrustmakerTaxIdSelection =
         normalizedCanonicalKey === "tax_id_owner" &&
         isTaxIdOwnerSelectionBoundToTrustmakers(field) &&
-        trustmakerNames.length > 1;
+        trustmakerNames.length > 0;
 
       const selectPlaceholder = isTrustmakerTaxIdSelection
         ? "Select primary trustmaker"

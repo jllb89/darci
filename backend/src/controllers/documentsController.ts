@@ -114,6 +114,11 @@ import {
   buildDocumentWorkspaceSummaries,
   buildDocumentWorkspaceSummary,
 } from "../services/documentWorkspaceReadModelService";
+import { buildDocumentActionEnrichment } from "../services/documentActionService";
+import {
+  previewSignatureReminders,
+  sendSignatureReminders,
+} from "../services/signatureReminderService";
 import {
   queueRemainingSignerInvitesAfterCreatorSignature,
   type RemainingSignerInviteDispatchResult,
@@ -136,7 +141,7 @@ import {
   watermarkWithNotice as finalizeDocumentWithWatermark,
 } from "../services/documentFinalizationService";
 import { buildDocumentTimeline } from "../services/documentTimelineService";
-import { getUserIdentityContextByUserId } from "../services/userRoleService";
+import { getUserIdentityContextByUserId, type RequestRole } from "../services/userRoleService";
 import { logDocumentTrace } from "../utils/documentTrace";
 import { captureException, captureMessage } from "../utils/sentry";
 
@@ -161,6 +166,9 @@ const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_VERSION = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_HASH = "uploaded_pdf";
 const RENDERING_RUN_STALE_AFTER_MS = 5 * 60 * 1000;
+const TRUST_BUNDLE_MODE_KEY = "trust_bundle";
+const BASE_POA_OUTPUT_KEY = "poa_document";
+const TRUSTMAKER_POA_OUTPUT_KEY_PREFIX = "poa_document_tm";
 
 const summarizeGenerationBlockersForTelemetry = (
   blockers: GenerationRunBlockingRequirement[],
@@ -496,6 +504,8 @@ type SigningSignatureResponse = {
   documentKey: string;
   partyName: string;
   partyRole: string;
+  principalSource: string | null;
+  principalEmail: string | null;
   signingGroup: string | null;
   isRequired: boolean;
   status: "pending" | "captured";
@@ -797,6 +807,119 @@ const documentPartiesUpdateSchema = z.object({
     }),
   ),
 });
+
+const signatureReminderBodySchema = z
+  .object({
+    documentIds: z.array(z.string().uuid()).min(1).max(50),
+    signerIds: z.array(z.string().uuid()).min(1).max(50).optional(),
+    mode: z.literal("pending_required_only").optional(),
+    channel: z.literal("email").optional(),
+  })
+  .strict();
+
+const singleDocumentSignatureReminderBodySchema = z
+  .object({
+    signerIds: z.array(z.string().uuid()).min(1).max(50).optional(),
+    mode: z.literal("pending_required_only").optional(),
+    channel: z.literal("email").optional(),
+  })
+  .strict();
+
+const resolveReminderRequestRole = (req: Request): RequestRole => {
+  const role = req.user?.role;
+  if (
+    role === "member" ||
+    role === "pro" ||
+    role === "notary" ||
+    role === "admin" ||
+    role === "service_role"
+  ) {
+    return role;
+  }
+
+  return "member";
+};
+
+const getIdempotencyKey = (req: Request) => {
+  const value = req.header("Idempotency-Key");
+  return value?.trim() || null;
+};
+
+const sendSignatureReminderEndpointFailure = (
+  res: Response,
+  error: unknown,
+  route: string,
+) => {
+  const message = getErrorMessage(error);
+  const statusCode = message.startsWith("Cannot ") ? 400 : 500;
+
+  console.error("Signature reminder endpoint failed", {
+    route,
+    error: message,
+  });
+
+  captureException(error, {
+    level: statusCode === 400 ? "warning" : "error",
+    tags: {
+      feature: "signature_reminders",
+      route,
+    },
+    fingerprint: ["signature_reminders", route, "endpoint_failed"],
+  });
+
+  return res.status(statusCode).json({
+    error: statusCode === 400 ? "validation_error" : "internal_error",
+    message,
+  });
+};
+
+const loadAuthorizedDocuments = async (
+  req: Request,
+  res: Response,
+  documentIds: string[],
+) => {
+  if (!req.user?.id) {
+    res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+
+    return null;
+  }
+
+  const uniqueDocumentIds = Array.from(
+    new Set(documentIds.map((documentId) => documentId.trim()).filter(Boolean)),
+  );
+  const role = req.user.role ?? "member";
+  const isPrivileged = role === "admin" || role === "service_role";
+  const ownerId = isPrivileged ? null : await getUserIdBySupabaseId(req.user.id);
+
+  if (!isPrivileged && !ownerId) {
+    res.status(403).json({
+      error: "forbidden",
+      message: "User not registered",
+    });
+
+    return null;
+  }
+
+  const documents: DocumentRecord[] = [];
+  for (const documentId of uniqueDocumentIds) {
+    const document = await getDocumentById(documentId);
+    if (!document || (!isPrivileged && document.owner_id !== ownerId)) {
+      res.status(404).json({
+        error: "not_found",
+        message: "Document not found",
+      });
+
+      return null;
+    }
+
+    documents.push(document);
+  }
+
+  return documents;
+};
 
 const documentIntakeDraftUpsertSchema = z
   .object({
@@ -2386,6 +2509,8 @@ const buildDocumentSigningState = async (input: {
           documentKey: signer.document_key,
           partyName: signer.party_name,
           partyRole: signer.party_role,
+          principalSource: asTrimmedString(signer.metadata.principalSource) || null,
+          principalEmail: normalizeEmailAddress(signer.metadata.principalEmail),
           signingGroup: signer.signing_group,
           isRequired: signer.is_required,
           status: matchedSignature?.status === "captured" ? "captured" : "pending",
@@ -2662,7 +2787,7 @@ const createGenerationRunsForDocument = async (input: {
 
     const template = await getActiveTemplateRegistryForOutput({
       jurisdiction: draft.jurisdiction,
-      outputKey: output.outputKey,
+      outputKey: resolveTemplateLookupOutputKey(output),
     });
 
     const templateArtifact = template
@@ -3010,6 +3135,182 @@ const parseOutputBundle = (value: unknown) => {
     .sort((left, right) => left.sortOrder - right.sortOrder);
 
   return parsed;
+};
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const asTrimmedString = (value: unknown) => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const normalizeEmailAddress = (value: unknown) => {
+  const email = asTrimmedString(value).toLowerCase();
+  return emailPattern.test(email) ? email : null;
+};
+
+const parseRecordString = (value: string) => {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecordValue(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const coerceTrustmakerRowRecord = (value: unknown) => {
+  if (isRecordValue(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return parseRecordString(trimmed) ?? { fullName: trimmed };
+};
+
+const parseTrustmakerRows = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return [] as Array<{
+      fullName: string;
+      email: string | null;
+      phone: string | null;
+      phoneCountryCode: string | null;
+      raw: Record<string, unknown>;
+    }>;
+  }
+
+  return value
+    .map((rawEntry) => {
+      const entry = coerceTrustmakerRowRecord(rawEntry);
+      if (!entry) {
+        return null;
+      }
+
+      const contact = isRecordValue(entry.contact) ? entry.contact : entry;
+
+      const fullName =
+        asTrimmedString(entry.fullName) ||
+        asTrimmedString(entry.name) ||
+        asTrimmedString(entry.displayName);
+      if (!fullName) {
+        return null;
+      }
+
+      return {
+        fullName,
+        email: normalizeEmailAddress(contact.email),
+        phone:
+          asTrimmedString(contact.phone) ||
+          asTrimmedString(contact.phoneNumber) ||
+          asTrimmedString(contact.mobile) ||
+          null,
+        phoneCountryCode:
+          asTrimmedString(contact.phoneCountryCode) ||
+          asTrimmedString(contact.countryCode) ||
+          null,
+        raw: entry,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+};
+
+const resolveTemplateLookupOutputKey = (output: ParsedOutputBundleEntry) => {
+  const baseOutputKey = asTrimmedString(output.metadata.baseOutputKey);
+  return baseOutputKey || output.outputKey;
+};
+
+const buildTrustBundleOutputBundleForTrustmakers = (input: {
+  currentOutputBundle: ParsedOutputBundleEntry[];
+  canonicalAnswers: Record<string, unknown>;
+}) => {
+  const trustmakers = parseTrustmakerRows(input.canonicalAnswers.grantors).slice(0, 2);
+  if (trustmakers.length === 0) {
+    return input.currentOutputBundle;
+  }
+
+  const basePoaOutput =
+    input.currentOutputBundle.find((output) => output.outputKey === BASE_POA_OUTPUT_KEY) ?? null;
+  if (!basePoaOutput) {
+    return input.currentOutputBundle;
+  }
+
+  const expandedOutputs = input.currentOutputBundle.flatMap((output) => {
+    if (
+      output.outputKey === BASE_POA_OUTPUT_KEY ||
+      output.outputKey.startsWith(TRUSTMAKER_POA_OUTPUT_KEY_PREFIX)
+    ) {
+      return [];
+    }
+
+    return [output];
+  });
+
+  trustmakers.forEach((trustmaker, index) => {
+    expandedOutputs.push({
+      outputKey: `${TRUSTMAKER_POA_OUTPUT_KEY_PREFIX}${index + 1}`,
+      outputLabel: `${basePoaOutput.outputLabel} - ${trustmaker.fullName}`,
+      isRequired: basePoaOutput.isRequired,
+      sortOrder: basePoaOutput.sortOrder + index,
+      metadata: {
+        ...basePoaOutput.metadata,
+        baseOutputKey: BASE_POA_OUTPUT_KEY,
+        documentKey: "poa_general",
+        principalSource: "grantor",
+        grantorIndex: index,
+        trustmakerName: trustmaker.fullName,
+        trustmakerEmail: trustmaker.email,
+      },
+    });
+  });
+
+  return expandedOutputs.sort((left, right) => left.sortOrder - right.sortOrder);
+};
+
+const buildTrustmakerCreatorEmailValidationError = (input: {
+  productFlowMode: string;
+  canonicalAnswers: Record<string, unknown>;
+  actorEmail?: string | null;
+}) => {
+  if (input.productFlowMode !== TRUST_BUNDLE_MODE_KEY) {
+    return null;
+  }
+
+  const actorEmail = normalizeEmailAddress(input.actorEmail);
+  if (!actorEmail) {
+    return {
+      code: "trustmaker_creator_email_required",
+      field: "grantors",
+      message: "The signed-in user must have a valid email to match one Trustmaker.",
+    };
+  }
+
+  const matchingTrustmakerCount = parseTrustmakerRows(input.canonicalAnswers.grantors).filter(
+    (trustmaker) => trustmaker.email === actorEmail,
+  ).length;
+
+  if (matchingTrustmakerCount === 1) {
+    return null;
+  }
+
+  return {
+    code:
+      matchingTrustmakerCount === 0
+        ? "trustmaker_creator_email_not_found"
+        : "trustmaker_creator_email_not_unique",
+    field: "grantors",
+    message:
+      matchingTrustmakerCount === 0
+        ? "The signed-in user email must match one listed Trustmaker email."
+        : "The signed-in user email must match exactly one Trustmaker email.",
+  };
 };
 
 const toMemberFormSubmissionValueRecord = (
@@ -3794,6 +4095,39 @@ const scopeSigningStateForAccess = (
   signing: DocumentSigningState,
   access: DocumentSigningAccessContext,
 ): DocumentSigningState => {
+  if (access.kind === "owner") {
+    const actorEmail = normalizeEmailAddress(access.actorEmail);
+    if (!actorEmail) {
+      return signing;
+    }
+
+    const scopedSignatures = signing.signatures.filter((signature) => {
+      if (signature.documentKey !== "poa_general" || signature.principalSource !== "grantor") {
+        return true;
+      }
+
+      return signature.principalEmail === actorEmail;
+    });
+
+    if (scopedSignatures.length === signing.signatures.length) {
+      return signing;
+    }
+
+    const scopedGroups = signing.groups.filter((group) =>
+      scopedSignatures.some(
+        (signature) =>
+          signature.signingGroup === group.signingGroup &&
+          signature.generationRunId === group.generationRunId,
+      ),
+    );
+
+    return {
+      ...signing,
+      signatures: scopedSignatures,
+      groups: scopedGroups,
+    };
+  }
+
   if (access.kind !== "invited_signer" || !access.inviteAccess) {
     return signing;
   }
@@ -3829,8 +4163,25 @@ const scopeSigningStateForAccess = (
 
 const ensureSigningAccessAllowsSignature = (
   access: DocumentSigningAccessContext,
+  signer: DocumentOutputSignerRecord | null,
   outputSignerId: string,
-) => access.kind !== "invited_signer" || access.inviteAccess?.documentOutputSignerId === outputSignerId;
+) => {
+  if (access.kind === "invited_signer") {
+    return access.inviteAccess?.documentOutputSignerId === outputSignerId;
+  }
+
+  if (
+    access.kind === "owner" &&
+    signer?.document_key === "poa_general" &&
+    signer.metadata.principalSource === "grantor"
+  ) {
+    const actorEmail = normalizeEmailAddress(access.actorEmail);
+    const principalEmail = normalizeEmailAddress(signer.metadata.principalEmail);
+    return Boolean(actorEmail && principalEmail && actorEmail === principalEmail);
+  }
+
+  return true;
+};
 
 export const getDocument = async (req: Request, res: Response) => {
   const document = await getAuthorizedDocument(req, res);
@@ -4459,6 +4810,19 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     canonicalAnswers: canonicalPayloadBase,
   });
   const canonicalPayload = persistedPayload.canonicalAnswers ?? canonicalPayloadBase;
+  const trustmakerCreatorEmailError = buildTrustmakerCreatorEmailValidationError({
+    productFlowMode: documentProductFlowMode,
+    canonicalAnswers: canonicalPayload,
+    actorEmail: req.user?.email ?? null,
+  });
+
+  if (trustmakerCreatorEmailError) {
+    return res.status(422).json({
+      valid: false,
+      message: "Member form validation failed",
+      errors: [trustmakerCreatorEmailError],
+    });
+  }
 
   const saveInput: SaveDocumentIntakeDraftInput = {
     documentId: document.id,
@@ -4501,6 +4865,23 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     documentId: document.id,
     canonicalAnswers: canonicalPayload,
   });
+  let submittedOutputBundle = document.output_bundle;
+  if (documentProductFlowMode === TRUST_BUNDLE_MODE_KEY) {
+    submittedOutputBundle = buildTrustBundleOutputBundleForTrustmakers({
+      currentOutputBundle: parseOutputBundle(document.output_bundle),
+      canonicalAnswers: canonicalPayload,
+    }).map((output) => ({
+      outputKey: output.outputKey,
+      outputLabel: output.outputLabel,
+      isRequired: output.isRequired,
+      sortOrder: output.sortOrder,
+      metadata: output.metadata,
+    }));
+
+    await updateDocument(document.id, {
+      output_bundle: submittedOutputBundle,
+    });
+  }
 
   logDocumentTrace("intake.submit", {
     documentId: document.id,
@@ -4509,6 +4890,7 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     jurisdiction: documentJurisdiction,
     currentStep: parsed.data.currentStep ?? result.draft.current_step ?? null,
     canonicalPayload,
+    outputBundle: submittedOutputBundle,
     parties: syncedParties.map((party) => ({
       partyRole: party.party_role,
       fullName: party.full_name,
@@ -5140,13 +5522,201 @@ export const listDocuments = async (req: Request, res: Response) => {
     documents,
     viewerRole: req.user?.role ?? "member",
   });
+  const enrichments = await Promise.all(
+    documents.map((document) => buildDocumentActionEnrichment({ document })),
+  );
+  const enrichmentByDocumentId = new Map(
+    documents.map((document, index) => [document.id, enrichments[index]]),
+  );
 
   res.status(200).json({
     documents: documents.map((document) => ({
       ...mapDocumentResponse(document, req.user?.role ?? "member"),
       summary: summaries.get(document.id) ?? null,
+      ...(enrichmentByDocumentId.get(document.id) ?? {}),
     })),
   });
+};
+
+export const getDocumentNextAction = async (req: Request, res: Response) => {
+  const document = await getAuthorizedDocument(req, res);
+  if (!document) {
+    return;
+  }
+
+  const enrichment = await buildDocumentActionEnrichment({ document });
+
+  res.status(200).json({
+    documentId: document.id,
+    documentTypeLabel: enrichment.documentTypeLabel,
+    principalName: enrichment.principalName,
+    signerSummary: enrichment.signerSummary,
+    nextAction: enrichment.nextAction,
+  });
+};
+
+export const previewBulkSignatureReminders = async (req: Request, res: Response) => {
+  const parsed = signatureReminderBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const documents = await loadAuthorizedDocuments(req, res, parsed.data.documentIds);
+  if (!documents) {
+    return;
+  }
+
+  try {
+    const preview = await previewSignatureReminders({
+      documentIds: parsed.data.documentIds,
+      documents,
+      signerIds: parsed.data.signerIds ?? null,
+    });
+
+    return res.status(200).json({
+      ...preview,
+      mode: parsed.data.mode ?? "pending_required_only",
+      channel: parsed.data.channel ?? "email",
+    });
+  } catch (error) {
+    return sendSignatureReminderEndpointFailure(res, error, "bulk_preview");
+  }
+};
+
+export const sendBulkSignatureReminders = async (req: Request, res: Response) => {
+  const parsed = signatureReminderBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const documents = await loadAuthorizedDocuments(req, res, parsed.data.documentIds);
+  if (!documents) {
+    return;
+  }
+
+  try {
+    const idempotencyKey = getIdempotencyKey(req);
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "document",
+      entityId: documents.length === 1 ? documents[0]?.id ?? null : null,
+      action: "member.signature_reminders_requested",
+      metadata: {
+        document_ids: documents.map((document) => document.id),
+        signer_ids: parsed.data.signerIds ?? null,
+        mode: parsed.data.mode ?? "pending_required_only",
+        channel: parsed.data.channel ?? "email",
+        idempotency_key: idempotencyKey,
+      },
+    });
+
+    const result = await sendSignatureReminders({
+      documentIds: parsed.data.documentIds,
+      documents,
+      signerIds: parsed.data.signerIds ?? null,
+      actorSupabaseId: req.user?.id ?? null,
+      actorUserId: await resolveRequestActorUserId(req),
+      actorRole: resolveReminderRequestRole(req),
+      idempotencyKey,
+    });
+
+    return res.status(202).json({
+      ...result,
+      mode: parsed.data.mode ?? "pending_required_only",
+      channel: parsed.data.channel ?? "email",
+    });
+  } catch (error) {
+    return sendSignatureReminderEndpointFailure(res, error, "bulk_send");
+  }
+};
+
+export const previewDocumentSignatureReminders = async (req: Request, res: Response) => {
+  const parsed = singleDocumentSignatureReminderBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (typeof req.params.id !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document id is required",
+    });
+  }
+
+  const documents = await loadAuthorizedDocuments(req, res, [req.params.id]);
+  if (!documents) {
+    return;
+  }
+
+  try {
+    const preview = await previewSignatureReminders({
+      documentIds: [req.params.id],
+      documents,
+      signerIds: parsed.data.signerIds ?? null,
+    });
+
+    return res.status(200).json({
+      ...preview,
+      mode: parsed.data.mode ?? "pending_required_only",
+      channel: parsed.data.channel ?? "email",
+    });
+  } catch (error) {
+    return sendSignatureReminderEndpointFailure(res, error, "document_preview");
+  }
+};
+
+export const sendDocumentSignatureReminders = async (req: Request, res: Response) => {
+  const parsed = singleDocumentSignatureReminderBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (typeof req.params.id !== "string") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document id is required",
+    });
+  }
+
+  const documents = await loadAuthorizedDocuments(req, res, [req.params.id]);
+  if (!documents) {
+    return;
+  }
+
+  try {
+    const idempotencyKey = getIdempotencyKey(req);
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "document",
+      entityId: documents[0]?.id ?? null,
+      action: "member.signature_reminders_requested",
+      metadata: {
+        document_ids: documents.map((document) => document.id),
+        signer_ids: parsed.data.signerIds ?? null,
+        mode: parsed.data.mode ?? "pending_required_only",
+        channel: parsed.data.channel ?? "email",
+        idempotency_key: idempotencyKey,
+      },
+    });
+
+    const result = await sendSignatureReminders({
+      documentIds: [req.params.id],
+      documents,
+      signerIds: parsed.data.signerIds ?? null,
+      actorSupabaseId: req.user?.id ?? null,
+      actorUserId: await resolveRequestActorUserId(req),
+      actorRole: resolveReminderRequestRole(req),
+      idempotencyKey,
+    });
+
+    return res.status(202).json({
+      ...result,
+      mode: parsed.data.mode ?? "pending_required_only",
+      channel: parsed.data.channel ?? "email",
+    });
+  } catch (error) {
+    return sendSignatureReminderEndpointFailure(res, error, "document_send");
+  }
 };
 
 export const listDocumentVersions = async (req: Request, res: Response) => {
@@ -5731,7 +6301,7 @@ export const captureSignature = async (req: Request, res: Response) => {
 
   const actorContext = buildAuditActorContext(req);
   const actorUserId = await resolveRequestActorUserId(req);
-  const { signingState, signatureTask } = await resolveSigningSignatureTarget({
+  const { signingState, signatureTask, signerRecord } = await resolveSigningSignatureTarget({
     document,
     generationRunId: parsed.data.generationRunId,
     outputSignerId: parsed.data.outputSignerId,
@@ -5753,7 +6323,7 @@ export const captureSignature = async (req: Request, res: Response) => {
     });
   }
 
-  if (!ensureSigningAccessAllowsSignature(signingAccess, signatureTask.outputSignerId)) {
+  if (!ensureSigningAccessAllowsSignature(signingAccess, signerRecord, signatureTask.outputSignerId)) {
     return res.status(404).json({
       error: "not_found",
       message: "Signature obligation not found for the prepared signing set",
@@ -5937,7 +6507,7 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
   }
 
   const actorContext = buildAuditActorContext(req);
-  const { signingState, signatureTask } = await resolveSigningSignatureTarget({
+  const { signingState, signatureTask, signerRecord } = await resolveSigningSignatureTarget({
     document,
     generationRunId: parsed.data.generationRunId,
     outputSignerId: parsed.data.outputSignerId,
@@ -5959,7 +6529,7 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
     });
   }
 
-  if (!ensureSigningAccessAllowsSignature(signingAccess, signatureTask.outputSignerId)) {
+  if (!ensureSigningAccessAllowsSignature(signingAccess, signerRecord, signatureTask.outputSignerId)) {
     return res.status(404).json({
       error: "not_found",
       message: "Signature obligation not found for the prepared signing set",
@@ -6046,7 +6616,7 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
 
   const actorContext = buildAuditActorContext(req);
   const actorUserId = await resolveRequestActorUserId(req);
-  const { signingState, signatureTask } = await resolveSigningSignatureTarget({
+  const { signingState, signatureTask, signerRecord } = await resolveSigningSignatureTarget({
     document,
     generationRunId: parsed.data.generationRunId,
     outputSignerId: parsed.data.outputSignerId,
@@ -6068,7 +6638,7 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
     });
   }
 
-  if (!ensureSigningAccessAllowsSignature(signingAccess, signatureTask.outputSignerId)) {
+  if (!ensureSigningAccessAllowsSignature(signingAccess, signerRecord, signatureTask.outputSignerId)) {
     return res.status(404).json({
       error: "not_found",
       message: "Signature obligation not found for the prepared signing set",

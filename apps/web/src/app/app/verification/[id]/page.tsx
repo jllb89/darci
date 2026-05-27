@@ -240,9 +240,9 @@ export default function VerificationDetailPage() {
 
             <Link
               className="block rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm hover:bg-Color-Neutral-Lightest"
-              href="/app/verification"
+              href="/app/documents"
             >
-              Back to verification
+              Back to documents
             </Link>
           </div>
         </div>

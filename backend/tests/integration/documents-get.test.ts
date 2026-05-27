@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   listDocumentVersionsMock: vi.fn(),
   listDocumentPartiesMock: vi.fn(),
   listDocumentOutputSignersMock: vi.fn(),
+  updateDocumentMock: vi.fn(),
   replaceDocumentPartiesMock: vi.fn(),
   replaceDocumentOutputSignersMock: vi.fn(),
   getDocumentIntakeDraftMock: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock("../../src/services/documentService", () => ({
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentParties: mocks.listDocumentPartiesMock,
   listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
+  updateDocument: mocks.updateDocumentMock,
   replaceDocumentParties: mocks.replaceDocumentPartiesMock,
   replaceDocumentOutputSigners: mocks.replaceDocumentOutputSignersMock,
   getDocumentIntakeDraft: mocks.getDocumentIntakeDraftMock,
@@ -242,6 +244,7 @@ describe("GET documents endpoints", () => {
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentPartiesMock.mockReset();
     mocks.listDocumentOutputSignersMock.mockReset();
+    mocks.updateDocumentMock.mockReset();
     mocks.replaceDocumentPartiesMock.mockReset();
     mocks.replaceDocumentOutputSignersMock.mockReset();
     mocks.getDocumentIntakeDraftMock.mockReset();
@@ -351,6 +354,9 @@ describe("GET documents endpoints", () => {
     });
     mocks.getActiveTemplateArtifactMock.mockResolvedValue(null);
     mocks.listDocumentOutputSignersMock.mockResolvedValue([]);
+    mocks.updateDocumentMock.mockResolvedValue({
+      id: "doc-1",
+    });
     mocks.replaceDocumentOutputSignersMock.mockResolvedValue([]);
     mocks.syncDocumentPartiesFromCanonicalAnswersMock.mockResolvedValue([]);
     mocks.prepareGenerationRunMock.mockResolvedValue({
@@ -1096,6 +1102,15 @@ describe("GET documents endpoints", () => {
   });
 
   it("submits intake draft and persists canonical payload", async () => {
+    const trustmaker = JSON.stringify({
+      fullName: "Jorge Lopez",
+      email: "lopezb.jl@gmail.com",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "(415) 555-0103",
+      isSigningTrustee: false,
+    });
+
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
@@ -1104,6 +1119,22 @@ describe("GET documents endpoints", () => {
       document_type: "intake",
       jurisdiction: "US-CA",
       product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "trust_rrr",
+          outputLabel: "Trust Registration",
+          isRequired: true,
+          sortOrder: 0,
+          metadata: { documentKey: "trust_rrr" },
+        },
+        {
+          outputKey: "poa_document",
+          outputLabel: "POA Document",
+          isRequired: true,
+          sortOrder: 1,
+          metadata: { documentKey: "poa_general" },
+        },
+      ],
       intake_status: "draft",
       intake_submitted_at: null,
       created_at: "2026-03-05T00:00:00.000Z",
@@ -1117,6 +1148,9 @@ describe("GET documents endpoints", () => {
               fields: [
                 {
                   canonical_key: "trust_name",
+                },
+                {
+                  canonical_key: "grantors",
                 },
               ],
             },
@@ -1142,9 +1176,11 @@ describe("GET documents endpoints", () => {
         rules_snapshot_version: "member_form_rules_contract_v1",
         answers_json: {
           trust_name: "Family Trust",
+          grantors: [trustmaker],
         },
         canonical_answers_json: {
           trust_name: "Family Trust",
+          grantors: [trustmaker],
         },
         revision: 7,
         created_at: "2026-03-05T00:05:00.000Z",
@@ -1154,6 +1190,7 @@ describe("GET documents endpoints", () => {
 
     const token = signToken({
       sub: "admin-1",
+      email: "lopezb.jl@gmail.com",
       app_metadata: { role: "admin" },
     });
 
@@ -1163,6 +1200,7 @@ describe("GET documents endpoints", () => {
         currentStep: "trust_requirements",
         answers: {
           trust_name: "Family Trust",
+          grantors: [trustmaker],
           ignored_object: { nope: true },
         },
         expectedRevision: 6,
@@ -1179,20 +1217,38 @@ describe("GET documents endpoints", () => {
         expectedRevision: 6,
         answers: expect.objectContaining({
           trust_name: "Family Trust",
+          grantors: [trustmaker],
           revocability_status: "revocable",
         }),
-        canonicalAnswers: {
+        canonicalAnswers: expect.objectContaining({
           trust_name: "Family Trust",
+          grantors: [trustmaker],
           revocability_status: "revocable",
-        },
+        }),
       }),
     );
     expect(mocks.syncDocumentPartiesFromCanonicalAnswersMock).toHaveBeenCalledWith({
       documentId: "doc-1",
-      canonicalAnswers: {
+      canonicalAnswers: expect.objectContaining({
         trust_name: "Family Trust",
+        grantors: [trustmaker],
         revocability_status: "revocable",
-      },
+      }),
+    });
+    expect(mocks.updateDocumentMock).toHaveBeenCalledWith("doc-1", {
+      output_bundle: expect.arrayContaining([
+        expect.objectContaining({
+          outputKey: "poa_document_tm1",
+          outputLabel: "POA Document - Jorge Lopez",
+          metadata: expect.objectContaining({
+            baseOutputKey: "poa_document",
+            documentKey: "poa_general",
+            principalSource: "grantor",
+            grantorIndex: 0,
+            trustmakerEmail: "lopezb.jl@gmail.com",
+          }),
+        }),
+      ]),
     });
     expect(response.body).toEqual({
       draft: {
@@ -1204,9 +1260,11 @@ describe("GET documents endpoints", () => {
         rulesSnapshotVersion: "member_form_rules_contract_v1",
         answers: {
           trust_name: "Family Trust",
+          grantors: [trustmaker],
         },
         canonicalAnswers: {
           trust_name: "Family Trust",
+          grantors: [trustmaker],
         },
         revision: 7,
         createdAt: "2026-03-05T00:05:00.000Z",
@@ -1214,6 +1272,7 @@ describe("GET documents endpoints", () => {
       },
       canonicalPayload: {
         trust_name: "Family Trust",
+        grantors: [trustmaker],
         revocability_status: "revocable",
       },
     });

@@ -188,6 +188,7 @@ const flattenMemberFields = (contract: MemberFormRulesContract) => {
 
 const MANDATORY_CONTACT_LIST_KEYS = new Set(["grantors", "trustees", "successor_trustees"]);
 const MANDATORY_CONTACT_VALUE_KEYS = new Set(["principal_contact", "agent_contact"]);
+const MAX_TRUSTMAKER_COUNT = 2;
 
 const getFieldByCanonicalKey = (
   contract: MemberFormRulesContract,
@@ -312,6 +313,27 @@ export const validateMemberFormSubmission = (
           field: field.canonical_key,
           message: `Each ${field.label.toLowerCase()} entry must include a valid email address.`,
         });
+      }
+
+      if (canonicalKey === "grantors") {
+        if (trustees.length > MAX_TRUSTMAKER_COUNT) {
+          errors.push({
+            code: "trustmakers_max_two",
+            field: field.canonical_key,
+            message: "Add no more than two Trustmakers.",
+          });
+        }
+
+        const emails = trustees
+          .map((trustee) => trustee.email?.trim().toLowerCase() ?? "")
+          .filter((email) => email.length > 0);
+        if (new Set(emails).size !== emails.length) {
+          errors.push({
+            code: "trustmakers_email_unique",
+            field: field.canonical_key,
+            message: "Each Trustmaker must use a unique email address.",
+          });
+        }
       }
     }
   }

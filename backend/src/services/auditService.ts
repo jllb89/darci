@@ -119,18 +119,42 @@ const buildAuditEventFilter = (documentIds: string[], actorId?: string) => {
 export const listRecentAuditEventsForDocumentIds = async (
   documentIds: string[],
   limit = 20,
-  actorId?: string
+  actorId?: string,
+  sinceIso?: string,
+  options?: {
+    excludeActionLike?: string[];
+    excludeEntityTypes?: string[];
+    includeActions?: string[];
+  },
 ) => {
   if (!documentIds.length) {
     return [] as AuditEventRecord[];
   }
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("audit_events")
     .select(
       "id, actor_id, entity_type, entity_id, action, metadata, created_at"
     )
-    .or(buildAuditEventFilter(documentIds, actorId))
+    .or(buildAuditEventFilter(documentIds, actorId));
+
+  if (sinceIso) {
+    query = query.gte("created_at", sinceIso);
+  }
+
+  if (options?.includeActions?.length) {
+    query = query.in("action", options.includeActions);
+  }
+
+  for (const entityType of options?.excludeEntityTypes ?? []) {
+    query = query.neq("entity_type", entityType);
+  }
+
+  for (const actionPattern of options?.excludeActionLike ?? []) {
+    query = query.not("action", "like", actionPattern);
+  }
+
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(limit);
 
