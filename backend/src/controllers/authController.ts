@@ -13,6 +13,7 @@ import {
 import {
   ensureUserIdentityFromAuth,
   getUserIdentityContextBySupabaseId,
+  isUserProfileComplete,
   type UserIdentityContext,
   toUserResponse,
 } from "../services/userRoleService";
@@ -760,6 +761,11 @@ const getStringMetadata = (metadata: Record<string, unknown> | undefined, key: s
   return typeof value === "string" ? value : null;
 };
 
+const getNonBlankString = (value: string | null | undefined) => {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const syncProfileFromAuthUser = async (input: {
   user: SupabaseAuthUserLike;
   emailFallback?: string | null;
@@ -767,17 +773,19 @@ const syncProfileFromAuthUser = async (input: {
   firstNameFallback?: string | null;
   lastNameFallback?: string | null;
 }) => {
+  const authEmail = getNonBlankString(input.user.email) ?? getNonBlankString(input.emailFallback);
+  const authPhone = getNonBlankString(input.user.phone) ?? getNonBlankString(input.phoneFallback);
   const emailConfirmedAt =
     input.user.email_confirmed_at ??
-    (input.user.email ? input.user.confirmed_at ?? null : null);
+    (authEmail ? input.user.confirmed_at ?? null : null);
   const phoneConfirmedAt =
     input.user.phone_confirmed_at ??
-    (input.user.phone ? input.user.confirmed_at ?? null : null);
+    (authPhone ? input.user.confirmed_at ?? null : null);
 
   return ensureUserIdentityFromAuth({
     supabaseUserId: input.user.id,
-    email: input.user.email ?? input.emailFallback ?? null,
-    phone: input.user.phone ?? input.phoneFallback ?? null,
+    email: authEmail,
+    phone: authPhone,
     role: (input.user.app_metadata?.role as string | undefined) ?? "member",
     firstName:
       getStringMetadata(input.user.user_metadata, "first_name") ??
@@ -857,6 +865,7 @@ export const login = async (req: Request, res: Response) => {
       user: data.user,
       emailFallback: parsed.data.email,
     });
+    const profileCompletionRequired = !isUserProfileComplete(profile);
 
     if (!ensureActiveAccount(profile, res)) {
       return;
@@ -866,6 +875,7 @@ export const login = async (req: Request, res: Response) => {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
       user: toUserResponse(profile),
+      profileCompletionRequired,
     });
   } catch (syncError) {
     const statusCode = syncError instanceof Error && "statusCode" in syncError
@@ -946,14 +956,30 @@ export const refresh = async (req: Request, res: Response) => {
   }
 
   const supabaseSessionClient = createSupabaseSessionClient();
-  const { data, error } = await supabaseSessionClient.auth.refreshSession({
-    refresh_token: parsed.data.refreshToken,
-  });
+  let refreshedSession: Awaited<ReturnType<typeof supabaseSessionClient.auth.refreshSession>>;
+
+  try {
+    refreshedSession = await supabaseSessionClient.auth.refreshSession({
+      refresh_token: parsed.data.refreshToken,
+    });
+  } catch (refreshError) {
+    console.warn("[auth.refresh]", {
+      component: "auth.refresh",
+      event: "refresh_session_failed",
+      error: getErrorLogDetails(refreshError),
+    });
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Invalid or expired session",
+    });
+  }
+
+  const { data, error } = refreshedSession;
 
   if (error || !data.session || !data.user) {
     return res.status(401).json({
       error: "unauthorized",
-      message: error?.message ?? "Invalid refresh token",
+      message: error?.message ?? "Invalid or expired session",
     });
   }
 
@@ -961,6 +987,7 @@ export const refresh = async (req: Request, res: Response) => {
     const profile = await syncProfileFromAuthUser({
       user: data.user,
     });
+    const profileCompletionRequired = !isUserProfileComplete(profile);
 
     if (!ensureActiveAccount(profile, res)) {
       return;
@@ -970,6 +997,7 @@ export const refresh = async (req: Request, res: Response) => {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
       user: toUserResponse(profile),
+      profileCompletionRequired,
     });
   } catch (syncError) {
     const statusCode = syncError instanceof Error && "statusCode" in syncError
@@ -1823,24 +1851,44 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
 
   const email = normalizeEmailForAuthAction(parsed.data.email);
   const token = normalizeOtpToken(parsed.data.token);
-  let { data, error } = await supabasePublic.auth.verifyOtp({
-    email,
-    token,
-    type: "email",
-  });
+  let verificationResult: Awaited<ReturnType<typeof supabasePublic.auth.verifyOtp>>;
 
-  // ✅ EXPLAINED: Fallback to magiclink type because Supabase may generate OTP codes
-  // as type "magiclink" internally even when we request "email" type. This handles
-  // both custom OTP email flows and Supabase fallback OTP delivery gracefully.
-  if (error || !data.session || !data.user) {
-    const fallbackResult = await supabasePublic.auth.verifyOtp({
+  try {
+    verificationResult = await supabasePublic.auth.verifyOtp({
       email,
       token,
       type: "magiclink",
     });
-    data = fallbackResult.data;
-    error = fallbackResult.error;
+
+    if (verificationResult.error || !verificationResult.data.session || !verificationResult.data.user) {
+      verificationResult = await supabasePublic.auth.verifyOtp({
+        email,
+        token,
+        type: "email",
+      });
+    }
+  } catch (verifyError) {
+    logAuthOtpEvent("warn", "verify_provider_threw", {
+      ...buildAuthOtpLogContext(req, { email, returnTo: parsed.data.returnTo ?? null }),
+      error: getErrorLogDetails(verifyError),
+    });
+
+    await recordAuthEvent({
+      action: authAuditActionNames.otpFailed,
+      metadata: {
+        email,
+        message: verifyError instanceof Error ? verifyError.message : "OTP verification provider failed",
+        stage: "otp_verify_provider",
+      },
+    });
+
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Invalid or expired code",
+    });
   }
+
+  const { data, error } = verificationResult;
 
   if (error || !data.session || !data.user) {
     await recordAuthEvent({
@@ -1859,12 +1907,11 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   }
 
   try {
-    const existingProfile = await getUserIdentityContextBySupabaseId(data.user.id);
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       emailFallback: email,
     });
-    const profileCompletionRequired = !existingProfile;
+    const profileCompletionRequired = !isUserProfileComplete(profile);
 
     if (!ensureActiveAccount(profile, res)) {
       return;
@@ -1883,6 +1930,11 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
       profileCompletionRequired,
     });
   } catch (syncError) {
+    logAuthOtpEvent("error", "verify_sync_failed", {
+      ...buildAuthOtpLogContext(req, { email, returnTo: parsed.data.returnTo ?? null }),
+      error: getErrorLogDetails(syncError),
+    });
+
     const statusCode = syncError instanceof Error && "statusCode" in syncError
       ? Number((syncError as { statusCode?: number }).statusCode) || 500
       : 500;
@@ -2045,12 +2097,11 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
   }
 
   try {
-    const existingProfile = await getUserIdentityContextBySupabaseId(data.user.id);
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       phoneFallback: phone,
     });
-    const profileCompletionRequired = !existingProfile;
+    const profileCompletionRequired = !isUserProfileComplete(profile);
 
     if (!ensureActiveAccount(profile, res)) {
       return;
@@ -2214,6 +2265,7 @@ export const syncSession = async (req: Request, res: Response) => {
 
   try {
     const profile = await syncProfileFromAuthUser({ user: data.user });
+    const profileCompletionRequired = !isUserProfileComplete(profile);
     if (!ensureActiveAccount(profile, res)) {
       return;
     }
@@ -2250,6 +2302,7 @@ export const syncSession = async (req: Request, res: Response) => {
       accessToken,
       refreshToken: parsed.data.refreshToken ?? null,
       user: toUserResponse(profile),
+      profileCompletionRequired,
     });
   } catch (syncError) {
     const statusCode = syncError instanceof Error && "statusCode" in syncError

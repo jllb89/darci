@@ -222,8 +222,10 @@ const IntakeDatePicker = ({
   }, []);
 
   useEffect(() => {
-    if (selectedDate) {
-      setVisibleMonth(getCalendarMonthStart(selectedDate));
+    const nextSelectedDate = parseCalendarDateValue(value);
+    if (nextSelectedDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keep the calendar month aligned to the selected field date.
+      setVisibleMonth(getCalendarMonthStart(nextSelectedDate));
     }
   }, [value]);
 
@@ -232,6 +234,7 @@ const IntakeDatePicker = ({
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- measure trigger position after the calendar opens.
     updatePopoverPosition();
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);

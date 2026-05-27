@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   resendSendMock: vi.fn(),
   ensureUserIdentityFromAuthMock: vi.fn(),
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
+  isUserProfileCompleteMock: vi.fn(),
   toUserResponseMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   findRecentAuditEventByEmailMock: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("resend", () => ({
 vi.mock("../../src/services/userRoleService", () => ({
   ensureUserIdentityFromAuth: mocks.ensureUserIdentityFromAuthMock,
   getUserIdentityContextBySupabaseId: mocks.getUserIdentityContextBySupabaseIdMock,
+  isUserProfileComplete: mocks.isUserProfileCompleteMock,
   toUserResponse: mocks.toUserResponseMock,
 }));
 
@@ -49,7 +51,7 @@ const buildProfile = () => ({
   id: "db-user-1",
   supabaseUserId: "auth-user-1",
   email: "member@example.com",
-  phone: null,
+  phone: "+15555550123",
   role: "member",
   status: "active",
   firstName: "Dana",
@@ -80,6 +82,17 @@ describe("auth controller Phase 1", () => {
 
     mocks.ensureUserIdentityFromAuthMock.mockResolvedValue(buildProfile());
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(buildProfile());
+    mocks.isUserProfileCompleteMock.mockImplementation((profile: {
+      firstName?: string | null;
+      lastName?: string | null;
+      email?: string | null;
+      phone?: string | null;
+    }) => Boolean(
+      profile.firstName?.trim() &&
+      profile.lastName?.trim() &&
+      profile.email?.trim() &&
+      profile.phone?.trim(),
+    ));
     mocks.toUserResponseMock.mockImplementation((profile: { email: string }) => ({
       id: "db-user-1",
       email: profile.email,
@@ -517,6 +530,7 @@ describe("auth controller Phase 1", () => {
         user: {
           id: "auth-user-1",
           email: "member@example.com",
+          phone: "",
           app_metadata: { role: "member" },
           user_metadata: { first_name: "Dana", last_name: "Ray" },
           email_confirmed_at: "2026-04-30T16:00:00.000Z",
@@ -540,8 +554,14 @@ describe("auth controller Phase 1", () => {
     expect(verifyOtpMock).toHaveBeenCalledWith({
       email: "member@example.com",
       token: "123456",
-      type: "email",
+      type: "magiclink",
     });
+    expect(mocks.ensureUserIdentityFromAuthMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "member@example.com",
+        phone: null,
+      }),
+    );
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith({
       accessToken: "otp-access-token",
@@ -688,6 +708,7 @@ describe("auth controller Phase 1", () => {
       expect.objectContaining({
         accessToken: "access-token",
         refreshToken: "refresh-token",
+        profileCompletionRequired: false,
       }),
     );
   });
@@ -747,6 +768,7 @@ describe("auth controller Phase 1", () => {
     expect(status).toHaveBeenCalledWith(200);
     expect(json).toHaveBeenCalledWith(
       expect.objectContaining({
+        profileCompletionRequired: true,
         user: expect.objectContaining({
           email: "",
           phone: "+15551234567",

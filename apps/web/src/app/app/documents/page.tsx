@@ -782,6 +782,7 @@ const SelectFilterControl = ({
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- measure trigger position after the popover opens.
     updatePopoverPosition();
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);
@@ -886,8 +887,10 @@ const DateFilterControl = ({
   }, []);
 
   useEffect(() => {
-    if (selectedDate) {
-      setVisibleMonth(getMonthStart(selectedDate));
+    const nextSelectedDate = parseDateFilterValue(value);
+    if (nextSelectedDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keep the calendar month aligned to the selected filter date.
+      setVisibleMonth(getMonthStart(nextSelectedDate));
     }
   }, [value]);
 
@@ -896,6 +899,7 @@ const DateFilterControl = ({
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- measure trigger position after the popover opens.
     updatePopoverPosition();
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AppSidebar from "@/components/app/AppSidebar";
 import AppTopbarBreadcrumb from "@/components/app/AppTopbarBreadcrumb";
 import {
@@ -9,8 +9,10 @@ import {
   type AppToastInput,
 } from "@/components/app/AppToastContext";
 import {
+  hasCompleteStoredUserProfile,
   logoutStoredAuth,
   switchStoredUserRole,
+  syncStoredAuthFromSession,
   useStoredAuth,
   useStoredSession,
   useStoredUser,
@@ -35,6 +37,21 @@ const roleLandingPath: Record<StoredUserRole, string> = {
   pro: "/app",
   notary: "/app/notary",
   admin: "/app",
+};
+
+const notaryBlockedRoutePrefixes = [
+  "/app/activity",
+  "/app/documents",
+  "/app/requests",
+  "/app/review",
+  "/app/sign",
+  "/app/start",
+];
+
+const isNotaryBlockedRoute = (pathname: string) => {
+  return pathname === "/app" || notaryBlockedRoutePrefixes.some((prefix) => {
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+  });
 };
 
 const getAvailableRoles = (user: ReturnType<typeof useStoredUser>, fallbackRole: StoredUserRole) => {
@@ -66,19 +83,30 @@ export default function AppLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isAuthorized = useStoredSession();
-  const { accessToken } = useStoredAuth();
+  const { accessToken, refreshToken } = useStoredAuth();
   const user = useStoredUser();
   const role: StoredUserRole = user?.role ?? "member";
   const availableRoles = getAvailableRoles(user, role);
   const isPublicInviteRoute = pathname === "/app/invite";
-  const profileName = "Name Placeholder";
+  const searchParamsString = searchParams.toString();
+  const profileCompletionReturnTo = `${pathname}${searchParamsString ? `?${searchParamsString}` : ""}`;
+  const profileName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || user?.phone || "Profile";
   const profileEmail = user?.email || user?.phone || "Profile";
+  const isProfileCompletionRequired = Boolean(
+    accessToken && user && !hasCompleteStoredUserProfile(user),
+  );
+  const sessionSyncKey = accessToken ? `${accessToken}:${refreshToken ?? ""}` : null;
+  const startedSessionSyncKeyRef = useRef<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [checkedSessionSyncKey, setCheckedSessionSyncKey] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isSwitchingRole, setIsSwitchingRole] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [toastPhase, setToastPhase] = useState<"hidden" | "visible" | "closing">("hidden");
+  const hasCheckedCurrentSession = !sessionSyncKey || checkedSessionSyncKey === sessionSyncKey;
+  const shouldRedirectForProfileCompletion = isProfileCompletionRequired && hasCheckedCurrentSession;
 
   const clearToast = useCallback(() => {
     setToastPhase("closing");
@@ -111,6 +139,46 @@ export default function AppLayout({
       router.replace("/start");
     }
   }, [hasHydrated, isAuthorized, isPublicInviteRoute, router]);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthorized || isPublicInviteRoute || !accessToken) {
+      return;
+    }
+
+    if (!sessionSyncKey || startedSessionSyncKeyRef.current === sessionSyncKey) {
+      return;
+    }
+
+    startedSessionSyncKeyRef.current = sessionSyncKey;
+    setCheckedSessionSyncKey(null);
+
+    let cancelled = false;
+    void syncStoredAuthFromSession({ accessToken, refreshToken })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setCheckedSessionSyncKey(sessionSyncKey);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, hasHydrated, isAuthorized, isPublicInviteRoute, refreshToken, sessionSyncKey]);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthorized || isPublicInviteRoute || !shouldRedirectForProfileCompletion) {
+      return;
+    }
+
+    router.replace(`/start?returnTo=${encodeURIComponent(profileCompletionReturnTo || "/app")}`);
+  }, [hasHydrated, isAuthorized, isPublicInviteRoute, profileCompletionReturnTo, router, shouldRedirectForProfileCompletion]);
+
+  useEffect(() => {
+    if (hasHydrated && isAuthorized && !shouldRedirectForProfileCompletion && role === "notary" && isNotaryBlockedRoute(pathname)) {
+      router.replace(roleLandingPath.notary);
+    }
+  }, [hasHydrated, isAuthorized, pathname, role, router, shouldRedirectForProfileCompletion]);
 
   useEffect(() => {
     if (!toast) {
@@ -209,6 +277,14 @@ export default function AppLayout({
   }
 
   if (!isAuthorized) {
+    return null;
+  }
+
+  if (isProfileCompletionRequired && !hasCheckedCurrentSession) {
+    return null;
+  }
+
+  if (shouldRedirectForProfileCompletion) {
     return null;
   }
 

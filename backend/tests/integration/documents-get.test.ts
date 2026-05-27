@@ -50,6 +50,7 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   buildDocumentWorkspaceSummaryMock: vi.fn(),
   buildDocumentWorkspaceSummariesMock: vi.fn(),
+  buildDocumentActionEnrichmentMock: vi.fn(),
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
 }));
 
@@ -84,6 +85,10 @@ vi.mock("../../src/services/auditService", () => ({
 vi.mock("../../src/services/documentWorkspaceReadModelService", () => ({
   buildDocumentWorkspaceSummary: mocks.buildDocumentWorkspaceSummaryMock,
   buildDocumentWorkspaceSummaries: mocks.buildDocumentWorkspaceSummariesMock,
+}));
+
+vi.mock("../../src/services/documentActionService", () => ({
+  buildDocumentActionEnrichment: mocks.buildDocumentActionEnrichmentMock,
 }));
 
 vi.mock("../../src/services/userRoleService", async () => {
@@ -267,6 +272,7 @@ describe("GET documents endpoints", () => {
     mocks.enqueueDocumentGenerationRunMock.mockReset();
     mocks.buildDocumentWorkspaceSummaryMock.mockReset();
     mocks.buildDocumentWorkspaceSummariesMock.mockReset();
+    mocks.buildDocumentActionEnrichmentMock.mockReset();
     mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
 
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
@@ -338,6 +344,7 @@ describe("GET documents endpoints", () => {
         );
       },
     );
+    mocks.buildDocumentActionEnrichmentMock.mockResolvedValue(undefined);
 
     mocks.isDocumentIntakeLockedMock.mockImplementation(() => false);
     mocks.buildSelectionForModeMock.mockResolvedValue({
@@ -495,6 +502,88 @@ describe("GET documents endpoints", () => {
         },
       ],
     });
+  });
+
+  it("does not list member documents while using the notary profile", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValueOnce({
+      id: "notary-user-1",
+      supabaseUserId: "notary-1",
+      email: "notary@example.com",
+      role: "notary",
+      status: "active",
+      firstName: "Nora",
+      lastName: "Notary",
+      availableRoles: ["member", "notary"],
+      roleAssignments: [],
+    });
+    mocks.listDocumentsMock.mockResolvedValue([
+      {
+        id: "doc-member-1",
+        owner_id: "notary-user-1",
+        idn: null,
+        status: "draft",
+        document_type: "generic",
+        jurisdiction: "US-OH",
+        created_at: "2026-03-05T00:00:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "notary-1",
+      app_metadata: { role: "notary" },
+    });
+
+    const response = await getWithLog(
+      "/documents",
+      "does not list member documents while using the notary profile",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ documents: [] });
+    expect(mocks.listDocumentsMock).not.toHaveBeenCalled();
+    expect(mocks.buildDocumentWorkspaceSummariesMock).not.toHaveBeenCalled();
+  });
+
+  it("does not open member document detail while using the notary profile", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValueOnce({
+      id: "notary-user-1",
+      supabaseUserId: "notary-1",
+      email: "notary@example.com",
+      role: "notary",
+      status: "active",
+      firstName: "Nora",
+      lastName: "Notary",
+      availableRoles: ["member", "notary"],
+      roleAssignments: [],
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-member-1",
+      owner_id: "notary-user-1",
+      idn: null,
+      status: "draft",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "notary-1",
+      app_metadata: { role: "notary" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-member-1",
+      "does not open member document detail while using the notary profile",
+      token,
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({
+      error: "not_found",
+      message: "Document not found",
+    });
+    expect(mocks.getDocumentByIdMock).not.toHaveBeenCalled();
   });
 
   it("gets a document by id for admin", async () => {

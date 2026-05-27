@@ -784,7 +784,7 @@ const buildNotaryDashboardData = async (input: {
         code: "review_notary_requests",
         label: "Review notary requests",
         description: `${pendingCount} request(s) are waiting for notary review.`,
-        targetPath: "/app/requests?status=pending",
+        targetPath: "/app/notary?status=pending",
         priority: "high",
       }
     : null;

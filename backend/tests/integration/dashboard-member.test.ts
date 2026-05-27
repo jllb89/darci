@@ -242,13 +242,11 @@ describe("GET /dashboard/member", () => {
           documentId: "doc-1",
           entityType: "document",
           entityId: "doc-1",
-        },
-        {
-          action: "system.signature_linked_to_document",
-          timestamp: "2026-03-05T00:04:00.000Z",
-          documentId: "doc-2",
-          entityType: "signature",
-          entityId: "sig-1",
+          document: {
+            id: "doc-1",
+            status: "pending_review",
+            documentType: "generic",
+          },
         },
       ],
       counts: {
@@ -262,8 +260,18 @@ describe("GET /dashboard/member", () => {
     });
     expect(mocks.listRecentAuditEventsForDocumentIdsMock).toHaveBeenCalledWith(
       ["doc-0", "doc-1", "doc-2", "doc-3", "doc-4"],
-      20,
-      "owner-1"
+      250,
+      undefined,
+      expect.any(String),
+      expect.objectContaining({
+        excludeActionLike: ["%generation_run%"],
+        excludeEntityTypes: ["generation_run"],
+        includeActions: expect.arrayContaining([
+          "member.document_upload_completed",
+          "system.document_signing_prepared",
+          "member.signature_reminder_sent",
+        ]),
+      })
     );
   });
 
@@ -297,8 +305,18 @@ describe("GET /dashboard/member", () => {
     expect(mocks.listDocumentsMock).toHaveBeenCalledWith("owner-42");
     expect(mocks.listRecentAuditEventsForDocumentIdsMock).toHaveBeenCalledWith(
       ["doc-1"],
-      20,
-      "owner-42"
+      250,
+      undefined,
+      expect.any(String),
+      expect.objectContaining({
+        excludeActionLike: ["%generation_run%"],
+        excludeEntityTypes: ["generation_run"],
+        includeActions: expect.arrayContaining([
+          "member.document_upload_completed",
+          "system.document_signing_prepared",
+          "member.signature_reminder_sent",
+        ]),
+      })
     );
   });
 

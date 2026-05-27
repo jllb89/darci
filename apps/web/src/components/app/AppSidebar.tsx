@@ -34,6 +34,28 @@ type VerificationLookupPayload = {
   verifications?: VerificationLookupItem[];
 };
 
+const PROFILE_ROLE_LABELS: Record<StoredUserRole, string> = {
+  member: "Member",
+  pro: "Member",
+  notary: "Notary",
+  admin: "Admin",
+};
+
+const getProfileSwitchOptions = (availableRoles: StoredUserRole[]) => {
+  const options = new Map<string, StoredUserRole>();
+
+  availableRoles.forEach((availableRole) => {
+    const label = PROFILE_ROLE_LABELS[availableRole];
+    const existingRole = options.get(label);
+
+    if (!existingRole || availableRole === "member") {
+      options.set(label, availableRole);
+    }
+  });
+
+  return Array.from(options, ([label, value]) => ({ label, value }));
+};
+
 const fetchWithTokenRefresh = async (
   url: string,
   accessToken: string,
@@ -113,21 +135,8 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
   },
   notary: {
     primaryItems: [
-      { label: "Start", href: "/app/notary", icon: "start" },
-      {
-        label: "My documents",
-        href: "/app/documents",
-        icon: "documents",
-        sectionLabel: "Documents",
-      },
+      { label: "Queue", href: "/app/notary", icon: "requests", sectionLabel: "Notary" },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
-      {
-        label: "Activity",
-        href: "/app/activity",
-        icon: "notifications",
-        sectionLabel: "Activity",
-      },
-      { label: "Requests", href: "/app/requests", icon: "requests" },
     ],
     settingsHref: "/app/settings",
     newDocumentHref: "/app/start",
@@ -291,7 +300,9 @@ export default function AppSidebar({
   const [verificationLookupMessage, setVerificationLookupMessage] = useState<string | null>(null);
   const verificationLookupRef = useRef<HTMLDivElement | null>(null);
 
-  const rolesToDisplay = availableRoles.length > 1 ? availableRoles : [];
+  const profileRoleLabel = PROFILE_ROLE_LABELS[role];
+  const profileSwitchOptions = getProfileSwitchOptions(availableRoles);
+  const rolesToDisplay = profileSwitchOptions.length > 1 ? profileSwitchOptions : [];
 
   const closeVerificationLookup = useCallback(() => {
     setIsVerificationLookupOpen(false);
@@ -528,8 +539,8 @@ export default function AppSidebar({
                 <span className="truncate text-[13px] font-display font-medium text-Color-Scheme-1-Text">
                   {profileName}
                 </span>
-                <span className="rounded-full border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lighter px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.05em] text-Color-Scheme-1-Text">
-                  {role}
+                <span className="rounded-full border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lighter px-1.5 py-0.5 text-[9px] font-medium text-Color-Scheme-1-Text">
+                  {profileRoleLabel}
                 </span>
               </span>
               <span className="mt-0.5 block truncate text-[11px] text-Color-Neutral">{profileEmail}</span>
@@ -547,30 +558,37 @@ export default function AppSidebar({
               isProfilePanelOpen ? "max-h-64 translate-y-0 opacity-100" : "max-h-0 translate-y-1 opacity-0"
             }`}
           >
-            <div className="rounded-md border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-2.5 py-2">
+            <div className="rounded-md border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-3 py-3">
               {rolesToDisplay.length > 0 ? (
                 <>
-                  <div className="px-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-Color-Neutral/80">
+                  <div className="mb-2 text-[12px] font-medium text-Color-Neutral/80">
                     Switch profile
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {rolesToDisplay.map((allowedRole) => (
+                  <div className="flex flex-wrap gap-2">
+                    {rolesToDisplay.map((allowedRole) => {
+                      const isCurrentProfile = allowedRole.label === profileRoleLabel;
+
+                      return (
                       <button
-                        key={allowedRole}
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.06em] transition-colors duration-200 ease-in-out ${
-                          allowedRole === role
+                        key={allowedRole.label}
+                        className={`rounded-full px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-200 ease-in-out ${
+                          isCurrentProfile
                             ? "bg-Color-Scheme-1-Text text-white"
                             : "bg-Color-Neutral-Lighter text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lighter/70"
                         }`}
-                        disabled={isSwitchingRole || allowedRole === role}
-                        onClick={() => onSwitchRole?.(allowedRole)}
+                        disabled={isSwitchingRole || isCurrentProfile}
+                        onClick={() => {
+                          setIsProfilePanelOpen(false);
+                          onSwitchRole?.(allowedRole.value);
+                        }}
                         type="button"
                       >
-                        {allowedRole}
+                        {allowedRole.label}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
-                  <div className="my-2 border-t border-Color-Scheme-1-Border/40" />
+                  <div className="my-3 border-t border-Color-Scheme-1-Border/40" />
                 </>
               ) : null}
 

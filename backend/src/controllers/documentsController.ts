@@ -3923,6 +3923,16 @@ const getAuthorizedDocument = async (req: Request, res: Response) => {
     return null;
   }
 
+  const role = req.user.role ?? "member";
+  if (role === "notary") {
+    res.status(404).json({
+      error: "not_found",
+      message: "Document not found",
+    });
+
+    return null;
+  }
+
   const documentId = req.params.id;
   const document = await getDocumentById(documentId);
   if (!document) {
@@ -3934,7 +3944,6 @@ const getAuthorizedDocument = async (req: Request, res: Response) => {
     return null;
   }
 
-  const role = req.user.role ?? "member";
   if (role !== "admin" && role !== "service_role") {
     const ownerId = await getUserIdBySupabaseId(req.user.id);
     if (!ownerId || document.owner_id !== ownerId) {
@@ -5505,6 +5514,10 @@ export const listDocuments = async (req: Request, res: Response) => {
   }
 
   const role = req.user.role ?? "member";
+  if (role === "notary") {
+    return res.status(200).json({ documents: [] });
+  }
+
   const ownerId =
     role === "admin" || role === "service_role"
       ? undefined

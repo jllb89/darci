@@ -175,6 +175,7 @@ const SelectFilterControl = ({
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- measure trigger position after the popover opens.
     updatePopoverPosition();
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);
@@ -850,7 +851,7 @@ export default function RequestsPage() {
         </div>
         {searchQuery ? (
           <div className="bg-Color-Neutral-Lightest/80 px-4 py-3 text-xs font-medium text-Color-Neutral-Darkest">
-            Displaying results for "{searchQuery}"... {visibleRequestCount} request{visibleRequestCount === 1 ? "" : "s"} found.
+            Displaying results for &quot;{searchQuery}&quot;... {visibleRequestCount} request{visibleRequestCount === 1 ? "" : "s"} found.
           </div>
         ) : null}
       </section>

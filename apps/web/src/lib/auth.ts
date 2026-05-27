@@ -24,6 +24,20 @@ export type StoredUser = {
   lastAuthSyncedAt?: string | null;
 };
 
+const hasProfileValue = (value: string | null | undefined) => {
+  return Boolean(value?.trim());
+};
+
+export const hasCompleteStoredUserProfile = (user: StoredUser | null | undefined) => {
+  return Boolean(
+    user &&
+    hasProfileValue(user.firstName) &&
+    hasProfileValue(user.lastName) &&
+    hasProfileValue(user.email) &&
+    hasProfileValue(user.phone)
+  );
+};
+
 type StoredAuth = {
   accessToken: string | null;
   refreshToken: string | null;

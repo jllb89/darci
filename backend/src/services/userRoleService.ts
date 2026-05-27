@@ -140,9 +140,16 @@ const mapRoleAssignments = (rows: UserRoleRow[]): UserRoleAssignment[] => {
 };
 
 const baseUserSelect = "id, supabase_user_id, email, role, status, first_name, last_name";
-const authMirrorUserSelect = `${baseUserSelect}, phone, email_confirmed_at, phone_confirmed_at, last_sign_in_at, last_auth_synced_at`;
+const authMirrorColumns = [
+  "phone",
+  "email_confirmed_at",
+  "phone_confirmed_at",
+  "last_sign_in_at",
+  "last_auth_synced_at",
+] as const;
+type AuthMirrorColumn = (typeof authMirrorColumns)[number];
 
-let authMirrorColumnsAvailable = true;
+const unavailableAuthMirrorColumns = new Set<AuthMirrorColumn>();
 
 const isMissingAuthMirrorColumnError = (error: SupabaseErrorLike | null | undefined) => {
   if (!error) {
@@ -152,13 +159,48 @@ const isMissingAuthMirrorColumnError = (error: SupabaseErrorLike | null | undefi
   const message = error.message ?? "";
   return (
     error.code === "42703" ||
+    error.code === "PGRST204" ||
     /users\.(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)/i.test(message) ||
-    /(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at).*does not exist/i.test(message)
+    /(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at).*does not exist/i.test(message) ||
+    /Could not find.*['"]?(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)['"]?.*column.*['"]users['"]/i.test(message)
   );
 };
 
-const markAuthMirrorColumnsUnavailable = () => {
-  authMirrorColumnsAvailable = false;
+const markUnavailableAuthMirrorColumns = (error: SupabaseErrorLike | null | undefined) => {
+  const message = error?.message ?? "";
+  const missingColumns = authMirrorColumns.filter((column) => {
+    return new RegExp(`\\b${column}\\b`, "i").test(message);
+  });
+
+  if (missingColumns.length === 0) {
+    authMirrorColumns.forEach((column) => unavailableAuthMirrorColumns.add(column));
+    return;
+  }
+
+  missingColumns.forEach((column) => unavailableAuthMirrorColumns.add(column));
+};
+
+const isAuthMirrorColumnAvailable = (column: AuthMirrorColumn) => {
+  return !unavailableAuthMirrorColumns.has(column);
+};
+
+const runWithAuthMirrorColumnFallback = async <T extends { error: SupabaseErrorLike | null }>(
+  operation: () => PromiseLike<T>,
+) => {
+  let result = await operation();
+
+  for (let attempt = 0; result.error && isMissingAuthMirrorColumnError(result.error) && attempt < authMirrorColumns.length; attempt += 1) {
+    const unavailableColumnCount = unavailableAuthMirrorColumns.size;
+    markUnavailableAuthMirrorColumns(result.error);
+
+    if (unavailableAuthMirrorColumns.size === unavailableColumnCount) {
+      break;
+    }
+
+    result = await operation();
+  }
+
+  return result;
 };
 
 const normalizeUserRow = (row: Partial<UserRow> | null | undefined) => {
@@ -177,7 +219,8 @@ const normalizeUserRow = (row: Partial<UserRow> | null | undefined) => {
 };
 
 const getUserSelect = () => {
-  return authMirrorColumnsAvailable ? authMirrorUserSelect : baseUserSelect;
+  const availableAuthMirrorColumns = authMirrorColumns.filter(isAuthMirrorColumnAvailable);
+  return [baseUserSelect, ...availableAuthMirrorColumns].join(", ");
 };
 
 const selectUserRowBySupabaseId = async (supabaseUserId: string) => {
@@ -188,12 +231,7 @@ const selectUserRowBySupabaseId = async (supabaseUserId: string) => {
     .limit(1)
     .maybeSingle();
 
-  let { data, error } = await runSelect(getUserSelect());
-
-  if (error && authMirrorColumnsAvailable && isMissingAuthMirrorColumnError(error)) {
-    markAuthMirrorColumnsUnavailable();
-    ({ data, error } = await runSelect(baseUserSelect));
-  }
+  const { data, error } = await runWithAuthMirrorColumnFallback(() => runSelect(getUserSelect()));
 
   if (error) {
     throw new Error(error.message);
@@ -210,12 +248,7 @@ const selectUserRowById = async (userId: string) => {
     .limit(1)
     .maybeSingle();
 
-  let { data, error } = await runSelect(getUserSelect());
-
-  if (error && authMirrorColumnsAvailable && isMissingAuthMirrorColumnError(error)) {
-    markAuthMirrorColumnsUnavailable();
-    ({ data, error } = await runSelect(baseUserSelect));
-  }
+  const { data, error } = await runWithAuthMirrorColumnFallback(() => runSelect(getUserSelect()));
 
   if (error) {
     throw new Error(error.message);
@@ -335,38 +368,33 @@ export const ensureUserIdentityFromAuth = async (input: {
       throw new UserRoleServiceError(400, "Email or phone is required to create the user record");
     }
 
-    const buildInsertPayload = (includeAuthMirrors: boolean) => ({
+    const buildInsertPayload = () => ({
         supabase_user_id: input.supabaseUserId,
         email: input.email ?? null,
         role: normalizeRuntimeRole(input.role),
-        ...(includeAuthMirrors && input.phone !== undefined ? { phone: input.phone } : {}),
+        ...(isAuthMirrorColumnAvailable("phone") && input.phone !== undefined ? { phone: input.phone } : {}),
         ...(input.firstName !== undefined ? { first_name: input.firstName } : {}),
         ...(input.lastName !== undefined ? { last_name: input.lastName } : {}),
-        ...(includeAuthMirrors && input.emailConfirmedAt !== undefined
+        ...(isAuthMirrorColumnAvailable("email_confirmed_at") && input.emailConfirmedAt !== undefined
           ? { email_confirmed_at: input.emailConfirmedAt }
           : {}),
-        ...(includeAuthMirrors && input.phoneConfirmedAt !== undefined
+        ...(isAuthMirrorColumnAvailable("phone_confirmed_at") && input.phoneConfirmedAt !== undefined
           ? { phone_confirmed_at: input.phoneConfirmedAt }
           : {}),
-        ...(includeAuthMirrors && input.lastSignInAt !== undefined
+        ...(isAuthMirrorColumnAvailable("last_sign_in_at") && input.lastSignInAt !== undefined
           ? { last_sign_in_at: input.lastSignInAt }
           : {}),
-        ...(includeAuthMirrors && input.lastAuthSyncedAt !== undefined
+        ...(isAuthMirrorColumnAvailable("last_auth_synced_at") && input.lastAuthSyncedAt !== undefined
           ? { last_auth_synced_at: input.lastAuthSyncedAt }
           : {}),
       });
-    const runInsert = (includeAuthMirrors: boolean) => supabaseAdmin
+    const runInsert = () => supabaseAdmin
       .from("users")
-      .insert(buildInsertPayload(includeAuthMirrors))
-      .select(includeAuthMirrors ? authMirrorUserSelect : baseUserSelect)
+      .insert(buildInsertPayload())
+      .select(getUserSelect())
       .single();
 
-    let { data, error } = await runInsert(authMirrorColumnsAvailable);
-
-    if (error && authMirrorColumnsAvailable && isMissingAuthMirrorColumnError(error)) {
-      markAuthMirrorColumnsUnavailable();
-      ({ data, error } = await runInsert(false));
-    }
+    const { data, error } = await runWithAuthMirrorColumnFallback(runInsert);
 
     if (error || !data) {
       throw new Error(error?.message ?? "Failed to create user record");
@@ -399,46 +427,41 @@ export const ensureUserIdentityFromAuth = async (input: {
 
   const shouldUpdateUser =
     nextEmail !== existingUser.email ||
-    nextPhone !== existingUser.phone ||
+    (isAuthMirrorColumnAvailable("phone") && nextPhone !== existingUser.phone) ||
     nextFirstName !== existingUser.first_name ||
     nextLastName !== existingUser.last_name ||
-    nextEmailConfirmedAt !== existingUser.email_confirmed_at ||
-    nextPhoneConfirmedAt !== existingUser.phone_confirmed_at ||
-    nextLastSignInAt !== existingUser.last_sign_in_at ||
-    nextLastAuthSyncedAt !== existingUser.last_auth_synced_at ||
+    (isAuthMirrorColumnAvailable("email_confirmed_at") && nextEmailConfirmedAt !== existingUser.email_confirmed_at) ||
+    (isAuthMirrorColumnAvailable("phone_confirmed_at") && nextPhoneConfirmedAt !== existingUser.phone_confirmed_at) ||
+    (isAuthMirrorColumnAvailable("last_sign_in_at") && nextLastSignInAt !== existingUser.last_sign_in_at) ||
+    (isAuthMirrorColumnAvailable("last_auth_synced_at") && nextLastAuthSyncedAt !== existingUser.last_auth_synced_at) ||
     existingRole !== existingUser.role;
 
   if (shouldUpdateUser) {
-    const buildUpdatePayload = (includeAuthMirrors: boolean) => ({
+    const buildUpdatePayload = () => ({
       email: nextEmail,
       role: existingRole,
-      ...(includeAuthMirrors && nextPhone !== undefined ? { phone: nextPhone } : {}),
+      ...(isAuthMirrorColumnAvailable("phone") && nextPhone !== undefined ? { phone: nextPhone } : {}),
       ...(nextFirstName !== undefined ? { first_name: nextFirstName } : {}),
       ...(nextLastName !== undefined ? { last_name: nextLastName } : {}),
-      ...(includeAuthMirrors && nextEmailConfirmedAt !== undefined
+      ...(isAuthMirrorColumnAvailable("email_confirmed_at") && nextEmailConfirmedAt !== undefined
         ? { email_confirmed_at: nextEmailConfirmedAt }
         : {}),
-      ...(includeAuthMirrors && nextPhoneConfirmedAt !== undefined
+      ...(isAuthMirrorColumnAvailable("phone_confirmed_at") && nextPhoneConfirmedAt !== undefined
         ? { phone_confirmed_at: nextPhoneConfirmedAt }
         : {}),
-      ...(includeAuthMirrors && nextLastSignInAt !== undefined
+      ...(isAuthMirrorColumnAvailable("last_sign_in_at") && nextLastSignInAt !== undefined
         ? { last_sign_in_at: nextLastSignInAt }
         : {}),
-      ...(includeAuthMirrors && nextLastAuthSyncedAt !== undefined
+      ...(isAuthMirrorColumnAvailable("last_auth_synced_at") && nextLastAuthSyncedAt !== undefined
         ? { last_auth_synced_at: nextLastAuthSyncedAt }
         : {}),
     });
-    const runUpdate = (includeAuthMirrors: boolean) => supabaseAdmin
+    const runUpdate = () => supabaseAdmin
       .from("users")
-      .update(buildUpdatePayload(includeAuthMirrors))
+      .update(buildUpdatePayload())
       .eq("id", existingUser.id);
 
-    let { error } = await runUpdate(authMirrorColumnsAvailable);
-
-    if (error && authMirrorColumnsAvailable && isMissingAuthMirrorColumnError(error)) {
-      markAuthMirrorColumnsUnavailable();
-      ({ error } = await runUpdate(false));
-    }
+    const { error } = await runWithAuthMirrorColumnFallback(runUpdate);
 
     if (error) {
       throw new Error(error.message);
@@ -648,6 +671,19 @@ export const upsertUserRoleAssignmentBySupabaseUserId = async (input: {
     supabaseUserId: ensuredContext.supabaseUserId,
     ...(nextIsActiveProfile ? { preferredRole: input.role } : {}),
   });
+};
+
+const hasProfileValue = (value: string | null | undefined) => {
+  return Boolean(value?.trim());
+};
+
+export const isUserProfileComplete = (context: UserIdentityContext) => {
+  return (
+    hasProfileValue(context.firstName) &&
+    hasProfileValue(context.lastName) &&
+    hasProfileValue(context.email) &&
+    hasProfileValue(context.phone)
+  );
 };
 
 export const toUserResponse = (context: UserIdentityContext) => {

@@ -4,9 +4,15 @@ import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AsYouType, parsePhoneNumberFromString } from "libphonenumber-js";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
+import ProfileCompletionForm, {
+  formatProfilePhoneInputValue,
+} from "@/components/auth/ProfileCompletionForm";
 import {
-  hasStoredSession,
+  clearStoredAuth,
+  getStoredAuth,
+  hasCompleteStoredUserProfile,
+  refreshStoredAuth,
   setStoredAuth,
   syncStoredAuthFromSession,
   type StoredUser,
@@ -43,6 +49,11 @@ type PendingAuthSession = {
   accessToken: string;
   refreshToken: string | null;
   user: StoredUser;
+};
+type UpdateProfilePayload = {
+  user?: StoredUser | null;
+  message?: string;
+  details?: Array<{ message?: string }>;
 };
 type ProfileFormState = {
   firstName: string;
@@ -108,15 +119,6 @@ const resolveIdentifier = (value: string): IdentifierChallenge | null => {
   return null;
 };
 
-const formatPhoneInputValue = (value: string) => {
-  const trimmed = value.trimStart();
-  if (!trimmed) {
-    return "";
-  }
-
-  return new AsYouType("US").input(trimmed);
-};
-
 function StartAuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -145,15 +147,87 @@ function StartAuthPageContent() {
 
   const otpCode = useMemo(() => otpDigits.join(""), [otpDigits]);
 
-  const resolvedIdentifier = useMemo(
-    () => resolveIdentifier(identifier),
-    [identifier],
-  );
-
   useEffect(() => {
-    if (hasStoredSession()) {
-      router.replace(returnTo);
-    }
+    let cancelled = false;
+
+    const showProfileStep = (authSession: ReturnType<typeof getStoredAuth>) => {
+      if (!authSession.accessToken || !authSession.user) {
+        return false;
+      }
+
+      setPendingAuthSession({
+        accessToken: authSession.accessToken,
+        refreshToken: authSession.refreshToken,
+        user: authSession.user,
+      });
+      setProfileForm({
+        firstName: authSession.user.firstName ?? "",
+        lastName: authSession.user.lastName ?? "",
+        email: authSession.user.email ?? "",
+        phone: formatProfilePhoneInputValue(authSession.user.phone ?? ""),
+      });
+      setChallenge(null);
+      setErrorMessage(null);
+      setNoticeMessage("Complete your profile to continue.");
+      setAuthStep("profile");
+      return true;
+    };
+
+    const continueStoredSession = async () => {
+      const storedAuth = getStoredAuth();
+      if (!storedAuth.accessToken) {
+        return;
+      }
+
+      try {
+        const syncedAuth = await syncStoredAuthFromSession({
+          accessToken: storedAuth.accessToken,
+          refreshToken: storedAuth.refreshToken,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextAuth = syncedAuth ?? getStoredAuth();
+        if (nextAuth.user && !hasCompleteStoredUserProfile(nextAuth.user) && showProfileStep(nextAuth)) {
+          return;
+        }
+
+        router.replace(returnTo);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        const refreshedAuth = await refreshStoredAuth().catch(() => null);
+        if (cancelled) {
+          return;
+        }
+
+        if (!refreshedAuth?.accessToken) {
+          clearStoredAuth();
+          setPendingAuthSession(null);
+          setNoticeMessage("Your session expired. Send a new code to continue.");
+          setAuthStep("identifier");
+          return;
+        }
+
+        if (refreshedAuth.user && !hasCompleteStoredUserProfile(refreshedAuth.user) && showProfileStep(refreshedAuth)) {
+          return;
+        }
+
+        if (refreshedAuth.accessToken) {
+          router.replace(returnTo);
+        }
+      }
+    };
+
+    void continueStoredSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [returnTo, router]);
 
   const getActionRedirectTo = (intent: "otp" | "oauth") => {
@@ -190,7 +264,7 @@ function StartAuthPageContent() {
         firstName: payload.user.firstName ?? "",
         lastName: payload.user.lastName ?? "",
         email: payload.user.email || (verifiedChallenge.kind === "email" ? verifiedChallenge.value : ""),
-        phone: formatPhoneInputValue(
+        phone: formatProfilePhoneInputValue(
           payload.user.phone ?? (verifiedChallenge.kind === "phone" ? verifiedChallenge.value : ""),
         ),
       });
@@ -468,6 +542,7 @@ function StartAuthPageContent() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- auto-submit reads the current OTP/challenge snapshot.
   }, [authStep, isSubmitting, otpDigits]);
 
   const signInWithPassword = async () => {
@@ -485,7 +560,8 @@ function StartAuthPageContent() {
     const payload = (await response.json().catch(() => null)) as {
       accessToken?: string | null;
       refreshToken?: string | null;
-      user?: unknown;
+      user?: StoredUser | null;
+      profileCompletionRequired?: boolean;
       message?: string;
       details?: Array<{ path?: string; message?: string }>;
     } | null;
@@ -493,6 +569,19 @@ function StartAuthPageContent() {
     if (!response.ok || !payload?.user) {
       const validationMessage = payload?.details?.[0]?.message;
       throw new Error(payload?.message || validationMessage || "Request failed");
+    }
+
+    if (payload.profileCompletionRequired || !hasCompleteStoredUserProfile(payload.user)) {
+      finishVerifiedSession(
+        {
+          accessToken: payload.accessToken,
+          refreshToken: payload.refreshToken,
+          user: payload.user,
+          profileCompletionRequired: true,
+        },
+        { kind: "email", value: email, displayValue: email },
+      );
+      return;
     }
 
     setStoredAuth({
@@ -526,36 +615,69 @@ function StartAuthPageContent() {
       throw new Error("Enter a valid phone number.");
     }
 
-    const response = await fetch(`${apiBaseUrl}/users/me`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${pendingAuthSession.accessToken}`,
-      },
-      body: JSON.stringify({
-        firstName,
-        lastName,
-        email,
-        phone: parsedPhone.number,
-      }),
-    });
+    const profilePayload = {
+      firstName,
+      lastName,
+      email,
+      phone: parsedPhone.number,
+    };
+    const updateProfile = async (accessToken: string) => {
+      const response = await fetch(`${apiBaseUrl}/users/me`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(profilePayload),
+      });
 
-    const payload = (await response.json().catch(() => null)) as
-      | { user?: StoredUser | null; message?: string; details?: Array<{ message?: string }> }
-      | null;
+      const payload = (await response.json().catch(() => null)) as UpdateProfilePayload | null;
+
+      return { payload, response };
+    };
+
+    let activeAuthSession = pendingAuthSession;
+    let { payload, response } = await updateProfile(activeAuthSession.accessToken);
+
+    if (response.status === 401) {
+      const refreshedAuth = await refreshStoredAuth().catch(() => null);
+      if (refreshedAuth?.accessToken && refreshedAuth.user) {
+        activeAuthSession = {
+          accessToken: refreshedAuth.accessToken,
+          refreshToken: refreshedAuth.refreshToken,
+          user: refreshedAuth.user,
+        };
+        ({ payload, response } = await updateProfile(activeAuthSession.accessToken));
+      } else {
+        clearStoredAuth();
+        setPendingAuthSession(null);
+        setNoticeMessage("Your session expired. Send a new code to continue.");
+        setAuthStep("identifier");
+        throw new Error("Your session expired. Send a new code to continue.");
+      }
+    }
 
     if (!response.ok || !payload?.user) {
       const validationMessage = payload?.details?.[0]?.message;
       throw new Error(payload?.message || validationMessage || "Failed to complete profile.");
     }
 
+    const completedUser = {
+      ...activeAuthSession.user,
+      ...payload.user,
+      firstName,
+      lastName,
+      email,
+      phone: parsedPhone.number,
+    };
+
     setStoredAuth({
-      accessToken: pendingAuthSession.accessToken,
-      refreshToken: pendingAuthSession.refreshToken,
-      user: payload.user,
+      accessToken: activeAuthSession.accessToken,
+      refreshToken: activeAuthSession.refreshToken,
+      user: completedUser,
     });
     setPendingAuthSession(null);
-    router.push(returnTo);
+    router.replace(returnTo);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -817,81 +939,12 @@ function StartAuthPageContent() {
                 ) : null}
 
                 {authStep === "profile" ? (
-                  <div className="space-y-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label className="mb-2 block text-sm font-medium">First name</label>
-                        <input
-                          autoComplete="given-name"
-                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                          type="text"
-                          value={profileForm.firstName}
-                          onChange={(event) =>
-                            setProfileForm((current) => ({
-                              ...current,
-                              firstName: event.target.value,
-                            }))
-                          }
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-2 block text-sm font-medium">Last name</label>
-                        <input
-                          autoComplete="family-name"
-                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                          type="text"
-                          value={profileForm.lastName}
-                          onChange={(event) =>
-                            setProfileForm((current) => ({
-                              ...current,
-                              lastName: event.target.value,
-                            }))
-                          }
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium">Email</label>
-                      <input
-                        autoComplete="email"
-                        className={`w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text ${
-                          challenge?.kind === "email" ? "bg-Color-Neutral-Lightest text-Color-Neutral" : ""
-                        }`}
-                        type="email"
-                        value={profileForm.email}
-                        onChange={(event) =>
-                          setProfileForm((current) => ({
-                            ...current,
-                            email: event.target.value,
-                          }))
-                        }
-                        readOnly={challenge?.kind === "email"}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium">Phone number</label>
-                      <input
-                        autoComplete="tel"
-                        className={`w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text ${
-                          challenge?.kind === "phone" ? "bg-Color-Neutral-Lightest text-Color-Neutral" : ""
-                        }`}
-                        placeholder="(555) 555-1234"
-                        type="tel"
-                        value={profileForm.phone}
-                        onChange={(event) =>
-                          setProfileForm((current) => ({
-                            ...current,
-                            phone: formatPhoneInputValue(event.target.value),
-                          }))
-                        }
-                        readOnly={challenge?.kind === "phone"}
-                        required
-                      />
-                    </div>
-                  </div>
+                  <ProfileCompletionForm
+                    lockedEmail={challenge?.kind === "email" || Boolean(pendingAuthSession?.user.email?.trim())}
+                    lockedPhone={challenge?.kind === "phone" || Boolean(pendingAuthSession?.user.phone?.trim())}
+                    onChange={setProfileForm}
+                    value={profileForm}
+                  />
                 ) : null}
 
                 {errorMessage ? (
