@@ -14,11 +14,13 @@ import {
   reviewRequestDecision,
   resolveCode,
   signRequest,
+  startInPersonSession,
   submitRequest,
 } from "../controllers/notaryController";
 import {
   getNotaryContext,
   listNotaryRequests,
+  resolveIdn,
 } from "../controllers/notaryWorkspaceController";
 import { requireRole } from "../middleware/roles";
 
@@ -34,6 +36,11 @@ router.post(
   "/code/resolve",
   requireRole(["notary", "admin", "service_role"]),
   resolveCode
+);
+router.post(
+  "/idn/resolve",
+  requireRole(["notary", "admin", "service_role"]),
+  resolveIdn
 );
 router.post(
   "/code/resend",
@@ -64,6 +71,11 @@ router.post(
   "/requests/:id/meeting/check-in",
   requireRole(["member", "notary", "admin", "service_role"]),
   recordMeetingCheckin
+);
+router.post(
+  "/requests/:id/meeting/start",
+  requireRole(["notary", "admin", "service_role"]),
+  startInPersonSession
 );
 router.post(
   "/requests/:id/meeting/confirm",

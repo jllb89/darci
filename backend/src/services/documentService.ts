@@ -545,6 +545,22 @@ export const getDocumentById = async (documentId: string) => {
   return data as DocumentRecord | null;
 };
 
+export const getDocumentByIdn = async (idn: string) => {
+  const normalizedIdn = idn.trim().toUpperCase();
+  const { data, error } = await supabaseAdmin
+    .from("documents")
+    .select(documentSelectColumns)
+    .eq("idn", normalizedIdn)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as DocumentRecord | null;
+};
+
 export const listDocuments = async (ownerId?: string) => {
   let query = supabaseAdmin
     .from("documents")

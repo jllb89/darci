@@ -218,6 +218,7 @@ describe("POST /notary/requests/:id/review-decision", () => {
       expect.objectContaining({
         documentId: "doc-1",
         requestId: "req-1",
+        summary: "All review checks passed",
       }),
     );
     expect(mocks.updateNotarizationRequestMock).not.toHaveBeenCalled();

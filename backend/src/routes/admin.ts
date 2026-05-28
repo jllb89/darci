@@ -22,6 +22,11 @@ import {
   listTemplateBindingRulesAdmin,
   updateTemplateBindingRuleAdmin,
 } from "../controllers/templateBindingRulesAdminController";
+import {
+  approveNotaryApplicationAdminHandler,
+  listNotaryApplicationsAdminHandler,
+  rejectNotaryApplicationAdminHandler,
+} from "../controllers/notaryProfileController";
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
@@ -114,6 +119,24 @@ router.delete(
   "/template-binding-rules/:id",
   requireRole(["admin", "service_role"]),
   deactivateTemplateBindingRuleAdmin,
+);
+
+router.get(
+  "/notary-applications",
+  requireRole(["admin", "service_role"]),
+  listNotaryApplicationsAdminHandler,
+);
+
+router.post(
+  "/notary-applications/:id/approve",
+  requireRole(["admin", "service_role"]),
+  approveNotaryApplicationAdminHandler,
+);
+
+router.post(
+  "/notary-applications/:id/reject",
+  requireRole(["admin", "service_role"]),
+  rejectNotaryApplicationAdminHandler,
 );
 
 export default router;

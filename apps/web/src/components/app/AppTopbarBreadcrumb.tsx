@@ -12,6 +12,7 @@ type BreadcrumbRule = {
 const BREADCRUMB_RULES: BreadcrumbRule[] = [
   { kind: "exact", path: "/app", breadcrumb: { current: "Start" } },
   { kind: "exact", path: "/app/notary", breadcrumb: { current: "Start" } },
+  { kind: "exact", path: "/app/notary/history", breadcrumb: { section: "Notary", current: "History" } },
   { kind: "prefix", path: "/app/start", breadcrumb: { current: "New Document" } },
   { kind: "prefix", path: "/app/review", breadcrumb: { current: "Review" } },
   { kind: "prefix", path: "/app/sign", breadcrumb: { current: "Sign" } },
@@ -48,12 +49,17 @@ const BREADCRUMB_RULES: BreadcrumbRule[] = [
   {
     kind: "prefix",
     path: "/app/notary/requests/",
-    breadcrumb: { section: "Activity", current: "Request" },
+    breadcrumb: { section: "Notary", current: "Request" },
+  },
+  {
+    kind: "prefix",
+    path: "/app/notary/history",
+    breadcrumb: { section: "Notary", current: "History" },
   },
   {
     kind: "prefix",
     path: "/app/notary/requests",
-    breadcrumb: { section: "Activity", current: "Requests" },
+    breadcrumb: { section: "Notary", current: "Requests" },
   },
   {
     kind: "prefix",

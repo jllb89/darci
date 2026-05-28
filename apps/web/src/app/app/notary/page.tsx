@@ -1,16 +1,240 @@
-export default function NotaryHomePage() {
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { useStoredAuth } from "@/lib/auth";
+import {
+  fetchWithTokenRefresh,
+  formatStatusLabel,
+  notaryApiBaseUrl,
+  readApiErrorMessage,
+  type NotaryQueueRequestSummary,
+  type NotaryQueueResponse,
+} from "@/lib/notaryWorkspace";
+
+type QueueTab = "review" | "in_review" | "ready" | "completed";
+
+const tabs: QueueTab[] = ["review", "in_review", "ready", "completed"];
+
+const emptyQueue: NotaryQueueResponse = {
+  requests: [],
+  meetings: [],
+  counts: {
+    pending: 0,
+    scheduled: 0,
+    completed: 0,
+    total: 0,
+  },
+};
+
+const tabLabels: Record<QueueTab, string> = {
+  review: "Review requests",
+  in_review: "In-review",
+  ready: "Ready for in-person session",
+  completed: "Completed",
+};
+
+const tabEmptyCopy: Record<QueueTab, string> = {
+  review: "No review requests.",
+  in_review: "No requests currently in review.",
+  ready: "No requests are ready for in-person session.",
+  completed: "No completed requests yet.",
+};
+
+const GooeyFilter = ({
+  id = "notary-tabs-goo-filter",
+  strength = 10,
+}: {
+  id?: string;
+  strength?: number;
+}) => {
   return (
-    <div className="space-y-6">
-      <div className="text-2xl font-medium">Notary Queue</div>
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-          <div className="text-sm font-medium">Pending requests</div>
-          <div className="mt-4 text-sm text-Color-Neutral">Queue is empty.</div>
-        </div>
-        <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-          <div className="text-sm font-medium">Calendar</div>
+    <svg className="absolute hidden">
+      <defs>
+        <filter id={id}>
+          <feGaussianBlur in="SourceGraphic" result="blur" stdDeviation={strength} />
+          <feColorMatrix
+            in="blur"
+            result="goo"
+            type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9"
+          />
+          <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+        </filter>
+      </defs>
+    </svg>
+  );
+};
+
+const resolveQueueStatus = (request: NotaryQueueRequestSummary) => {
+  return request.request.queueStatus ?? request.workflow?.latestStatus ?? request.workflow?.status ?? request.request.status;
+};
+
+const isOpenMeetingRequest = (request: NotaryQueueRequestSummary) => {
+  return Boolean(
+    request.meeting && !["completed", "cancelled", "canceled", "no_show"].includes(request.meeting.status ?? ""),
+  );
+};
+
+const splitRequests = (requests: NotaryQueueRequestSummary[]) => {
+  return {
+    review: requests.filter((request) => {
+      const status = resolveQueueStatus(request);
+      return status === "pending" || status === "submitted" || status === "code_delivered";
+    }),
+    in_review: requests.filter((request) => resolveQueueStatus(request) === "in_review"),
+    ready: requests.filter((request) => resolveQueueStatus(request) === "approved" || isOpenMeetingRequest(request)),
+    completed: requests.filter((request) => {
+      const status = resolveQueueStatus(request);
+      return status === "completed" || request.document.summary.finalization.isAnchored;
+    }),
+  } satisfies Record<QueueTab, NotaryQueueRequestSummary[]>;
+};
+
+function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
+  const memberName = request.owner?.displayName ?? request.owner?.email ?? "Member pending";
+  const queueStatus = resolveQueueStatus(request);
+  const rowStatus = formatStatusLabel(queueStatus);
+
+  return (
+    <Link
+      className="grid gap-3 px-3 py-4 text-sm transition hover:bg-Color-Neutral-Lightest sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.55fr)]"
+      href={`/app/notary/requests/${encodeURIComponent(request.request.id)}`}
+    >
+      <div className="min-w-0">
+        <div className="truncate font-medium text-Color-Scheme-1-Text">{memberName}</div>
+        <div className="mt-1 inline-flex rounded-full bg-Color-Neutral-Lightest px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-Color-Neutral-Darkest">
+          {rowStatus}
         </div>
       </div>
+      <div className="min-w-0 sm:text-right">
+        <div className="truncate font-mono font-medium text-Color-Scheme-1-Text">{request.document.idn ?? "Pending"}</div>
+      </div>
+    </Link>
+  );
+}
+
+export default function NotaryHomePage() {
+  const { accessToken } = useStoredAuth();
+  const [queue, setQueue] = useState<NotaryQueueResponse>(emptyQueue);
+  const [activeTab, setActiveTab] = useState<QueueTab>("review");
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadQueue = useCallback(async () => {
+    if (!accessToken) {
+      setQueue(emptyQueue);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetchWithTokenRefresh(`${notaryApiBaseUrl}/notary/requests?limit=80`, accessToken, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response, "Unable to load notary queue."));
+      }
+
+      setQueue((await response.json()) as NotaryQueueResponse);
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load notary queue.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void loadQueue();
+  }, [loadQueue]);
+
+  const requestsByTab = splitRequests(queue.requests);
+  const visibleRequests = requestsByTab[activeTab];
+  const activeTabIndex = tabs.indexOf(activeTab);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-1">
+          <div className="text-2xl font-medium">Notary</div>
+          <div className="text-sm text-Color-Neutral">Review signed documents assigned to you.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            className="rounded-lg border border-Color-Scheme-1-Border/60 px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text transition hover:border-Color-Scheme-1-Text"
+            href="/app/notary/history"
+          >
+            History
+          </Link>
+          <button
+            className="rounded-lg border border-Color-Scheme-1-Border/60 px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text transition hover:border-Color-Scheme-1-Text disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isLoading}
+            onClick={() => void loadQueue()}
+            type="button"
+          >
+            {isLoading ? "Refreshing" : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {errorMessage ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div>
+      ) : null}
+
+      <section className="space-y-4 text-sm">
+        <div>
+          <GooeyFilter />
+          <div className="relative grid grid-cols-1 gap-1 rounded-full bg-Color-Neutral-Lighter p-1 sm:grid-cols-4">
+            <div
+              aria-hidden
+              className="absolute inset-y-1 hidden rounded-full bg-Color-White shadow-[0_10px_26px_rgba(0,0,0,0.10)] transition-[left] duration-300 ease-out sm:block"
+              style={{
+                filter: "url(#notary-tabs-goo-filter)",
+                left: `calc(${activeTabIndex * (100 / tabs.length)}% + 0.25rem)`,
+                width: `calc(${100 / tabs.length}% - 0.5rem)`,
+              }}
+            />
+            {tabs.map((tab) => {
+            const isActive = activeTab === tab;
+            return (
+              <button
+                className={`relative z-10 flex min-h-10 items-center justify-between gap-3 rounded-full px-4 text-left transition ${
+                  isActive ? "bg-Color-White text-Color-Scheme-1-Text sm:bg-transparent" : "text-Color-Neutral hover:text-Color-Scheme-1-Text"
+                }`}
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                type="button"
+              >
+                <span className="font-medium">{tabLabels[tab]}</span>
+                <span className="rounded-full bg-Color-Neutral-Lighter px-2.5 py-1 text-xs font-medium text-Color-Neutral-Darkest">
+                  {requestsByTab[tab].length}
+                </span>
+              </button>
+            );
+          })}
+          </div>
+        </div>
+
+        {visibleRequests.length ? (
+          <div className="bg-Color-White">
+            <div className="grid gap-3 px-3 py-2 text-xs uppercase tracking-wide text-Color-Neutral sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.55fr)]">
+              <div>Name</div>
+              <div className="sm:text-right">IDN</div>
+            </div>
+            <div className="divide-y divide-Color-Scheme-1-Border/20">
+              {visibleRequests.map((request) => (
+                <RequestRow key={request.request.id} request={request} />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-Color-White px-3 py-8 text-Color-Neutral">
+            {tabEmptyCopy[activeTab]}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

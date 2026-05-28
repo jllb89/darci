@@ -52,6 +52,7 @@ import {
   getWorkspaceIdentitySummaryByUserId,
   type WorkspaceIdentitySummary,
 } from "./workspaceIdentitySummaryService";
+import { createDocumentDownloadUrl } from "./storageService";
 
 export type NotaryQueueRequestSummary = {
   request: {
@@ -135,6 +136,7 @@ export type NotaryQueueResponse = {
   counts: {
     pending: number;
     scheduled: number;
+    readyForInPerson: number;
     completed: number;
     total: number;
   };
@@ -150,6 +152,17 @@ export type NotaryRequestContext = {
       mimeType: string | null;
       sizeBytes: number | null;
       isFinal: boolean;
+      createdAt: string;
+    }>;
+    reviewDocuments: Array<{
+      id: string;
+      versionId: string;
+      label: string;
+      fileName: string | null;
+      mimeType: string | null;
+      sizeBytes: number | null;
+      isFinal: boolean;
+      downloadUrl: string | null;
       createdAt: string;
     }>;
   };
@@ -566,6 +579,59 @@ const mapDocumentVersionSummary = (version: DocumentVersionRecord) => {
   };
 };
 
+const buildReviewDocumentLabel = (version: DocumentVersionRecord, index: number) => {
+  return version.file_name?.trim() || `Document ${index + 1}`;
+};
+
+const buildReviewDocuments = async (versions: DocumentVersionRecord[]) => {
+  const pdfVersions = versions
+    .filter((version) => version.storage_path && version.mime_type === "application/pdf")
+    .sort((left, right) => right.version - left.version);
+  const sourceVersions = pdfVersions.some((version) => version.is_final)
+    ? pdfVersions.filter((version) => version.is_final)
+    : pdfVersions;
+  const latestByOutput = new Map<string, DocumentVersionRecord>();
+
+  for (const version of sourceVersions) {
+    const key = version.generation_run_id ?? version.file_name ?? version.id;
+    if (!latestByOutput.has(key)) {
+      latestByOutput.set(key, version);
+    }
+  }
+
+  const reviewVersions = Array.from(latestByOutput.values()).sort((left, right) => {
+    const leftTime = Date.parse(left.created_at);
+    const rightTime = Date.parse(right.created_at);
+    return leftTime - rightTime;
+  });
+
+  return Promise.all(
+    reviewVersions.map(async (version, index) => {
+      let downloadUrl: string | null = null;
+
+      if (version.storage_path) {
+        try {
+          downloadUrl = (await createDocumentDownloadUrl(version.storage_path)).signedUrl;
+        } catch {
+          downloadUrl = null;
+        }
+      }
+
+      return {
+        id: version.id,
+        versionId: version.id,
+        label: buildReviewDocumentLabel(version, index),
+        fileName: version.file_name,
+        mimeType: version.mime_type,
+        sizeBytes: version.size_bytes,
+        isFinal: Boolean(version.is_final),
+        downloadUrl,
+        createdAt: version.created_at,
+      };
+    }),
+  );
+};
+
 const mapMeetingGeolocation = (sample: GeolocationSampleRecord) => {
   return {
     id: sample.id,
@@ -691,7 +757,7 @@ const buildNextAction = (input: {
   }
 
   if ((input.queueStatus === "approved" || input.queueStatus === "completed") && !input.meeting) {
-    return "schedule_meeting";
+    return "ready_for_in_person_session";
   }
 
   if (
@@ -738,7 +804,7 @@ const buildWarnings = (input: {
     warnings.push({
       code: "meeting_missing",
       severity: "info",
-      message: "This request is ready for meeting scheduling, but no meeting has been recorded yet.",
+      message: "This request is ready for the in-person session after approval contact emails are sent.",
     });
   }
 
@@ -765,14 +831,25 @@ const buildCapabilities = (input: {
   queueStatus: string | null;
   meeting: MeetingRecord | null;
   documentSummary: DocumentWorkspaceSummary;
+  identityVerifications: IdentityVerificationEventRecord[];
+  proximityEvaluations: ProximityEvaluationRecord[];
 }) => {
+  const hasPassedSamePlace =
+    input.meeting?.same_place_status === "passed" ||
+    input.proximityEvaluations.some((evaluation) => evaluation.status === "passed");
+  const hasVerifiedIdentity = input.identityVerifications.some((event) => event.status === "verified");
+
   return {
     canReviewRequest: input.queueStatus === "in_review" || input.queueStatus === "changes_requested",
     canManageMeeting:
       input.queueStatus === "approved" ||
       (!!input.meeting && input.meeting.status !== "completed" && input.meeting.status !== "cancelled" && input.meeting.status !== "no_show"),
     canRecordEvidence: Boolean(input.meeting),
-    canFinalizeDocument: input.meeting?.status === "completed" && !input.documentSummary.finalization.isAnchored,
+    canFinalizeDocument:
+      input.meeting?.status === "completed" &&
+      hasPassedSamePlace &&
+      hasVerifiedIdentity &&
+      !input.documentSummary.finalization.isAnchored,
     canOpenVerification: input.documentSummary.verification.status === "ready",
   };
 };
@@ -862,6 +939,9 @@ const buildQueueCounts = (requests: NotaryQueueRequestSummary[]) => {
   const scheduled = requests.filter((request) =>
     ["scheduled", "rescheduled", "in_progress"].includes(request.meeting?.status ?? ""),
   ).length;
+  const readyForInPerson = requests.filter(
+    (request) => request.request.queueStatus === "approved" || request.meeting?.status === "in_progress",
+  ).length;
   const completed = requests.filter((request) => {
     return (
       request.finalization.isAnchored ||
@@ -873,6 +953,7 @@ const buildQueueCounts = (requests: NotaryQueueRequestSummary[]) => {
   return {
     pending: Math.max(total - scheduled - completed, 0),
     scheduled,
+    readyForInPerson,
     completed,
     total,
   };
@@ -1034,6 +1115,7 @@ export const getNotaryRequestContext = async (input: {
     listFinalizationStatusHistory(resource.document.id),
     base.meetingRecord ? listMeetingParticipants(base.meetingRecord.id) : Promise.resolve([]),
   ]);
+  const reviewDocuments = await buildReviewDocuments(versions);
 
   const [checkins, geolocationSamples, identityVerifications, proximityEvaluations, artifacts] =
     base.meetingRecord
@@ -1059,6 +1141,7 @@ export const getNotaryRequestContext = async (input: {
     document: {
       ...base.document,
       versions: versions.map(mapDocumentVersionSummary),
+      reviewDocuments,
     },
     owner: base.owner,
     notary,
@@ -1110,6 +1193,8 @@ export const getNotaryRequestContext = async (input: {
       queueStatus: base.request.queueStatus,
       meeting: base.meetingRecord,
       documentSummary: base.documentSummary,
+      identityVerifications,
+      proximityEvaluations,
     }),
     warnings: buildWarnings({
       queueStatus: base.request.queueStatus,

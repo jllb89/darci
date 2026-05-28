@@ -438,4 +438,186 @@ describe("Phase 5 meeting runtime slice", () => {
     );
     expect(mocks.recordAuditEventMock).not.toHaveBeenCalled();
   });
+
+  it("starts an in-person session from an approved request without an existing meeting", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "11111111-1111-1111-1111-111111111111",
+      supabaseUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      email: "notary@example.com",
+      role: "notary",
+      status: "active",
+      firstName: "Nora",
+      lastName: "Tary",
+      availableRoles: ["notary"],
+      roleAssignments: [],
+    });
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-3",
+      document_id: "doc-3",
+      workflow_id: "workflow-3",
+      assigned_notary_id: "11111111-1111-1111-1111-111111111111",
+      status: "approved",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      created_at: "2026-04-20T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-3",
+      owner_id: "owner-3",
+      idn: "IDN-789",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "notarize_document",
+      selected_families: [],
+      output_bundle: [],
+      intake_status: "submitted",
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-20T09:00:00.000Z",
+      updated_at: "2026-04-20T09:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      id: "workflow-3",
+      owner_user_id: "owner-3",
+      created_by_user_id: "owner-3",
+      primary_document_id: "doc-3",
+      workflow_kind: "single_document",
+      status: "approved",
+      selected_notary_user_id: null,
+      assigned_notary_user_id: "11111111-1111-1111-1111-111111111111",
+      current_legacy_request_id: "req-3",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      last_code_generated_at: null,
+      review_started_at: "2026-04-20T10:05:00.000Z",
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-20T10:00:00.000Z",
+      updated_at: "2026-04-20T10:05:00.000Z",
+    });
+    mocks.getMeetingByRequestIdMock.mockResolvedValue(null);
+    mocks.createMeetingMock.mockResolvedValue({
+      id: "meeting-3",
+      request_id: "req-3",
+      workflow_id: "workflow-3",
+      scheduled_at: "2026-05-27T15:00:00.000Z",
+      timezone: null,
+      location: null,
+      status: "scheduled",
+      same_place_required: true,
+      same_place_status: "not_started",
+      evidence_retention_until: null,
+      metadata: {},
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:00:00.000Z",
+    });
+    mocks.listMeetingParticipantsMock.mockResolvedValue([]);
+    mocks.createMeetingParticipantMock
+      .mockResolvedValueOnce({
+        id: "participant-member-3",
+        meeting_id: "meeting-3",
+        user_id: "owner-3",
+        document_party_id: null,
+        participant_role: "member",
+        status: "expected",
+        presence_required: true,
+        participant_label: null,
+        arrived_at: null,
+        departed_at: null,
+        metadata: {},
+        created_at: "2026-05-27T15:00:00.000Z",
+        updated_at: "2026-05-27T15:00:00.000Z",
+      })
+      .mockResolvedValueOnce({
+        id: "participant-notary-3",
+        meeting_id: "meeting-3",
+        user_id: "11111111-1111-1111-1111-111111111111",
+        document_party_id: null,
+        participant_role: "notary",
+        status: "expected",
+        presence_required: true,
+        participant_label: null,
+        arrived_at: null,
+        departed_at: null,
+        metadata: {},
+        created_at: "2026-05-27T15:00:00.000Z",
+        updated_at: "2026-05-27T15:00:00.000Z",
+      });
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      id: "participant-notary-3",
+      meeting_id: "meeting-3",
+      user_id: "11111111-1111-1111-1111-111111111111",
+      document_party_id: null,
+      participant_role: "notary",
+      status: "checked_in",
+      presence_required: true,
+      participant_label: null,
+      arrived_at: "2026-05-27T15:00:00.000Z",
+      departed_at: null,
+      metadata: {},
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:00:00.000Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-3",
+      meeting_id: "meeting-3",
+      meeting_participant_id: "participant-notary-3",
+      recorded_by_user_id: "11111111-1111-1111-1111-111111111111",
+      checkin_kind: "meeting_start",
+      status: "recorded",
+      recorded_at: "2026-05-27T15:00:00.000Z",
+      notes: null,
+      metadata: {},
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:00:00.000Z",
+    });
+    mocks.updateMeetingMock.mockResolvedValue({
+      id: "meeting-3",
+      request_id: "req-3",
+      workflow_id: "workflow-3",
+      scheduled_at: "2026-05-27T15:00:00.000Z",
+      timezone: null,
+      location: null,
+      status: "in_progress",
+      same_place_required: true,
+      same_place_status: "not_started",
+      evidence_retention_until: null,
+      metadata: { lastCheckinAt: "2026-05-27T15:00:00.000Z" },
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:00:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      app_metadata: { role: "notary" },
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-3/meeting/start")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ recordedAt: "2026-05-27T15:00:00.000Z" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.meeting.status).toBe("in_progress");
+    expect(mocks.createMeetingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-3",
+        status: "scheduled",
+      }),
+    );
+    expect(mocks.createMeetingCheckinMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId: "meeting-3",
+        checkinKind: "meeting_start",
+      }),
+    );
+    expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
+      "meeting-3",
+      expect.objectContaining({ status: "in_progress" }),
+    );
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "notary.meeting_started" }),
+    );
+  });
 });

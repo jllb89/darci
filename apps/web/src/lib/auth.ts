@@ -200,43 +200,87 @@ export const clearStoredAuth = () => {
   emitAuthChange();
 };
 
+const SESSION_SYNC_COOLDOWN_MS = 15_000;
+
+let sessionSyncRequest:
+  | {
+      key: string;
+      promise: Promise<StoredAuth>;
+    }
+  | null = null;
+let lastSessionSyncKey: string | null = null;
+let lastSessionSyncAt = 0;
+
 export const syncStoredAuthFromSession = async (input: {
   accessToken: string;
   refreshToken?: string | null;
   intent?: "signup" | "magic-link" | "otp" | "oauth" | null;
 }) => {
-  const response = await fetch(`${getApiBaseUrl()}/auth/session/sync`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${input.accessToken}`,
-    },
-    body: JSON.stringify({
-      refreshToken: input.refreshToken ?? null,
-      ...(input.intent ? { intent: input.intent } : {}),
-    }),
-  });
+  const syncKey = [
+    input.accessToken,
+    input.refreshToken ?? "",
+    input.intent ?? "",
+  ].join(":");
+  const now = Date.now();
 
-  const payload = (await response.json().catch(() => null)) as
-    | {
-        accessToken?: string | null;
-        refreshToken?: string | null;
-        user?: StoredUser | null;
-        message?: string;
-      }
-    | null;
-
-  if (!response.ok || !payload?.accessToken || !payload.user) {
-    throw new Error(payload?.message || "Failed to sync session");
+  if (
+    lastSessionSyncKey === syncKey &&
+    now - lastSessionSyncAt < SESSION_SYNC_COOLDOWN_MS
+  ) {
+    return getStoredAuth();
   }
 
-  setStoredAuth({
-    accessToken: payload.accessToken,
-    refreshToken: payload.refreshToken ?? input.refreshToken ?? null,
-    user: payload.user,
-  });
+  if (sessionSyncRequest?.key === syncKey) {
+    return sessionSyncRequest.promise;
+  }
 
-  return getStoredAuth();
+  const promise = (async () => {
+    const response = await fetch(`${getApiBaseUrl()}/auth/session/sync`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.accessToken}`,
+      },
+      body: JSON.stringify({
+        refreshToken: input.refreshToken ?? null,
+        ...(input.intent ? { intent: input.intent } : {}),
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          accessToken?: string | null;
+          refreshToken?: string | null;
+          user?: StoredUser | null;
+          message?: string;
+        }
+      | null;
+
+    if (!response.ok || !payload?.accessToken || !payload.user) {
+      throw new Error(payload?.message || "Failed to sync session");
+    }
+
+    setStoredAuth({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken ?? input.refreshToken ?? null,
+      user: payload.user,
+    });
+
+    lastSessionSyncKey = syncKey;
+    lastSessionSyncAt = Date.now();
+
+    return getStoredAuth();
+  })();
+
+  sessionSyncRequest = { key: syncKey, promise };
+
+  try {
+    return await promise;
+  } finally {
+    if (sessionSyncRequest?.key === syncKey) {
+      sessionSyncRequest = null;
+    }
+  }
 };
 
 export const logoutStoredAuth = async () => {

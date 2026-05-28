@@ -41,6 +41,7 @@ type NotificationDeliveryRecord = {
 type NotificationUserRecord = {
   id: string;
   email: string | null;
+  phone: string | null;
   first_name: string | null;
   last_name: string | null;
 };
@@ -90,6 +91,46 @@ const documentTypeLabels: Record<string, string> = {
   acknowledgment: "acknowledgment",
   authentic_act: "authentic act",
   public_instrument: "public instrument",
+};
+
+export const queueNotaryApplicationApprovedNotification = async (input: {
+  applicationId: string;
+  userId: string;
+  reviewedBySupabaseUserId: string;
+  reviewNotes?: string | null;
+}) => {
+  try {
+    const recipient = await getUserById(input.userId);
+    if (!recipient?.email) {
+      return null;
+    }
+
+    return await queueTemplatedNotification({
+      templateKey: "notary_application_approved_email",
+      jobKind: "status_update",
+      dedupeKey: `notary_application_approved:${input.applicationId}`,
+      requestedBySupabaseUserId: input.reviewedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(recipient),
+        nextStepUrl: buildAppUrl("/app/settings"),
+        dashboardUrl: buildAppUrl("/app/settings"),
+        approvalSummary: input.reviewNotes?.trim() || null,
+      },
+      recipients: [buildOwnerRecipient(recipient)],
+      metadata: {
+        applicationId: input.applicationId,
+        userId: input.userId,
+        reviewNotes: input.reviewNotes?.trim() || null,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("notary_application_approved_email", error, {
+      applicationId: input.applicationId,
+      userId: input.userId,
+      reviewedBySupabaseUserId: input.reviewedBySupabaseUserId,
+    });
+    return null;
+  }
 };
 
 const getApiBaseUrl = () => {
@@ -197,7 +238,24 @@ const buildOwnerRecipient = (user: NotificationUserRecord): NotificationRecipien
   return {
     targetUserId: user.id,
     email: user.email?.trim() ?? null,
+    phone: user.phone?.trim() ?? null,
     displayName: toDisplayName(user),
+  };
+};
+
+const buildContactPayload = (user: NotificationUserRecord | null) => {
+  if (!user) {
+    return {
+      name: null,
+      email: null,
+      phone: null,
+    };
+  }
+
+  return {
+    name: toDisplayName(user),
+    email: user.email?.trim() ?? null,
+    phone: user.phone?.trim() ?? null,
   };
 };
 
@@ -496,7 +554,7 @@ const queueTemplatedNotification = async (
 const getUserById = async (userId: string) => {
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, email, first_name, last_name")
+    .select("id, email, phone, first_name, last_name")
     .eq("id", userId)
     .limit(1)
     .maybeSingle();
@@ -1011,6 +1069,7 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
   documentId: string;
   requestId: string;
   notaryUserId: string;
+  summary?: string | null | undefined;
   requestedBySupabaseUserId?: string | undefined;
 }) => {
   try {
@@ -1026,7 +1085,10 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
     }
 
     const dashboardUrl = buildDocumentDetailsUrl(document.id);
-    return await queueTemplatedNotification({
+    const notaryUrl = buildAppUrl(`/app/notary/requests/${encodeURIComponent(input.requestId)}`);
+    const memberContact = buildContactPayload(owner);
+    const notaryContact = buildContactPayload(notary);
+    const ownerResult = await queueTemplatedNotification({
       templateKey: "notary_approval_received_email",
       jobKind: "status_update",
       dedupeKey: `notary_request_approved:${input.requestId}`,
@@ -1036,16 +1098,56 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
       payload: {
         firstName: toFirstName(owner),
         illuminotaryName: notary ? toDisplayName(notary) : "Your illuminotary",
+        approvalSummary: input.summary?.trim() || null,
         continueUrl: dashboardUrl,
         dashboardUrl,
+        nextStepUrl: dashboardUrl,
+        notaryName: notaryContact.name,
+        notaryEmail: notaryContact.email,
+        notaryPhone: notaryContact.phone,
         documentName: getDocumentLabel(document),
       },
       recipients: [buildOwnerRecipient(owner)],
       metadata: {
         requestId: input.requestId,
         notaryUserId: input.notaryUserId,
+        summary: input.summary?.trim() || null,
+        contactExchange: true,
       },
     });
+
+    const notaryResult = notary
+      ? await queueTemplatedNotification({
+          templateKey: "notary_member_contact_received_email",
+          jobKind: "status_update",
+          dedupeKey: `notary_request_approved_notary:${input.requestId}`,
+          documentId: document.id,
+          notarizationRequestId: input.requestId,
+          requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+          payload: {
+            firstName: toFirstName(notary),
+            illuminotaryName: toDisplayName(notary),
+            approvalSummary: input.summary?.trim() || null,
+            continueUrl: notaryUrl,
+            dashboardUrl: notaryUrl,
+            nextStepUrl: notaryUrl,
+            memberName: memberContact.name,
+            memberEmail: memberContact.email,
+            memberPhone: memberContact.phone,
+            documentName: getDocumentLabel(document),
+          },
+          recipients: [buildOwnerRecipient(notary)],
+          metadata: {
+            requestId: input.requestId,
+            notaryUserId: input.notaryUserId,
+            memberUserId: owner.id,
+            summary: input.summary?.trim() || null,
+            contactExchange: true,
+          },
+        })
+      : null;
+
+    return ownerResult ?? notaryResult;
   } catch (error) {
     logNotificationFailure("notary_approval_received_email", error, {
       documentId: input.documentId,

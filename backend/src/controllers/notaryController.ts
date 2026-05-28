@@ -32,6 +32,7 @@ import {
   getIdentityVerificationEventById,
   getMeetingByRequestId,
   getMeetingCheckinById,
+  listIdentityVerificationEvents,
   listMeetingParticipants,
   listMeetingGeolocationSamples,
   updateMeeting,
@@ -67,6 +68,13 @@ import {
   type IlluminotaryReviewDecision,
   type IlluminotarizationWorkflowRecord,
 } from "../services/illuminotarizationWorkflowService";
+import {
+  appendAcknowledgmentPage as appendAcknowledgmentPageToDocument,
+  DocumentFinalizationConflictError,
+  DocumentFinalizationForbiddenError,
+  DocumentFinalizationNotFoundError,
+  watermarkWithNotice as finalizeDocumentWithWatermark,
+} from "../services/documentFinalizationService";
 
 const resolveCodeSchema = z.object({
   code: z.string().min(1),
@@ -123,6 +131,12 @@ const meetingCheckinSchema = z.object({
       "meeting_end",
     ]).optional(),
   }).optional(),
+}).passthrough();
+
+const startInPersonSessionSchema = z.object({
+  participantRole: z.enum(["notary"]).optional(),
+  recordedAt: z.string().datetime().optional(),
+  notes: z.string().trim().max(2000).optional(),
 }).passthrough();
 
 const meetingConfirmSchema = z.object({
@@ -199,12 +213,83 @@ const meetingArtifactSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 }).passthrough();
 
+const notarySignSchema = z.object({
+  notarialFields: z.record(z.string(), z.unknown()).optional(),
+  sealLabel: z.string().trim().max(255).optional(),
+  signatureLabel: z.string().trim().max(255).optional(),
+  notes: z.string().trim().max(2000).optional(),
+}).passthrough();
+
+const notarySubmitSchema = z.object({
+  notes: z.string().trim().max(2000).optional(),
+}).passthrough();
+
 const sendNotImplemented = (res: Response, message: string) => {
   return res.status(501).json({
     error: "not_implemented",
     message,
   });
 };
+
+const sendDocumentFinalizationError = (res: Response, error: unknown) => {
+  if (error instanceof DocumentFinalizationNotFoundError) {
+    return res.status(404).json({ error: "not_found", message: error.message });
+  }
+
+  if (error instanceof DocumentFinalizationForbiddenError) {
+    return res.status(403).json({ error: "forbidden", message: error.message });
+  }
+
+  if (error instanceof DocumentFinalizationConflictError) {
+    return res.status(409).json({ error: "conflict", message: error.message });
+  }
+
+  throw error;
+};
+
+const mapFinalizationExecutionSummary = (execution: {
+  id: string;
+  execution_kind: string;
+  status: string;
+  source_document_version_id: string;
+  output_document_version_id: string | null;
+  template_id: string | null;
+  template_version: string | null;
+  watermark_text: string | null;
+  completed_at: string | null;
+}) => ({
+  id: execution.id,
+  kind: execution.execution_kind,
+  status: execution.status,
+  sourceVersionId: execution.source_document_version_id,
+  outputVersionId: execution.output_document_version_id,
+  templateId: execution.template_id,
+  templateVersion: execution.template_version,
+  watermarkText: execution.watermark_text,
+  completedAt: execution.completed_at,
+});
+
+const mapFinalizationVersionSummary = (version: {
+  id: string;
+  document_id: string;
+  version: number;
+  storage_path: string | null;
+  file_name: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  is_final: boolean | null;
+  created_at: string;
+}) => ({
+  id: version.id,
+  documentId: version.document_id,
+  version: version.version,
+  storagePath: version.storage_path,
+  fileName: version.file_name,
+  mimeType: version.mime_type,
+  sizeBytes: version.size_bytes,
+  isFinal: version.is_final ?? false,
+  createdAt: version.created_at,
+});
 
 const buildAuditActorContext = (req: Request) => {
   const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
@@ -493,7 +578,7 @@ const inferParticipantRoleFromRequestUser = (input: {
   }
 
   if (input.role === "notary") {
-    return input.bodyParticipantRole && input.bodyParticipantRole !== "notary" ? null : "notary";
+    return input.bodyParticipantRole ?? "notary";
   }
 
   return input.bodyParticipantRole ?? null;
@@ -564,6 +649,43 @@ const syncDefaultMeetingParticipants = async (input: {
   await syncParticipant("notary", input.assignedNotaryUserId);
 
   return nextParticipants.sort((left, right) => left.participant_role.localeCompare(right.participant_role));
+};
+
+const ensureNotaryCompletionReady = async (input: {
+  requestId: string;
+  requireMeetingCompleted?: boolean;
+}) => {
+  const meeting = await getMeetingByRequestId(input.requestId);
+  if (!meeting) {
+    throw new DocumentFinalizationConflictError(
+      "Meeting must be started before notarial completion",
+    );
+  }
+
+  if (input.requireMeetingCompleted && meeting.status !== "completed") {
+    throw new DocumentFinalizationConflictError(
+      "Meeting must be completed before final submission",
+    );
+  }
+
+  if (meeting.same_place_status !== "passed") {
+    throw new DocumentFinalizationConflictError(
+      "Same-place evidence must pass before notarial completion",
+    );
+  }
+
+  const identityVerifications = await listIdentityVerificationEvents(meeting.id);
+  const verifiedIdentity = identityVerifications.find((event) => event.status === "verified");
+  if (!verifiedIdentity) {
+    throw new DocumentFinalizationConflictError(
+      "Member identity must be verified before notarial completion",
+    );
+  }
+
+  return {
+    meeting,
+    verifiedIdentity,
+  };
 };
 
 const resolveMeetingActorContext = async (req: Request, requestId: string) => {
@@ -1337,6 +1459,7 @@ export const reviewRequestDecision = async (req: Request, res: Response) => {
         documentId: updatedRequest.document_id,
         requestId: updatedRequest.id,
         notaryUserId: assignedNotaryId,
+        summary,
         requestedBySupabaseUserId: req.user?.id,
       });
     } else if (parsed.data.decision === "changes_requested") {
@@ -2020,6 +2143,166 @@ export const recordMeetingNoShow = async (req: Request, res: Response) => {
   });
 };
 
+export const startInPersonSession = async (req: Request, res: Response) => {
+  const parsed = startInPersonSessionSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const requestId = resolveRequestIdParam(req);
+  if (!requestId) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Missing notarization request id",
+    });
+  }
+
+  const { request, document, workflow, actorUserId } = await resolveMeetingActorContext(req, requestId);
+  if (!request || !document) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Notarization request not found",
+    });
+  }
+
+  if (!request.assigned_notary_id) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Request must be assigned to an illuminotary before starting the session",
+    });
+  }
+
+  if (
+    !ensureMeetingActorAuthorized({
+      role: req.user?.role,
+      actorUserId,
+      ownerUserId: document.owner_id,
+      assignedNotaryUserId: request.assigned_notary_id,
+    })
+  ) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Starting the in-person session is not allowed for this request",
+    });
+  }
+
+  const existingMeeting = await getMeetingByRequestId(request.id);
+  if (isMeetingClosedStatus(existingMeeting?.status ?? null)) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Meeting can no longer be started",
+    });
+  }
+
+  if (!existingMeeting && request.status !== "approved" && workflow?.status !== "approved") {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Request must be approved before starting the in-person session",
+    });
+  }
+
+  const participantRole = inferParticipantRoleFromRequestUser({
+    role: req.user?.role,
+    bodyParticipantRole: parsed.data.participantRole,
+  });
+
+  if (participantRole !== "notary") {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Only the assigned illuminotary can start the in-person session",
+    });
+  }
+
+  const recordedAt = parsed.data.recordedAt ?? new Date().toISOString();
+  const meeting = existingMeeting ?? await createMeeting({
+    requestId: request.id,
+    workflowId: workflow?.id ?? request.workflow_id,
+    scheduledAt: recordedAt,
+    timezone: null,
+    location: null,
+    status: "scheduled",
+    samePlaceRequired: true,
+    samePlaceStatus: "not_started",
+    metadata: {
+      createdFor: "in_person_session_start",
+      contactExchangeCompleted: true,
+      createdAt: recordedAt,
+    },
+  });
+
+  const participants = await syncDefaultMeetingParticipants({
+    meeting,
+    ownerUserId: document.owner_id,
+    assignedNotaryUserId: request.assigned_notary_id,
+  });
+  const participant = participants.find((item) => item.participant_role === "notary");
+
+  if (!participant) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Notary meeting participant could not be resolved",
+    });
+  }
+
+  const nextParticipant = await updateMeetingParticipant(participant.id, {
+    status: "checked_in",
+    arrived_at: participant.arrived_at ?? recordedAt,
+  });
+
+  const checkin = await createMeetingCheckin({
+    meetingId: meeting.id,
+    meetingParticipantId: participant.id,
+    recordedByUserId: actorUserId,
+    checkinKind: "meeting_start",
+    recordedAt,
+    notes: parsed.data.notes?.trim() ?? null,
+    metadata: {
+      requestId: request.id,
+      actorRole: req.user?.role ?? null,
+    },
+  });
+
+  const refreshedMeeting = await updateMeeting(meeting.id, {
+    status: "in_progress",
+    metadata: {
+      ...meeting.metadata,
+      lastCheckinAt: recordedAt,
+      startedAt: recordedAt,
+    },
+  });
+
+  await recordAuditEvent({
+    ...buildAuditActorContext(req),
+    entityType: "notarization_request",
+    entityId: request.id,
+    action: "notary.meeting_started",
+    metadata: {
+      request_id: request.id,
+      document_id: request.document_id,
+      workflow_id: workflow?.id ?? request.workflow_id,
+      meeting_id: meeting.id,
+      meeting_checkin_id: checkin.id,
+      participant_role: participantRole,
+    },
+  });
+
+  res.status(existingMeeting ? 200 : 201).json({
+    meeting: buildMeetingResponse(refreshedMeeting, [
+      ...participants.filter((item) => item.id !== nextParticipant.id),
+      nextParticipant,
+    ]),
+    participant: {
+      id: nextParticipant.id,
+      userId: nextParticipant.user_id,
+      participantRole: nextParticipant.participant_role,
+      status: nextParticipant.status,
+      arrivedAt: nextParticipant.arrived_at,
+      departedAt: nextParticipant.departed_at,
+    },
+    checkin: buildMeetingCheckinResponse(checkin, nextParticipant, null),
+  });
+};
+
 export const recordMeetingCheckin = async (req: Request, res: Response) => {
   const parsed = meetingCheckinSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -2626,15 +2909,203 @@ export const getNotaryContext = async (req: Request, res: Response) => {
 };
 
 export const signRequest = async (req: Request, res: Response) => {
-  return sendNotImplemented(
-    res,
-    "Direct notary signing is not mounted on this compatibility route. Use the Phase 5 meeting and Phase 6 document finalization flow instead.",
-  );
+  const parsed = notarySignSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const requestId = resolveRequestIdParam(req);
+  if (!requestId) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Missing notarization request id",
+    });
+  }
+
+  const { request, document, actorUserId } = await resolveMeetingActorContext(req, requestId);
+  if (!request || !document) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Notarization request not found",
+    });
+  }
+
+  if (!request.assigned_notary_id) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Request must be assigned to an illuminotary before signing",
+    });
+  }
+
+  if (
+    !ensureMeetingActorAuthorized({
+      role: req.user?.role,
+      actorUserId,
+      ownerUserId: document.owner_id,
+      assignedNotaryUserId: request.assigned_notary_id,
+    })
+  ) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Notarial signing is not allowed for this request",
+    });
+  }
+
+  try {
+    const { meeting } = await ensureNotaryCompletionReady({ requestId: request.id });
+    const participants = await syncDefaultMeetingParticipants({
+      meeting,
+      ownerUserId: document.owner_id,
+      assignedNotaryUserId: request.assigned_notary_id,
+    });
+    const notaryParticipant = participants.find((participant) => participant.participant_role === "notary");
+    const result = await appendAcknowledgmentPageToDocument({
+      documentId: document.id,
+      actorSupabaseId: req.user?.id,
+      actorRole: req.user?.role ?? null,
+    });
+    const artifact = await createMeetingArtifact({
+      meetingId: meeting.id,
+      meetingParticipantId: notaryParticipant?.id ?? null,
+      uploadedByUserId: actorUserId,
+      artifactKind: "seal_preview",
+      capturedAt: new Date().toISOString(),
+      metadata: {
+        requestId: request.id,
+        acknowledgmentPageId: result.acknowledgmentPage.id,
+        notarialFields: parsed.data.notarialFields ?? {},
+        sealLabel: parsed.data.sealLabel?.trim() ?? null,
+        signatureLabel: parsed.data.signatureLabel?.trim() ?? null,
+        notes: parsed.data.notes?.trim() ?? null,
+      },
+    });
+
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "notarization_request",
+      entityId: request.id,
+      action: "notary.notarial_acknowledgment_signed",
+      metadata: {
+        request_id: request.id,
+        document_id: document.id,
+        meeting_id: meeting.id,
+        acknowledgment_page_id: result.acknowledgmentPage.id,
+        document_version_id: result.version.id,
+        seal_artifact_id: artifact.id,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      documentId: result.document.id,
+      requestId: result.request.id,
+      acknowledgmentPage: {
+        id: result.acknowledgmentPage.id,
+        jurisdiction: result.acknowledgmentPage.jurisdiction,
+        content: result.acknowledgmentPage.content,
+        createdAt: result.acknowledgmentPage.created_at,
+      },
+      execution: mapFinalizationExecutionSummary(result.execution),
+      version: mapFinalizationVersionSummary(result.version),
+      sealArtifact: buildMeetingArtifactResponse(artifact),
+    });
+  } catch (error) {
+    return sendDocumentFinalizationError(res, error);
+  }
 };
 
 export const submitRequest = async (req: Request, res: Response) => {
-  return sendNotImplemented(
-    res,
-    "Direct request submission is not mounted on this compatibility route. Use the document watermark and verification closeout flow instead.",
-  );
+  const parsed = notarySubmitSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const requestId = resolveRequestIdParam(req);
+  if (!requestId) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Missing notarization request id",
+    });
+  }
+
+  const { request, document, actorUserId } = await resolveMeetingActorContext(req, requestId);
+  if (!request || !document) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Notarization request not found",
+    });
+  }
+
+  if (!request.assigned_notary_id) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Request must be assigned to an illuminotary before final submission",
+    });
+  }
+
+  if (
+    !ensureMeetingActorAuthorized({
+      role: req.user?.role,
+      actorUserId,
+      ownerUserId: document.owner_id,
+      assignedNotaryUserId: request.assigned_notary_id,
+    })
+  ) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Final submission is not allowed for this request",
+    });
+  }
+
+  try {
+    const { meeting } = await ensureNotaryCompletionReady({
+      requestId: request.id,
+      requireMeetingCompleted: true,
+    });
+    const result = await finalizeDocumentWithWatermark({
+      documentId: document.id,
+      actorSupabaseId: req.user?.id,
+      actorRole: req.user?.role ?? null,
+    });
+    const ledgerStatus = result.ledgerAnchorAttempt?.status ?? "anchored";
+
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "notarization_request",
+      entityId: request.id,
+      action: "notary.final_package_submitted",
+      metadata: {
+        request_id: request.id,
+        document_id: document.id,
+        meeting_id: meeting.id,
+        document_version_id: result.version.id,
+        ledger_entry_id: result.ledgerEntry.id,
+        ledger_status: ledgerStatus,
+        notes: parsed.data.notes?.trim() ?? null,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      documentId: result.document.id,
+      requestId: result.request.id,
+      execution: mapFinalizationExecutionSummary(result.execution),
+      version: mapFinalizationVersionSummary(result.version),
+      hashRecord: {
+        id: result.hashRecord.id,
+        algorithm: result.hashRecord.algorithm,
+        hash: result.hashRecord.hash,
+        status: result.hashRecord.status,
+        completedAt: result.hashRecord.completed_at,
+      },
+      ledger: {
+        id: result.ledgerEntry.id,
+        ledgerTxId: result.ledgerEntry.ledger_tx_id,
+        anchoredAt: result.ledgerEntry.anchored_at,
+        status: ledgerStatus,
+      },
+    });
+  } catch (error) {
+    return sendDocumentFinalizationError(res, error);
+  }
 };

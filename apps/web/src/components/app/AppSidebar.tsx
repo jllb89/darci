@@ -10,7 +10,7 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
 
-type NavIcon = "start" | "documents" | "verify" | "notifications" | "requests" | "settings";
+type NavIcon = "start" | "documents" | "verify" | "notifications" | "requests" | "settings" | "history";
 
 type NavItem = {
   label: string;
@@ -136,6 +136,7 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
   notary: {
     primaryItems: [
       { label: "Queue", href: "/app/notary", icon: "requests", sectionLabel: "Notary" },
+      { label: "History", href: "/app/notary/history", icon: "history" },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
     ],
     settingsHref: "/app/settings",
@@ -243,6 +244,22 @@ const renderNavIcon = (icon: NavIcon) => {
     );
   }
 
+  if (icon === "history") {
+    return (
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+        <path
+          d="M12 5.25a6.75 6.75 0 1 1-6.6 8.2"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+        <path d="M4.25 7.75v4h4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+        <path d="M12 8.5v3.75l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+
   return (
     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.5" />
@@ -303,6 +320,7 @@ export default function AppSidebar({
   const profileRoleLabel = PROFILE_ROLE_LABELS[role];
   const profileSwitchOptions = getProfileSwitchOptions(availableRoles);
   const rolesToDisplay = profileSwitchOptions.length > 1 ? profileSwitchOptions : [];
+  const showNotarySignupLink = role === "member" || role === "pro";
 
   const closeVerificationLookup = useCallback(() => {
     setIsVerificationLookupOpen(false);
@@ -610,6 +628,31 @@ export default function AppSidebar({
                   </svg>
                   Billing
                 </Link>
+                {showNotarySignupLink ? (
+                  <Link
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
+                    href="/app/notary/signup"
+                    prefetch={false}
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                      <path
+                        d="M12 4.5v15"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                      />
+                      <path
+                        d="M4.5 12h15"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+                    Notary signup
+                  </Link>
+                ) : null}
                 <Link
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
                   href={config.settingsHref}
