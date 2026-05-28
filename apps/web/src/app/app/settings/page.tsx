@@ -1,9 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent as ReactDragEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useStoredAuth, useStoredUser } from "@/lib/auth";
 import { fetchWithTokenRefresh, notaryApiBaseUrl, readApiErrorMessage } from "@/lib/notaryWorkspace";
-import SignatureCanvasField from "@/components/signature/SignatureCanvasField";
+import type { JurisdictionOption, MemberFormJurisdictionsPayload } from "@/app/app/start/startPageTypes";
 
 type NotaryServiceAreaKind =
   | "county"
@@ -13,8 +23,7 @@ type NotaryServiceAreaKind =
   | "city"
   | "metro"
   | "region"
-  | "state"
-  | "other";
+  | "state";
 
 type NotaryApplication = {
   id: string;
@@ -28,21 +37,6 @@ type NotaryApplication = {
   reviewNotes: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type NotaryProfile = {
-  id: string;
-  userId: string;
-  jurisdiction: string | null;
-  serviceAreaKind: NotaryServiceAreaKind | null;
-  serviceAreaName: string | null;
-  commissionNumber: string | null;
-  commissionExpiresAt: string | null;
-  sealStoragePath: string | null;
-  signatureDataUrl: string | null;
-  sealDataUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -71,23 +65,131 @@ type AdminApplicationRow = {
   } | null;
 };
 
-type SettingsResponse = {
-  application: NotaryApplication | null;
-  profile: NotaryProfile | null;
-  applications: AdminApplicationRow[];
+type SelectOption = {
+  label: string;
+  value: string;
 };
 
-const serviceAreaKinds: Array<{ value: NotaryServiceAreaKind; label: string }> = [
-  { value: "county", label: "County" },
-  { value: "parish", label: "Parish" },
-  { value: "borough", label: "Borough" },
-  { value: "district", label: "District" },
-  { value: "city", label: "City" },
-  { value: "metro", label: "Metro area" },
-  { value: "region", label: "Region" },
-  { value: "state", label: "State" },
-  { value: "other", label: "Other" },
-];
+type CensusCountyRow = [string, string, string];
+
+type SavedSignature = {
+  id: string;
+  label: string;
+  dataUrl: string;
+  createdAt: string;
+};
+
+const SAVED_SIGNATURES_STORAGE_KEY = "darci.notary.savedSignatures";
+const DRAW_CANVAS_WIDTH = 960;
+const DRAW_CANVAS_HEIGHT = 320;
+
+const stateFipsByAbbreviation: Record<string, string> = {
+  AL: "01",
+  AK: "02",
+  AZ: "04",
+  AR: "05",
+  CA: "06",
+  CO: "08",
+  CT: "09",
+  DE: "10",
+  FL: "12",
+  GA: "13",
+  HI: "15",
+  ID: "16",
+  IL: "17",
+  IN: "18",
+  IA: "19",
+  KS: "20",
+  KY: "21",
+  LA: "22",
+  ME: "23",
+  MD: "24",
+  MA: "25",
+  MI: "26",
+  MN: "27",
+  MS: "28",
+  MO: "29",
+  MT: "30",
+  NE: "31",
+  NV: "32",
+  NH: "33",
+  NJ: "34",
+  NM: "35",
+  NY: "36",
+  NC: "37",
+  ND: "38",
+  OH: "39",
+  OK: "40",
+  OR: "41",
+  PA: "42",
+  RI: "44",
+  SC: "45",
+  SD: "46",
+  TN: "47",
+  TX: "48",
+  UT: "49",
+  VT: "50",
+  VA: "51",
+  WA: "53",
+  WV: "54",
+  WI: "55",
+  WY: "56",
+  DC: "11",
+};
+
+const stateAbbreviationByName: Record<string, string> = {
+  ALABAMA: "AL",
+  ALASKA: "AK",
+  ARIZONA: "AZ",
+  ARKANSAS: "AR",
+  CALIFORNIA: "CA",
+  COLORADO: "CO",
+  CONNECTICUT: "CT",
+  DELAWARE: "DE",
+  FLORIDA: "FL",
+  GEORGIA: "GA",
+  HAWAII: "HI",
+  IDAHO: "ID",
+  ILLINOIS: "IL",
+  INDIANA: "IN",
+  IOWA: "IA",
+  KANSAS: "KS",
+  KENTUCKY: "KY",
+  LOUISIANA: "LA",
+  MAINE: "ME",
+  MARYLAND: "MD",
+  MASSACHUSETTS: "MA",
+  MICHIGAN: "MI",
+  MINNESOTA: "MN",
+  MISSISSIPPI: "MS",
+  MISSOURI: "MO",
+  MONTANA: "MT",
+  NEBRASKA: "NE",
+  NEVADA: "NV",
+  "NEW HAMPSHIRE": "NH",
+  "NEW JERSEY": "NJ",
+  "NEW MEXICO": "NM",
+  "NEW YORK": "NY",
+  "NORTH CAROLINA": "NC",
+  "NORTH DAKOTA": "ND",
+  OHIO: "OH",
+  OKLAHOMA: "OK",
+  OREGON: "OR",
+  PENNSYLVANIA: "PA",
+  "RHODE ISLAND": "RI",
+  "SOUTH CAROLINA": "SC",
+  "SOUTH DAKOTA": "SD",
+  TENNESSEE: "TN",
+  TEXAS: "TX",
+  UTAH: "UT",
+  VERMONT: "VT",
+  VIRGINIA: "VA",
+  WASHINGTON: "WA",
+  "WEST VIRGINIA": "WV",
+  WISCONSIN: "WI",
+  WYOMING: "WY",
+  "DISTRICT OF COLUMBIA": "DC",
+};
 
 const emptyApplicationForm = {
   jurisdiction: "",
@@ -97,70 +199,685 @@ const emptyApplicationForm = {
   sealDataUrl: null as string | null,
 };
 
-const emptyProfileForm = {
-  jurisdiction: "",
-  serviceAreaKind: "county" as NotaryServiceAreaKind,
-  serviceAreaName: "",
-  commissionNumber: "",
-  commissionExpiresAt: "",
-  signatureDataUrl: null as string | null,
-  sealDataUrl: null as string | null,
-};
-
 const formatPersonName = (firstName: string | null, lastName: string | null) => {
   return [firstName, lastName].filter(Boolean).join(" ").trim() || "Profile";
 };
+
+const normalizeJurisdictionValue = (value: string) => {
+  return value.trim().toUpperCase();
+};
+
+const getJurisdictionCode = (value: string) => {
+  const normalized = normalizeJurisdictionValue(value);
+  if (normalized.startsWith("US-")) {
+    return normalized;
+  }
+
+  if (normalized.length === 2) {
+    return `US-${normalized}`;
+  }
+
+  return normalized;
+};
+
+const getStateAbbreviation = (value: string) => {
+  const normalized = getJurisdictionCode(value);
+  if (normalized.startsWith("US-") && normalized.length === 5) {
+    return normalized.slice(3);
+  }
+
+  const embeddedCodeMatch = normalized.match(/\b([A-Z]{2})\b/);
+  if (embeddedCodeMatch?.[1] && stateFipsByAbbreviation[embeddedCodeMatch[1]]) {
+    return embeddedCodeMatch[1];
+  }
+
+  return null;
+};
+
+const getStateAbbreviationFromLabel = (label: string | null | undefined) => {
+  const normalized = (label ?? "").trim().toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const codeMatch = normalized.match(/US-([A-Z]{2})/);
+  if (codeMatch?.[1] && stateFipsByAbbreviation[codeMatch[1]]) {
+    return codeMatch[1];
+  }
+
+  if (stateAbbreviationByName[normalized]) {
+    return stateAbbreviationByName[normalized];
+  }
+
+  return null;
+};
+
+const inferServiceAreaKind = (serviceAreaLabel: string): NotaryServiceAreaKind => {
+  const normalized = serviceAreaLabel.toLowerCase();
+  if (normalized.includes("parish")) {
+    return "parish";
+  }
+  if (normalized.includes("borough")) {
+    return "borough";
+  }
+  if (normalized.includes("district")) {
+    return "district";
+  }
+  if (normalized.includes("city")) {
+    return "city";
+  }
+  if (normalized.includes("metro")) {
+    return "metro";
+  }
+  if (normalized.includes("region")) {
+    return "region";
+  }
+  if (normalized.includes("state")) {
+    return "state";
+  }
+
+  return "county";
+};
+
+const toDataUrlFromFile = (file: File) => {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Failed to read image file"));
+    };
+    reader.onerror = () => {
+      reject(new Error("Failed to read image file"));
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
+const loadSavedSignatures = (): SavedSignature[] => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = localStorage.getItem(SAVED_SIGNATURES_STORAGE_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as SavedSignature[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item) => {
+      return Boolean(item && item.id && item.label && item.dataUrl);
+    });
+  } catch {
+    return [];
+  }
+};
+
+const saveSignatureToLibrary = (dataUrl: string) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const current = loadSavedSignatures();
+  const nextItem: SavedSignature = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    label: `Saved ${new Date().toLocaleString()}`,
+    dataUrl,
+    createdAt: new Date().toISOString(),
+  };
+
+  const deduped = [nextItem, ...current.filter((item) => item.dataUrl !== dataUrl)].slice(0, 10);
+  localStorage.setItem(SAVED_SIGNATURES_STORAGE_KEY, JSON.stringify(deduped));
+};
+
+function SelectField({
+  label,
+  value,
+  placeholder,
+  options,
+  isOpen,
+  disabled,
+  onChange,
+  onOpenChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: SelectOption[];
+  isOpen: boolean;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  onOpenChange: (isOpen: boolean) => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const selectedOption = options.find((option) => option.value === value);
+
+  const updatePopoverPosition = useCallback(() => {
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) {
+      return;
+    }
+
+    const popoverWidth = 320;
+    const leftBoundary = 16;
+    const rightBoundary = window.innerWidth - popoverWidth - leftBoundary;
+    setPopoverPosition({
+      left: Math.max(leftBoundary, Math.min(triggerRect.left, rightBoundary)),
+      top: triggerRect.bottom + 8,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    updatePopoverPosition();
+    window.addEventListener("resize", updatePopoverPosition);
+    window.addEventListener("scroll", updatePopoverPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePopoverPosition);
+      window.removeEventListener("scroll", updatePopoverPosition, true);
+    };
+  }, [isOpen, updatePopoverPosition]);
+
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+  const popover =
+    isOpen && popoverPosition && portalTarget
+      ? createPortal(
+          <div
+            className="fixed z-[100] max-h-72 w-80 overflow-y-auto rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-2 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
+            style={{ left: popoverPosition.left, top: popoverPosition.top }}
+          >
+            {options.map((option) => {
+              const isSelected = option.value === value;
+              return (
+                <button
+                  key={option.value || option.label}
+                  type="button"
+                  className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs transition-colors ${
+                    isSelected
+                      ? "bg-Green text-Color-Neutral-Darkest"
+                      : "text-Color-Scheme-1-Text hover:bg-Color-White"
+                  }`}
+                  onClick={() => {
+                    onChange(option.value);
+                    onOpenChange(false);
+                    triggerRef.current?.blur();
+                  }}
+                >
+                  <span>{option.label}</span>
+                  {isSelected ? <span>Selected</span> : null}
+                </button>
+              );
+            })}
+          </div>,
+          portalTarget,
+        )
+      : null;
+
+  return (
+    <div className="flex flex-col gap-2 text-xs font-medium text-Color-Neutral-Darkest">
+      <span>{label}</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        className="flex h-10 w-full items-center justify-between rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-3 text-left text-sm text-Color-Scheme-1-Text outline-none transition-colors hover:bg-Color-Neutral-Lightest/50 focus-visible:border-Color-Scheme-1-Text disabled:cursor-not-allowed disabled:opacity-50"
+        aria-expanded={isOpen}
+        onClick={() => onOpenChange(!isOpen)}
+      >
+        <span className={selectedOption ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"}>
+          {selectedOption?.label ?? placeholder}
+        </span>
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 border-b border-r border-Color-Neutral transition-transform ${
+            isOpen ? "rotate-[225deg]" : "rotate-45"
+          }`}
+        />
+      </button>
+      {popover}
+    </div>
+  );
+}
+
+function SignatureCaptureField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string | null;
+  onChange: (nextValue: string | null) => void;
+  disabled?: boolean;
+}) {
+  const [mode, setMode] = useState<"draw" | "upload" | "saved">("draw");
+  const [isUsingDrawnSignature, setIsUsingDrawnSignature] = useState(false);
+  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
+  const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
+  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawingRef = useRef(false);
+  const hasInkRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    setSavedSignatures(loadSavedSignatures());
+  }, []);
+
+  const resetCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.beginPath();
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = 3;
+    context.strokeStyle = "#111111";
+    hasInkRef.current = false;
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    resetCanvas();
+  }, [resetCanvas]);
+
+  const getCanvasPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  }, []);
+
+  const beginDraw = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || disabled) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    const point = getCanvasPoint(event);
+    if (!context || !point) {
+      return;
+    }
+
+    isDrawingRef.current = true;
+    hasInkRef.current = true;
+    lastPointRef.current = point;
+    canvas.setPointerCapture(event.pointerId);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+  }, [disabled, getCanvasPoint]);
+
+  const continueDraw = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current || disabled) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    const point = getCanvasPoint(event);
+    if (!context || !point) {
+      return;
+    }
+
+    const previousPoint = lastPointRef.current;
+    if (!previousPoint) {
+      lastPointRef.current = point;
+      return;
+    }
+
+    context.beginPath();
+    context.moveTo(previousPoint.x, previousPoint.y);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+    lastPointRef.current = point;
+  }, [disabled, getCanvasPoint]);
+
+  const endDraw = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (canvas && canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+  }, []);
+
+  const saveDrawnSignature = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasInkRef.current || isUsingDrawnSignature) {
+      return;
+    }
+
+    const dataUrl = canvas.toDataURL("image/png");
+    onChange(dataUrl);
+    saveSignatureToLibrary(dataUrl);
+    setSavedSignatures(loadSavedSignatures());
+    setIsUsingDrawnSignature(true);
+  }, [isUsingDrawnSignature, onChange]);
+
+  const applyUploadFile = useCallback(async (file: File | null) => {
+    if (!file || disabled) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      return;
+    }
+
+    const dataUrl = await toDataUrlFromFile(file);
+    onChange(dataUrl);
+    saveSignatureToLibrary(dataUrl);
+    setSavedSignatures(loadSavedSignatures());
+    setIsUsingDrawnSignature(false);
+  }, [disabled, onChange]);
+
+  const onUploadInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    void applyUploadFile(file);
+    event.target.value = "";
+  }, [applyUploadFile]);
+
+  const onDropUpload = useCallback((event: ReactDragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setIsDraggingUpload(false);
+    const file = event.dataTransfer.files?.[0] ?? null;
+    void applyUploadFile(file);
+  }, [applyUploadFile]);
+
+  const selectedSaved = useMemo(() => {
+    return savedSignatures.find((item) => item.id === selectedSavedId) ?? null;
+  }, [savedSignatures, selectedSavedId]);
+
+  return (
+    <div className="space-y-3 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
+      <div className="text-sm font-medium text-Color-Scheme-1-Text">Signature</div>
+      <div className="flex flex-wrap gap-2">
+        {([
+          { key: "draw", label: "Draw" },
+          { key: "upload", label: "Upload" },
+          { key: "saved", label: "Use pre-saved" },
+        ] as const).map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            disabled={disabled}
+            onClick={() => setMode(option.key)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+              mode === option.key
+                ? "bg-Green text-Color-Neutral-Darkest"
+                : "bg-white text-Color-Scheme-1-Text"
+            } disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "draw" ? (
+        <div className="space-y-3">
+          <canvas
+            ref={canvasRef}
+            width={DRAW_CANVAS_WIDTH}
+            height={DRAW_CANVAS_HEIGHT}
+            className={`w-full rounded-lg border border-Color-Scheme-1-Border/40 bg-white touch-none ${
+              isUsingDrawnSignature ? "cursor-not-allowed opacity-75" : ""
+            }`}
+            onPointerDown={beginDraw}
+            onPointerMove={continueDraw}
+            onPointerUp={endDraw}
+            onPointerLeave={endDraw}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-white px-3 py-2 text-xs font-medium text-Color-Scheme-1-Text"
+              disabled={disabled}
+              onClick={() => {
+                resetCanvas();
+                setIsUsingDrawnSignature(false);
+                onChange(null);
+              }}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-3 py-2 text-xs font-medium ${
+                isUsingDrawnSignature
+                  ? "bg-Green text-Color-Neutral-Darkest opacity-70"
+                  : "bg-Green text-Color-Neutral-Darkest"
+              }`}
+              disabled={disabled || isUsingDrawnSignature}
+              onClick={saveDrawnSignature}
+            >
+              {isUsingDrawnSignature ? "Using drawn signature" : "Save drawn signature"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "upload" ? (
+        <label
+          onDragOver={(event) => {
+            event.preventDefault();
+            setIsDraggingUpload(true);
+          }}
+          onDragLeave={() => setIsDraggingUpload(false)}
+          onDrop={onDropUpload}
+          className={`block cursor-pointer rounded-lg border border-dashed px-4 py-6 text-center text-sm ${
+            isDraggingUpload ? "border-Green bg-Green/10" : "border-Color-Scheme-1-Border/40 bg-white"
+          }`}
+        >
+          <div className="font-medium text-Color-Scheme-1-Text">Drag & drop signature image or click to upload</div>
+          <div className="mt-1 text-xs text-Color-Neutral">PNG, JPG, or WEBP</div>
+          <input type="file" accept="image/*" className="hidden" onChange={onUploadInputChange} />
+        </label>
+      ) : null}
+
+      {mode === "saved" ? (
+        <div className="space-y-3">
+          {savedSignatures.length === 0 ? (
+            <div className="rounded-md bg-white p-3 text-xs text-Color-Neutral">No saved signatures yet.</div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {savedSignatures.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setSelectedSavedId(item.id)}
+                  className={`rounded-lg border p-2 text-left ${
+                    selectedSavedId === item.id ? "border-Green" : "border-Color-Scheme-1-Border/30"
+                  }`}
+                >
+                  <div className="mb-2 text-xs text-Color-Neutral">{item.label}</div>
+                  <img src={item.dataUrl} alt={item.label} className="h-14 w-full rounded bg-white object-contain" />
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={!selectedSaved || disabled}
+            onClick={() => {
+              if (!selectedSaved) {
+                return;
+              }
+
+              onChange(selectedSaved.dataUrl);
+              setIsUsingDrawnSignature(false);
+            }}
+            className="rounded-md bg-Green px-3 py-2 text-xs font-medium text-Color-Neutral-Darkest disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Use selected signature
+          </button>
+        </div>
+      ) : null}
+
+      {value && mode !== "draw" ? (
+        <div className="rounded-md bg-white p-3">
+          <div className="mb-2 text-xs text-Color-Neutral">Current signature</div>
+          <img src={value} alt="Current signature" className="h-20 w-full object-contain" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SealDropzoneField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string | null;
+  onChange: (nextValue: string | null) => void;
+  disabled?: boolean;
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const onFile = useCallback(async (file: File | null) => {
+    if (!file || disabled || !file.type.startsWith("image/")) {
+      return;
+    }
+
+    const dataUrl = await toDataUrlFromFile(file);
+    onChange(dataUrl);
+  }, [disabled, onChange]);
+
+  return (
+    <div className="space-y-3 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
+      <div className="text-sm font-medium text-Color-Scheme-1-Text">Seal upload</div>
+      <label
+        onDragOver={(event) => {
+          event.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          const file = event.dataTransfer.files?.[0] ?? null;
+          void onFile(file);
+        }}
+        className={`block cursor-pointer rounded-lg border border-dashed px-4 py-8 text-center text-sm ${
+          isDragging ? "border-Green bg-Green/10" : "border-Color-Scheme-1-Border/40 bg-white"
+        }`}
+      >
+        <div className="font-medium text-Color-Scheme-1-Text">Drag & drop your seal image</div>
+        <div className="mt-1 text-xs text-Color-Neutral">or click to choose a file</div>
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0] ?? null;
+            void onFile(file);
+            event.target.value = "";
+          }}
+        />
+      </label>
+      {value ? (
+        <div className="rounded-md bg-white p-3">
+          <div className="mb-2 text-xs text-Color-Neutral">Current seal</div>
+          <img src={value} alt="Current seal" className="h-28 w-full rounded object-contain" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { accessToken } = useStoredAuth();
   const user = useStoredUser();
   const isAdmin = user?.role === "admin";
-  const isNotary = user?.role === "notary";
-  const isMember = !isNotary;
   const [application, setApplication] = useState<NotaryApplication | null>(null);
-  const [profile, setProfile] = useState<NotaryProfile | null>(null);
   const [adminApplications, setAdminApplications] = useState<AdminApplicationRow[]>([]);
   const [applicationForm, setApplicationForm] = useState(emptyApplicationForm);
-  const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [adminReviewNotes, setAdminReviewNotes] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingApplication, setIsSavingApplication] = useState(false);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([]);
+  const [serviceAreaOptions, setServiceAreaOptions] = useState<SelectOption[]>([]);
+  const [isLoadingServiceAreas, setIsLoadingServiceAreas] = useState(false);
+  const [serviceAreaLoadFailed, setServiceAreaLoadFailed] = useState(false);
+  const [hasAuthError, setHasAuthError] = useState(false);
+  const [openSelectId, setOpenSelectId] = useState<"jurisdiction" | "serviceArea" | null>(null);
 
   const loadSettings = useCallback(async () => {
     if (!accessToken) {
+      setHasAuthError(true);
       return;
     }
 
     setIsLoading(true);
     try {
-      const [applicationResponse, profileResponse, adminResponse] = await Promise.all([
+      const [applicationResponse, adminResponse] = await Promise.all([
         fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/notary-application`, accessToken, { cache: "no-store" }),
-        fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/notary-profile`, accessToken, { cache: "no-store" }),
         isAdmin
           ? fetchWithTokenRefresh(`${notaryApiBaseUrl}/admin/notary-applications`, accessToken, { cache: "no-store" })
           : Promise.resolve(null),
       ]);
 
+      if (applicationResponse.status === 401) {
+        setHasAuthError(true);
+        setErrorMessage("Session expired. Please sign in again.");
+        return;
+      }
+
       if (!applicationResponse.ok) {
         throw new Error(await readApiErrorMessage(applicationResponse, "Unable to load your notary application."));
       }
-      if (!profileResponse.ok) {
-        throw new Error(await readApiErrorMessage(profileResponse, "Unable to load your notary profile."));
-      }
       if (adminResponse && !adminResponse.ok) {
+        if (adminResponse.status === 401) {
+          setHasAuthError(true);
+          setErrorMessage("Session expired. Please sign in again.");
+          return;
+        }
         throw new Error(await readApiErrorMessage(adminResponse, "Unable to load notary applications."));
       }
 
       const applicationPayload = (await applicationResponse.json()) as { application: NotaryApplication | null };
-      const profilePayload = (await profileResponse.json()) as { profile: NotaryProfile | null };
       const adminPayload = adminResponse ? ((await adminResponse.json()) as { applications: AdminApplicationRow[] }) : { applications: [] };
 
       setApplication(applicationPayload.application);
-      setProfile(profilePayload.profile);
       setAdminApplications(adminPayload.applications ?? []);
       setApplicationForm(
         applicationPayload.application
@@ -173,21 +890,9 @@ export default function SettingsPage() {
             }
           : emptyApplicationForm,
       );
-      setProfileForm(
-        profilePayload.profile
-          ? {
-              jurisdiction: profilePayload.profile.jurisdiction ?? "",
-              serviceAreaKind: profilePayload.profile.serviceAreaKind ?? "county",
-              serviceAreaName: profilePayload.profile.serviceAreaName ?? "",
-              commissionNumber: profilePayload.profile.commissionNumber ?? "",
-              commissionExpiresAt: profilePayload.profile.commissionExpiresAt ?? "",
-              signatureDataUrl: profilePayload.profile.signatureDataUrl,
-              sealDataUrl: profilePayload.profile.sealDataUrl,
-            }
-          : emptyProfileForm,
-      );
       setMessage(null);
       setErrorMessage(null);
+      setHasAuthError(false);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to load settings.");
     } finally {
@@ -195,9 +900,115 @@ export default function SettingsPage() {
     }
   }, [accessToken, isAdmin]);
 
+  const loadJurisdictions = useCallback(async () => {
+    if (!accessToken) {
+      setHasAuthError(true);
+      return;
+    }
+
+    try {
+      const query = new URLSearchParams({ mode: "notarize_document" }).toString();
+      const response = await fetchWithTokenRefresh(`${notaryApiBaseUrl}/rules/member-form?${query}`, accessToken, {
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as MemberFormJurisdictionsPayload | null;
+      if (response.status === 401) {
+        setHasAuthError(true);
+        setErrorMessage("Session expired. Please sign in again.");
+        setJurisdictions([]);
+        return;
+      }
+
+      if (!response.ok || !payload?.jurisdictions) {
+        throw new Error(payload?.message || "Failed to load jurisdictions");
+      }
+
+      setJurisdictions(payload.jurisdictions);
+      setHasAuthError(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to load jurisdictions");
+      setJurisdictions([]);
+    }
+  }, [accessToken]);
+
+  const loadServiceAreas = useCallback(async (jurisdictionValue: string, jurisdictionLabel?: string | null) => {
+    if (!accessToken) {
+      setServiceAreaOptions([]);
+      setServiceAreaLoadFailed(false);
+      setHasAuthError(true);
+      return;
+    }
+
+    setServiceAreaLoadFailed(false);
+    const stateAbbreviation =
+      getStateAbbreviation(jurisdictionValue) ?? getStateAbbreviationFromLabel(jurisdictionLabel);
+    if (!stateAbbreviation) {
+      setServiceAreaOptions([]);
+      setServiceAreaLoadFailed(true);
+      return;
+    }
+
+    const stateFips = stateFipsByAbbreviation[stateAbbreviation];
+    if (!stateFips) {
+      setServiceAreaOptions([]);
+      setServiceAreaLoadFailed(true);
+      return;
+    }
+
+    setIsLoadingServiceAreas(true);
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${notaryApiBaseUrl}/rules/service-areas/${encodeURIComponent(jurisdictionValue)}`,
+        accessToken,
+        { cache: "no-store" },
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { options?: Array<{ label: string; value: string }>; message?: string }
+        | null;
+      if (response.status === 401) {
+        setHasAuthError(true);
+        setErrorMessage("Session expired. Please sign in again.");
+        setServiceAreaOptions([]);
+        setServiceAreaLoadFailed(false);
+        return;
+      }
+
+      if (!response.ok || !payload?.options) {
+        throw new Error("Unable to load counties for this jurisdiction.");
+      }
+
+      const options = payload.options
+        .filter((option) => option && option.value && option.label)
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      setServiceAreaOptions(options);
+      setServiceAreaLoadFailed(options.length === 0);
+      setHasAuthError(false);
+    } catch {
+      setServiceAreaOptions([]);
+      setServiceAreaLoadFailed(true);
+    } finally {
+      setIsLoadingServiceAreas(false);
+    }
+  }, [accessToken]);
+
   useEffect(() => {
     void loadSettings();
-  }, [loadSettings]);
+    void loadJurisdictions();
+  }, [loadSettings, loadJurisdictions]);
+
+  useEffect(() => {
+    if (!applicationForm.jurisdiction) {
+      setServiceAreaOptions([]);
+      setServiceAreaLoadFailed(false);
+      return;
+    }
+
+    const selectedJurisdiction = jurisdictions.find(
+      (jurisdiction) => jurisdiction.code === applicationForm.jurisdiction,
+    );
+    void loadServiceAreas(applicationForm.jurisdiction, selectedJurisdiction?.label ?? null);
+  }, [applicationForm.jurisdiction, jurisdictions, loadServiceAreas]);
 
   const submitApplication = async () => {
     if (!accessToken) {
@@ -206,7 +1017,7 @@ export default function SettingsPage() {
     }
 
     if (!applicationForm.jurisdiction.trim() || !applicationForm.serviceAreaName.trim()) {
-      setErrorMessage("Enter your jurisdiction and service area.");
+      setErrorMessage("Choose your jurisdiction and service area.");
       return;
     }
 
@@ -237,49 +1048,6 @@ export default function SettingsPage() {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save notary application.");
     } finally {
       setIsSavingApplication(false);
-    }
-  };
-
-  const saveProfile = async () => {
-    if (!accessToken) {
-      setErrorMessage("Sign in again to update your notary profile.");
-      return;
-    }
-
-    if (!profileForm.jurisdiction.trim() || !profileForm.serviceAreaName.trim()) {
-      setErrorMessage("Enter your jurisdiction and service area.");
-      return;
-    }
-
-    setIsSavingProfile(true);
-    setMessage(null);
-    setErrorMessage(null);
-
-    try {
-      const response = await fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/notary-profile`, accessToken, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jurisdiction: profileForm.jurisdiction.trim(),
-          serviceAreaKind: profileForm.serviceAreaKind,
-          serviceAreaName: profileForm.serviceAreaName.trim(),
-          commissionNumber: profileForm.commissionNumber.trim() || null,
-          commissionExpiresAt: profileForm.commissionExpiresAt || null,
-          signatureDataUrl: profileForm.signatureDataUrl,
-          sealDataUrl: profileForm.sealDataUrl,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response, "Unable to save notary profile."));
-      }
-
-      setMessage("Notary profile saved.");
-      await loadSettings();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to save notary profile.");
-    } finally {
-      setIsSavingProfile(false);
     }
   };
 
@@ -323,23 +1091,28 @@ export default function SettingsPage() {
     [adminApplications],
   );
 
+  const jurisdictionSelectOptions = useMemo(() => {
+    return jurisdictions.map((jurisdiction) => ({
+      value: jurisdiction.code,
+      label: jurisdiction.label,
+    }));
+  }, [jurisdictions]);
+
   return (
     <div className="space-y-8">
       <div className="space-y-2">
         <div className="text-2xl font-medium">Settings</div>
         <div className="text-sm text-Color-Neutral">
-          {isNotary
-            ? "Manage your notary profile, seal, and signature."
-            : isAdmin
-              ? "Review notary applications and manage approvals."
-              : "Request notary approval from your member profile."}
+          {isAdmin
+            ? "Review notary applications and manage approvals."
+            : "Request notary approval from your member profile."}
         </div>
       </div>
 
       {message ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{message}</div> : null}
       {errorMessage ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div> : null}
 
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+      <section className="max-w-4xl">
         <div className="space-y-4 rounded-2xl bg-Color-White p-5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -359,154 +1132,81 @@ export default function SettingsPage() {
             <div>Phone: {user?.phone ?? "-"}</div>
           </div>
 
-          {isMember ? (
-            <div className="space-y-4 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
-              <div className="text-sm font-medium text-Color-Scheme-1-Text">Apply as a notary</div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="block md:col-span-2">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">State or jurisdiction</span>
-                  <input
-                    className="mt-2 w-full rounded-lg bg-white px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                    onChange={(event) => setApplicationForm((current) => ({ ...current, jurisdiction: event.target.value }))}
-                    value={applicationForm.jurisdiction}
-                  />
-                </label>
-                <label className="block md:col-span-2">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">County or service area</span>
-                  <div className="mt-2 grid gap-2 md:grid-cols-[minmax(10rem,0.35fr)_minmax(0,1fr)]">
-                    <select
-                      className="rounded-lg bg-white px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                      onChange={(event) => setApplicationForm((current) => ({ ...current, serviceAreaKind: event.target.value as NotaryServiceAreaKind }))}
-                      value={applicationForm.serviceAreaKind}
-                    >
-                      {serviceAreaKinds.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      className="rounded-lg bg-white px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                      onChange={(event) => setApplicationForm((current) => ({ ...current, serviceAreaName: event.target.value }))}
-                      placeholder="Example: Sonoma County, Greater Los Angeles, Central Ohio"
-                      value={applicationForm.serviceAreaName}
-                    />
-                  </div>
-                </label>
-              </div>
+          <div className="space-y-4 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
+            <div className="text-sm font-medium text-Color-Scheme-1-Text">Apply as a notary</div>
 
-              <SignatureCanvasField
-                description="Draw your notary signature for the application review."
-                label="Signature"
-                onChange={(nextValue) => setApplicationForm((current) => ({ ...current, signatureDataUrl: nextValue }))}
-                value={applicationForm.signatureDataUrl}
+            <div className="grid gap-3 md:grid-cols-2">
+              <SelectField
+                label="State"
+                value={applicationForm.jurisdiction}
+                placeholder="Select a state"
+                options={jurisdictionSelectOptions}
+                isOpen={openSelectId === "jurisdiction"}
+                disabled={isLoading || jurisdictionSelectOptions.length === 0}
+                onOpenChange={(isOpen) => setOpenSelectId(isOpen ? "jurisdiction" : null)}
+                onChange={(nextValue) => {
+                  setApplicationForm((current) => ({
+                    ...current,
+                    jurisdiction: nextValue,
+                    serviceAreaName: "",
+                    serviceAreaKind: "county",
+                  }));
+                }}
               />
 
-              <SignatureCanvasField
-                description="Use the same capture flow for your seal impression."
-                label="Seal"
-                onChange={(nextValue) => setApplicationForm((current) => ({ ...current, sealDataUrl: nextValue }))}
-                value={applicationForm.sealDataUrl}
+              <SelectField
+                label="County or service area"
+                value={applicationForm.serviceAreaName}
+                placeholder={isLoadingServiceAreas ? "Loading options..." : "Select one"}
+                options={serviceAreaOptions}
+                isOpen={openSelectId === "serviceArea"}
+                disabled={isLoading || isLoadingServiceAreas || !applicationForm.jurisdiction}
+                onOpenChange={(isOpen) => setOpenSelectId(isOpen ? "serviceArea" : null)}
+                onChange={(nextValue) => {
+                  setApplicationForm((current) => ({
+                    ...current,
+                    serviceAreaName: nextValue,
+                    serviceAreaKind: inferServiceAreaKind(nextValue),
+                  }));
+                }}
               />
 
-              <button
-                className="w-full rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isSavingApplication || isLoading}
-                onClick={() => void submitApplication()}
-                type="button"
-              >
-                {isSavingApplication ? "Submitting" : application?.status === "approved" ? "Resubmit application" : "Submit notary application"}
-              </button>
+              {applicationForm.jurisdiction && !isLoadingServiceAreas && serviceAreaLoadFailed && !hasAuthError ? (
+                <div className="text-xs text-amber-700">
+                  Could not load county/service-area options for this state right now. Re-select the state and try again.
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
 
-        <div className="space-y-4 rounded-2xl bg-Color-White p-5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
-          <div className="text-sm font-medium text-Color-Scheme-1-Text">Notary profile</div>
-          {isNotary ? (
-            <>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="block md:col-span-2">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Jurisdiction</span>
-                  <input
-                    className="mt-2 w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                    onChange={(event) => setProfileForm((current) => ({ ...current, jurisdiction: event.target.value }))}
-                    value={profileForm.jurisdiction}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Service area kind</span>
-                  <select
-                    className="mt-2 w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                    onChange={(event) => setProfileForm((current) => ({ ...current, serviceAreaKind: event.target.value as NotaryServiceAreaKind }))}
-                    value={profileForm.serviceAreaKind}
-                  >
-                    {serviceAreaKinds.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Service area name</span>
-                  <input
-                    className="mt-2 w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                    onChange={(event) => setProfileForm((current) => ({ ...current, serviceAreaName: event.target.value }))}
-                    value={profileForm.serviceAreaName}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Commission number</span>
-                  <input
-                    className="mt-2 w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                    onChange={(event) => setProfileForm((current) => ({ ...current, commissionNumber: event.target.value }))}
-                    value={profileForm.commissionNumber}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Commission expiration</span>
-                  <input
-                    className="mt-2 w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-                    onChange={(event) => setProfileForm((current) => ({ ...current, commissionExpiresAt: event.target.value }))}
-                    type="datetime-local"
-                    value={profileForm.commissionExpiresAt}
-                  />
-                </label>
-              </div>
+            <div className="text-xs text-Color-Neutral">
+              Service area options are loaded from the US Census county dataset for the selected state.
+            </div>
 
-              <SignatureCanvasField
-                description="Update the signature that appears on notary-facing records."
-                label="Signature"
-                onChange={(nextValue) => setProfileForm((current) => ({ ...current, signatureDataUrl: nextValue }))}
-                value={profileForm.signatureDataUrl}
-              />
+            <SignatureCaptureField
+              value={applicationForm.signatureDataUrl}
+              onChange={(nextValue) => setApplicationForm((current) => ({ ...current, signatureDataUrl: nextValue }))}
+              disabled={isSavingApplication || isLoading}
+            />
 
-              <SignatureCanvasField
-                description="Update the seal image that will be used for completion artifacts."
-                label="Seal"
-                onChange={(nextValue) => setProfileForm((current) => ({ ...current, sealDataUrl: nextValue }))}
-                value={profileForm.sealDataUrl}
-              />
+            <SealDropzoneField
+              value={applicationForm.sealDataUrl}
+              onChange={(nextValue) => setApplicationForm((current) => ({ ...current, sealDataUrl: nextValue }))}
+              disabled={isSavingApplication || isLoading}
+            />
 
-              <button
-                className="w-full rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isSavingProfile || isLoading}
-                onClick={() => void saveProfile()}
-                type="button"
-              >
-                {isSavingProfile ? "Saving" : "Save notary profile"}
-              </button>
+            <button
+              className="w-full rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isSavingApplication || isLoading}
+              onClick={() => void submitApplication()}
+              type="button"
+            >
+              {isSavingApplication ? "Submitting" : application?.status === "approved" ? "Resubmit application" : "Submit notary application"}
+            </button>
 
-              <div className="rounded-xl bg-Color-Neutral-Lightest/60 p-4 text-sm text-Color-Neutral-Darkest">
-                This profile is the source of truth for the notary dashboard. Update it whenever your commission, service area, seal, or signature changes.
-              </div>
-            </>
-          ) : (
             <div className="rounded-xl bg-Color-Neutral-Lightest/60 p-4 text-sm text-Color-Neutral-Darkest">
-              Once your application is approved, this section becomes your notary dashboard profile editor.
+              Once your application is approved, you will get a notification email with further instructions.
             </div>
-          )}
+          </div>
         </div>
       </section>
 

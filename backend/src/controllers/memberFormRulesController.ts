@@ -24,6 +24,209 @@ import { sendValidationError } from "../utils/validation";
 
 const productFlowModeKeySet = new Set<ProductFlowModeKey>(productFlowModeKeys);
 
+const stateFipsByAbbreviation: Record<string, string> = {
+  AL: "01",
+  AK: "02",
+  AZ: "04",
+  AR: "05",
+  CA: "06",
+  CO: "08",
+  CT: "09",
+  DE: "10",
+  FL: "12",
+  GA: "13",
+  HI: "15",
+  ID: "16",
+  IL: "17",
+  IN: "18",
+  IA: "19",
+  KS: "20",
+  KY: "21",
+  LA: "22",
+  ME: "23",
+  MD: "24",
+  MA: "25",
+  MI: "26",
+  MN: "27",
+  MS: "28",
+  MO: "29",
+  MT: "30",
+  NE: "31",
+  NV: "32",
+  NH: "33",
+  NJ: "34",
+  NM: "35",
+  NY: "36",
+  NC: "37",
+  ND: "38",
+  OH: "39",
+  OK: "40",
+  OR: "41",
+  PA: "42",
+  RI: "44",
+  SC: "45",
+  SD: "46",
+  TN: "47",
+  TX: "48",
+  UT: "49",
+  VT: "50",
+  VA: "51",
+  WA: "53",
+  WV: "54",
+  WI: "55",
+  WY: "56",
+  DC: "11",
+};
+
+const stateAbbreviationByName: Record<string, string> = {
+  ALABAMA: "AL",
+  ALASKA: "AK",
+  ARIZONA: "AZ",
+  ARKANSAS: "AR",
+  CALIFORNIA: "CA",
+  COLORADO: "CO",
+  CONNECTICUT: "CT",
+  DELAWARE: "DE",
+  FLORIDA: "FL",
+  GEORGIA: "GA",
+  HAWAII: "HI",
+  IDAHO: "ID",
+  ILLINOIS: "IL",
+  INDIANA: "IN",
+  IOWA: "IA",
+  KANSAS: "KS",
+  KENTUCKY: "KY",
+  LOUISIANA: "LA",
+  MAINE: "ME",
+  MARYLAND: "MD",
+  MASSACHUSETTS: "MA",
+  MICHIGAN: "MI",
+  MINNESOTA: "MN",
+  MISSISSIPPI: "MS",
+  MISSOURI: "MO",
+  MONTANA: "MT",
+  NEBRASKA: "NE",
+  NEVADA: "NV",
+  "NEW HAMPSHIRE": "NH",
+  "NEW JERSEY": "NJ",
+  "NEW MEXICO": "NM",
+  "NEW YORK": "NY",
+  "NORTH CAROLINA": "NC",
+  "NORTH DAKOTA": "ND",
+  OHIO: "OH",
+  OKLAHOMA: "OK",
+  OREGON: "OR",
+  PENNSYLVANIA: "PA",
+  "RHODE ISLAND": "RI",
+  "SOUTH CAROLINA": "SC",
+  "SOUTH DAKOTA": "SD",
+  TENNESSEE: "TN",
+  TEXAS: "TX",
+  UTAH: "UT",
+  VERMONT: "VT",
+  VIRGINIA: "VA",
+  WASHINGTON: "WA",
+  "WEST VIRGINIA": "WV",
+  WISCONSIN: "WI",
+  WYOMING: "WY",
+  "DISTRICT OF COLUMBIA": "DC",
+};
+
+const resolveStateAbbreviation = (jurisdiction: string) => {
+  const normalized = jurisdiction.trim().toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const usCodeMatch = normalized.match(/US-([A-Z]{2})/);
+  if (usCodeMatch?.[1] && stateFipsByAbbreviation[usCodeMatch[1]]) {
+    return usCodeMatch[1];
+  }
+
+  if (stateFipsByAbbreviation[normalized]) {
+    return normalized;
+  }
+
+  const embeddedCodeMatch = normalized.match(/\b([A-Z]{2})\b/);
+  if (embeddedCodeMatch?.[1] && stateFipsByAbbreviation[embeddedCodeMatch[1]]) {
+    return embeddedCodeMatch[1];
+  }
+
+  if (stateAbbreviationByName[normalized]) {
+    return stateAbbreviationByName[normalized];
+  }
+
+  return null;
+};
+
+const fallbackServiceAreasByState: Record<string, string[]> = {
+  CA: [
+    "Alameda County",
+    "Alpine County",
+    "Amador County",
+    "Butte County",
+    "Calaveras County",
+    "Colusa County",
+    "Contra Costa County",
+    "Del Norte County",
+    "El Dorado County",
+    "Fresno County",
+    "Glenn County",
+    "Humboldt County",
+    "Imperial County",
+    "Inyo County",
+    "Kern County",
+    "Kings County",
+    "Lake County",
+    "Lassen County",
+    "Los Angeles County",
+    "Madera County",
+    "Marin County",
+    "Mariposa County",
+    "Mendocino County",
+    "Merced County",
+    "Modoc County",
+    "Mono County",
+    "Monterey County",
+    "Napa County",
+    "Nevada County",
+    "Orange County",
+    "Placer County",
+    "Plumas County",
+    "Riverside County",
+    "Sacramento County",
+    "San Benito County",
+    "San Bernardino County",
+    "San Diego County",
+    "San Francisco County",
+    "San Joaquin County",
+    "San Luis Obispo County",
+    "San Mateo County",
+    "Santa Barbara County",
+    "Santa Clara County",
+    "Santa Cruz County",
+    "Shasta County",
+    "Sierra County",
+    "Siskiyou County",
+    "Solano County",
+    "Sonoma County",
+    "Stanislaus County",
+    "Sutter County",
+    "Tehama County",
+    "Trinity County",
+    "Tulare County",
+    "Tuolumne County",
+    "Ventura County",
+    "Yolo County",
+    "Yuba County",
+  ],
+};
+
+const buildFallbackServiceAreaOptions = (abbreviation: string) => {
+  const serviceAreas = fallbackServiceAreasByState[abbreviation] ?? [`${abbreviation} Statewide`];
+  return serviceAreas.map((name) => ({ label: name, value: name }));
+};
+
 const MEMBER_FORM_REQUIREMENTS_NOT_FOUND_MESSAGE =
   "Member form requirements not found for one or more selected families";
 
@@ -316,6 +519,83 @@ export const getMemberFormRulesByJurisdiction = async (
         error instanceof Error
           ? error.message
           : "Failed to load member form requirements",
+    });
+  }
+};
+
+export const listServiceAreasByJurisdiction = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!ensureAuthenticatedUser(req, res)) {
+    return;
+  }
+
+  if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
+    return sendJurisdictionRequiredError(res);
+  }
+
+  const abbreviation = resolveStateAbbreviation(req.params.jurisdiction);
+  if (!abbreviation) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Unsupported jurisdiction format",
+    });
+  }
+
+  const stateFips = stateFipsByAbbreviation[abbreviation];
+  if (!stateFips) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Jurisdiction is not a supported US state",
+    });
+  }
+
+  const fallbackOptions = buildFallbackServiceAreaOptions(abbreviation);
+
+  try {
+    const response = await fetch(
+      `https://api.census.gov/data/2020/dec/pl?get=NAME&for=county:*&in=state:${stateFips}`,
+    );
+
+    const payload = (await response.json().catch(() => null)) as string[][] | null;
+    if (!response.ok || !payload || payload.length < 2) {
+      return res.status(200).json({
+        jurisdiction: req.params.jurisdiction,
+        abbreviation,
+        options: fallbackOptions,
+        source: "fallback",
+      });
+    }
+
+    const options = payload
+      .slice(1)
+      .map((row) => (Array.isArray(row) ? row[0] : null))
+      .filter((name): name is string => Boolean(name && name.trim()))
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ label: name, value: name }));
+
+    if (options.length === 0) {
+      return res.status(200).json({
+        jurisdiction: req.params.jurisdiction,
+        abbreviation,
+        options: fallbackOptions,
+        source: "fallback",
+      });
+    }
+
+    return res.status(200).json({
+      jurisdiction: req.params.jurisdiction,
+      abbreviation,
+      options,
+      source: "census",
+    });
+  } catch {
+    return res.status(200).json({
+      jurisdiction: req.params.jurisdiction,
+      abbreviation,
+      options: fallbackOptions,
+      source: "fallback",
     });
   }
 };

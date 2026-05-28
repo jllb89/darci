@@ -14,6 +14,7 @@ import {
 import {
   getMemberFormDocumentExtractionByJurisdiction,
   getMemberFormRulesByJurisdiction,
+  listServiceAreasByJurisdiction,
   listProductFlowModesForSelection,
   listMemberFormJurisdictionsForSelection,
   validateMemberFormSubmissionByJurisdiction,
@@ -80,6 +81,12 @@ router.get(
   "/member-form/:jurisdiction/document-extraction",
   requireRole(["member", "notary", "admin", "service_role"]),
   getMemberFormDocumentExtractionByJurisdiction,
+);
+
+router.get(
+  "/service-areas/:jurisdiction",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  listServiceAreasByJurisdiction,
 );
 
 router.post(
