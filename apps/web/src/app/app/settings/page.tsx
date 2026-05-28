@@ -1,6 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -11,6 +12,7 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useAppToast } from "@/components/app/AppToastContext";
 import { useStoredAuth, useStoredUser } from "@/lib/auth";
 import { fetchWithTokenRefresh, notaryApiBaseUrl, readApiErrorMessage } from "@/lib/notaryWorkspace";
 import type { JurisdictionOption, MemberFormJurisdictionsPayload } from "@/app/app/start/startPageTypes";
@@ -82,6 +84,8 @@ type SavedSignature = {
 const SAVED_SIGNATURES_STORAGE_KEY = "darci.notary.savedSignatures";
 const DRAW_CANVAS_WIDTH = 960;
 const DRAW_CANVAS_HEIGHT = 320;
+const SIGNATURE_UPLOAD_MAX_DIMENSION = 960;
+const SEAL_UPLOAD_MAX_DIMENSION = 560;
 
 const stateFipsByAbbreviation: Record<string, string> = {
   AL: "01",
@@ -279,21 +283,36 @@ const inferServiceAreaKind = (serviceAreaLabel: string): NotaryServiceAreaKind =
   return "county";
 };
 
-const toDataUrlFromFile = (file: File) => {
+const toDataUrlFromFile = (file: File, options?: { maxDimension?: number; quality?: number }) => {
   return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      const maxDimension = options?.maxDimension ?? SIGNATURE_UPLOAD_MAX_DIMENSION;
+      const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+      const width = Math.max(1, Math.round(image.naturalWidth * scale));
+      const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        reject(new Error("Failed to prepare image file"));
         return;
       }
 
+      canvas.width = width;
+      canvas.height = height;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/webp", options?.quality ?? 0.82));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
       reject(new Error("Failed to read image file"));
     };
-    reader.onerror = () => {
-      reject(new Error("Failed to read image file"));
-    };
-    reader.readAsDataURL(file);
+    image.src = objectUrl;
   });
 };
 
@@ -583,7 +602,7 @@ function SignatureCaptureField({
       return;
     }
 
-    const dataUrl = canvas.toDataURL("image/png");
+    const dataUrl = canvas.toDataURL("image/webp", 0.82);
     onChange(dataUrl);
     saveSignatureToLibrary(dataUrl);
     setSavedSignatures(loadSavedSignatures());
@@ -599,7 +618,10 @@ function SignatureCaptureField({
       return;
     }
 
-    const dataUrl = await toDataUrlFromFile(file);
+    const dataUrl = await toDataUrlFromFile(file, {
+      maxDimension: SIGNATURE_UPLOAD_MAX_DIMENSION,
+      quality: 0.82,
+    });
     onChange(dataUrl);
     saveSignatureToLibrary(dataUrl);
     setSavedSignatures(loadSavedSignatures());
@@ -769,20 +791,37 @@ function SealDropzoneField({
   disabled?: boolean;
 }) {
   const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const onFile = useCallback(async (file: File | null) => {
     if (!file || disabled || !file.type.startsWith("image/")) {
       return;
     }
 
-    const dataUrl = await toDataUrlFromFile(file);
+    const dataUrl = await toDataUrlFromFile(file, {
+      maxDimension: SEAL_UPLOAD_MAX_DIMENSION,
+      quality: 0.82,
+    });
     onChange(dataUrl);
   }, [disabled, onChange]);
 
   return (
     <div className="space-y-3 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
       <div className="text-sm font-medium text-Color-Scheme-1-Text">Seal upload</div>
-      <label
+      <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        onClick={() => {
+          if (!disabled) {
+            fileInputRef.current?.click();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!disabled && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           setIsDragging(true);
@@ -794,13 +833,34 @@ function SealDropzoneField({
           const file = event.dataTransfer.files?.[0] ?? null;
           void onFile(file);
         }}
-        className={`block cursor-pointer rounded-lg border border-dashed px-4 py-8 text-center text-sm ${
+        className={`cursor-pointer rounded-lg border border-dashed px-4 py-6 text-center text-sm outline-none transition-colors ${
           isDragging ? "border-Green bg-Green/10" : "border-Color-Scheme-1-Border/40 bg-white"
-        }`}
+        } ${disabled ? "cursor-not-allowed opacity-60" : "focus-visible:border-Color-Scheme-1-Text"}`}
       >
-        <div className="font-medium text-Color-Scheme-1-Text">Drag & drop your seal image</div>
-        <div className="mt-1 text-xs text-Color-Neutral">or click to choose a file</div>
+        {value ? (
+          <div className="space-y-3">
+            <img src={value} alt="Current seal" className="mx-auto h-28 w-full rounded object-contain" />
+            <div className="text-xs text-Color-Neutral">Drag & drop or click to replace the seal image.</div>
+            <button
+              type="button"
+              className="rounded-md bg-Color-Neutral-Lightest px-3 py-2 text-xs font-medium text-Color-Neutral-Darkest transition hover:bg-Color-Neutral-Lighter"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onChange(null);
+              }}
+            >
+              Remove seal
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="font-medium text-Color-Scheme-1-Text">Drag & drop your seal image</div>
+            <div className="mt-1 text-xs text-Color-Neutral">or click to choose a file</div>
+          </>
+        )}
         <input
+          ref={fileInputRef}
           type="file"
           accept="image/*"
           className="hidden"
@@ -810,18 +870,14 @@ function SealDropzoneField({
             event.target.value = "";
           }}
         />
-      </label>
-      {value ? (
-        <div className="rounded-md bg-white p-3">
-          <div className="mb-2 text-xs text-Color-Neutral">Current seal</div>
-          <img src={value} alt="Current seal" className="h-28 w-full rounded object-contain" />
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
+  const { showToast } = useAppToast();
   const { accessToken } = useStoredAuth();
   const user = useStoredUser();
   const isAdmin = user?.role === "admin";
@@ -840,6 +896,7 @@ export default function SettingsPage() {
   const [serviceAreaLoadFailed, setServiceAreaLoadFailed] = useState(false);
   const [hasAuthError, setHasAuthError] = useState(false);
   const [openSelectId, setOpenSelectId] = useState<"jurisdiction" | "serviceArea" | null>(null);
+  const serviceAreaOptionsCacheRef = useRef(new Map<string, SelectOption[]>());
 
   const loadSettings = useCallback(async () => {
     if (!accessToken) {
@@ -955,6 +1012,13 @@ export default function SettingsPage() {
       return;
     }
 
+    const cachedOptions = serviceAreaOptionsCacheRef.current.get(stateAbbreviation);
+    if (cachedOptions) {
+      setServiceAreaOptions(cachedOptions);
+      setServiceAreaLoadFailed(cachedOptions.length === 0);
+      return;
+    }
+
     setIsLoadingServiceAreas(true);
     try {
       const response = await fetchWithTokenRefresh(
@@ -981,6 +1045,7 @@ export default function SettingsPage() {
         .filter((option) => option && option.value && option.label)
         .sort((a, b) => a.label.localeCompare(b.label));
 
+      serviceAreaOptionsCacheRef.current.set(stateAbbreviation, options);
       setServiceAreaOptions(options);
       setServiceAreaLoadFailed(options.length === 0);
       setHasAuthError(false);
@@ -1004,15 +1069,17 @@ export default function SettingsPage() {
       return;
     }
 
-    const selectedJurisdiction = jurisdictions.find(
-      (jurisdiction) => jurisdiction.code === applicationForm.jurisdiction,
-    );
-    void loadServiceAreas(applicationForm.jurisdiction, selectedJurisdiction?.label ?? null);
-  }, [applicationForm.jurisdiction, jurisdictions, loadServiceAreas]);
+    void loadServiceAreas(applicationForm.jurisdiction);
+  }, [applicationForm.jurisdiction, loadServiceAreas]);
 
   const submitApplication = async () => {
     if (!accessToken) {
       setErrorMessage("Sign in again to submit your notary request.");
+      return;
+    }
+
+    if (application) {
+      setErrorMessage("A notary application has already been submitted for this account.");
       return;
     }
 
@@ -1042,8 +1109,12 @@ export default function SettingsPage() {
         throw new Error(await readApiErrorMessage(response, "Unable to save notary application."));
       }
 
-      setMessage("Notary application submitted for admin review.");
-      await loadSettings();
+      showToast({
+        tone: "success",
+        message: "Your request has been sent. We'll be in touch soon.",
+        durationMs: 6000,
+      });
+      router.push("/app");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save notary application.");
     } finally {
@@ -1090,6 +1161,10 @@ export default function SettingsPage() {
     () => adminApplications.filter((row) => row.status === "pending"),
     [adminApplications],
   );
+  const hasSubmittedApplication = Boolean(application);
+  const applicationStatusLabel = application
+    ? application.status.charAt(0).toUpperCase() + application.status.slice(1)
+    : null;
 
   const jurisdictionSelectOptions = useMemo(() => {
     return jurisdictions.map((jurisdiction) => ({
@@ -1134,6 +1209,11 @@ export default function SettingsPage() {
 
           <div className="space-y-4 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
             <div className="text-sm font-medium text-Color-Scheme-1-Text">Apply as a notary</div>
+            {hasSubmittedApplication ? (
+              <div className="rounded-xl bg-white p-4 text-sm text-Color-Neutral-Darkest">
+                Your notary application has already been submitted. Current status: {applicationStatusLabel}.
+              </div>
+            ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
               <SelectField
@@ -1142,7 +1222,7 @@ export default function SettingsPage() {
                 placeholder="Select a state"
                 options={jurisdictionSelectOptions}
                 isOpen={openSelectId === "jurisdiction"}
-                disabled={isLoading || jurisdictionSelectOptions.length === 0}
+                disabled={hasSubmittedApplication || isLoading || jurisdictionSelectOptions.length === 0}
                 onOpenChange={(isOpen) => setOpenSelectId(isOpen ? "jurisdiction" : null)}
                 onChange={(nextValue) => {
                   setApplicationForm((current) => ({
@@ -1160,7 +1240,7 @@ export default function SettingsPage() {
                 placeholder={isLoadingServiceAreas ? "Loading options..." : "Select one"}
                 options={serviceAreaOptions}
                 isOpen={openSelectId === "serviceArea"}
-                disabled={isLoading || isLoadingServiceAreas || !applicationForm.jurisdiction}
+                disabled={hasSubmittedApplication || isLoading || isLoadingServiceAreas || !applicationForm.jurisdiction}
                 onOpenChange={(isOpen) => setOpenSelectId(isOpen ? "serviceArea" : null)}
                 onChange={(nextValue) => {
                   setApplicationForm((current) => ({
@@ -1185,22 +1265,22 @@ export default function SettingsPage() {
             <SignatureCaptureField
               value={applicationForm.signatureDataUrl}
               onChange={(nextValue) => setApplicationForm((current) => ({ ...current, signatureDataUrl: nextValue }))}
-              disabled={isSavingApplication || isLoading}
+              disabled={hasSubmittedApplication || isSavingApplication || isLoading}
             />
 
             <SealDropzoneField
               value={applicationForm.sealDataUrl}
               onChange={(nextValue) => setApplicationForm((current) => ({ ...current, sealDataUrl: nextValue }))}
-              disabled={isSavingApplication || isLoading}
+              disabled={hasSubmittedApplication || isSavingApplication || isLoading}
             />
 
             <button
               className="w-full rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSavingApplication || isLoading}
+              disabled={hasSubmittedApplication || isSavingApplication || isLoading}
               onClick={() => void submitApplication()}
               type="button"
             >
-              {isSavingApplication ? "Submitting" : application?.status === "approved" ? "Resubmit application" : "Submit notary application"}
+              {hasSubmittedApplication ? "Application already submitted" : isSavingApplication ? "Submitting" : "Submit notary application"}
             </button>
 
             <div className="rounded-xl bg-Color-Neutral-Lightest/60 p-4 text-sm text-Color-Neutral-Darkest">

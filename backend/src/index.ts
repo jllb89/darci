@@ -118,7 +118,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "3mb" }));
 
 if (isDevelopment) {
   app.use((req: Request, res: Response, next: NextFunction) => {

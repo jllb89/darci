@@ -10,7 +10,10 @@ import {
   upsertMyNotaryProfile,
   type NotaryServiceAreaKind,
 } from "../services/notaryProfileService";
-import { queueNotaryApplicationApprovedNotification } from "../services/notificationService";
+import {
+  queueNotaryApplicationApprovedNotification,
+  queueNotaryApplicationSubmittedAdminNotification,
+} from "../services/notificationService";
 import { sendValidationError } from "../utils/validation";
 
 const serviceAreaKindSchema = z.enum([
@@ -152,6 +155,16 @@ export const submitMyNotaryApplication = async (req: Request, res: Response) => 
       serviceAreaName: parsed.data.serviceAreaName,
       signatureDataUrl: parsed.data.signatureDataUrl ?? null,
       sealDataUrl: parsed.data.sealDataUrl ?? null,
+    });
+
+    await queueNotaryApplicationSubmittedAdminNotification({
+      applicationId: application.id,
+      applicantUserId: application.userId,
+      jurisdiction: application.jurisdiction,
+      serviceAreaKind: application.serviceAreaKind,
+      serviceAreaName: application.serviceAreaName,
+      submittedAt: application.updatedAt,
+      requestedBySupabaseUserId: supabaseUserId,
     });
 
     return res.status(200).json({ application: mapNotaryApplication(application) });

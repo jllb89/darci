@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { pool } from "../db/pool";
 import {
   resolveEmailNotificationProvider,
   resolveSmsNotificationProvider,
@@ -128,6 +129,62 @@ export const queueNotaryApplicationApprovedNotification = async (input: {
       applicationId: input.applicationId,
       userId: input.userId,
       reviewedBySupabaseUserId: input.reviewedBySupabaseUserId,
+    });
+    return null;
+  }
+};
+
+export const queueNotaryApplicationSubmittedAdminNotification = async (input: {
+  applicationId: string;
+  applicantUserId: string;
+  jurisdiction: string;
+  serviceAreaKind: string;
+  serviceAreaName: string;
+  submittedAt: string;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const [applicant, admins] = await Promise.all([
+      getUserById(input.applicantUserId),
+      listActiveAdminUsers(),
+    ]);
+    const recipients = admins.map(buildOwnerRecipient);
+
+    if (recipients.length === 0) {
+      return null;
+    }
+
+    const requestUrl = buildAppUrl(`/app/admin/notary-requests/${encodeURIComponent(input.applicationId)}`);
+    return await queueTemplatedNotification({
+      templateKey: "notary_application_submitted_admin_email",
+      jobKind: "transactional",
+      dedupeKey: `notary_application_submitted_admin:${input.applicationId}:${input.submittedAt}`,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        applicantName: applicant ? toDisplayName(applicant) : "A member",
+        applicantEmail: applicant?.email?.trim() || null,
+        applicantPhone: applicant?.phone?.trim() || null,
+        jurisdiction: input.jurisdiction,
+        serviceAreaKind: humanizeToken(input.serviceAreaKind),
+        serviceAreaName: input.serviceAreaName,
+        submittedAt: input.submittedAt,
+        requestUrl,
+        dashboardUrl: requestUrl,
+      },
+      recipients,
+      metadata: {
+        applicationId: input.applicationId,
+        applicantUserId: input.applicantUserId,
+        jurisdiction: input.jurisdiction,
+        serviceAreaKind: input.serviceAreaKind,
+        serviceAreaName: input.serviceAreaName,
+        preparedRoute: "/app/admin/notary-requests/:id",
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("notary_application_submitted_admin_email", error, {
+      applicationId: input.applicationId,
+      applicantUserId: input.applicantUserId,
     });
     return null;
   }
@@ -564,6 +621,36 @@ const getUserById = async (userId: string) => {
   }
 
   return (data as NotificationUserRecord | null) ?? null;
+};
+
+const listActiveAdminUsers = async () => {
+  const result = await pool.query(
+    `
+      select distinct
+        u.id,
+        u.email,
+        u.phone,
+        u.first_name,
+        u.last_name
+      from public.users u
+      left join public.user_roles ur
+        on ur.user_id = u.id
+        and ur.role = 'admin'
+        and ur.status = 'active'
+      where (u.role = 'admin' or ur.id is not null)
+        and coalesce(u.status, 'active') = 'active'
+        and nullif(btrim(coalesce(u.email, '')), '') is not null
+      order by u.email asc
+    `,
+  );
+
+  return result.rows.map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    email: row.email == null ? null : String(row.email),
+    phone: row.phone == null ? null : String(row.phone),
+    first_name: row.first_name == null ? null : String(row.first_name),
+    last_name: row.last_name == null ? null : String(row.last_name),
+  })) satisfies NotificationUserRecord[];
 };
 
 const getDocumentById = async (documentId: string) => {

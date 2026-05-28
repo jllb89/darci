@@ -243,6 +243,11 @@ export const submitNotaryApplication = async (input: {
     throw new NotaryProfileServiceError(404, "User not found");
   }
 
+  const existingApplication = await getNotaryApplicationByUserIdFromPool(identity.id);
+  if (existingApplication) {
+    throw new NotaryProfileServiceError(409, "A notary application has already been submitted for this account.");
+  }
+
   const { data, error } = await supabaseAdmin
     .from("notary_profile_applications")
     .upsert({

@@ -179,6 +179,11 @@ function StartAuthPageContent() {
         return;
       }
 
+      if (storedAuth.user && hasCompleteStoredUserProfile(storedAuth.user)) {
+        router.replace(returnTo);
+        return;
+      }
+
       try {
         const syncedAuth = await syncStoredAuthFromSession({
           accessToken: storedAuth.accessToken,

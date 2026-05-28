@@ -222,9 +222,66 @@ const fallbackServiceAreasByState: Record<string, string[]> = {
   ],
 };
 
+type ServiceAreaSource = "census" | "fallback";
+type ServiceAreaOption = { label: string; value: string };
+
+const SERVICE_AREA_CACHE_TTL_MS = 1000 * 60 * 60;
+const SERVICE_AREA_CENSUS_TIMEOUT_MS = 1200;
+
+const serviceAreaCache = new Map<string, {
+  expiresAt: number;
+  options: ServiceAreaOption[];
+  source: ServiceAreaSource;
+}>();
+
 const buildFallbackServiceAreaOptions = (abbreviation: string) => {
   const serviceAreas = fallbackServiceAreasByState[abbreviation] ?? [`${abbreviation} Statewide`];
   return serviceAreas.map((name) => ({ label: name, value: name }));
+};
+
+const getCachedServiceAreas = (abbreviation: string) => {
+  const cached = serviceAreaCache.get(abbreviation);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    serviceAreaCache.delete(abbreviation);
+    return null;
+  }
+
+  return cached;
+};
+
+const cacheServiceAreas = (abbreviation: string, options: ServiceAreaOption[], source: ServiceAreaSource) => {
+  serviceAreaCache.set(abbreviation, {
+    expiresAt: Date.now() + SERVICE_AREA_CACHE_TTL_MS,
+    options,
+    source,
+  });
+};
+
+const fetchCensusServiceAreas = async (stateFips: string) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVICE_AREA_CENSUS_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(
+      `https://api.census.gov/data/2020/dec/pl?get=NAME&for=county:*&in=state:${stateFips}`,
+      { signal: controller.signal },
+    );
+    const payload = (await response.json().catch(() => null)) as string[][] | null;
+    if (!response.ok || !payload || payload.length < 2) {
+      return null;
+    }
+
+    const options = payload
+      .slice(1)
+      .map((row) => (Array.isArray(row) ? row[0] : null))
+      .filter((name): name is string => Boolean(name && name.trim()))
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ label: name, value: name }));
+
+    return options.length > 0 ? options : null;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 const MEMBER_FORM_REQUIREMENTS_NOT_FOUND_MESSAGE =
@@ -552,14 +609,30 @@ export const listServiceAreasByJurisdiction = async (
   }
 
   const fallbackOptions = buildFallbackServiceAreaOptions(abbreviation);
+  const cached = getCachedServiceAreas(abbreviation);
+  if (cached) {
+    return res.status(200).json({
+      jurisdiction: req.params.jurisdiction,
+      abbreviation,
+      options: cached.options,
+      source: cached.source,
+    });
+  }
+
+  if (fallbackServiceAreasByState[abbreviation]?.length) {
+    cacheServiceAreas(abbreviation, fallbackOptions, "fallback");
+    return res.status(200).json({
+      jurisdiction: req.params.jurisdiction,
+      abbreviation,
+      options: fallbackOptions,
+      source: "fallback",
+    });
+  }
 
   try {
-    const response = await fetch(
-      `https://api.census.gov/data/2020/dec/pl?get=NAME&for=county:*&in=state:${stateFips}`,
-    );
-
-    const payload = (await response.json().catch(() => null)) as string[][] | null;
-    if (!response.ok || !payload || payload.length < 2) {
+    const options = await fetchCensusServiceAreas(stateFips);
+    if (!options) {
+      cacheServiceAreas(abbreviation, fallbackOptions, "fallback");
       return res.status(200).json({
         jurisdiction: req.params.jurisdiction,
         abbreviation,
@@ -568,22 +641,7 @@ export const listServiceAreasByJurisdiction = async (
       });
     }
 
-    const options = payload
-      .slice(1)
-      .map((row) => (Array.isArray(row) ? row[0] : null))
-      .filter((name): name is string => Boolean(name && name.trim()))
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ label: name, value: name }));
-
-    if (options.length === 0) {
-      return res.status(200).json({
-        jurisdiction: req.params.jurisdiction,
-        abbreviation,
-        options: fallbackOptions,
-        source: "fallback",
-      });
-    }
-
+    cacheServiceAreas(abbreviation, options, "census");
     return res.status(200).json({
       jurisdiction: req.params.jurisdiction,
       abbreviation,
@@ -591,6 +649,7 @@ export const listServiceAreasByJurisdiction = async (
       source: "census",
     });
   } catch {
+    cacheServiceAreas(abbreviation, fallbackOptions, "fallback");
     return res.status(200).json({
       jurisdiction: req.params.jurisdiction,
       abbreviation,
