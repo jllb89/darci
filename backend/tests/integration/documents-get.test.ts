@@ -1905,6 +1905,195 @@ describe("GET documents endpoints", () => {
     );
   });
 
+  it.each([
+    {
+      label: "failed",
+      status: "failed",
+      rendererJobId: "generation-runs:run-failed",
+      failedAt: "2026-03-05T00:21:00.000Z",
+      failureCode: "renderer_error",
+      errorMessage: "Template source could not be loaded",
+    },
+    {
+      label: "stale queued",
+      status: "queued",
+      rendererJobId: null,
+      failedAt: null,
+      failureCode: null,
+      errorMessage: null,
+    },
+  ])("creates a fresh generation run when retrying a $label output", async ({
+    status,
+    rendererJobId,
+    failedAt,
+    failureCode,
+    errorMessage,
+  }) => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "poa_document",
+          outputLabel: "Power of Attorney",
+          isRequired: true,
+          sortOrder: 10,
+          metadata: {},
+        },
+      ],
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.isDocumentIntakeLockedMock.mockReturnValue(true);
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      document_id: "doc-1",
+      owner_id: "owner-1",
+      product_flow_mode: "trust_bundle",
+      jurisdiction: "US-CA",
+      current_step: "trust_requirements",
+      rules_snapshot_version: "member_form_rules_contract_v1",
+      answers_json: {
+        trust_name: "Family Trust",
+      },
+      canonical_answers_json: {
+        trust_name: "Family Trust",
+      },
+      revision: 7,
+      created_at: "2026-03-05T00:05:00.000Z",
+      updated_at: "2026-03-05T00:15:00.000Z",
+    });
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-failed",
+        document_id: "doc-1",
+        intake_revision: 7,
+        output_key: "poa_document",
+        document_key: "poa_general",
+        template_key: "ca_poa_general",
+        template_version: "2026.04.14.v1",
+        template_hash: "sha256:ca-poadoc-v1",
+        template_artifact_id: "artifact-1",
+        payload_json: {},
+        coverage_json: {},
+        render_context_json: {},
+        blocking_requirements_json: [],
+        resolved_sources_json: {},
+        status,
+        renderer_job_id: rendererJobId,
+        document_version_id: null,
+        blocked_at: null,
+        started_at: "2026-03-05T00:20:00.000Z",
+        rendered_at: null,
+        failed_at: failedAt,
+        canceled_at: null,
+        failure_code: failureCode,
+        failure_details_json: {},
+        cancellation_reason: null,
+        error_message: errorMessage,
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+    ]);
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [],
+        },
+      },
+      missing: [],
+    });
+    mocks.getActiveTemplateRegistryForOutputMock.mockResolvedValue({
+      id: "tmpl-1",
+      jurisdiction: "US-CA",
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      effective_from: "2026-04-14T00:00:00.000Z",
+      effective_to: null,
+      is_active: true,
+      created_at: "2026-04-14T00:00:00.000Z",
+    });
+    mocks.getActiveTemplateArtifactMock.mockResolvedValue({
+      id: "artifact-1",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      artifact_storage_path: "templates/ca_poa_general.docx",
+      artifact_mime_type:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      render_engine: "docx_template",
+      artifact_metadata: {},
+      is_active: true,
+      created_at: "2026-04-14T00:00:00.000Z",
+    });
+    mocks.createDocumentGenerationRunMock.mockResolvedValue({
+      id: "run-retry",
+      document_id: "doc-1",
+      intake_revision: 7,
+      output_key: "poa_document",
+      document_key: "poa_general",
+      template_key: "ca_poa_general",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:ca-poadoc-v1",
+      template_artifact_id: "artifact-1",
+      payload_json: {},
+      coverage_json: {},
+      render_context_json: {},
+      blocking_requirements_json: [],
+      resolved_sources_json: {},
+      status: "queued",
+      renderer_job_id: null,
+      document_version_id: null,
+      blocked_at: null,
+      started_at: null,
+      rendered_at: null,
+      failed_at: null,
+      canceled_at: null,
+      failure_code: null,
+      failure_details_json: {},
+      cancellation_reason: null,
+      error_message: null,
+      created_at: "2026-03-05T00:22:00.000Z",
+    });
+    mocks.enqueueDocumentGenerationRunMock.mockResolvedValue("job-retry");
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/generation-runs",
+      {
+        outputKeys: ["poa_document"],
+      },
+      "creates fresh generation run for failed retry",
+      token,
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.updateDocumentGenerationRunMock).not.toHaveBeenCalled();
+    expect(mocks.createDocumentGenerationRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        intakeRevision: 7,
+        outputKey: "poa_document",
+        status: "queued",
+      }),
+    );
+    expect(mocks.enqueueDocumentGenerationRunMock).toHaveBeenCalledWith({
+      runId: "run-retry",
+    });
+  });
+
   it("lists generation runs", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",

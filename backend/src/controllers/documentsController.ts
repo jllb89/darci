@@ -2003,16 +2003,48 @@ const isStaleRenderingReviewRun = (run: DocumentGenerationRunRecord | null) => {
   );
 };
 
+const isStaleQueuedReviewRun = (run: DocumentGenerationRunRecord | null) => {
+  if (!run || run.status !== "queued") {
+    return false;
+  }
+
+  const queuedTimestamp = toTimestamp(run.created_at);
+  return (
+    queuedTimestamp > 0 &&
+    Date.now() - queuedTimestamp >= RENDERING_RUN_STALE_AFTER_MS
+  );
+};
+
+const isStaleActiveReviewRun = (run: DocumentGenerationRunRecord | null) => {
+  return isStaleRenderingReviewRun(run) || isStaleQueuedReviewRun(run);
+};
+
 const isRetryableReviewRun = (run: DocumentGenerationRunRecord | null) => {
   if (!run) {
     return false;
   }
 
-  return isRetryableReviewRunStatus(run.status) || isStaleRenderingReviewRun(run);
+  return isRetryableReviewRunStatus(run.status) || isStaleActiveReviewRun(run);
 };
 
 const isReusableReviewRun = (run: DocumentGenerationRunRecord) => {
-  return isSatisfiedReviewRunStatus(run.status) && !isStaleRenderingReviewRun(run);
+  return isSatisfiedReviewRunStatus(run.status) && !isStaleActiveReviewRun(run);
+};
+
+const canRefreshExistingGenerationRun = (run: DocumentGenerationRunRecord) => {
+  return (
+    (run.status === "blocked" || run.status === "queued" || run.status === "rendering") &&
+    !isStaleActiveReviewRun(run)
+  );
+};
+
+const shouldHoldReviewBundleForPendingOutput = (output: PendingReviewOutputResponse) => {
+  return (
+    output.status === "queued" ||
+    output.status === "rendering" ||
+    output.status === "not_started" ||
+    output.status === "download_unavailable"
+  );
 };
 
 const mapReadyReviewOutputToPending = (
@@ -2227,7 +2259,7 @@ const buildDocumentReviewState = async (input: {
       const blockers = mapBlockingRequirementsResponse(
         latestRun?.blocking_requirements_json,
       );
-      const staleRenderingMessage = isStaleRenderingReviewRun(latestRun)
+      const staleRenderingMessage = isStaleActiveReviewRun(latestRun)
         ? "Rendering is taking longer than expected. DARCi is retrying this output."
         : null;
 
@@ -2251,7 +2283,9 @@ const buildDocumentReviewState = async (input: {
   const signedReadyOutputs = await signReadyReviewOutputs({
     documentId: input.document.id,
     readyOutputs,
-    holdUntilBundleReady: visibleOutputs.length > 1 && pendingOutputs.length > 0,
+    holdUntilBundleReady:
+      visibleOutputs.length > 1 &&
+      pendingOutputs.some(shouldHoldReviewBundleForPendingOutput),
   });
   const outputs = signedReadyOutputs.outputs;
 
@@ -2575,7 +2609,7 @@ const buildDocumentSigningState = async (input: {
     const blockers = mapBlockingRequirementsResponse(
       latestRun?.blocking_requirements_json,
     );
-    const staleRenderingMessage = isStaleRenderingReviewRun(latestRun)
+    const staleRenderingMessage = isStaleActiveReviewRun(latestRun)
       ? "Rendering is taking longer than expected. DARCi is retrying this output."
       : null;
 
@@ -2598,7 +2632,9 @@ const buildDocumentSigningState = async (input: {
   const signedReadyOutputs = await signReadyReviewOutputs({
     documentId: input.document.id,
     readyOutputs,
-    holdUntilBundleReady: outputBundle.length > 1 && pendingOutputs.length > 0,
+    holdUntilBundleReady:
+      outputBundle.length > 1 &&
+      pendingOutputs.some(shouldHoldReviewBundleForPendingOutput),
   });
   const outputs = signedReadyOutputs.outputs;
 
@@ -3025,7 +3061,7 @@ const createGenerationRunsForDocument = async (input: {
     const shouldUpdateExistingRun =
       existingRun &&
       existingRun.intake_revision === draft.revision &&
-      !isStaleRenderingReviewRun(existingRun);
+      canRefreshExistingGenerationRun(existingRun);
     const run = shouldUpdateExistingRun
       ? await updateDocumentGenerationRun(existingRun.id, {
           template_artifact_id: templateArtifact?.id ?? null,
