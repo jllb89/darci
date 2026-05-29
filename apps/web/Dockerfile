@@ -29,7 +29,14 @@ ENV NEXT_PUBLIC_SENTRY_RELEASE=$NEXT_PUBLIC_SENTRY_RELEASE
 ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 
 COPY apps/web/package*.json ./
-RUN npm ci
+RUN npm ci \
+	--fetch-retries=5 \
+	--fetch-retry-factor=2 \
+	--fetch-retry-mintimeout=20000 \
+	--fetch-retry-maxtimeout=120000 \
+	--fetch-timeout=300000 \
+	--no-audit \
+	--no-fund
 
 COPY apps/web ./
 RUN npm run build
