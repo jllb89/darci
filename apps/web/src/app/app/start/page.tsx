@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppToast } from "@/components/app/AppToastContext";
@@ -13,6 +13,7 @@ import { MockDataToggle } from "@/app/app/start/MockDataToggle";
 import {
   buildInitialMemberFormValues,
   computeFieldRuntime,
+  type FieldFamilyScope,
   getSectionLayoutMode,
   groupSectionFieldsByFamily,
   getVisibleSections,
@@ -107,6 +108,141 @@ const NOTARIZATION_UPLOAD_FIELD_KEY = "notarize_document_upload";
 const NOTARIZATION_DOCUMENT_DESCRIPTION_KEY = "document_description";
 const NOTARIZATION_REASON_KEY = "notarization_reason";
 const NOTARIZATION_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const ALL_FIELD_FAMILY_SCOPES: FieldFamilyScope[] = ["shared", "poa", "trust", "unknown"];
+const PHONE_COUNTRY_SELECT_OPTIONS = PHONE_COUNTRY_CODE_OPTIONS.map((option) => ({
+  value: option.countryIso2,
+  label: option.label,
+}));
+
+type ContractSelectOption = {
+  value: string;
+  label: string;
+};
+
+function ContractSelectControl({
+  value,
+  placeholder,
+  options,
+  disabled = false,
+  className = "platform-control",
+  popoverWidth = 320,
+  ariaLabel,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  options: ContractSelectOption[];
+  disabled?: boolean;
+  className?: string;
+  popoverWidth?: number;
+  ariaLabel?: string;
+  onChange: (value: string) => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const selectedOption = options.find((option) => option.value === value);
+  const isSelectOpen = isOpen && !disabled;
+
+  const updatePopoverPosition = useCallback(() => {
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) {
+      return;
+    }
+
+    const leftBoundary = 16;
+    const rightBoundary = window.innerWidth - popoverWidth - leftBoundary;
+    setPopoverPosition({
+      left: Math.max(leftBoundary, Math.min(triggerRect.left, rightBoundary)),
+      top: triggerRect.bottom + 8,
+    });
+  }, [popoverWidth]);
+
+  useEffect(() => {
+    if (!isSelectOpen) {
+      return;
+    }
+
+    window.addEventListener("resize", updatePopoverPosition);
+    window.addEventListener("scroll", updatePopoverPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePopoverPosition);
+      window.removeEventListener("scroll", updatePopoverPosition, true);
+    };
+  }, [isSelectOpen, updatePopoverPosition]);
+
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+  const selectPopover =
+    isSelectOpen && popoverPosition && portalTarget
+      ? createPortal(
+          <div
+            className="fixed z-[120] max-h-72 overflow-y-auto rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-2 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
+            style={{ left: popoverPosition.left, top: popoverPosition.top, width: popoverWidth }}
+          >
+            {options.map((option) => {
+              const isSelected = option.value === value;
+
+              return (
+                <button
+                  key={option.value || option.label}
+                  type="button"
+                  className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-xs transition-colors ${
+                    isSelected
+                      ? "bg-Green text-Color-Neutral-Darkest"
+                      : "text-Color-Scheme-1-Text hover:bg-Color-White"
+                  }`}
+                  onClick={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                    triggerRef.current?.blur();
+                  }}
+                >
+                  <span>{option.label}</span>
+                  {isSelected ? <span aria-hidden="true">Selected</span> : null}
+                </button>
+              );
+            })}
+          </div>,
+          portalTarget,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        className={`${className} flex items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-50`}
+        aria-label={ariaLabel ?? placeholder}
+        aria-expanded={isSelectOpen}
+        onClick={() => {
+          if (disabled) {
+            return;
+          }
+
+          if (!isSelectOpen) {
+            updatePopoverPosition();
+          }
+
+          setIsOpen(!isSelectOpen);
+        }}
+      >
+        <span className={selectedOption && value ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"}>
+          {selectedOption?.label ?? placeholder}
+        </span>
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 border-b border-r border-Color-Neutral transition-transform ${
+            isSelectOpen ? "rotate-[225deg]" : "rotate-45"
+          }`}
+        />
+      </button>
+      {selectPopover}
+    </>
+  );
+}
 
 const fetchWithTokenRefresh = async (
   url: string,
@@ -671,6 +807,89 @@ type DraftSaveSnapshot = {
   formValues: Record<string, FormValue>;
 };
 
+type TrustmakerPrincipalSeed = {
+  principalFullName: string;
+  principalContact: string;
+};
+
+const isBlankFormValue = (value: FormValue | undefined) => {
+  if (typeof value === "string") {
+    return value.trim().length === 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+
+  return value === undefined;
+};
+
+const buildTrustmakerPrincipalSeed = (
+  values: Record<string, FormValue>,
+): TrustmakerPrincipalSeed | null => {
+  const trustmaker = parsePersonListItems(values.grantors).find((item) => {
+    return (
+      item.fullName.trim().length > 0 ||
+      item.email.trim().length > 0 ||
+      item.phone.trim().length > 0
+    );
+  });
+
+  if (!trustmaker) {
+    return null;
+  }
+
+  return {
+    principalFullName: trustmaker.fullName.trim(),
+    principalContact: serializePersonContact({
+      email: trustmaker.email,
+      phoneCountryIso2: trustmaker.phoneCountryIso2,
+      phoneCountryCode: trustmaker.phoneCountryCode,
+      phone: trustmaker.phone,
+    }),
+  };
+};
+
+const applyTrustmakerPrincipalSeed = (input: {
+  values: Record<string, FormValue>;
+  previousSeed: TrustmakerPrincipalSeed | null;
+}) => {
+  const seed = buildTrustmakerPrincipalSeed(input.values);
+  if (!seed) {
+    return {
+      values: input.values,
+      seed: null,
+    };
+  }
+
+  const currentPrincipalName = input.values.principal_full_name;
+  const currentPrincipalContact = input.values.principal_contact;
+  const shouldSeedName =
+    isBlankFormValue(currentPrincipalName) ||
+    (typeof currentPrincipalName === "string" &&
+      currentPrincipalName === input.previousSeed?.principalFullName);
+  const shouldSeedContact =
+    isBlankFormValue(currentPrincipalContact) ||
+    (typeof currentPrincipalContact === "string" &&
+      currentPrincipalContact === input.previousSeed?.principalContact);
+
+  if (!shouldSeedName && !shouldSeedContact) {
+    return {
+      values: input.values,
+      seed,
+    };
+  }
+
+  return {
+    values: {
+      ...input.values,
+      ...(shouldSeedName ? { principal_full_name: seed.principalFullName } : {}),
+      ...(shouldSeedContact ? { principal_contact: seed.principalContact } : {}),
+    },
+    seed,
+  };
+};
+
 type DocumentResponsePayload = {
   document?: DocumentSummary;
   message?: string;
@@ -729,6 +948,7 @@ export default function StartDocumentPage() {
   const allowLeavingRef = useRef(false);
   const hasPushedHistoryGuardRef = useRef(false);
   const lastServerDraftSignatureRef = useRef<string | null>(null);
+  const lastTrustmakerPrincipalSeedRef = useRef<TrustmakerPrincipalSeed | null>(null);
   const contractContainerRef = useRef<HTMLDivElement | null>(null);
   const draftDocumentIdRef = useRef<string | null>(null);
   const draftRevisionRef = useRef<number | null>(null);
@@ -1650,7 +1870,9 @@ export default function StartDocumentPage() {
       ? formValues[NOTARIZATION_REASON_KEY]
       : "";
 
-  const displayedPrimarySections = activeFormStep?.sections ?? [];
+  const displayedPrimarySections = useMemo(() => {
+    return activeFormStep?.sections ?? [];
+  }, [activeFormStep]);
 
   const hasPreviousFormStep = previousFormStep !== null;
   const hasNextFormStep = nextFormStep !== null;
@@ -1976,7 +2198,41 @@ export default function StartDocumentPage() {
     };
   }, [formValues.prior_document_items, visibleCanonicalKeys]);
 
-  const requiredVisibleFieldMessages = useMemo(() => {
+  const documentsToIncludeValidationMessages = useMemo(() => {
+    if (!documentsColumnHasPriorDocumentItems) {
+      return [] as string[];
+    }
+
+    const messages: string[] = [];
+
+    if (!priorDocumentItemsValidation.hasRows) {
+      messages.push(
+        "This amendment requires at least one document to include. Add each document's type, signed date, document label, and recording or attachment reference before continuing.",
+      );
+      return messages;
+    }
+
+    if (priorDocumentItemsValidation.incompleteCount > 0) {
+      messages.push(
+        "Documents to Include: complete type, signed date, document label, and recording or attachment reference for each listed document.",
+      );
+    }
+
+    if (priorDocumentItemsValidation.missingOriginatingDocument) {
+      messages.push("Document 1: type must be Trust Agreement or Declaration of Trust.");
+    }
+
+    if (priorDocumentItemsValidation.chronologyOutOfOrderCount > 0) {
+      messages.push("Documents: signed dates must be chronological from oldest to newest.");
+    }
+
+    return messages;
+  }, [documentsColumnHasPriorDocumentItems, priorDocumentItemsValidation]);
+
+  const buildRequiredFieldMessages = useCallback((
+    sections: MemberFacingSection[],
+    allowedFamilyScopes?: FieldFamilyScope[],
+  ) => {
     const messages: string[] = [];
     const addMessage = (message: string) => {
       if (!messages.includes(message)) {
@@ -2000,8 +2256,14 @@ export default function StartDocumentPage() {
       return "Person";
     };
 
-    for (const section of visibleSections) {
-      for (const field of section.fields) {
+    for (const section of sections) {
+      const sectionFields = allowedFamilyScopes
+        ? groupSectionFieldsByFamily<MemberFacingField>(section, fieldRuntime)
+          .filter((group) => allowedFamilyScopes.includes(group.scope))
+          .flatMap((group) => group.fields)
+        : section.fields;
+
+      for (const field of sectionFields) {
         if (isTemporarilyHiddenCreateFlowField(field.canonical_key)) {
           continue;
         }
@@ -2219,44 +2481,37 @@ export default function StartDocumentPage() {
     getResolvedAllowedValues,
     requiresNamedSigningTrusteeSelection,
     trustmakerNames,
-    visibleSections,
   ]);
 
-  const blockingValidationMessages = useMemo(() => {
+  const requiredVisibleFieldMessages = useMemo(() => {
+    return buildRequiredFieldMessages(visibleSections);
+  }, [buildRequiredFieldMessages, visibleSections]);
+
+  const activeStepValidationSections = useMemo(() => {
+    if (
+      selectedProductFlowMode === "trust_bundle" &&
+      currentFormStep === "trust_requirements"
+    ) {
+      return [...displayedPrimarySections, ...documentSections];
+    }
+
+    return displayedPrimarySections;
+  }, [currentFormStep, displayedPrimarySections, documentSections, selectedProductFlowMode]);
+
+  const activeStepRequiredFieldMessages = useMemo(() => {
+    return buildRequiredFieldMessages(
+      activeStepValidationSections,
+      productFlowStepFamilyScopes[currentFormStep] ?? ALL_FIELD_FAMILY_SCOPES,
+    );
+  }, [activeStepValidationSections, buildRequiredFieldMessages, currentFormStep]);
+
+  const trustRequirementBlockingMessages = useMemo(() => {
     const messages: string[] = [];
     const addMessage = (message: string) => {
       if (!messages.includes(message)) {
         messages.push(message);
       }
     };
-
-    const addContactMessages = (
-      label: string,
-      validation: typeof principalContactValidation,
-    ) => {
-      if (!("missingEmail" in validation)) {
-        return;
-      }
-
-      if (validation.missingEmail) {
-        addMessage(`${label}: email is required.`);
-      }
-
-      if (validation.missingPhone) {
-        addMessage(`${label}: phone number is required.`);
-      }
-
-      if (validation.invalidEmail) {
-        addMessage(`${label}: enter a valid email address.`);
-      }
-
-      if (validation.invalidPhone || validation.invalidCountryCode) {
-        addMessage(`${label}: enter a valid phone country code and phone number.`);
-      }
-    };
-
-    addContactMessages("Principal contact", principalContactValidation);
-    addContactMessages("Agent contact", agentContactValidation);
 
     if (trustmakerValidation.tooMany) {
       addMessage("Trustmakers: add no more than two Trustmakers.");
@@ -2318,13 +2573,74 @@ export default function StartDocumentPage() {
 
     return messages;
   }, [
-    agentContactValidation,
-    principalContactValidation,
     priorDocumentItemsValidation,
     successorTrusteeValidation,
     taxIdOwnerValidation.isValid,
     trustmakerValidation,
     trusteeValidation,
+  ]);
+
+  const blockingValidationMessages = useMemo(() => {
+    const messages: string[] = [];
+    const addMessage = (message: string) => {
+      if (!messages.includes(message)) {
+        messages.push(message);
+      }
+    };
+
+    const addContactMessages = (
+      label: string,
+      validation: typeof principalContactValidation,
+    ) => {
+      if (!("missingEmail" in validation)) {
+        return;
+      }
+
+      if (validation.missingEmail) {
+        addMessage(`${label}: email is required.`);
+      }
+
+      if (validation.missingPhone) {
+        addMessage(`${label}: phone number is required.`);
+      }
+
+      if (validation.invalidEmail) {
+        addMessage(`${label}: enter a valid email address.`);
+      }
+
+      if (validation.invalidPhone || validation.invalidCountryCode) {
+        addMessage(`${label}: enter a valid phone country code and phone number.`);
+      }
+    };
+
+    addContactMessages("Principal contact", principalContactValidation);
+    addContactMessages("Agent contact", agentContactValidation);
+
+    return [...messages, ...trustRequirementBlockingMessages];
+  }, [
+    agentContactValidation,
+    principalContactValidation,
+    trustRequirementBlockingMessages,
+  ]);
+
+  const trustStepLockValidationMessages = useMemo(() => {
+    if (
+      selectedProductFlowMode !== "trust_bundle" ||
+      currentFormStep !== "trust_requirements" ||
+      !hasNextFormStep
+    ) {
+      return [] as string[];
+    }
+
+    return Array.from(
+      new Set([...activeStepRequiredFieldMessages, ...trustRequirementBlockingMessages]),
+    );
+  }, [
+    activeStepRequiredFieldMessages,
+    currentFormStep,
+    hasNextFormStep,
+    selectedProductFlowMode,
+    trustRequirementBlockingMessages,
   ]);
 
   const notarizationUploadValidationMessages = useMemo(() => {
@@ -2385,7 +2701,11 @@ export default function StartDocumentPage() {
       return notarizationUploadValidationMessages;
     }
 
-    const messages = [...requiredVisibleFieldMessages, ...blockingValidationMessages];
+    const messages = [
+      ...requiredVisibleFieldMessages,
+      ...blockingValidationMessages,
+      ...documentsToIncludeValidationMessages,
+    ];
 
     if (!isDocumentsColumnComplete) {
       messages.push("Supporting documents: add at least one document entry.");
@@ -2398,6 +2718,7 @@ export default function StartDocumentPage() {
     return Array.from(new Set(messages));
   }, [
     blockingValidationMessages,
+    documentsToIncludeValidationMessages,
     hasNextFormStep,
     isNotarizationProductFlow,
     isDocumentsColumnComplete,
@@ -2500,7 +2821,30 @@ export default function StartDocumentPage() {
       return;
     }
 
-    setCurrentFormStep(formStepDefinitions[currentIndex + 1]!.stepKey);
+    const targetStep = formStepDefinitions[currentIndex + 1]!;
+    const isTrustBundleTrustToPoaTransition =
+      selectedProductFlowMode === "trust_bundle" &&
+      currentFormStep === "trust_requirements" &&
+      targetStep.stepKey === "poa_requirements";
+
+    if (isTrustBundleTrustToPoaTransition && trustStepLockValidationMessages.length > 0) {
+      setShowContinueValidationDetails(true);
+      setSubmissionErrorMessage(formatMissingInformationAlert(trustStepLockValidationMessages));
+      return;
+    }
+
+    if (isTrustBundleTrustToPoaTransition) {
+      setFormValues((current) => {
+        const result = applyTrustmakerPrincipalSeed({
+          values: current,
+          previousSeed: lastTrustmakerPrincipalSeedRef.current,
+        });
+        lastTrustmakerPrincipalSeedRef.current = result.seed;
+        return result.values;
+      });
+    }
+
+    setCurrentFormStep(targetStep.stepKey);
     setSubmissionErrorMessage(null);
     setShowContinueValidationDetails(false);
   };
@@ -3033,9 +3377,7 @@ export default function StartDocumentPage() {
     openLeaveModal({ type: "clear-product-selection" });
   };
 
-  const handleJurisdictionChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextJurisdiction = event.target.value;
-
+  const handleJurisdictionSelect = (nextJurisdiction: string) => {
     if (nextJurisdiction === selectedJurisdiction) {
       return;
     }
@@ -3350,39 +3692,24 @@ export default function StartDocumentPage() {
               value={contact.email}
             />
             <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
-              <div className="platform-select-wrap">
-                <select
-                  className={baseInputClassName}
-                  onChange={(event) => {
-                    const nextPhoneCountryIso2 = event.target.value;
-                    handleFieldChange(
-                      field.canonical_key,
-                      serializePersonContact({
-                        ...contact,
-                        phoneCountryIso2: nextPhoneCountryIso2,
-                        phoneCountryCode: getPhoneCountryCodeByIso2(nextPhoneCountryIso2),
-                        phone: formatPhoneInput(contact.phone, nextPhoneCountryIso2),
-                      }),
-                    );
-                  }}
-                  value={contact.phoneCountryIso2 || DEFAULT_PHONE_COUNTRY_ISO2}
-                >
-                  {PHONE_COUNTRY_CODE_OPTIONS.map((option) => (
-                    <option key={option.countryIso2} value={option.countryIso2}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-                  <path
-                    d="M5.5 7.75 10 12.25l4.5-4.5"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.5"
-                  />
-                </svg>
-              </div>
+              <ContractSelectControl
+                ariaLabel="Phone country code"
+                className={baseInputClassName}
+                onChange={(nextPhoneCountryIso2) => {
+                  handleFieldChange(
+                    field.canonical_key,
+                    serializePersonContact({
+                      ...contact,
+                      phoneCountryIso2: nextPhoneCountryIso2,
+                      phoneCountryCode: getPhoneCountryCodeByIso2(nextPhoneCountryIso2),
+                      phone: formatPhoneInput(contact.phone, nextPhoneCountryIso2),
+                    }),
+                  );
+                }}
+                options={PHONE_COUNTRY_SELECT_OPTIONS}
+                placeholder="Country code"
+                value={contact.phoneCountryIso2 || DEFAULT_PHONE_COUNTRY_ISO2}
+              />
               <input
                 className={baseInputClassName}
                 onChange={(event) => {
@@ -3755,38 +4082,23 @@ export default function StartDocumentPage() {
                     />
                   </div>
                   <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
-                    <div className="platform-select-wrap">
-                      <select
-                        className={baseInputClassName}
-                        onChange={(event) => {
-                          const nextPhoneCountryIso2 = event.target.value;
-                          const nextItems = [...items];
-                          nextItems[index] = {
-                            ...item,
-                            phoneCountryIso2: nextPhoneCountryIso2,
-                            phoneCountryCode: getPhoneCountryCodeByIso2(nextPhoneCountryIso2),
-                            phone: formatPhoneInput(item.phone, nextPhoneCountryIso2),
-                          };
-                          updateItems(nextItems);
-                        }}
-                        value={item.phoneCountryIso2 || DEFAULT_PHONE_COUNTRY_ISO2}
-                      >
-                        {PHONE_COUNTRY_CODE_OPTIONS.map((option) => (
-                          <option key={option.countryIso2} value={option.countryIso2}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-                        <path
-                          d="M5.5 7.75 10 12.25l4.5-4.5"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="1.5"
-                        />
-                      </svg>
-                    </div>
+                    <ContractSelectControl
+                      ariaLabel={`${roleLabel} phone country code`}
+                      className={baseInputClassName}
+                      onChange={(nextPhoneCountryIso2) => {
+                        const nextItems = [...items];
+                        nextItems[index] = {
+                          ...item,
+                          phoneCountryIso2: nextPhoneCountryIso2,
+                          phoneCountryCode: getPhoneCountryCodeByIso2(nextPhoneCountryIso2),
+                          phone: formatPhoneInput(item.phone, nextPhoneCountryIso2),
+                        };
+                        updateItems(nextItems);
+                      }}
+                      options={PHONE_COUNTRY_SELECT_OPTIONS}
+                      placeholder="Country code"
+                      value={item.phoneCountryIso2 || DEFAULT_PHONE_COUNTRY_ISO2}
+                    />
                     <input
                       className={baseInputClassName}
                       onChange={(event) => {
@@ -3980,36 +4292,27 @@ export default function StartDocumentPage() {
                     <label className={fieldLabelClassName}>
                       Type
                     </label>
-                    <div className="platform-select-wrap">
-                      <select
-                        className={baseInputClassName}
-                        onChange={(event) => {
-                          const nextItems = [...items];
-                          nextItems[index] = {
-                            ...item,
-                            documentType: event.target.value,
-                          };
-                          updateItems(nextItems);
-                        }}
-                        value={item.documentType}
-                      >
-                        <option value="">Select type</option>
-                        {priorDocumentTypeOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {formatLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                      <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-                        <path
-                          d="M5.5 7.75 10 12.25l4.5-4.5"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="1.5"
-                        />
-                      </svg>
-                    </div>
+                    <ContractSelectControl
+                      ariaLabel="Document type"
+                      className={baseInputClassName}
+                      onChange={(nextDocumentType) => {
+                        const nextItems = [...items];
+                        nextItems[index] = {
+                          ...item,
+                          documentType: nextDocumentType,
+                        };
+                        updateItems(nextItems);
+                      }}
+                      options={[
+                        { value: "", label: "Select type" },
+                        ...priorDocumentTypeOptions.map((option) => ({
+                          value: option,
+                          label: formatLabel(option),
+                        })),
+                      ]}
+                      placeholder="Select type"
+                      value={item.documentType}
+                    />
                   </div>
                   <div className="space-y-3">
                     <label className={fieldLabelClassName}>
@@ -4191,29 +4494,20 @@ export default function StartDocumentPage() {
 
       return (
         <div className="space-y-2">
-          <div className="platform-select-wrap">
-            <select
-              className={baseInputClassName}
-              onChange={(event) => handleFieldChange(field.canonical_key, event.target.value)}
-              value={typeof fieldValue === "string" ? fieldValue : ""}
-            >
-              <option value="">{selectPlaceholder}</option>
-              {allowedValues.map((value) => (
-                <option key={value} value={value}>
-                  {allowedValueLabels[value] ?? formatLabel(value)}
-                </option>
-              ))}
-            </select>
-            <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-              <path
-                d="M5.5 7.75 10 12.25l4.5-4.5"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.5"
-              />
-            </svg>
-          </div>
+          <ContractSelectControl
+            ariaLabel={field.label || selectPlaceholder}
+            className={baseInputClassName}
+            onChange={(nextValue) => handleFieldChange(field.canonical_key, nextValue)}
+            options={[
+              { value: "", label: selectPlaceholder },
+              ...allowedValues.map((value) => ({
+                value,
+                label: allowedValueLabels[value] ?? formatLabel(value),
+              })),
+            ]}
+            placeholder={selectPlaceholder}
+            value={typeof fieldValue === "string" ? fieldValue : ""}
+          />
 
           {isTrustmakerTaxIdSelection ? (
             <div className="text-xs text-Color-Neutral">
@@ -4283,12 +4577,7 @@ export default function StartDocumentPage() {
       filteredSection,
       fieldRuntime,
     );
-    const allowedFamilyScopes = productFlowStepFamilyScopes[currentFormStep] ?? [
-      "shared",
-      "poa",
-      "trust",
-      "unknown",
-    ];
+    const allowedFamilyScopes = productFlowStepFamilyScopes[currentFormStep] ?? ALL_FIELD_FAMILY_SCOPES;
     const scopedFamilyGroups = familyGroups.filter((group) =>
       allowedFamilyScopes.includes(group.scope),
     );
@@ -4415,13 +4704,18 @@ export default function StartDocumentPage() {
   const isContinueUnavailable = isContinueDisabled;
   const isContinueBlocked = continueValidationMessages.length > 0;
   const shouldStyleContinueAsBlocked = isContinueUnavailable || isContinueBlocked;
+  const isNextFormStepBlocked = trustStepLockValidationMessages.length > 0;
+  const visibleContinueValidationMessages =
+    showContinueValidationDetails && isNextFormStepBlocked
+      ? trustStepLockValidationMessages
+      : continueValidationMessages;
 
   const continueValidationPanel =
-    showContinueValidationDetails && continueValidationMessages.length > 0 ? (
+    showContinueValidationDetails && visibleContinueValidationMessages.length > 0 ? (
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         <div className="font-medium">Missing information</div>
         <ul className="mt-2 list-disc space-y-1 pl-4">
-          {continueValidationMessages.map((message) => (
+          {visibleContinueValidationMessages.map((message) => (
             <li key={message}>{message}</li>
           ))}
         </ul>
@@ -4573,43 +4867,30 @@ export default function StartDocumentPage() {
                     </div>
 
                     <div className="relative max-w-sm">
-                      <div className="platform-select-wrap">
-                        <select
-                          className="platform-control"
-                          disabled={
-                            !selectedProductFlowMode ||
-                            isLoadingProductFlowModes ||
-                            isLoadingJurisdictions ||
-                            jurisdictions.length === 0
-                          }
-                          onChange={handleJurisdictionChange}
-                          value={selectedJurisdiction}
-                        >
-                          <option value="">
-                            {!selectedProductFlowMode
-                              ? "Select a product mode first"
-                              : isLoadingJurisdictions
-                                ? "Loading jurisdictions..."
-                                : jurisdictions.length === 0
-                                  ? "No jurisdictions"
-                                  : "Select a jurisdiction"}
-                          </option>
-                          {jurisdictions.map((jurisdiction) => (
-                            <option key={jurisdiction.code} value={jurisdiction.code}>
-                              {formatJurisdictionDisplayLabel(jurisdiction.label, jurisdiction.code)}
-                            </option>
-                          ))}
-                        </select>
-                        <svg className="platform-select-icon" fill="none" viewBox="0 0 20 20">
-                          <path
-                            d="M5.5 7.75 10 12.25l4.5-4.5"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="1.5"
-                          />
-                        </svg>
-                      </div>
+                      <ContractSelectControl
+                        ariaLabel="Jurisdiction"
+                        disabled={
+                          !selectedProductFlowMode ||
+                          isLoadingProductFlowModes ||
+                          isLoadingJurisdictions ||
+                          jurisdictions.length === 0
+                        }
+                        onChange={handleJurisdictionSelect}
+                        options={jurisdictions.map((jurisdiction) => ({
+                          value: jurisdiction.code,
+                          label: formatJurisdictionDisplayLabel(jurisdiction.label, jurisdiction.code),
+                        }))}
+                        placeholder={
+                          !selectedProductFlowMode
+                            ? "Select a product mode first"
+                            : isLoadingJurisdictions
+                              ? "Loading jurisdictions..."
+                              : jurisdictions.length === 0
+                                ? "No jurisdictions"
+                                : "Select a jurisdiction"
+                        }
+                        value={selectedJurisdiction}
+                      />
                     </div>
                   </div>
 
@@ -4681,7 +4962,12 @@ export default function StartDocumentPage() {
                           {hasNextFormStep ? (
                             <button
                               type="button"
-                              className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border/40 bg-Color-Scheme-1-Text px-4 py-2 text-sm font-medium text-white transition hover:bg-Color-Scheme-1-Text/90"
+                              aria-disabled={isNextFormStepBlocked}
+                              className={`inline-flex items-center gap-2 border px-4 py-2 text-sm font-medium transition ${
+                                isNextFormStepBlocked
+                                  ? "cursor-not-allowed border-Color-Scheme-1-Border bg-Color-Neutral-Lighter text-Color-Neutral"
+                                  : "border-Color-Scheme-1-Border/40 bg-Color-Scheme-1-Text text-white hover:bg-Color-Scheme-1-Text/90"
+                              }`}
                               onClick={continueToNextSectionGroup}
                             >
                               {hasPreviousFormStep ? `Continue to ${nextFormStep?.label}` : "Continue"}
@@ -4720,7 +5006,7 @@ export default function StartDocumentPage() {
                             shouldStyleContinueAsBlocked
                               ? isContinueUnavailable
                                 ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
-                                : "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                                : "cursor-not-allowed border border-Color-Scheme-1-Border bg-Color-Neutral-Lighter text-Color-Neutral"
                               : "platform-btn-primary"
                           }`}
                           aria-disabled={shouldStyleContinueAsBlocked}
@@ -4811,7 +5097,7 @@ export default function StartDocumentPage() {
                     shouldStyleContinueAsBlocked
                       ? isContinueUnavailable
                         ? "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
-                        : "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                        : "cursor-not-allowed border border-Color-Scheme-1-Border bg-Color-Neutral-Lighter text-Color-Neutral"
                       : "platform-btn-primary"
                   }`}
                   aria-disabled={shouldStyleContinueAsBlocked}

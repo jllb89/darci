@@ -58,35 +58,6 @@ const emptyAuth: StoredAuth = {
   user: null,
 };
 
-const isStoredUserLike = (value: unknown): value is StoredUser => {
-  return typeof value === "object" && value !== null && "id" in value;
-};
-
-const keepNonBlankValue = <T extends string | null | undefined>(
-  nextValue: T,
-  existingValue: T,
-) => {
-  return nextValue?.trim() ? nextValue : existingValue;
-};
-
-const mergeStoredUserProfile = (
-  nextUser: unknown,
-  existingUser: StoredUser | null,
-) => {
-  if (!isStoredUserLike(nextUser) || !existingUser || nextUser.id !== existingUser.id) {
-    return nextUser;
-  }
-
-  return {
-    ...existingUser,
-    ...nextUser,
-    email: keepNonBlankValue(nextUser.email, existingUser.email),
-    phone: keepNonBlankValue(nextUser.phone, existingUser.phone),
-    firstName: keepNonBlankValue(nextUser.firstName, existingUser.firstName),
-    lastName: keepNonBlankValue(nextUser.lastName, existingUser.lastName),
-  } satisfies StoredUser;
-};
-
 let cachedStoredAuth: CachedStoredAuth = {
   accessToken: null,
   refreshToken: null,
@@ -197,8 +168,6 @@ export const setStoredAuth = (input: {
     return;
   }
 
-  const existingUser = getStoredAuth().user;
-
   if (input.accessToken) {
     localStorage.setItem(ACCESS_TOKEN_KEY, input.accessToken);
   } else {
@@ -212,7 +181,7 @@ export const setStoredAuth = (input: {
   }
 
   if (typeof input.user !== "undefined") {
-    localStorage.setItem(USER_KEY, JSON.stringify(mergeStoredUserProfile(input.user, existingUser)));
+    localStorage.setItem(USER_KEY, JSON.stringify(input.user));
   }
 
   emitAuthChange();

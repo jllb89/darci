@@ -316,6 +316,11 @@ describe("memberFormControls", () => {
     expect(formatPhoneInput("02079460056", "GB")).toBe("020 7946 0056");
   });
 
+  it("caps US phone input at ten national digits", () => {
+    expect(formatPhoneInput("4155550103123", "US")).toBe("(415) 555-0103");
+    expect(formatPhoneInput("14155550103123", "US")).toBe("(415) 555-0103");
+  });
+
   it("preserves spaces while converting multiline array input", () => {
     expect(parseMultilineArrayFormInput("Jane Doe \n  John Q Public\n\n")).toEqual([
       "Jane Doe ",

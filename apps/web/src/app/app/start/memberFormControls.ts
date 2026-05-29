@@ -160,9 +160,23 @@ const normalizePhoneCountryIso2 = (
 };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const US_PHONE_DIGIT_LIMIT = 10;
 
 const normalizePhoneDigits = (value: string) => {
   return value.replace(/\D/g, "");
+};
+
+const limitPhoneDigitsForCountry = (value: string, countryIso2: string) => {
+  const digits = normalizePhoneDigits(value);
+  if (countryIso2 !== "US") {
+    return digits;
+  }
+
+  const nationalDigits = digits.length > US_PHONE_DIGIT_LIMIT && digits.startsWith("1")
+    ? digits.slice(1)
+    : digits;
+
+  return nationalDigits.slice(0, US_PHONE_DIGIT_LIMIT);
 };
 
 export const isValidEmailFormat = (value: string): boolean => {
@@ -189,10 +203,11 @@ export const formatPhoneInput = (value: string, countryIso2?: string): string =>
   }
 
   const phoneCountryIso2 = normalizePhoneCountryIso2(countryIso2 ?? DEFAULT_PHONE_COUNTRY_ISO2);
+  const limitedValue = limitPhoneDigitsForCountry(value, phoneCountryIso2);
   try {
-    return new AsYouType(phoneCountryIso2 as CountryCode).input(value);
+    return new AsYouType(phoneCountryIso2 as CountryCode).input(limitedValue);
   } catch {
-    return value;
+    return limitedValue;
   }
 };
 

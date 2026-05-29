@@ -43,6 +43,11 @@ const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
 const UPLOADED_DOCUMENT_OUTPUT_KEY = "uploaded_document";
 const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
 const UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY = "addendum_page";
+
+const templateKeysThatMustLoadSource = new Set([
+  "oh_trust_rrr",
+  "oh_trust_certificate",
+]);
 import { captureException } from "../utils/sentry";
 
 const PDF_PAGE_MARGINS = {
@@ -2144,8 +2149,16 @@ const buildRenderedPdf = async (input: {
   const selectionCatalogs = getSelectionCatalogs(input.run);
   const isPreview = input.document.status !== "pending_signature";
   const brandAssets = await loadPdfBrandAssets();
+  const loadedTemplateSource = await loadTemplateSource(input.artifact);
+
+  if (!loadedTemplateSource && templateKeysThatMustLoadSource.has(input.run.template_key)) {
+    throw new Error(
+      `Template source could not be loaded for ${input.run.template_key}; confirm the active template artifact points at the deployed markdown source.`,
+    );
+  }
+
   const templateSource =
-    (await loadTemplateSource(input.artifact)) ??
+    loadedTemplateSource ??
     buildFallbackTemplateSource({
       documentKey: input.run.document_key,
       templateLabel,
