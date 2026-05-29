@@ -91,33 +91,6 @@ beforeEach(() => {
 });
 
 describe("placeholder compatibility endpoints", () => {
-  it("returns not implemented for direct notary signing", async () => {
-    const response = await request(app)
-      .post("/notary/requests/req-1/sign")
-      .set("Authorization", `Bearer ${notaryToken()}`);
-
-    expect(response.status).toBe(501);
-    expect(response.body).toEqual({
-      error: "not_implemented",
-      message:
-        "Direct notary signing is not mounted on this compatibility route. Use the Phase 5 meeting and Phase 6 document finalization flow instead.",
-    });
-  });
-
-  it("returns not implemented for direct request submission", async () => {
-    const response = await request(app)
-      .post("/notary/requests/req-1/submit")
-      .set("Authorization", `Bearer ${notaryToken()}`)
-      .send({ documentId: "doc-1" });
-
-    expect(response.status).toBe(501);
-    expect(response.body).toEqual({
-      error: "not_implemented",
-      message:
-        "Direct request submission is not mounted on this compatibility route. Use the document watermark and verification closeout flow instead.",
-    });
-  });
-
   it("returns not implemented for manual ledger anchoring", async () => {
     const response = await request(app)
       .post("/ledger/anchor")

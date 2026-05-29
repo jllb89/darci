@@ -1,6 +1,18 @@
 import request from "supertest";
 import jwt from "jsonwebtoken";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getNotarizationRequestByIdMock: vi.fn(),
+}));
+
+vi.mock("../../src/services/documentService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/documentService")>();
+  return {
+    ...actual,
+    getNotarizationRequestById: mocks.getNotarizationRequestByIdMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -15,6 +27,12 @@ const signToken = (payload: TokenPayload) => {
   const secret = process.env.SUPABASE_JWT_SECRET ?? "test-secret";
   return jwt.sign(payload, secret, { expiresIn: "1h" });
 };
+
+beforeEach(() => {
+  process.env.SUPABASE_JWT_SECRET = "test-secret";
+  mocks.getNotarizationRequestByIdMock.mockReset();
+  mocks.getNotarizationRequestByIdMock.mockResolvedValue(null);
+});
 
 describe("auth middleware", () => {
   it("rejects requests without a token", async () => {
@@ -39,7 +57,6 @@ describe("auth middleware", () => {
   });
 
   it("allows notary role through notary endpoint authorization", async () => {
-    process.env.SUPABASE_JWT_SECRET = "test-secret";
     const token = signToken({
       sub: "notary-1",
       app_metadata: { role: "notary" },
@@ -49,7 +66,8 @@ describe("auth middleware", () => {
       .post("/notary/requests/req-1/sign")
       .set("Authorization", `Bearer ${token}`);
 
-    expect(response.status).toBe(501);
-    expect(response.body.error).toBe("not_implemented");
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe("not_found");
+    expect(mocks.getNotarizationRequestByIdMock).toHaveBeenCalledWith("req-1");
   });
 });

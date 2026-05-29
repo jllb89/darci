@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AppSidebar from "@/components/app/AppSidebar";
 import AppTopbarBreadcrumb from "@/components/app/AppTopbarBreadcrumb";
@@ -77,6 +77,18 @@ const getAvailableRoles = (user: ReturnType<typeof useStoredUser>, fallbackRole:
 };
 
 export default function AppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <AppLayoutContent>{children}</AppLayoutContent>
+    </Suspense>
+  );
+}
+
+function AppLayoutContent({
   children,
 }: {
   children: React.ReactNode;
