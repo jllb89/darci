@@ -159,6 +159,67 @@ const addCalendarMonths = (date: Date, amount: number) => {
   return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 };
 
+const addCalendarYears = (date: Date, amount: number) => {
+  return new Date(date.getFullYear() + amount, date.getMonth(), 1);
+};
+
+const getCalendarDecadeStart = (year: number) => Math.floor(year / 10) * 10;
+
+const getCalendarCenturyStart = (year: number) => Math.floor(year / 100) * 100;
+
+const getCalendarDecadeOptions = (year: number) => {
+  const centuryStart = getCalendarCenturyStart(year);
+  return Array.from({ length: 12 }, (_, index) => centuryStart - 10 + index * 10);
+};
+
+const getCalendarYearOptions = (year: number) => {
+  const decadeStart = getCalendarDecadeStart(year);
+  return Array.from({ length: 12 }, (_, index) => decadeStart - 1 + index);
+};
+
+const calendarMonthOptions = Array.from({ length: 12 }, (_, index) => {
+  const sampleDate = new Date(2026, index, 1);
+  return {
+    index,
+    shortLabel: sampleDate.toLocaleDateString(undefined, { month: "short" }),
+    longLabel: sampleDate.toLocaleDateString(undefined, { month: "long" }),
+  };
+});
+
+type CalendarView = "days" | "decades" | "years" | "months";
+
+const getCalendarPreviousLabel = (view: CalendarView) => {
+  if (view === "decades") {
+    return "Previous century";
+  }
+
+  if (view === "years") {
+    return "Previous decade";
+  }
+
+  if (view === "months") {
+    return "Previous year";
+  }
+
+  return "Previous month";
+};
+
+const getCalendarNextLabel = (view: CalendarView) => {
+  if (view === "decades") {
+    return "Next century";
+  }
+
+  if (view === "years") {
+    return "Next decade";
+  }
+
+  if (view === "months") {
+    return "Next year";
+  }
+
+  return "Next month";
+};
+
 const getCalendarDays = (visibleMonth: Date) => {
   const firstOfMonth = getCalendarMonthStart(visibleMonth);
   const firstVisibleDate = new Date(firstOfMonth);
@@ -184,6 +245,28 @@ const formatCalendarDateLabel = (value: string, placeholder: string) => {
   });
 };
 
+const formatMissingInformationAlert = (messages: string[]) => {
+  const uniqueMessages = Array.from(
+    new Set(messages.map((message) => message.trim()).filter(Boolean)),
+  );
+
+  if (uniqueMessages.length === 0) {
+    return "Complete the missing information before continuing.";
+  }
+
+  const visibleMessages = uniqueMessages.slice(0, 3);
+  const remainingCount = uniqueMessages.length - visibleMessages.length;
+  const suffix = remainingCount > 0 ? ` ${remainingCount} more item${remainingCount === 1 ? "" : "s"} below.` : "";
+
+  return `Missing information: ${visibleMessages.join(" ")}${suffix}`;
+};
+
+const bulkSelectableCheckboxFieldKeys = new Set([
+  "authority_scope_selection",
+  "trustee_power_matrix",
+  "trustee_powers",
+]);
+
 const IntakeDatePicker = ({
   value,
   onChange,
@@ -200,6 +283,7 @@ const IntakeDatePicker = ({
   const selectedDate = parseCalendarDateValue(value);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [calendarView, setCalendarView] = useState<CalendarView>("days");
   const [visibleMonth, setVisibleMonth] = useState(() =>
     getCalendarMonthStart(selectedDate ?? new Date()),
   );
@@ -247,10 +331,12 @@ const IntakeDatePicker = ({
 
   const selectedKey = selectedDate ? formatCalendarDateKey(selectedDate) : null;
   const currentMonth = visibleMonth.getMonth();
-  const monthLabel = visibleMonth.toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
+  const currentYear = visibleMonth.getFullYear();
+  const currentDecadeStart = getCalendarDecadeStart(currentYear);
+  const currentCenturyStart = getCalendarCenturyStart(currentYear);
+  const decadeOptions = useMemo(() => getCalendarDecadeOptions(currentYear), [currentYear]);
+  const yearOptions = useMemo(() => getCalendarYearOptions(currentYear), [currentYear]);
+  const monthName = visibleMonth.toLocaleDateString(undefined, { month: "long" });
   const portalTarget = typeof document === "undefined" ? null : document.body;
   const calendarPopover =
     isOpen && popoverPosition && portalTarget
@@ -263,53 +349,217 @@ const IntakeDatePicker = ({
               <button
                 type="button"
                 className="flex h-8 w-8 items-center justify-center rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White transition-colors hover:bg-Color-Neutral-Lightest/70"
-                aria-label="Previous month"
-                onClick={() => setVisibleMonth((current) => addCalendarMonths(current, -1))}
+                aria-label={getCalendarPreviousLabel(calendarView)}
+                onClick={() => {
+                  if (calendarView === "decades") {
+                    setVisibleMonth((current) => addCalendarYears(current, -100));
+                    return;
+                  }
+
+                  if (calendarView === "years") {
+                    setVisibleMonth((current) => addCalendarYears(current, -10));
+                    return;
+                  }
+
+                  if (calendarView === "months") {
+                    setVisibleMonth((current) => addCalendarYears(current, -1));
+                    return;
+                  }
+
+                  setVisibleMonth((current) => addCalendarMonths(current, -1));
+                }}
               >
                 <span aria-hidden="true" className="h-2 w-2 rotate-[135deg] border-b border-r border-Color-Neutral-Darkest" />
               </button>
-              <div className="text-sm font-medium text-Color-Scheme-1-Text">{monthLabel}</div>
+              {calendarView === "days" ? (
+                <div className="flex items-center gap-1 text-sm font-medium text-Color-Scheme-1-Text">
+                  <button
+                    type="button"
+                    className="rounded-md px-1.5 py-1 transition-colors hover:bg-Color-White"
+                    onClick={() => setCalendarView("months")}
+                  >
+                    {monthName}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md px-1.5 py-1 transition-colors hover:bg-Color-White"
+                    aria-label={`Select year, current year ${currentYear}`}
+                    onClick={() => setCalendarView("decades")}
+                  >
+                    {currentYear}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {calendarView === "decades" ? (
+                    <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                      {currentCenturyStart - 10}-{currentCenturyStart + 109}
+                    </div>
+                  ) : null}
+                  {calendarView === "years" ? (
+                    <button
+                      type="button"
+                      className="rounded-md px-1.5 py-1 text-sm font-medium text-Color-Scheme-1-Text transition-colors hover:bg-Color-White"
+                      onClick={() => setCalendarView("decades")}
+                    >
+                      {currentDecadeStart}-{currentDecadeStart + 9}
+                    </button>
+                  ) : null}
+                  {calendarView === "months" ? (
+                    <button
+                      type="button"
+                      className="rounded-md px-1.5 py-1 text-sm font-medium text-Color-Scheme-1-Text transition-colors hover:bg-Color-White"
+                      onClick={() => setCalendarView("years")}
+                    >
+                      {currentYear}
+                    </button>
+                  ) : null}
+                </>
+              )}
               <button
                 type="button"
                 className="flex h-8 w-8 items-center justify-center rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White transition-colors hover:bg-Color-Neutral-Lightest/70"
-                aria-label="Next month"
-                onClick={() => setVisibleMonth((current) => addCalendarMonths(current, 1))}
+                aria-label={getCalendarNextLabel(calendarView)}
+                onClick={() => {
+                  if (calendarView === "decades") {
+                    setVisibleMonth((current) => addCalendarYears(current, 100));
+                    return;
+                  }
+
+                  if (calendarView === "years") {
+                    setVisibleMonth((current) => addCalendarYears(current, 10));
+                    return;
+                  }
+
+                  if (calendarView === "months") {
+                    setVisibleMonth((current) => addCalendarYears(current, 1));
+                    return;
+                  }
+
+                  setVisibleMonth((current) => addCalendarMonths(current, 1));
+                }}
               >
                 <span aria-hidden="true" className="h-2 w-2 -rotate-45 border-b border-r border-Color-Neutral-Darkest" />
               </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-7 gap-1.5 text-center text-[11px] uppercase text-Color-Neutral">
-              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
-                <div key={day}>{day}</div>
-              ))}
-            </div>
-            <div className="mt-2 grid grid-cols-7 gap-1.5">
-              {days.map((day) => {
-                const dayKey = formatCalendarDateKey(day);
-                const isSelected = dayKey === selectedKey;
-                const isMuted = day.getMonth() !== currentMonth;
+            {calendarView === "decades" ? (
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {decadeOptions.map((decadeStart) => {
+                  const isCurrentDecade = decadeStart === currentDecadeStart;
 
-                return (
-                  <button
-                    key={dayKey}
-                    type="button"
-                    className={`h-8 rounded-md border text-xs transition-colors ${
-                      isSelected
-                        ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
-                        : "border-transparent bg-Color-White/70 hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
-                    } ${isMuted ? "text-Color-Neutral" : "text-Color-Scheme-1-Text"}`}
-                    onClick={() => {
-                      onChange(dayKey);
-                      setIsOpen(false);
-                      triggerRef.current?.blur();
-                    }}
-                  >
-                    {day.getDate()}
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={decadeStart}
+                      type="button"
+                      className={`h-10 rounded-md border text-xs transition-colors ${
+                        isCurrentDecade
+                          ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                          : "border-transparent bg-Color-White/70 text-Color-Scheme-1-Text hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                      }`}
+                      onClick={() => {
+                        setVisibleMonth(new Date(decadeStart, currentMonth, 1));
+                        setCalendarView("years");
+                      }}
+                    >
+                      {decadeStart}-{decadeStart + 9}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {calendarView === "years" ? (
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {yearOptions.map((year) => {
+                  const isSelectedYear = selectedDate?.getFullYear() === year;
+                  const isMuted = year < currentDecadeStart || year > currentDecadeStart + 9;
+
+                  return (
+                    <button
+                      key={year}
+                      type="button"
+                      className={`h-10 rounded-md border text-xs transition-colors ${
+                        isSelectedYear
+                          ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                          : "border-transparent bg-Color-White/70 hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                      } ${isMuted ? "text-Color-Neutral" : "text-Color-Scheme-1-Text"}`}
+                      onClick={() => {
+                        setVisibleMonth(new Date(year, currentMonth, 1));
+                        setCalendarView("months");
+                      }}
+                    >
+                      {year}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {calendarView === "months" ? (
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {calendarMonthOptions.map((month) => {
+                  const isSelectedMonth = selectedDate?.getFullYear() === currentYear && selectedDate.getMonth() === month.index;
+                  const isCurrentVisibleMonth = currentMonth === month.index;
+
+                  return (
+                    <button
+                      key={month.index}
+                      type="button"
+                      className={`h-10 rounded-md border text-xs transition-colors ${
+                        isSelectedMonth || isCurrentVisibleMonth
+                          ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                          : "border-transparent bg-Color-White/70 text-Color-Scheme-1-Text hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                      }`}
+                      aria-label={`Show ${month.longLabel} ${currentYear}`}
+                      onClick={() => {
+                        setVisibleMonth(new Date(currentYear, month.index, 1));
+                        setCalendarView("days");
+                      }}
+                    >
+                      {month.shortLabel}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {calendarView === "days" ? (
+              <>
+                <div className="mt-4 grid grid-cols-7 gap-1.5 text-center text-[11px] uppercase text-Color-Neutral">
+                  {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+                    <div key={day}>{day}</div>
+                  ))}
+                </div>
+                <div className="mt-2 grid grid-cols-7 gap-1.5">
+                  {days.map((day) => {
+                    const dayKey = formatCalendarDateKey(day);
+                    const isSelected = dayKey === selectedKey;
+                    const isMuted = day.getMonth() !== currentMonth;
+
+                    return (
+                      <button
+                        key={dayKey}
+                        type="button"
+                        className={`h-8 rounded-md border text-xs transition-colors ${
+                          isSelected
+                            ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                            : "border-transparent bg-Color-White/70 hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                        } ${isMuted ? "text-Color-Neutral" : "text-Color-Scheme-1-Text"}`}
+                        onClick={() => {
+                          onChange(dayKey);
+                          setIsOpen(false);
+                          setCalendarView("days");
+                          triggerRef.current?.blur();
+                        }}
+                      >
+                        {day.getDate()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
 
             {value ? (
               <button
@@ -318,6 +568,7 @@ const IntakeDatePicker = ({
                 onClick={() => {
                   onChange("");
                   setIsOpen(false);
+                  setCalendarView("days");
                   triggerRef.current?.blur();
                 }}
               >
@@ -340,6 +591,7 @@ const IntakeDatePicker = ({
         onClick={() => {
           if (!isOpen) {
             updatePopoverPosition();
+            setCalendarView("days");
           }
           setIsOpen(!isOpen);
         }}
@@ -1294,6 +1546,9 @@ export default function StartDocumentPage() {
       .flatMap((section) => section.fields)
       .filter((field) => !isTemporarilyHiddenCreateFlowField(field.canonical_key)) as MemberFacingField[];
   }, [documentSections]);
+  const documentsColumnHasPriorDocumentItems = documentsColumnFields.some(
+    (field) => normalizeCanonicalKey(field.canonical_key) === "prior_document_items",
+  );
 
   const selectedModeKeyForLayout =
     selectedProductFlowMode || selectedProductFlowModeDefinition?.modeKey || "";
@@ -2206,9 +2461,9 @@ export default function StartDocumentPage() {
         | null;
 
       if (response.status === 422 || payload?.valid === false) {
-        const firstErrorMessage = payload?.errors?.find(
-          (item) => typeof item.message === "string" && item.message.trim().length > 0,
-        )?.message;
+        const validationMessages = (payload?.errors ?? [])
+          .map((item) => (typeof item.message === "string" ? item.message.trim() : ""))
+          .filter((message) => message.length > 0);
 
         captureAppMessage("Member form submission validation failed", {
           level: "warning",
@@ -2236,9 +2491,10 @@ export default function StartDocumentPage() {
         });
 
         setSubmissionErrorMessage(
-          firstErrorMessage ??
-            payload?.message ??
-            "Member form validation failed. Review your entries and try again.",
+          validationMessages.length > 0
+            ? formatMissingInformationAlert(validationMessages)
+            : payload?.message ??
+              "Member form validation failed. Review your entries and try again.",
         );
         return false;
       }
@@ -2379,7 +2635,7 @@ export default function StartDocumentPage() {
     }
 
     if (continueValidationMessages.length > 0) {
-      setSubmissionErrorMessage("Complete the missing information listed below before continuing.");
+      setSubmissionErrorMessage(formatMissingInformationAlert(continueValidationMessages));
       return;
     }
 
@@ -2580,11 +2836,39 @@ export default function StartDocumentPage() {
   };
 
   const renderFieldLabel = (field: MemberFacingField) => {
+    const allowedValues = getResolvedAllowedValues(field);
+    const normalizedCanonicalKey = normalizeCanonicalKey(field.canonical_key);
+    const shouldShowSelectAll =
+      bulkSelectableCheckboxFieldKeys.has(normalizedCanonicalKey) &&
+      getMemberFieldControlKind(field, allowedValues) === "checkbox-multi" &&
+      allowedValues.length > 0;
+    const selectedValues = shouldShowSelectAll
+      ? toStringArrayValue(formValues[field.canonical_key])
+      : [];
+    const areAllValuesSelected =
+      shouldShowSelectAll && allowedValues.every((value) => selectedValues.includes(value));
+
     return (
-      <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
+      <div className="flex w-full flex-wrap items-center gap-2 text-sm font-medium text-Color-Scheme-1-Text">
         <span>{field.label}</span>
         {field.help_text ? (
           <HelpTooltip label={`Explain ${field.label}`} content={field.help_text} />
+        ) : null}
+        {shouldShowSelectAll ? (
+          <label className="ml-auto inline-flex items-center gap-1.5 text-xs font-medium text-Color-Neutral-Darkest">
+            <input
+              checked={areAllValuesSelected}
+              className="h-3.5 w-3.5 accent-Color-Scheme-1-Text"
+              onChange={(event) => {
+                handleFieldChange(
+                  field.canonical_key,
+                  event.target.checked ? [...allowedValues] : [],
+                );
+              }}
+              type="checkbox"
+            />
+            <span>Select all</span>
+          </label>
         ) : null}
       </div>
     );
@@ -4036,6 +4320,12 @@ export default function StartDocumentPage() {
                 <div className="text-sm text-Color-Neutral">Loading document requirements...</div>
               ) : memberForm ? (
                 <div className="space-y-4">
+                  {documentsColumnHasPriorDocumentItems ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                      Documents to Include is required before review. Start with the originating trust agreement or declaration, then add amendments and supporting records in date order.
+                    </div>
+                  ) : null}
+
                   {shouldShowUploadColumn && documentsColumnFields.length > 0 ? (
                     documentsColumnFields.map((field) => {
                       const fieldMicrocopy = getFieldMicrocopy(field.canonical_key);

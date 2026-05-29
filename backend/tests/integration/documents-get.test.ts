@@ -1045,6 +1045,72 @@ describe("GET documents endpoints", () => {
     });
   });
 
+  it("saves submitted pending-review intake drafts for blocker fixes", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "pending_review",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      intake_status: "submitted",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: false,
+      draft: {
+        document_id: "doc-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: "trust_requirements",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {
+          prior_document_items: ["doc-row"],
+        },
+        canonical_answers_json: {
+          prior_document_items: ["doc-row"],
+        },
+        revision: 8,
+        created_at: "2026-03-05T00:05:00.000Z",
+        updated_at: "2026-03-05T00:20:00.000Z",
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await putWithLog(
+      "/documents/doc-1/intake-draft",
+      {
+        currentStep: "trust_requirements",
+        answers: {
+          prior_document_items: ["doc-row"],
+        },
+        canonicalAnswers: {
+          prior_document_items: ["doc-row"],
+        },
+        expectedRevision: 7,
+      },
+      "saves submitted pending-review intake drafts for blocker fixes",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveDocumentIntakeDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        currentStep: "trust_requirements",
+        expectedRevision: 7,
+        eventType: "autosave",
+      }),
+    );
+  });
+
   it("returns 409 on intake draft revision conflict", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
@@ -1365,6 +1431,113 @@ describe("GET documents endpoints", () => {
         revocability_status: "revocable",
       },
     });
+  });
+
+  it("resubmits submitted pending-review intake after blocker fixes", async () => {
+    const trustmaker = JSON.stringify({
+      fullName: "Jorge Lopez",
+      email: "lopezb.jl@gmail.com",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "(415) 555-0103",
+      isSigningTrustee: false,
+    });
+
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "pending_review",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [],
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:15:00.000Z",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [
+            {
+              fields: [
+                {
+                  canonical_key: "grantors",
+                },
+                {
+                  canonical_key: "prior_document_items",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      missing: [],
+    });
+
+    mocks.validateMemberFormSubmissionMock.mockReturnValue({
+      valid: true,
+      errors: [],
+    });
+
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: false,
+      draft: {
+        document_id: "doc-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-CA",
+        current_step: "trust_requirements",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {
+          grantors: [trustmaker],
+          prior_document_items: ["doc-row"],
+        },
+        canonical_answers_json: {
+          grantors: [trustmaker],
+          prior_document_items: ["doc-row"],
+        },
+        revision: 8,
+        created_at: "2026-03-05T00:05:00.000Z",
+        updated_at: "2026-03-05T00:20:00.000Z",
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      email: "lopezb.jl@gmail.com",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-submit",
+      {
+        currentStep: "trust_requirements",
+        answers: {
+          grantors: [trustmaker],
+          prior_document_items: ["doc-row"],
+        },
+        expectedRevision: 7,
+      },
+      "resubmits submitted pending-review intake after blocker fixes",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveDocumentIntakeDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        eventType: "submit",
+        expectedRevision: 7,
+        answers: expect.objectContaining({
+          grantors: [trustmaker],
+          prior_document_items: ["doc-row"],
+          revocability_status: "revocable",
+        }),
+      }),
+    );
   });
 
   it("returns 409 when intake submit is blocked by the launch gate", async () => {

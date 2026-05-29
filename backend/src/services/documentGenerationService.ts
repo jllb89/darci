@@ -1297,6 +1297,17 @@ const buildSelectionCatalogs = (extractionDocument?: DocumentExtractionContract)
   return selectionCatalogs;
 };
 
+const getMissingMemberFormValueMessage = (binding: DocumentTemplateBinding) => {
+  if (
+    binding.canonicalKey === "prior_document_items" ||
+    binding.placeholder === "Document#.Name / Document#.Date"
+  ) {
+    return "This amendment requires at least one document to include. Add each document's type, signed date, document label, and recording or attachment reference before continuing.";
+  }
+
+  return `Required placeholder ${binding.placeholder} does not have a member-form value in the submitted intake.`;
+};
+
 export const buildGenerationRunBlockers = (input: {
   jurisdiction: string;
   outputKey: string;
@@ -1379,7 +1390,7 @@ export const buildGenerationRunBlockers = (input: {
           code: "missing_render_context_value",
           source: binding.source,
           field: binding.placeholder,
-          message: `Required placeholder ${binding.placeholder} does not have a member-form value in the submitted intake.`,
+          message: getMissingMemberFormValueMessage(binding),
           blocking: true,
         });
         continue;
@@ -1400,7 +1411,7 @@ export const buildGenerationRunBlockers = (input: {
         code: "missing_render_context_value",
         source: binding.source,
         field: binding.placeholder,
-        message: `Required placeholder ${binding.placeholder} does not have a member-form value in the submitted intake.`,
+        message: getMissingMemberFormValueMessage(binding),
         blocking: true,
       });
       continue;

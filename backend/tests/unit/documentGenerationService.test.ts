@@ -120,6 +120,40 @@ describe("documentGenerationService blockers", () => {
     ]);
   });
 
+  it("uses document-to-include copy for missing prior document placeholders", () => {
+    const blockers = buildGenerationRunBlockers({
+      jurisdiction: "US-CA",
+      outputKey: "trust_rrr",
+      documentKey: "trust_rrr",
+      templateResolved: true,
+      templateArtifact: { id: "artifact-1" } as never,
+      extractionDocument: buildExtractionDocument([
+        {
+          placeholder: "Document#.Name / Document#.Date",
+          description: "Prior trust documents listed in chronology order.",
+          required: true,
+          source: "member_form",
+          status: "mapped",
+          canonicalKey: "prior_document_items",
+        },
+      ]),
+      signerObligations,
+      placeholderValues: {
+        "Document#.Name / Document#.Date": null,
+      },
+    });
+
+    expect(blockers).toEqual([
+      expect.objectContaining({
+        code: "missing_render_context_value",
+        field: "Document#.Name / Document#.Date",
+        message:
+          "This amendment requires at least one document to include. Add each document's type, signed date, document label, and recording or attachment reference before continuing.",
+        blocking: true,
+      }),
+    ]);
+  });
+
   it("defers registry-dependent system placeholders during review artifact generation", () => {
     const blockers = buildGenerationRunBlockers({
       jurisdiction: "US-CA",

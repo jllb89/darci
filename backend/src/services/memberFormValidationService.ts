@@ -23,6 +23,14 @@ type TrusteeRow = {
   email: string | null;
 };
 
+type PriorDocumentRow = {
+  documentType: string;
+  title: string;
+  date: string;
+  recordingReference: string;
+  chronologyOrder: number;
+};
+
 type SignatureAuthorityMode =
   | "all_trustees"
   | "any_one_trustee"
@@ -182,13 +190,100 @@ const extractEmailFromContactValue = (value: MemberFormSubmissionValue | undefin
   return null;
 };
 
+const parsePositiveInteger = (value: unknown) => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+};
+
+const extractPriorDocumentRows = (value: MemberFormSubmissionValue | undefined) => {
+  return toStringArray(value)
+    .map((entry, index): PriorDocumentRow => {
+      try {
+        const parsed = JSON.parse(entry) as unknown;
+        if (isRecord(parsed)) {
+          return {
+            documentType:
+              asTrimmedString(parsed.documentType) || asTrimmedString(parsed.document_type),
+            title:
+              asTrimmedString(parsed.documentLabel) ||
+              asTrimmedString(parsed.title) ||
+              asTrimmedString(parsed.name),
+            date: asTrimmedString(parsed.documentDate) || asTrimmedString(parsed.date),
+            recordingReference:
+              asTrimmedString(parsed.attachmentReference) ||
+              asTrimmedString(parsed.attachment_reference) ||
+              asTrimmedString(parsed.recording_reference),
+            chronologyOrder:
+              parsePositiveInteger(parsed.chronologyOrder ?? parsed.chronology_order) ||
+              index + 1,
+          };
+        }
+      } catch {
+        // Falls through to legacy single-string handling.
+      }
+
+      return {
+        documentType: "",
+        title: entry.trim(),
+        date: "",
+        recordingReference: "",
+        chronologyOrder: index + 1,
+      };
+    })
+    .sort((left, right) => left.chronologyOrder - right.chronologyOrder);
+};
+
+const hasPriorDocumentRowValue = (row: PriorDocumentRow) => {
+  return (
+    row.documentType.length > 0 ||
+    row.title.length > 0 ||
+    row.date.length > 0 ||
+    row.recordingReference.length > 0
+  );
+};
+
+const isPriorDocumentRowComplete = (row: PriorDocumentRow) => {
+  return (
+    row.documentType.length > 0 &&
+    row.title.length > 0 &&
+    row.date.length > 0 &&
+    row.recordingReference.length > 0
+  );
+};
+
+const countPriorDocumentChronologyErrors = (rows: PriorDocumentRow[]) => {
+  let previousDate = "";
+  let errorCount = 0;
+
+  for (const row of rows.filter(isPriorDocumentRowComplete)) {
+    if (previousDate && row.date < previousDate) {
+      errorCount += 1;
+    }
+
+    previousDate = row.date;
+  }
+
+  return errorCount;
+};
+
 const flattenMemberFields = (contract: MemberFormRulesContract) => {
   return contract.aggregatedForm.sections.flatMap((section) => section.fields);
 };
 
 const MANDATORY_CONTACT_LIST_KEYS = new Set(["grantors", "trustees", "successor_trustees"]);
 const MANDATORY_CONTACT_VALUE_KEYS = new Set(["principal_contact", "agent_contact"]);
+const ORIGINATING_PRIOR_DOCUMENT_TYPES = new Set(["trust_agreement", "declaration_of_trust"]);
 const MAX_TRUSTMAKER_COUNT = 2;
+
+const asTrimmedString = (value: unknown) => {
+  return typeof value === "string" ? value.trim() : "";
+};
 
 const getFieldByCanonicalKey = (
   contract: MemberFormRulesContract,
@@ -334,6 +429,45 @@ export const validateMemberFormSubmission = (
             message: "Each Trustmaker must use a unique email address.",
           });
         }
+      }
+    }
+
+    if (canonicalKey === "prior_document_items") {
+      const rows = extractPriorDocumentRows(formValues[field.canonical_key]);
+      const filledRows = rows.filter(hasPriorDocumentRowValue);
+
+      if (filledRows.length === 0) {
+        errors.push({
+          code: "prior_document_items_required",
+          field: field.canonical_key,
+          message: "Add at least one document to include before continuing.",
+        });
+        continue;
+      }
+
+      if (filledRows.some((row) => !isPriorDocumentRowComplete(row))) {
+        errors.push({
+          code: "prior_document_items_incomplete",
+          field: field.canonical_key,
+          message:
+            "Each document to include must have a type, signed date, document label, and recording or attachment reference.",
+        });
+      }
+
+      if (!ORIGINATING_PRIOR_DOCUMENT_TYPES.has(filledRows[0]?.documentType ?? "")) {
+        errors.push({
+          code: "prior_document_items_originating_document_required",
+          field: field.canonical_key,
+          message: "Document 1 must be a Trust Agreement or Declaration of Trust.",
+        });
+      }
+
+      if (countPriorDocumentChronologyErrors(filledRows) > 0) {
+        errors.push({
+          code: "prior_document_items_chronology_order",
+          field: field.canonical_key,
+          message: "Documents to include must be listed in chronological order from oldest to newest.",
+        });
       }
     }
   }

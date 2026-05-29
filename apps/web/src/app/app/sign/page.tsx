@@ -342,20 +342,49 @@ const buildRemainingSignerInviteMessage = (
   const fragments: string[] = [];
 
   if (invitedCount > 0) {
-    fragments.push(`queued ${invitedCount}`);
+    fragments.push(`${invitedCount} queued`);
   }
   if (skippedCount > 0) {
-    fragments.push(`skipped ${skippedCount}`);
+    fragments.push(`${skippedCount} skipped`);
   }
   if (failureCount > 0) {
     fragments.push(`${failureCount} failed`);
   }
 
   if (fragments.length === 0) {
-    return "Remaining signer invites are already up to date.";
+    return "Remaining signature requests are already up to date.";
   }
 
-  return `Remaining signer invites: ${fragments.join(", ")}.`;
+  return `Remaining signature requests: ${fragments.join(", ")}.`;
+};
+
+const formatSignatureRequestCount = (count: number) => {
+  return `${count} signature request${count === 1 ? "" : "s"}`;
+};
+
+const buildRemainingSignerWorkSummary = (hiddenSignatures: SigningSignature[]) => {
+  const pendingHiddenSignatures = hiddenSignatures.filter(
+    (signature) => signature.status !== "captured",
+  );
+  const pendingCount = pendingHiddenSignatures.length;
+
+  if (pendingCount === 0) {
+    return "The remaining signer workflow is already complete.";
+  }
+
+  const signerNames = Array.from(
+    new Set(
+      pendingHiddenSignatures
+        .map((signature) => signature.partyName.trim())
+        .filter((name) => name.length > 0),
+    ),
+  );
+
+  if (signerNames.length === 1) {
+    return `Waiting on ${signerNames[0]} to complete ${formatSignatureRequestCount(pendingCount)}.`;
+  }
+
+  return `Waiting on ${signerNames.length} signers to complete ${formatSignatureRequestCount(pendingCount)}.`;
 };
 
 const getCanvasCoordinates = (
@@ -542,6 +571,7 @@ export default function SignPage() {
         .filter((name) => name.length > 0),
     ),
   ).length;
+  const remainingSignerWorkSummary = buildRemainingSignerWorkSummary(hiddenSignatures);
   const selectedProductLabel = formatProductFlowModeLabel(
     payload?.document?.productFlowMode ?? payload?.document?.documentType,
   );
@@ -1725,8 +1755,8 @@ export default function SignPage() {
                 <div className="mt-3 text-sm leading-6 text-emerald-800/90">
                   {payload?.signing?.state === "confirmed"
                     ? "The prepared signing set is fully confirmed."
-                    : remainingSignerCount > 0
-                      ? `The next workflow step is notifying the remaining ${remainingSignerCount} signer${remainingSignerCount === 1 ? "" : "s"}.`
+                    : hiddenSignatures.length > 0
+                      ? remainingSignerWorkSummary
                       : "Your signature has been saved on this prepared signing set."}
                 </div>
                 {principalSigningComplete && hiddenSignatures.length > 0 && inviteDispatchSummary.message ? (
@@ -1844,7 +1874,7 @@ export default function SignPage() {
 
               {remainingSignerCount > 0 ? (
                 <div className="mt-5 text-sm leading-6 text-Color-Neutral">
-                  {remainingSignerCount} remaining signer{remainingSignerCount === 1 ? "" : "s"} are outside this member step.
+                  {remainingSignerWorkSummary}
                 </div>
               ) : null}
             </div>

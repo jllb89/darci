@@ -1,5 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import { listDocuments, getOrCreateUserId, type DocumentRecord } from "./documentService";
+import {
+  listSigningRequestCards,
+  type SigningRequestCard,
+} from "./documentInviteService";
 import { listRecentAuditEventsForDocumentIds } from "./auditService";
 import { getVisibleDocumentIdn } from "./documentVisibilityService";
 import { normalizeRuntimeRole, type RuntimeRole } from "./userRoleService";
@@ -147,6 +151,8 @@ export type DashboardRequestSummary = {
   meetingStatus: string | null;
 };
 
+export type DashboardSignatureRequestSummary = SigningRequestCard;
+
 export type DashboardMeetingSummary = {
   id: string;
   requestId: string;
@@ -185,6 +191,7 @@ export type RoleAwareDashboardResponse = {
   metrics: DashboardMetric[];
   documents: DashboardDocumentSummary[];
   requests: DashboardRequestSummary[];
+  signatureRequests?: DashboardSignatureRequestSummary[];
   meetings: DashboardMeetingSummary[];
   activity: DashboardActivity[];
   alerts: DashboardAlert[];
@@ -211,6 +218,7 @@ type MemberLikeDashboardData = {
   counts: MemberDashboardCounts;
   documents: DashboardDocumentSummary[];
   requests: DashboardRequestSummary[];
+  signatureRequests: DashboardSignatureRequestSummary[];
   meetings: DashboardMeetingSummary[];
   activity: DashboardActivity[];
   alerts: DashboardAlert[];
@@ -607,6 +615,14 @@ const buildMemberLikeDashboardData = async (input: {
   const requests = includeWorkflowState
     ? await listNotarizationRequestsByDocumentIds(documentIds)
     : [];
+  const signatureRequests = includeWorkflowState
+    ? await listSigningRequestCards({
+        role: input.role,
+        viewerUserId: ownerId,
+        viewerEmail: input.email ?? null,
+        limit: REQUEST_LIMIT,
+      })
+    : { incoming: [], outgoing: [] };
   const meetings = includeWorkflowState
     ? await listMeetingsByRequestIds(requests.map((request) => request.id))
     : [];
@@ -646,6 +662,12 @@ const buildMemberLikeDashboardData = async (input: {
     usersById,
     meetingsByRequestId,
   });
+  const signatureRequestSummary = [
+    ...signatureRequests.incoming,
+    ...signatureRequests.outgoing,
+  ]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, REQUEST_LIMIT);
 
   const upcomingMeetings = buildMeetingSummaries({
     meetings,
@@ -709,6 +731,7 @@ const buildMemberLikeDashboardData = async (input: {
     counts,
     documents: recentDocuments.map((document) => toDashboardDocumentSummary(document, input.role)),
     requests: requestsSummary,
+    signatureRequests: signatureRequestSummary,
     meetings: upcomingMeetings,
     activity: auditEvents.map((event) => toDashboardActivity(event, documentsById)),
     alerts,
@@ -912,6 +935,7 @@ export const buildRoleAwareDashboard = async (input: {
       metrics: dashboard.metrics,
       documents: dashboard.documents,
       requests: dashboard.requests,
+      signatureRequests: dashboard.signatureRequests,
       meetings: dashboard.meetings,
       activity: dashboard.activity,
       alerts: dashboard.alerts,

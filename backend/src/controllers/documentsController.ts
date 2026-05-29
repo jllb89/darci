@@ -940,6 +940,37 @@ const documentIntakeSubmitSchema = z
   })
   .passthrough();
 
+const canEditDocumentIntake = (
+  document: Pick<DocumentRecord, "intake_status" | "status">,
+) => {
+  const intakeStatus = document.intake_status?.trim().toLowerCase();
+  if (intakeStatus === "locked") {
+    return false;
+  }
+
+  if (intakeStatus === "submitted") {
+    const documentStatus = document.status?.trim().toLowerCase();
+    return documentStatus === "draft" || documentStatus === "pending_review";
+  }
+
+  return true;
+};
+
+const getDocumentIntakeEditConflictMessage = (
+  document: Pick<DocumentRecord, "intake_status" | "status">,
+) => {
+  const intakeStatus = document.intake_status?.trim().toLowerCase();
+  if (intakeStatus === "locked") {
+    return "Intake is locked and can no longer be edited from this form.";
+  }
+
+  if (intakeStatus === "submitted") {
+    return "Review has already been approved, so this intake can no longer be edited from this form.";
+  }
+
+  return "Intake can no longer be edited from this form.";
+};
+
 const generationRunOutputKeySchema = z
   .string()
   .trim()
@@ -1720,6 +1751,31 @@ const resolveVisibleReviewOutputs = (
       viewerRole,
     }),
   );
+};
+
+const resolveApprovedReviewOutputKeys = (input: {
+  document: Pick<DocumentRecord, "output_bundle">;
+  viewerRole?: string | null;
+  reviewedOutputs: Pick<ReviewOutputResponse, "outputKey">[];
+}) => {
+  const reviewedOutputKeys = input.reviewedOutputs.map((output) => output.outputKey);
+
+  if (reviewedOutputKeys.length === 0) {
+    return reviewedOutputKeys;
+  }
+
+  const hiddenRequiredOutputKeys = parseOutputBundle(input.document.output_bundle)
+    .filter(
+      (output) =>
+        output.isRequired &&
+        !shouldExposeDocumentReviewOutput({
+          outputKey: output.outputKey,
+          viewerRole: input.viewerRole,
+        }),
+    )
+    .map((output) => output.outputKey);
+
+  return Array.from(new Set([...reviewedOutputKeys, ...hiddenRequiredOutputKeys]));
 };
 
 const shouldUseInlineReviewGenerationFallback = () => {
@@ -4256,6 +4312,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
     return;
   }
 
+  const viewerRole = req.user?.role ?? "member";
+
   const parsed = reviewApprovalSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return sendValidationError(res, parsed.error);
@@ -4275,7 +4333,7 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
 
   const review = await buildDocumentReviewState({
     document,
-    viewerRole: req.user?.role ?? "member",
+    viewerRole,
   });
 
   if (document.status === "pending_signature" && isFinalIdn(document.idn) && review.reviewApproval) {
@@ -4318,6 +4376,12 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
 
   const approvedAt = new Date().toISOString();
   const assignedIdn = resolveReviewApprovalIdn(document);
+  const approvedOutputKeys = resolveApprovedReviewOutputKeys({
+    document,
+    viewerRole,
+    reviewedOutputs: review.outputs,
+  });
+  const approvedVersionIds = review.outputs.map((output) => output.versionId);
   const reviewedRunIds = Array.from(
     new Set(
       review.outputs
@@ -4373,8 +4437,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
     latestVersionId: latestReviewedOutput.versionId,
     latestVersionNumber: latestReviewedOutput.version,
     latestRenderedRunId: latestReviewedOutput.generationRunId,
-    approvedOutputKeys: review.outputs.map((output) => output.outputKey),
-    approvedVersionIds: review.outputs.map((output) => output.versionId),
+    approvedOutputKeys,
+    approvedVersionIds,
     reviewSource,
   };
 
@@ -4400,8 +4464,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
           reviewSource,
           latestVersionId: latestReviewedOutput.versionId,
           latestRenderedRunId: latestReviewedOutput.generationRunId,
-          approvedOutputKeys: review.outputs.map((output) => output.outputKey),
-          approvedVersionIds: review.outputs.map((output) => output.versionId),
+          approvedOutputKeys,
+          approvedVersionIds,
           actorSupabaseId: req.user?.id ?? null,
           actorRole: req.user?.role ?? null,
         },
@@ -4445,8 +4509,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
     verificationUrl,
     latestVersionId: latestReviewedOutput.versionId,
     latestRenderedRunId: latestReviewedOutput.generationRunId,
-    approvedOutputKeys: review.outputs.map((output) => output.outputKey),
-    approvedVersionIds: review.outputs.map((output) => output.versionId),
+    approvedOutputKeys,
+    approvedVersionIds,
     signerNames,
     idnRecord,
   });
@@ -4462,8 +4526,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
       approved_at: approvedAt,
       latest_version_id: latestReviewedOutput.versionId,
       latest_rendered_run_id: latestReviewedOutput.generationRunId,
-      approved_output_keys: review.outputs.map((output) => output.outputKey),
-      approved_version_ids: review.outputs.map((output) => output.versionId),
+      approved_output_keys: approvedOutputKeys,
+      approved_version_ids: approvedVersionIds,
       review_source: reviewSource,
     },
   });
@@ -4479,8 +4543,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
       idn_algorithm_version: "phase_c_v1",
       latest_version_id: latestReviewedOutput.versionId,
       latest_rendered_run_id: latestReviewedOutput.generationRunId,
-      approved_output_keys: review.outputs.map((output) => output.outputKey),
-      approved_version_ids: review.outputs.map((output) => output.versionId),
+      approved_output_keys: approvedOutputKeys,
+      approved_version_ids: approvedVersionIds,
       review_source: reviewSource,
     },
   });
@@ -4497,8 +4561,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
         reviewSource,
         latestVersionId: latestReviewedOutput.versionId,
         latestRenderedRunId: latestReviewedOutput.generationRunId,
-        approvedOutputKeys: review.outputs.map((output) => output.outputKey),
-        approvedVersionIds: review.outputs.map((output) => output.versionId),
+        approvedOutputKeys,
+        approvedVersionIds,
       },
     });
 
@@ -4508,7 +4572,7 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
   } else {
     const signingGeneration = await createGenerationRunsForDocument({
       document: updatedDocument,
-      outputKeys: review.outputs.map((output) => output.outputKey),
+      outputKeys: approvedOutputKeys,
       reuseSatisfiedRunsCreatedAfter: approvedAt,
       actorContext,
     });
@@ -4553,8 +4617,8 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
       reviewSource,
       latestVersionId: latestReviewedOutput.versionId,
       latestRenderedRunId: latestReviewedOutput.generationRunId,
-      approvedOutputKeys: review.outputs.map((output) => output.outputKey),
-      approvedVersionIds: review.outputs.map((output) => output.versionId),
+      approvedOutputKeys,
+      approvedVersionIds,
     },
   });
 };
@@ -4623,10 +4687,10 @@ export const saveDocumentIntakeDraft = async (req: Request, res: Response) => {
     return;
   }
 
-  if (isDocumentIntakeLocked(document)) {
+  if (!canEditDocumentIntake(document)) {
     return res.status(409).json({
       error: "conflict",
-      message: "Intake is already submitted and cannot be modified",
+      message: getDocumentIntakeEditConflictMessage(document),
       intakeStatus: document.intake_status,
     });
   }
@@ -4736,10 +4800,10 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
     return;
   }
 
-  if (isDocumentIntakeLocked(document)) {
+  if (!canEditDocumentIntake(document)) {
     return res.status(409).json({
       error: "conflict",
-      message: "Intake is already submitted and cannot be modified",
+      message: getDocumentIntakeEditConflictMessage(document),
       intakeStatus: document.intake_status,
     });
   }

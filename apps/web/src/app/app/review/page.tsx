@@ -550,7 +550,16 @@ export default function ReviewPage() {
   ]);
 
   useEffect(() => {
-    if (payload?.review?.state !== "generating") {
+    const shouldPollReview = Boolean(
+      payload?.review &&
+        (payload.review.state === "generating" ||
+          payload.review.requiresGeneration ||
+          payload.review.pendingOutputs.some((output) =>
+            isActiveGenerationStatus(output.status),
+          )),
+    );
+
+    if (!shouldPollReview) {
       return;
     }
 
@@ -561,7 +570,7 @@ export default function ReviewPage() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [fetchReview, payload?.review?.state]);
+  }, [fetchReview, payload?.review]);
 
   const selectedOutput =
     payload?.review?.outputs.find((output) => output.outputKey === selectedOutputKey) ??

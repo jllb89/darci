@@ -85,6 +85,22 @@ const buildTrustContract = (): MemberFormRulesContract => {
             },
           ],
         },
+        {
+          key: "documents",
+          title: "Documents",
+          fields: [
+            {
+              canonical_key: "prior_document_items",
+              label: "Documents to Include",
+              semantic_type: "object",
+              data_type: "array",
+              required: true,
+              repeatable: true,
+              sources: [],
+              ui_group: "documents",
+            },
+          ],
+        },
       ],
       source_trace: [],
     },
@@ -116,6 +132,15 @@ const buildFormValues = (
     principal_contact: JSON.stringify({ email: "principal@example.com" }),
     agent_contact: JSON.stringify({ email: "agent@example.com" }),
     grantors: [grantorAlice, grantorBob],
+    prior_document_items: [
+      JSON.stringify({
+        chronology_order: 1,
+        document_type: "trust_agreement",
+        title: "Original Trust Agreement",
+        date: "2021-04-05",
+        recording_reference: "agreement.pdf",
+      }),
+    ],
     tax_id_owner: "Alice Trustmaker",
     trustees: [trusteeAlice],
     trustee_signature_authority: "named_signing_trustee",
@@ -234,6 +259,101 @@ describe("memberFormValidationService", () => {
 
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
+  });
+
+  it("fails when documents to include are missing", () => {
+    const contract = buildTrustContract();
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        prior_document_items: [],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.code === "prior_document_items_required")).toBe(
+      true,
+    );
+  });
+
+  it("fails when a document to include row is incomplete", () => {
+    const contract = buildTrustContract();
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        prior_document_items: [
+          JSON.stringify({
+            chronology_order: 1,
+            document_type: "trust_agreement",
+            title: "Original Trust Agreement",
+          }),
+        ],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.code === "prior_document_items_incomplete")).toBe(
+      true,
+    );
+  });
+
+  it("fails when the first document to include is not the originating trust document", () => {
+    const contract = buildTrustContract();
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        prior_document_items: [
+          JSON.stringify({
+            chronology_order: 1,
+            document_type: "amendment",
+            title: "First Amendment",
+            date: "2022-04-05",
+            recording_reference: "amendment.pdf",
+          }),
+        ],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some(
+        (error) => error.code === "prior_document_items_originating_document_required",
+      ),
+    ).toBe(true);
+  });
+
+  it("fails when documents to include are not chronological", () => {
+    const contract = buildTrustContract();
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        prior_document_items: [
+          JSON.stringify({
+            chronology_order: 1,
+            document_type: "trust_agreement",
+            title: "Original Trust Agreement",
+            date: "2022-04-05",
+            recording_reference: "agreement.pdf",
+          }),
+          JSON.stringify({
+            chronology_order: 2,
+            document_type: "amendment",
+            title: "First Amendment",
+            date: "2021-04-05",
+            recording_reference: "amendment.pdf",
+          }),
+        ],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) => error.code === "prior_document_items_chronology_order"),
+    ).toBe(true);
   });
 
   it("fails when multiple trustmakers exist and tax ID owner is missing", () => {

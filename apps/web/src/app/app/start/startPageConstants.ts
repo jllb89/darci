@@ -35,7 +35,7 @@ export const productFlowStepFamilyScopes: Record<FormStep, FieldFamilyScope[]> =
 export const productFlowStepOrderByMode: Record<ProductFlowModeKey, FormStep[]> = {
   poa_only: ["general_information", "poa_requirements"],
   trust_bundle: ["trust_requirements", "poa_requirements"],
-  notarize_document: ["general_information", "poa_requirements"],
+  notarize_document: ["general_information"],
 };
 
 export const productFlowUploadDefaultsByMode: Record<

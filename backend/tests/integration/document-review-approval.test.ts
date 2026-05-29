@@ -167,6 +167,13 @@ describe("document review approval", () => {
           sortOrder: 0,
           metadata: {},
         },
+        {
+          outputKey: "trust_certificate",
+          outputLabel: "Certificate of Trust",
+          isRequired: true,
+          sortOrder: 1,
+          metadata: {},
+        },
       ],
       created_at: "2026-03-05T00:00:00.000Z",
     });
@@ -226,12 +233,12 @@ describe("document review approval", () => {
     });
     mocks.getActiveTemplateRegistryForOutputMock.mockResolvedValue(null);
     mocks.getActiveTemplateArtifactMock.mockResolvedValue(null);
-    mocks.prepareGenerationRunMock.mockResolvedValue({
+    mocks.prepareGenerationRunMock.mockImplementation(async ({ outputKey }: { outputKey: string }) => ({
       document: {
         id: "doc-1",
         owner_id: "owner-1",
       },
-      documentKey: "trust_rrr_document",
+      documentKey: `${outputKey}_document`,
       status: "blocked",
       blockingRequirements: [
         {
@@ -245,8 +252,8 @@ describe("document review approval", () => {
       extractionDocument: null,
       signerObligations: [
         {
-          output_key: "trust_rrr",
-          document_key: "trust_rrr_document",
+          output_key: outputKey,
+          document_key: `${outputKey}_document`,
           party_role: "trustee",
           party_name: "Taylor Trustee",
           obligation_type: "signer",
@@ -257,13 +264,13 @@ describe("document review approval", () => {
         },
       ],
       errorMessage: "Deferred in test",
-    });
-    mocks.createDocumentGenerationRunMock.mockResolvedValue({
-      id: "run-2",
+    }));
+    mocks.createDocumentGenerationRunMock.mockImplementation(async (payload: { outputKey: string; documentKey: string }) => ({
+      id: `run-2-${payload.outputKey}`,
       document_id: "doc-1",
       intake_revision: 7,
-      output_key: "trust_rrr",
-      document_key: "trust_rrr_document",
+      output_key: payload.outputKey,
+      document_key: payload.documentKey,
       template_key: "unresolved_template",
       template_version: "unresolved",
       template_hash: "unresolved",
@@ -286,7 +293,7 @@ describe("document review approval", () => {
       cancellation_reason: null,
       error_message: "Deferred in test",
       created_at: "2026-03-05T00:10:00.000Z",
-    });
+    }));
     mocks.replaceDocumentOutputSignersMock.mockResolvedValue([]);
     mocks.queueDocumentSigningPreparedNotificationMock.mockResolvedValue(null);
     mocks.updateDocumentMock.mockImplementation(async (_documentId: string, updates: Record<string, unknown>) => ({
@@ -303,6 +310,13 @@ describe("document review approval", () => {
           outputLabel: "Trust Registration Amendment",
           isRequired: true,
           sortOrder: 0,
+          metadata: {},
+        },
+        {
+          outputKey: "trust_certificate",
+          outputLabel: "Certificate of Trust",
+          isRequired: true,
+          sortOrder: 1,
           metadata: {},
         },
       ],
@@ -326,6 +340,11 @@ describe("document review approval", () => {
     expect(response.body.document.status).toBe("pending_signature");
     expect(response.body.document.idn).toBeNull();
     expect(response.body.reviewApproval.signingReady).toBe(true);
+    expect(response.body.reviewApproval.approvedOutputKeys).toEqual([
+      "trust_rrr",
+      "trust_certificate",
+    ]);
+    expect(response.body.reviewApproval.approvedVersionIds).toEqual(["ver-1"]);
     expect(mocks.updateDocumentMock).toHaveBeenCalledWith(
       "doc-1",
       expect.objectContaining({
@@ -337,14 +356,26 @@ describe("document review approval", () => {
       expect.objectContaining({
         documentId: "doc-1",
         values: expect.arrayContaining([
-          expect.objectContaining({ systemKey: "review_approval" }),
+          expect.objectContaining({
+            systemKey: "review_approval",
+            value: expect.objectContaining({
+              approvedOutputKeys: ["trust_rrr", "trust_certificate"],
+              approvedVersionIds: ["ver-1"],
+            }),
+          }),
           expect.objectContaining({ systemKey: "registry_number" }),
           expect.objectContaining({ systemKey: "verification_url" }),
           expect.objectContaining({ systemKey: "idn_record" }),
         ]),
       }),
     );
-    expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(4);
+    expect(mocks.prepareGenerationRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outputKey: "trust_rrr" }),
+    );
+    expect(mocks.prepareGenerationRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outputKey: "trust_certificate" }),
+    );
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(5);
   });
 
   it("approves uploaded PDFs by provisioning a synthetic uploaded-document signing run", async () => {

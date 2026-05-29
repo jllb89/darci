@@ -52,6 +52,25 @@ type DashboardRequest = {
   meetingStatus: string | null;
 };
 
+type DashboardSignatureRequest = {
+  id: string;
+  inviteId: string;
+  direction: "incoming" | "outgoing";
+  documentId: string;
+  documentLabel: string;
+  documentTypeLabel: string;
+  signerName: string | null;
+  signerEmail: string | null;
+  senderName: string | null;
+  senderEmail: string | null;
+  roleLabel: string;
+  status: string;
+  updatedAt: string;
+  actionHref: string | null;
+  actionLabel: string;
+  detail: string;
+};
+
 type DashboardMeeting = {
   id: string;
   requestId: string;
@@ -125,6 +144,7 @@ type DashboardPayload = {
   metrics: DashboardMetric[];
   documents: DashboardDocument[];
   requests: DashboardRequest[];
+  signatureRequests?: DashboardSignatureRequest[];
   meetings: DashboardMeeting[];
   activity: DashboardActivity[];
   alerts: DashboardAlert[];
@@ -316,6 +336,20 @@ const formatDocumentTitle = (document: DashboardDocumentLabelSource) => {
       document.productFlowMode,
     );
   return type;
+};
+
+const getSignatureRequestCounterparty = (request: DashboardSignatureRequest) => {
+  if (request.direction === "incoming") {
+    return request.senderName ?? request.senderEmail ?? "DARCi";
+  }
+
+  return request.signerName ?? request.signerEmail ?? "Pending signer";
+};
+
+const getSignatureRequestMeta = (request: DashboardSignatureRequest) => {
+  const counterparty = getSignatureRequestCounterparty(request);
+  const directionLabel = request.direction === "incoming" ? "From" : "Signer";
+  return `${directionLabel}: ${counterparty}`;
 };
 
 const resolveFriendlyDocumentType = (
@@ -750,6 +784,7 @@ export default function DashboardPage() {
     }, activityLoadDelayMs);
   }, [activityTimeline.hasMoreEvents, activityTimeline.totalEventCount, isActivityLoadingMore]);
   const primaryAction = payload?.primaryAction ?? null;
+  const signatureRequests = payload?.signatureRequests ?? [];
 
   return (
     <div className="flex flex-col gap-8 lg:h-full lg:min-h-0">
@@ -967,18 +1002,30 @@ export default function DashboardPage() {
               </Link>
             </div>
             <div className="mt-4 space-y-3 text-xs">
-              {(payload?.requests ?? []).slice(0, 5).map((request) => (
-                <div key={request.id} className="space-y-1">
-                  <div className="font-medium">{formatReference(request.id, "REQ")}</div>
-                  <div className="text-xs text-Color-Neutral">
-                    {resolveFriendlyDocumentType(request.documentType)} • Principal: {request.ownerName ?? displayName}
+              {signatureRequests.slice(0, 5).map((request) => {
+                const content = (
+                  <>
+                    <div className="font-medium text-Color-Scheme-1-Text">{request.documentLabel}</div>
+                    <div className="text-xs text-Color-Neutral">
+                      {request.documentTypeLabel} • {getSignatureRequestMeta(request)}
+                    </div>
+                    <div className="text-xs text-Color-Neutral">
+                      {formatStatusLabel(request.status)} • {request.detail}
+                    </div>
+                  </>
+                );
+
+                return request.actionHref ? (
+                  <Link key={request.id} className="block space-y-1 rounded-md transition hover:text-Color-Scheme-1-Text" href={request.actionHref}>
+                    {content}
+                  </Link>
+                ) : (
+                  <div key={request.id} className="space-y-1">
+                    {content}
                   </div>
-                  <div className="text-xs text-Color-Neutral">
-                    {formatStatusLabel(request.status)} • Signature requested on {formatReference(request.documentId, "DOC")}
-                  </div>
-                </div>
-              ))}
-              {(payload?.requests ?? []).length === 0 ? <div className="text-Color-Neutral">No signature requests.</div> : null}
+                );
+              })}
+              {signatureRequests.length === 0 ? <div className="text-Color-Neutral">No signature requests.</div> : null}
             </div>
           </div>
 
