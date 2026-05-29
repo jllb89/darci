@@ -134,6 +134,46 @@ export const queueNotaryApplicationApprovedNotification = async (input: {
   }
 };
 
+export const queueNotaryApplicationRejectedNotification = async (input: {
+  applicationId: string;
+  userId: string;
+  reviewedBySupabaseUserId: string;
+  reviewNotes?: string | null;
+}) => {
+  try {
+    const recipient = await getUserById(input.userId);
+    if (!recipient?.email) {
+      return null;
+    }
+
+    return await queueTemplatedNotification({
+      templateKey: "notary_application_rejected_email",
+      jobKind: "status_update",
+      dedupeKey: `notary_application_rejected:${input.applicationId}`,
+      requestedBySupabaseUserId: input.reviewedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(recipient),
+        nextStepUrl: buildAppUrl("/app/settings"),
+        dashboardUrl: buildAppUrl("/app/settings"),
+        rejectionSummary: input.reviewNotes?.trim() || null,
+      },
+      recipients: [buildOwnerRecipient(recipient)],
+      metadata: {
+        applicationId: input.applicationId,
+        userId: input.userId,
+        reviewNotes: input.reviewNotes?.trim() || null,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("notary_application_rejected_email", error, {
+      applicationId: input.applicationId,
+      userId: input.userId,
+      reviewedBySupabaseUserId: input.reviewedBySupabaseUserId,
+    });
+    return null;
+  }
+};
+
 export const queueNotaryApplicationSubmittedAdminNotification = async (input: {
   applicationId: string;
   applicantUserId: string;
@@ -154,7 +194,7 @@ export const queueNotaryApplicationSubmittedAdminNotification = async (input: {
       return null;
     }
 
-    const requestUrl = buildAppUrl(`/app/admin/notary-requests/${encodeURIComponent(input.applicationId)}`);
+    const requestUrl = buildAppUrl("/admin/notary-requests", { requestId: input.applicationId });
     return await queueTemplatedNotification({
       templateKey: "notary_application_submitted_admin_email",
       jobKind: "transactional",
@@ -178,7 +218,7 @@ export const queueNotaryApplicationSubmittedAdminNotification = async (input: {
         jurisdiction: input.jurisdiction,
         serviceAreaKind: input.serviceAreaKind,
         serviceAreaName: input.serviceAreaName,
-        preparedRoute: "/app/admin/notary-requests/:id",
+        preparedRoute: "/admin/notary-requests?requestId=:id",
       },
     });
   } catch (error) {

@@ -531,6 +531,7 @@ const formatAlertDocumentLabel = (
 
 export default function DashboardPage() {
   const { accessToken, user } = useStoredAuth();
+  const activeRole = user?.role ?? null;
   const [payload, setPayload] = useState<DashboardPayload | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -549,6 +550,7 @@ export default function DashboardPage() {
     }
 
     setIsLoading(true);
+    setPayload(null);
     try {
       const response = await fetchWithTokenRefresh(`${apiBaseUrl}/dashboard`, accessToken, {
         cache: "no-store",
@@ -566,7 +568,7 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, activeRole]);
 
   useEffect(() => {
     void loadDashboard();

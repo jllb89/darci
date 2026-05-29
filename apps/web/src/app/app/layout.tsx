@@ -36,7 +36,7 @@ const roleLandingPath: Record<StoredUserRole, string> = {
   member: "/app",
   pro: "/app",
   notary: "/app/notary",
-  admin: "/app",
+  admin: "/admin",
 };
 
 const notaryBlockedRoutePrefixes = [
@@ -90,6 +90,7 @@ export default function AppLayout({
   const role: StoredUserRole = user?.role ?? "member";
   const availableRoles = getAvailableRoles(user, role);
   const isPublicInviteRoute = pathname === "/app/invite";
+  const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
   const searchParamsString = searchParams.toString();
   const profileCompletionReturnTo = `${pathname}${searchParamsString ? `?${searchParamsString}` : ""}`;
   const profileName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || user?.phone || "Profile";
@@ -107,6 +108,7 @@ export default function AppLayout({
   const [toastPhase, setToastPhase] = useState<"hidden" | "visible" | "closing">("hidden");
   const hasCheckedCurrentSession = !sessionSyncKey || checkedSessionSyncKey === sessionSyncKey;
   const shouldRedirectForProfileCompletion = isProfileCompletionRequired && hasCheckedCurrentSession;
+  const shouldRedirectAwayFromAdminRoute = isAdminRoute && role !== "admin" && !shouldRedirectForProfileCompletion;
 
   const clearToast = useCallback(() => {
     setToastPhase("closing");
@@ -179,6 +181,12 @@ export default function AppLayout({
       router.replace(roleLandingPath.notary);
     }
   }, [hasHydrated, isAuthorized, pathname, role, router, shouldRedirectForProfileCompletion]);
+
+  useEffect(() => {
+    if (hasHydrated && isAuthorized && shouldRedirectAwayFromAdminRoute) {
+      router.replace(roleLandingPath[role]);
+    }
+  }, [hasHydrated, isAuthorized, role, router, shouldRedirectAwayFromAdminRoute]);
 
   useEffect(() => {
     if (!toast) {
@@ -285,6 +293,10 @@ export default function AppLayout({
   }
 
   if (shouldRedirectForProfileCompletion) {
+    return null;
+  }
+
+  if (shouldRedirectAwayFromAdminRoute) {
     return null;
   }
 

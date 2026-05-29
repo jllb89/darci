@@ -14,6 +14,8 @@ import {
   ensureUserIdentityFromAuth,
   getUserIdentityContextBySupabaseId,
   isUserProfileComplete,
+  switchActiveRoleBySupabaseUserId,
+  type RuntimeRole,
   type UserIdentityContext,
   toUserResponse,
 } from "../services/userRoleService";
@@ -772,6 +774,7 @@ const syncProfileFromAuthUser = async (input: {
   phoneFallback?: string | null;
   firstNameFallback?: string | null;
   lastNameFallback?: string | null;
+  defaultActiveRole?: RuntimeRole | null;
 }) => {
   const authEmail = getNonBlankString(input.user.email) ?? getNonBlankString(input.emailFallback);
   const authPhone = getNonBlankString(input.user.phone) ?? getNonBlankString(input.phoneFallback);
@@ -782,7 +785,7 @@ const syncProfileFromAuthUser = async (input: {
     input.user.phone_confirmed_at ??
     (authPhone ? input.user.confirmed_at ?? null : null);
 
-  return ensureUserIdentityFromAuth({
+  const profile = await ensureUserIdentityFromAuth({
     supabaseUserId: input.user.id,
     email: authEmail,
     phone: authPhone,
@@ -800,6 +803,19 @@ const syncProfileFromAuthUser = async (input: {
     lastSignInAt: input.user.last_sign_in_at ?? null,
     lastAuthSyncedAt: new Date().toISOString(),
   });
+
+  if (
+    input.defaultActiveRole &&
+    profile.role !== input.defaultActiveRole &&
+    profile.availableRoles.includes(input.defaultActiveRole)
+  ) {
+    return switchActiveRoleBySupabaseUserId({
+      supabaseUserId: input.user.id,
+      role: input.defaultActiveRole,
+    });
+  }
+
+  return profile;
 };
 
 const recordAuthEvent = async (input: {
@@ -864,6 +880,7 @@ export const login = async (req: Request, res: Response) => {
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       emailFallback: parsed.data.email,
+      defaultActiveRole: "member",
     });
     const profileCompletionRequired = !isUserProfileComplete(profile);
 
@@ -1910,6 +1927,7 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       emailFallback: email,
+      defaultActiveRole: "member",
     });
     const profileCompletionRequired = !isUserProfileComplete(profile);
 
@@ -2100,6 +2118,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       phoneFallback: phone,
+      defaultActiveRole: "member",
     });
     const profileCompletionRequired = !isUserProfileComplete(profile);
 
@@ -2264,7 +2283,10 @@ export const syncSession = async (req: Request, res: Response) => {
   }
 
   try {
-    const profile = await syncProfileFromAuthUser({ user: data.user });
+    const profile = await syncProfileFromAuthUser({
+      user: data.user,
+      ...(parsed.data.intent ? { defaultActiveRole: "member" } : {}),
+    });
     const profileCompletionRequired = !isUserProfileComplete(profile);
     if (!ensureActiveAccount(profile, res)) {
       return;

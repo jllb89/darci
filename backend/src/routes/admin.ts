@@ -6,6 +6,16 @@ import {
   upsertUserRole,
 } from "../controllers/adminController";
 import {
+  getAdminProfileDashboard,
+  getAdminProfileMe,
+  grantAdminProfileTeamMember,
+  listAdminProfileActivity,
+  listAdminProfileTeam,
+  listAdminProfileUsers,
+  revokeAdminProfileTeamMember,
+  updateAdminProfileUserStatus,
+} from "../controllers/adminProfileController";
+import {
   getNotificationMetricsAdmin,
   getNotificationJobDetailAdmin,
   listNotificationJobsAdmin,
@@ -30,6 +40,54 @@ import {
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
+
+router.get(
+  "/profile/me",
+  requireRole(["admin", "service_role"]),
+  getAdminProfileMe,
+);
+
+router.get(
+  "/profile/dashboard",
+  requireRole(["admin", "service_role"]),
+  getAdminProfileDashboard,
+);
+
+router.get(
+  "/profile/users",
+  requireRole(["admin", "service_role"]),
+  listAdminProfileUsers,
+);
+
+router.patch(
+  "/profile/users/:id/status",
+  requireRole(["admin", "service_role"]),
+  updateAdminProfileUserStatus,
+);
+
+router.get(
+  "/profile/team",
+  requireRole(["admin", "service_role"]),
+  listAdminProfileTeam,
+);
+
+router.post(
+  "/profile/team",
+  requireRole(["admin", "service_role"]),
+  grantAdminProfileTeamMember,
+);
+
+router.delete(
+  "/profile/team/:id",
+  requireRole(["admin", "service_role"]),
+  revokeAdminProfileTeamMember,
+);
+
+router.get(
+  "/profile/activity",
+  requireRole(["admin", "service_role"]),
+  listAdminProfileActivity,
+);
 
 router.patch(
   "/users/:id/role",

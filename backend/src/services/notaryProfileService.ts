@@ -420,7 +420,7 @@ export const approveNotaryApplication = async (input: {
     throw new NotaryProfileServiceError(500, approvedApplication.error?.message ?? "Failed to approve application");
   }
 
-  await upsertUserRoleAssignmentBySupabaseUserId({
+  const applicant = await upsertUserRoleAssignmentBySupabaseUserId({
     supabaseUserId: reviewerIdentity.supabaseUserId,
     role: "notary",
     status: "active",
@@ -441,7 +441,7 @@ export const approveNotaryApplication = async (input: {
   return {
     application: toNotaryApplicationRecord(approvedApplication.data as Record<string, unknown>),
     profile: approvedProfile,
-    applicant: reviewerIdentity,
+    applicant,
   };
 };
 

@@ -1,4 +1,4 @@
--- Notify admins when a member submits a notary application.
+-- Notary application rejection email.
 
 insert into public.notification_templates (
   template_key,
@@ -20,44 +20,37 @@ insert into public.notification_templates (
   updated_at
 )
 values (
-  'notary_application_submitted_admin_email',
+  'notary_application_rejected_email',
   '2026.05.28.v1',
   'en-US',
   'email',
-  'transactional',
-  'admin',
-  'notary.application_submitted',
+  'status_update',
+  'member',
+  'notary.application_rejected',
   null,
-  'New notary request from {{applicantName}}',
-  $$Hi admin team,
+  'Update on your notary profile request',
+  $$Hi {{firstName}},
 
-{{applicantName}} submitted a request to become a DARCi notary.
+Thanks for submitting your notary profile request. After review, we are not able to approve it at this time.
 
-Request details:
+Review your profile settings here:
 
-**Applicant:** {{applicantName}}
-**Email:** {{applicantEmail}}
-**Phone:** {{applicantPhone}}
-**Jurisdiction:** {{jurisdiction}}
-**Service area:** {{serviceAreaName}}
+[Open notary settings]({{nextStepUrl}})
 
-Review this request here:
+{{rejectionSummary}}
 
-[View this request]({{requestUrl}})
+If you have questions, reply to this email and our team can help.
 
 - Your DARCi Team$$,
   'markdown',
   jsonb_build_object(
-    'required', jsonb_build_array('applicantName', 'jurisdiction', 'serviceAreaName', 'requestUrl'),
-    'optional', jsonb_build_array('applicantEmail', 'applicantPhone', 'serviceAreaKind', 'submittedAt', 'dashboardUrl'),
+    'required', jsonb_build_array('firstName', 'nextStepUrl'),
+    'optional', jsonb_build_array('rejectionSummary', 'dashboardUrl'),
     'scope', jsonb_build_array(11)
   ),
   true,
   'docs/notary-profile-dashboard-roadmap.md',
-  jsonb_build_object(
-    'seed_source', 'notary_application_submitted_admin_20260528',
-    'prepared_route', '/admin/notary-requests?requestId=:id'
-  ),
+  jsonb_build_object('seed_source', 'notary_application_rejection_20260528'),
   now(),
   now()
 )

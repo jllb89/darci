@@ -93,6 +93,15 @@ export const normalizeRuntimeRole = (value?: string | null): RuntimeRole => {
   return "member";
 };
 
+const normalizeAuthMirrorPhone = (value: string | null | undefined) => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return /^\+[1-9][0-9]{6,14}$/.test(trimmed) ? trimmed : undefined;
+};
+
 export const roleSatisfiesRequirement = (
   actualRole: string | undefined,
   requiredRole: RequestRole,
@@ -271,6 +280,61 @@ const selectRoleRowsByUserId = async (userId: string) => {
   return (data as UserRoleRow[] | null) ?? [];
 };
 
+const ensureBaselineRoleAssignments = async (input: { userId: string; activeRole: RuntimeRole }) => {
+  const rolesToDeactivate = input.activeRole === "member"
+    ? ["pro", "notary", "admin"]
+    : runtimeRoleValues.filter((role) => role !== input.activeRole);
+
+  const { error: clearActiveProfileError } = await supabaseAdmin
+    .from("user_roles")
+    .update({ is_active_profile: false })
+    .eq("user_id", input.userId)
+    .eq("is_active_profile", true)
+    .in("role", rolesToDeactivate);
+
+  if (clearActiveProfileError) {
+    throw new Error(clearActiveProfileError.message);
+  }
+
+  const { error: memberError } = await supabaseAdmin
+    .from("user_roles")
+    .upsert(
+      {
+        user_id: input.userId,
+        role: "member",
+        status: "active",
+        is_active_profile: input.activeRole === "member",
+        granted_reason: "Baseline member access",
+      },
+      { onConflict: "user_id,role" },
+    );
+
+  if (memberError) {
+    throw new Error(memberError.message);
+  }
+
+  if (input.activeRole === "member") {
+    return;
+  }
+
+  const { error: activeRoleError } = await supabaseAdmin
+    .from("user_roles")
+    .upsert(
+      {
+        user_id: input.userId,
+        role: input.activeRole,
+        status: "active",
+        is_active_profile: true,
+        granted_reason: input.activeRole === "admin" ? "Bootstrap admin manager" : "Synced from active user role",
+      },
+      { onConflict: "user_id,role" },
+    );
+
+  if (activeRoleError) {
+    throw new Error(activeRoleError.message);
+  }
+};
+
 const deriveAvailableRoles = (
   assignments: UserRoleAssignment[],
   fallbackRole: RuntimeRole,
@@ -362,17 +426,19 @@ export const ensureUserIdentityFromAuth = async (input: {
   lastAuthSyncedAt?: string | null;
 }) => {
   const existingUser = await selectUserRowBySupabaseId(input.supabaseUserId);
+  const normalizedInputPhone = normalizeAuthMirrorPhone(input.phone);
+  const inputRole = normalizeRuntimeRole(input.role);
 
   if (!existingUser) {
-    if (!input.email && !input.phone) {
+    if (!input.email && !normalizedInputPhone) {
       throw new UserRoleServiceError(400, "Email or phone is required to create the user record");
     }
 
     const buildInsertPayload = () => ({
         supabase_user_id: input.supabaseUserId,
         email: input.email ?? null,
-        role: normalizeRuntimeRole(input.role),
-        ...(isAuthMirrorColumnAvailable("phone") && input.phone !== undefined ? { phone: input.phone } : {}),
+        role: inputRole,
+        ...(isAuthMirrorColumnAvailable("phone") && normalizedInputPhone !== undefined ? { phone: normalizedInputPhone } : {}),
         ...(input.firstName !== undefined ? { first_name: input.firstName } : {}),
         ...(input.lastName !== undefined ? { last_name: input.lastName } : {}),
         ...(isAuthMirrorColumnAvailable("email_confirmed_at") && input.emailConfirmedAt !== undefined
@@ -400,11 +466,16 @@ export const ensureUserIdentityFromAuth = async (input: {
       throw new Error(error?.message ?? "Failed to create user record");
     }
 
+    await ensureBaselineRoleAssignments({
+      userId: String((data as Partial<UserRow>).id),
+      activeRole: inputRole,
+    });
+
     return buildIdentityContext(normalizeUserRow(data as Partial<UserRow>) as UserRow);
   }
 
   const nextEmail = input.email ?? existingUser.email;
-  const nextPhone = input.phone ?? existingUser.phone;
+  const nextPhone = normalizedInputPhone === undefined ? existingUser.phone : normalizedInputPhone;
   const nextFirstName = input.firstName ?? existingUser.first_name;
   const nextLastName = input.lastName ?? existingUser.last_name;
   const nextEmailConfirmedAt =
@@ -423,7 +494,7 @@ export const ensureUserIdentityFromAuth = async (input: {
       : existingUser.last_auth_synced_at;
   const existingRole = isRuntimeRole(existingUser.role)
     ? existingUser.role
-    : normalizeRuntimeRole(input.role);
+    : inputRole;
 
   const shouldUpdateUser =
     nextEmail !== existingUser.email ||
@@ -467,6 +538,8 @@ export const ensureUserIdentityFromAuth = async (input: {
       throw new Error(error.message);
     }
   }
+
+  await ensureBaselineRoleAssignments({ userId: existingUser.id, activeRole: existingRole });
 
   const refreshedContext = await getUserIdentityContextBySupabaseId(input.supabaseUserId);
   if (!refreshedContext) {
@@ -642,6 +715,19 @@ export const upsertUserRoleAssignmentBySupabaseUserId = async (input: {
     ? input.makeActive && input.status === "active"
     : input.status === "active" && Boolean(existingAssignment?.isActiveProfile);
 
+  if (nextIsActiveProfile) {
+    const { error: clearActiveProfileError } = await supabaseAdmin
+      .from("user_roles")
+      .update({ is_active_profile: false })
+      .eq("user_id", ensuredContext.id)
+      .eq("is_active_profile", true)
+      .neq("role", input.role);
+
+    if (clearActiveProfileError) {
+      throw new Error(clearActiveProfileError.message);
+    }
+  }
+
   let grantedByUserId: string | undefined;
   if (input.grantedBySupabaseUserId) {
     const grantingContext = await getUserIdentityContextBySupabaseId(input.grantedBySupabaseUserId);
@@ -681,8 +767,7 @@ export const isUserProfileComplete = (context: UserIdentityContext) => {
   return (
     hasProfileValue(context.firstName) &&
     hasProfileValue(context.lastName) &&
-    hasProfileValue(context.email) &&
-    hasProfileValue(context.phone)
+    hasProfileValue(context.email)
   );
 };
 

@@ -11,6 +11,16 @@ type BreadcrumbRule = {
 
 const BREADCRUMB_RULES: BreadcrumbRule[] = [
   { kind: "exact", path: "/app", breadcrumb: { current: "Start" } },
+  { kind: "exact", path: "/admin", breadcrumb: { section: "Admin", current: "Home" } },
+  { kind: "prefix", path: "/admin/notary-requests", breadcrumb: { section: "Admin", current: "Notary requests" } },
+  { kind: "prefix", path: "/admin/users", breadcrumb: { section: "Admin", current: "Users" } },
+  { kind: "prefix", path: "/admin/team", breadcrumb: { section: "Admin", current: "Admin team" } },
+  { kind: "prefix", path: "/admin/activity", breadcrumb: { section: "Admin", current: "Activity" } },
+  { kind: "exact", path: "/app/admin", breadcrumb: { section: "Admin", current: "Home" } },
+  { kind: "prefix", path: "/app/admin/notary-requests", breadcrumb: { section: "Admin", current: "Notary requests" } },
+  { kind: "prefix", path: "/app/admin/users", breadcrumb: { section: "Admin", current: "Users" } },
+  { kind: "prefix", path: "/app/admin/team", breadcrumb: { section: "Admin", current: "Admin team" } },
+  { kind: "prefix", path: "/app/admin/activity", breadcrumb: { section: "Admin", current: "Activity" } },
   { kind: "exact", path: "/app/notary", breadcrumb: { current: "Start" } },
   { kind: "exact", path: "/app/notary/history", breadcrumb: { section: "Notary", current: "History" } },
   { kind: "prefix", path: "/app/start", breadcrumb: { current: "New Document" } },

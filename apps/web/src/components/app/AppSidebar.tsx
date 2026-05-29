@@ -145,26 +145,36 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
   },
   admin: {
     primaryItems: [
-      { label: "Start", href: "/app", icon: "start" },
+      { label: "Admin home", href: "/app/admin", icon: "start", sectionLabel: "Admin" },
       {
-        label: "My documents",
-        href: "/app/documents",
-        icon: "documents",
-        sectionLabel: "Documents",
+        label: "Notary requests",
+        href: "/app/admin/notary-requests",
+        icon: "requests",
       },
-      { label: "Verify a document", href: "/app/verification", icon: "verify" },
-      {
-        label: "Activity",
-        href: "/app/activity",
-        icon: "notifications",
-        sectionLabel: "Activity",
-      },
-      { label: "Requests", href: "/app/requests", icon: "requests" },
+      { label: "Users", href: "/app/admin/users", icon: "documents" },
+      { label: "Admin team", href: "/app/admin/team", icon: "settings" },
+      { label: "Verify a document", href: "/app/verification", icon: "verify", sectionLabel: "Tools" },
     ],
     settingsHref: "/app/settings",
     newDocumentHref: "/app/start",
     showNewDocument: false,
   },
+};
+
+const getSidebarConfig = (role: StoredUserRole, pathname: string): SidebarConfig => {
+  const config = ROLE_SIDEBAR_CONFIG[role];
+
+  if (role !== "admin" || !pathname.startsWith("/admin")) {
+    return config;
+  }
+
+  return {
+    ...config,
+    primaryItems: config.primaryItems.map((item) => ({
+      ...item,
+      href: item.href.replace(/^\/app\/admin/, "/admin"),
+    })),
+  };
 };
 
 const renderNavIcon = (icon: NavIcon) => {
@@ -309,7 +319,7 @@ export default function AppSidebar({
 }: AppSidebarProps) {
   const router = useRouter();
   const { accessToken } = useStoredAuth();
-  const config = ROLE_SIDEBAR_CONFIG[role];
+  const config = getSidebarConfig(role, pathname);
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [isVerificationLookupOpen, setIsVerificationLookupOpen] = useState(false);
   const [verificationQuery, setVerificationQuery] = useState("");

@@ -12,6 +12,7 @@ import {
 } from "../services/notaryProfileService";
 import {
   queueNotaryApplicationApprovedNotification,
+  queueNotaryApplicationRejectedNotification,
   queueNotaryApplicationSubmittedAdminNotification,
 } from "../services/notificationService";
 import { sendValidationError } from "../utils/validation";
@@ -302,6 +303,13 @@ export const rejectNotaryApplicationAdminHandler = async (req: Request, res: Res
   try {
     const application = await rejectNotaryApplication({
       applicationId: String(req.params.id),
+      reviewedBySupabaseUserId: supabaseUserId,
+      reviewNotes: parsed.data.reviewNotes ?? null,
+    });
+
+    await queueNotaryApplicationRejectedNotification({
+      applicationId: application.id,
+      userId: application.userId,
       reviewedBySupabaseUserId: supabaseUserId,
       reviewNotes: parsed.data.reviewNotes ?? null,
     });

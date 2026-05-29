@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   ensureUserIdentityFromAuthMock: vi.fn(),
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
   isUserProfileCompleteMock: vi.fn(),
+  switchActiveRoleBySupabaseUserIdMock: vi.fn(),
   toUserResponseMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   findRecentAuditEventByEmailMock: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("../../src/services/userRoleService", () => ({
   ensureUserIdentityFromAuth: mocks.ensureUserIdentityFromAuthMock,
   getUserIdentityContextBySupabaseId: mocks.getUserIdentityContextBySupabaseIdMock,
   isUserProfileComplete: mocks.isUserProfileCompleteMock,
+  switchActiveRoleBySupabaseUserId: mocks.switchActiveRoleBySupabaseUserIdMock,
   toUserResponse: mocks.toUserResponseMock,
 }));
 
@@ -82,6 +84,7 @@ describe("auth controller Phase 1", () => {
 
     mocks.ensureUserIdentityFromAuthMock.mockResolvedValue(buildProfile());
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(buildProfile());
+    mocks.switchActiveRoleBySupabaseUserIdMock.mockResolvedValue(buildProfile());
     mocks.isUserProfileCompleteMock.mockImplementation((profile: {
       firstName?: string | null;
       lastName?: string | null;
@@ -711,6 +714,49 @@ describe("auth controller Phase 1", () => {
         profileCompletionRequired: false,
       }),
     );
+  });
+
+  it("defaults explicit sign-in session syncs back to the member profile", async () => {
+    const getUserMock = vi.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: "auth-user-1",
+          email: "member@example.com",
+          app_metadata: { role: "admin" },
+          user_metadata: { first_name: "Dana", last_name: "Ray" },
+          email_confirmed_at: "2026-04-30T16:00:00.000Z",
+          confirmed_at: "2026-04-30T16:00:00.000Z",
+          last_sign_in_at: "2026-04-30T16:01:00.000Z",
+        },
+      },
+      error: null,
+    });
+    mocks.createClientMock.mockReturnValue({ auth: { getUser: getUserMock } });
+    mocks.ensureUserIdentityFromAuthMock.mockResolvedValue({
+      ...buildProfile(),
+      role: "admin",
+      availableRoles: ["member", "admin"],
+    });
+    mocks.switchActiveRoleBySupabaseUserIdMock.mockResolvedValue({
+      ...buildProfile(),
+      role: "member",
+      availableRoles: ["member", "admin"],
+    });
+
+    const { syncSession } = await import("../../src/controllers/authController.ts");
+    const { res, status } = buildResponse();
+    const req = {
+      headers: { authorization: "Bearer access-token" },
+      body: { refreshToken: "refresh-token", intent: "oauth" },
+    } as unknown as Request;
+
+    await syncSession(req, res);
+
+    expect(mocks.switchActiveRoleBySupabaseUserIdMock).toHaveBeenCalledWith({
+      supabaseUserId: "auth-user-1",
+      role: "member",
+    });
+    expect(status).toHaveBeenCalledWith(200);
   });
 
   it("syncs a phone OTP session into a phone-only DARCi profile mirror", async () => {
