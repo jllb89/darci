@@ -18,6 +18,7 @@ import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
+const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
 
 type SigningExecution = {
   confirmedAt: string | null;
@@ -423,6 +424,7 @@ export default function SignPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingCapture, setIsSavingCapture] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isSkippingSignature, setIsSkippingSignature] = useState(false);
   const [activeSignerId, setActiveSignerId] = useState<string | null>(null);
   const [activeOutputKey, setActiveOutputKey] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("type");
@@ -767,11 +769,17 @@ export default function SignPage() {
     ? (typedKinds[activeSignature.outputSignerId] ?? activeSignature.typedKind ?? "name")
     : "name";
   const isInvitedSigner = payload?.signing?.viewerAccess?.kind === "invited_signer";
+  const isDocumentNotarization = payload?.document?.productFlowMode === NOTARIZE_DOCUMENT_MODE_KEY;
   const canFinalizeSigningSet =
     !isInvitedSigner &&
     hiddenSignatures.length === 0 &&
     payload?.signing?.state !== "confirmed" &&
     Boolean(payload?.signing?.completion.canConfirm);
+  const canContinueWithoutSignature =
+    !isInvitedSigner &&
+    isDocumentNotarization &&
+    payload?.signing?.state !== "confirmed" &&
+    payload?.document?.status === "pending_signature";
   const shouldShowCaptureContainer =
     Boolean(activeSignature) &&
     activeSignature?.status !== "captured" &&
@@ -1261,6 +1269,58 @@ export default function SignPage() {
       setIsConfirming(false);
     }
   }, [accessToken, documentId, isConfirming, payload?.signing, refreshAfterCapture, showToast]);
+
+  const handleContinueWithoutSignature = useCallback(async () => {
+    if (!accessToken || !documentId || !canContinueWithoutSignature || isSkippingSignature) {
+      return;
+    }
+
+    setIsSkippingSignature(true);
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${documentId}/submit-notarization`,
+        accessToken,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            signatureSkipped: true,
+            signatureSkipReason: "member_selected_no_signature",
+          }),
+        },
+      );
+      const responsePayload = (await response.json().catch(() => null)) as
+        | { message?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "Failed to continue without signature.");
+      }
+
+      showToast({
+        tone: "success",
+        message: "Document sent to notarization without a member signature.",
+      });
+      router.push("/app/documents?status=pending_notary");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to continue without signature.";
+      setErrorMessage(message);
+      showToast({ tone: "error", message });
+    } finally {
+      setIsSkippingSignature(false);
+    }
+  }, [
+    accessToken,
+    canContinueWithoutSignature,
+    documentId,
+    isSkippingSignature,
+    router,
+    showToast,
+  ]);
 
   const renderPreviewPanel = () => {
     if (isLoading && !payload) {
@@ -1792,6 +1852,22 @@ export default function SignPage() {
                 >
                   {isConfirming ? "Confirming..." : "Confirm signatures"}
                 </button>
+                {isDocumentNotarization ? (
+                  <button
+                    className={`mt-3 inline-flex min-h-11 w-full items-center justify-center border px-4 py-2 text-sm font-medium transition ${
+                      canContinueWithoutSignature && !isSkippingSignature
+                        ? "border-Color-Scheme-1-Text text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
+                        : "cursor-not-allowed border-Color-Scheme-1-Border text-Color-Neutral"
+                    }`}
+                    disabled={!canContinueWithoutSignature || isSkippingSignature}
+                    onClick={() => {
+                      void handleContinueWithoutSignature();
+                    }}
+                    type="button"
+                  >
+                    {isSkippingSignature ? "Continuing..." : "Continue without signature"}
+                  </button>
+                ) : null}
               </div>
             )}
           </div>

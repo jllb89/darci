@@ -61,6 +61,7 @@ import {
   type SignatureTypedKind,
   upsertDocumentSystemValues,
   updateDocumentGenerationRun,
+  updateDocumentOutputSignerMetadata,
   updateSignatureRecord,
   updateDocument,
   updateDocumentVersion,
@@ -166,6 +167,9 @@ const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_VERSION = "uploaded_pdf";
 const UPLOADED_DOCUMENT_TEMPLATE_HASH = "uploaded_pdf";
 const RENDERING_RUN_STALE_AFTER_MS = 5 * 60 * 1000;
+const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
+const NOTARIZE_DOCUMENT_INTAKE_SCHEMA_VERSION = "notarize_document_upload_v1";
+const UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY = "addendum_page";
 const TRUST_BUNDLE_MODE_KEY = "trust_bundle";
 const BASE_POA_OUTPUT_KEY = "poa_document";
 const TRUSTMAKER_POA_OUTPUT_KEY_PREFIX = "poa_document_tm";
@@ -658,6 +662,29 @@ const createDocumentSchema = z
     fileName: z.string().min(1),
     fileSize: z.number().int().positive().max(MAX_UPLOAD_BYTES),
     mimeType: z.string().min(1),
+    documentDescription: z.string().trim().max(2000).optional(),
+    notarizationReason: z.string().trim().max(2000).optional(),
+    requesterName: z.string().trim().max(200).optional(),
+    requesterEmail: z
+      .string()
+      .trim()
+      .optional()
+      .refine(
+        (value) => value === undefined || value.length === 0 || emailPattern.test(value),
+        "Invalid email format",
+      ),
+    requesterPhoneCountryCode: z
+      .string()
+      .trim()
+      .optional()
+      .refine(
+        (value) =>
+          value === undefined ||
+          value.length === 0 ||
+          phoneCountryCodePattern.test(value),
+        "Invalid phone country code",
+      ),
+    requesterPhone: z.string().trim().max(50).optional(),
   })
   .refine(
     (data) => data.mimeType.toLowerCase() === "application/pdf",
@@ -686,6 +713,8 @@ const finalizeUploadSchema = z
 const submitNotarizationSchema = z.object({
   webhookUrl: z.string().url().optional(),
   selectedNotaryUserId: z.string().min(1).optional(),
+  signatureSkipped: z.boolean().optional(),
+  signatureSkipReason: z.string().trim().max(200).optional(),
 }).passthrough();
 
 const reviewApprovalSchema = z
@@ -1513,10 +1542,48 @@ const buildDefaultUploadedSignatureFieldPlacement = (input: {
   };
 };
 
+const buildUploadedSignatureAddendumFieldPlacement = (input: {
+  index: number;
+  label: string;
+}): SignatureFieldPlacement => {
+  const top = 190 + input.index * 78;
+
+  return {
+    pageNumber: 1,
+    label: input.label,
+    includeDate: true,
+    signatureRect: {
+      x: 72,
+      y: top,
+      width: 292,
+      height: 44,
+    },
+    dateRect: {
+      x: 392,
+      y: top,
+      width: 148,
+      height: 44,
+    },
+  };
+};
+
+const buildUploadedDocumentSignatureFieldPlacement = (input: {
+  index: number;
+  label: string;
+  useAddendumPage: boolean;
+}) => {
+  return input.useAddendumPage
+    ? buildUploadedSignatureAddendumFieldPlacement(input)
+    : buildDefaultUploadedSignatureFieldPlacement(input);
+};
+
 const buildUploadedDocumentSignerInputs = (input: {
   parties: DocumentPartyRecord[];
   outputLabel: string;
+  productFlowMode?: string | null;
 }): DocumentOutputSignerUpsertInput[] => {
+  const useAddendumPage = input.productFlowMode === NOTARIZE_DOCUMENT_MODE_KEY;
+
   return input.parties
     .filter((party) => party.is_signing_party)
     .sort((left, right) => left.sort_order - right.sort_order)
@@ -1533,12 +1600,67 @@ const buildUploadedDocumentSignerInputs = (input: {
       metadata: {
         source: "uploaded_pdf",
         outputLabel: input.outputLabel,
-        signatureField: buildDefaultUploadedSignatureFieldPlacement({
+        ...(useAddendumPage
+          ? { signaturePlacementStrategy: UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY }
+          : {}),
+        signatureField: buildUploadedDocumentSignatureFieldPlacement({
           index,
           label: party.full_name,
+          useAddendumPage,
         }),
       },
     }));
+};
+
+const ensureUploadedDocumentSignerPlacementMetadata = async (input: {
+  document: DocumentRecord;
+  generationRunId: string;
+  outputLabel: string;
+  signers: DocumentOutputSignerRecord[];
+}) => {
+  if (input.document.product_flow_mode !== NOTARIZE_DOCUMENT_MODE_KEY) {
+    return;
+  }
+
+  await Promise.all(
+    input.signers
+      .filter(
+        (signer) =>
+          signer.obligation_type === "signer" &&
+          signer.output_key === UPLOADED_DOCUMENT_OUTPUT_KEY &&
+          signer.metadata.source === "uploaded_pdf" &&
+          signer.metadata.signaturePlacementStrategy !== "manual",
+      )
+      .sort((left, right) => left.sort_order - right.sort_order)
+      .map((signer, index) => {
+        const nextMetadata = {
+          ...signer.metadata,
+          source: "uploaded_pdf",
+          outputLabel: input.outputLabel,
+          signaturePlacementStrategy: UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY,
+          signatureField: buildUploadedSignatureAddendumFieldPlacement({
+            index,
+            label: signer.party_name,
+          }),
+        };
+
+        if (
+          signer.metadata.signaturePlacementStrategy ===
+            UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY &&
+          JSON.stringify(signer.metadata.signatureField) ===
+            JSON.stringify(nextMetadata.signatureField)
+        ) {
+          return null;
+        }
+
+        return updateDocumentOutputSignerMetadata({
+          signerId: signer.id,
+          documentId: input.document.id,
+          generationRunId: input.generationRunId,
+          metadata: nextMetadata,
+        });
+      }),
+  );
 };
 
 type UploadedDocumentSigningPreparationResult = {
@@ -1666,6 +1788,7 @@ const ensureUploadedDocumentSigningPreparation = async (input: {
     const signerInputs = buildUploadedDocumentSignerInputs({
       parties,
       outputLabel,
+      productFlowMode: document.product_flow_mode,
     });
 
     if (signerInputs.length > 0) {
@@ -1675,6 +1798,13 @@ const ensureUploadedDocumentSigningPreparation = async (input: {
         signers: signerInputs,
       });
     }
+  } else {
+    await ensureUploadedDocumentSignerPlacementMetadata({
+      document,
+      generationRunId: uploadedRun.id,
+      outputLabel,
+      signers: existingSigners,
+    });
   }
 
   logDocumentTrace("signing.uploaded_document_prepared", {
@@ -3485,10 +3615,25 @@ export const createDocument = async (req: Request, res: Response) => {
     });
   }
 
+  const isNotarizeDocumentFlow = parsed.data.productFlowMode === NOTARIZE_DOCUMENT_MODE_KEY;
+  const documentDescription = parsed.data.documentDescription?.trim() ?? "";
+  if (isNotarizeDocumentFlow && documentDescription.length === 0) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document description is required",
+      details: [
+        {
+          path: "documentDescription",
+          message: "Document description is required",
+        },
+      ],
+    });
+  }
+
   const source = parsed.data.templateId ? "template" : "upload";
   const documentType = parsed.data.templateId
     ? parsed.data.documentType ?? "template"
-    : parsed.data.documentType ?? "generic";
+    : parsed.data.documentType ?? (isNotarizeDocumentFlow ? "notarize_document" : "generic");
   const jurisdiction = parsed.data.jurisdiction ?? "US-OH";
 
   let productFlowMode: string | null = null;
@@ -3497,17 +3642,22 @@ export const createDocument = async (req: Request, res: Response) => {
 
   if (parsed.data.productFlowMode) {
     const selection = await buildSelectionForMode(parsed.data.productFlowMode);
-    const expectedOutputs = await resolveExpectedOutputsForMode(selection.modeKey);
 
     productFlowMode = selection.modeKey;
-    selectedFamilies = [...selection.families];
-    outputBundle = expectedOutputs.map((output) => ({
-      outputKey: output.outputKey,
-      outputLabel: output.outputLabel,
-      isRequired: output.isRequired,
-      sortOrder: output.sortOrder,
-      metadata: output.metadata,
-    }));
+    if (selection.modeKey === NOTARIZE_DOCUMENT_MODE_KEY) {
+      selectedFamilies = null;
+      outputBundle = [];
+    } else {
+      const expectedOutputs = await resolveExpectedOutputsForMode(selection.modeKey);
+      selectedFamilies = [...selection.families];
+      outputBundle = expectedOutputs.map((output) => ({
+        outputKey: output.outputKey,
+        outputLabel: output.outputLabel,
+        isRequired: output.isRequired,
+        sortOrder: output.sortOrder,
+        metadata: output.metadata,
+      }));
+    }
   } else if (parsed.data.selectedFamilies?.length) {
     const normalizedFamilies = normalizeSelectedFamilies(parsed.data.selectedFamilies);
     selectedFamilies = normalizedFamilies.length > 0 ? [...normalizedFamilies] : null;
@@ -3565,6 +3715,61 @@ export const createDocument = async (req: Request, res: Response) => {
       owner_id: ownerId,
     },
   });
+
+  if (productFlowMode === NOTARIZE_DOCUMENT_MODE_KEY) {
+    const requesterName =
+      parsed.data.requesterName?.trim() ||
+      req.user.email ||
+      req.user.phone ||
+      "Document owner";
+    const requesterEmail = parsed.data.requesterEmail?.trim() || req.user.email || null;
+    const requesterPhone = parsed.data.requesterPhone?.trim() || req.user.phone || null;
+    const requesterPhoneCountryCode =
+      parsed.data.requesterPhoneCountryCode?.trim() || DEFAULT_PHONE_COUNTRY_CODE;
+    const notarizationReason = parsed.data.notarizationReason?.trim() ?? "";
+    const notarizationAnswers = {
+      jurisdiction,
+      requester_name: requesterName,
+      requester_email: requesterEmail,
+      requester_phone_country_code: requesterPhoneCountryCode,
+      requester_phone: requesterPhone,
+      uploaded_document_file: parsed.data.fileName,
+      document_description: documentDescription,
+      notarization_reason: notarizationReason,
+    };
+
+    await saveDocumentIntakeDraftToDb({
+      documentId: document.id,
+      ownerId,
+      productFlowMode,
+      jurisdiction,
+      currentStep: "general_information",
+      rulesSnapshotVersion: NOTARIZE_DOCUMENT_INTAKE_SCHEMA_VERSION,
+      answers: notarizationAnswers,
+      canonicalAnswers: notarizationAnswers,
+      createdBy: ownerId,
+      eventType: "autosave",
+    });
+
+    await replaceDocumentParties({
+      documentId: document.id,
+      parties: [
+        {
+          party_role: "principal",
+          full_name: requesterName,
+          email: requesterEmail,
+          phone_country_code: requesterPhoneCountryCode,
+          phone: requesterPhone,
+          is_signing_party: true,
+          sort_order: 0,
+          metadata: {
+            source: "notarize_document_upload",
+            requester: true,
+          },
+        },
+      ],
+    });
+  }
 
   res.status(201).json({
     document: mapDocumentResponse(document, req.user?.role ?? "member"),
@@ -6854,6 +7059,22 @@ export const submitNotarization = async (req: Request, res: Response) => {
   }
 
   const selectedNotaryUserId = parsed.data.selectedNotaryUserId?.trim() || null;
+  const signatureSkipped = parsed.data.signatureSkipped === true;
+  const signatureSkipReason = parsed.data.signatureSkipReason?.trim() || "member_selected_no_signature";
+
+  if (signatureSkipped && document.product_flow_mode !== NOTARIZE_DOCUMENT_MODE_KEY) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Signature skip is only available for document notarization uploads",
+      details: [
+        {
+          path: "signatureSkipped",
+          message: "Signature skip is only available for document notarization uploads",
+        },
+      ],
+    });
+  }
+
   if (selectedNotaryUserId) {
     const selectedNotaryContext = await getUserIdentityContextByUserId(
       selectedNotaryUserId,
@@ -6912,6 +7133,42 @@ export const submitNotarization = async (req: Request, res: Response) => {
   });
 
   const submittedAt = new Date().toISOString();
+
+  if (signatureSkipped) {
+    await upsertDocumentSystemValues({
+      documentId,
+      values: [
+        {
+          systemKey: "signature_bypass",
+          source: "signature_execution",
+          value: {
+            skippedAt: submittedAt,
+            skippedBySupabaseId: req.user.id,
+            skippedByRole: req.user.role ?? null,
+            reason: signatureSkipReason,
+            productFlowMode: document.product_flow_mode,
+          },
+          metadata: {
+            source: "documents.submit-notarization",
+          },
+        },
+      ],
+    });
+
+    await recordAuditEvent({
+      ...actorContext,
+      entityType: "document",
+      entityId: documentId,
+      action: "member.document_signature_skipped",
+      metadata: {
+        document_id: documentId,
+        skipped_at: submittedAt,
+        reason: signatureSkipReason,
+        product_flow_mode: document.product_flow_mode,
+      },
+    });
+  }
+
   const workflow = await createIlluminotarizationWorkflow({
     ownerUserId: document.owner_id,
     createdByUserId: actorUserId,
@@ -6922,10 +7179,13 @@ export const submitNotarization = async (req: Request, res: Response) => {
     contextJson: {
       compatibilityMode: "legacy_request_bridge",
       selectedNotaryLocked: Boolean(selectedNotaryUserId),
+      signatureSkipped,
+      signatureSkipReason: signatureSkipped ? signatureSkipReason : null,
     },
     metadata: {
       source: "documents.submit-notarization",
       actorRole: req.user.role ?? null,
+      signatureSkipped,
     },
   });
 
@@ -6971,6 +7231,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
     metadata: {
       documentId,
       selectedNotaryUserId,
+      signatureSkipped,
     },
   });
 
@@ -7011,6 +7272,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
       document_id: documentId,
       workflow_id: workflow.id,
       selected_notary_user_id: selectedNotaryUserId,
+      signature_skipped: signatureSkipped,
       submitted_at: submittedAt,
     },
   });
@@ -7055,6 +7317,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
     metadata: {
       source: "documents.submit-notarization",
       selectedNotaryUserId,
+      signatureSkipped,
     },
   });
 
@@ -7124,6 +7387,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
         code: codeRecord.code,
         expiresAt,
         productFlowMode: document.product_flow_mode,
+        signatureSkipped,
         selectedFamilies: document.selected_families,
         outputBundle: document.output_bundle,
       },

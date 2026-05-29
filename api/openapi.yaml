@@ -1654,6 +1654,25 @@ paths:
                     - poa_only
                     - trust_bundle
                     - notarize_document
+                documentDescription:
+                  type: string
+                  description: Required when productFlowMode is notarize_document.
+                  maxLength: 2000
+                notarizationReason:
+                  type: string
+                  description: Optional requester-provided reason for notarizing the uploaded document.
+                  maxLength: 2000
+                requesterName:
+                  type: string
+                  maxLength: 200
+                requesterEmail:
+                  type: string
+                  format: email
+                requesterPhoneCountryCode:
+                  type: string
+                  example: "+1"
+                requesterPhone:
+                  type: string
                 selectedFamilies:
                   type: array
                   items:
@@ -3123,6 +3142,7 @@ paths:
         - service_role
       x-audit-events:
         - member.notarization_submit_started
+        - member.document_signature_skipped
         - member.notarization_submitted
         - member.notary_selected
         - system.code_generated
@@ -3146,6 +3166,13 @@ paths:
                 selectedNotaryUserId:
                   type: string
                   description: Optional internal user id for an active notary selected by the member. When present, only that notary may successfully resolve the code.
+                signatureSkipped:
+                  type: boolean
+                  description: Allows document notarization uploads to continue to notarization without applying a member signature. Rejected for POA and Trust products.
+                signatureSkipReason:
+                  type: string
+                  maxLength: 200
+                  description: Optional audit reason when signatureSkipped is true.
       responses:
         "201":
           description: Created

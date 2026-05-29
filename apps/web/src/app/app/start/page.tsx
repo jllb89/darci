@@ -102,6 +102,11 @@ import {
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
+const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
+const NOTARIZATION_UPLOAD_FIELD_KEY = "notarize_document_upload";
+const NOTARIZATION_DOCUMENT_DESCRIPTION_KEY = "document_description";
+const NOTARIZATION_REASON_KEY = "notarization_reason";
+const NOTARIZATION_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const fetchWithTokenRefresh = async (
   url: string,
@@ -671,10 +676,19 @@ type DocumentResponsePayload = {
   message?: string;
 };
 
+type DocumentUploadCreateResponsePayload = DocumentResponsePayload & {
+  version?: {
+    id: string;
+  };
+  upload?: {
+    signedUrl: string;
+  };
+};
+
 export default function StartDocumentPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { accessToken } = useStoredAuth();
+  const { accessToken, user } = useStoredAuth();
   const { showToast } = useAppToast();
   const resumeDocumentId = searchParams.get("documentId")?.trim() ?? "";
   const [productFlowModes, setProductFlowModes] = useState<ProductFlowModeDefinition[]>([]);
@@ -705,6 +719,8 @@ export default function StartDocumentPage() {
   const [pendingLeaveAction, setPendingLeaveAction] = useState<LeaveAction | null>(null);
   const [currentFormStep, setCurrentFormStep] = useState<FormStep>("general_information");
   const [activeDropzoneFieldKey, setActiveDropzoneFieldKey] = useState<string | null>(null);
+  const [notarizationUploadFile, setNotarizationUploadFile] = useState<File | null>(null);
+  const [isSubmittingNotarizationUpload, setIsSubmittingNotarizationUpload] = useState(false);
   const [draftDocumentId, setDraftDocumentId] = useState<string | null>(null);
   const [, setDraftRevision] = useState<number | null>(null);
   const [, setDraftUpdatedAt] = useState<string | null>(null);
@@ -843,7 +859,19 @@ export default function StartDocumentPage() {
     );
   }, [productFlowModes, resolvedProductFlowMode, selectedProductFlowMode]);
 
-  const isMockDataToggleVisible = process.env.NODE_ENV !== "production";
+  const isNotarizationProductFlow = selectedProductFlowMode === NOTARIZE_DOCUMENT_MODE_KEY;
+  const requesterDisplayName = useMemo(() => {
+    return (
+      [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() ||
+      user?.email?.trim() ||
+      user?.phone?.trim() ||
+      ""
+    );
+  }, [user?.email, user?.firstName, user?.lastName, user?.phone]);
+  const requesterEmail = user?.email?.trim() ?? "";
+  const requesterPhone = user?.phone?.trim() ?? "";
+
+  const isMockDataToggleVisible = process.env.NODE_ENV !== "production" && !isNotarizationProductFlow;
   const isMockDataToggleDisabled =
     !selectedProductFlowMode ||
     !selectedJurisdiction ||
@@ -1201,6 +1229,21 @@ export default function StartDocumentPage() {
 
   useEffect(() => {
     if (!accessToken || !selectedProductFlowMode || !selectedJurisdiction) {
+      return;
+    }
+
+    if (selectedProductFlowMode === NOTARIZE_DOCUMENT_MODE_KEY) {
+      setMemberForm(null);
+      setMissingRequirements([]);
+      setErrorMessage(null);
+      setIsLoadingMemberForm(false);
+      setIsSavingDraft(false);
+      setDraftSaveNotice(null);
+      resetQueuedDraftSaves();
+      lastServerDraftSignatureRef.current = null;
+      syncDraftDocumentId(null);
+      syncDraftRevision(null);
+      setDraftUpdatedAt(null);
       return;
     }
 
@@ -1597,6 +1640,15 @@ export default function StartDocumentPage() {
 
   const isDocumentsColumnComplete =
     !shouldShowUploadColumn || !uploadRequiredByMode || hasDocumentsUploadValue;
+
+  const notarizationDocumentDescription =
+    typeof formValues[NOTARIZATION_DOCUMENT_DESCRIPTION_KEY] === "string"
+      ? formValues[NOTARIZATION_DOCUMENT_DESCRIPTION_KEY]
+      : "";
+  const notarizationReason =
+    typeof formValues[NOTARIZATION_REASON_KEY] === "string"
+      ? formValues[NOTARIZATION_REASON_KEY]
+      : "";
 
   const displayedPrimarySections = activeFormStep?.sections ?? [];
 
@@ -2275,7 +2327,64 @@ export default function StartDocumentPage() {
     trusteeValidation,
   ]);
 
+  const notarizationUploadValidationMessages = useMemo(() => {
+    if (!isNotarizationProductFlow) {
+      return [] as string[];
+    }
+
+    const messages: string[] = [];
+    if (!selectedJurisdiction) {
+      messages.push("Jurisdiction: select the state where this document will be notarized.");
+    }
+
+    if (!requesterDisplayName.trim()) {
+      messages.push("Requester: complete your profile name before continuing.");
+    }
+
+    if (!requesterEmail.trim() || !isValidEmailFormat(requesterEmail)) {
+      messages.push("Requester: complete a valid email address before continuing.");
+    }
+
+    if (!requesterPhone.trim() || !isValidPhoneFormat(requesterPhone)) {
+      messages.push("Requester: complete a valid phone number before continuing.");
+    }
+
+    if (!notarizationUploadFile) {
+      messages.push("Document upload: upload the PDF that needs notarization.");
+    } else {
+      const isPdfFile =
+        notarizationUploadFile.type === "application/pdf" ||
+        notarizationUploadFile.name.toLowerCase().endsWith(".pdf");
+
+      if (!isPdfFile) {
+        messages.push("Document upload: upload a PDF file.");
+      }
+
+      if (notarizationUploadFile.size > NOTARIZATION_MAX_UPLOAD_BYTES) {
+        messages.push("Document upload: PDF must be 25 MB or smaller.");
+      }
+    }
+
+    if (!notarizationDocumentDescription.trim()) {
+      messages.push("Document description: describe the document being notarized.");
+    }
+
+    return messages;
+  }, [
+    isNotarizationProductFlow,
+    notarizationDocumentDescription,
+    notarizationUploadFile,
+    requesterDisplayName,
+    requesterEmail,
+    requesterPhone,
+    selectedJurisdiction,
+  ]);
+
   const continueValidationMessages = useMemo(() => {
+    if (isNotarizationProductFlow) {
+      return notarizationUploadValidationMessages;
+    }
+
     const messages = [...requiredVisibleFieldMessages, ...blockingValidationMessages];
 
     if (!isDocumentsColumnComplete) {
@@ -2290,7 +2399,9 @@ export default function StartDocumentPage() {
   }, [
     blockingValidationMessages,
     hasNextFormStep,
+    isNotarizationProductFlow,
     isDocumentsColumnComplete,
+    notarizationUploadValidationMessages,
     nextFormStep,
     requiredVisibleFieldMessages,
   ]);
@@ -2300,8 +2411,8 @@ export default function StartDocumentPage() {
       return false;
     }
 
-    return Object.keys(formValues).length > 0;
-  }, [formValues, selectedJurisdiction]);
+    return Object.keys(formValues).length > 0 || Boolean(notarizationUploadFile);
+  }, [formValues, notarizationUploadFile, selectedJurisdiction]);
 
   const leaveModalCopy = useMemo(() => {
     if (pendingLeaveAction?.type === "clear-product-selection") {
@@ -2627,6 +2738,138 @@ export default function StartDocumentPage() {
     waitForQueuedDraftSaves,
   ]);
 
+  const submitNotarizationUpload = useCallback(async () => {
+    if (!accessToken || !selectedJurisdiction || !notarizationUploadFile) {
+      setSubmissionErrorMessage("Missing context to upload this document for notarization.");
+      return false;
+    }
+
+    if (notarizationUploadValidationMessages.length > 0) {
+      setSubmissionErrorMessage(formatMissingInformationAlert(notarizationUploadValidationMessages));
+      return false;
+    }
+
+    const uploadMimeType = notarizationUploadFile.type || "application/pdf";
+    const isPdfFile =
+      uploadMimeType.toLowerCase() === "application/pdf" ||
+      notarizationUploadFile.name.toLowerCase().endsWith(".pdf");
+
+    if (!isPdfFile) {
+      setSubmissionErrorMessage("Document upload: upload a PDF file.");
+      return false;
+    }
+
+    setIsSubmittingNotarizationUpload(true);
+    setSubmissionErrorMessage(null);
+
+    try {
+      const createResponse = await fetchWithTokenRefresh(`${apiBaseUrl}/documents`, accessToken, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productFlowMode: NOTARIZE_DOCUMENT_MODE_KEY,
+          documentType: "notarize_document",
+          jurisdiction: selectedJurisdiction,
+          fileName: notarizationUploadFile.name,
+          fileSize: notarizationUploadFile.size,
+          mimeType: uploadMimeType,
+          documentDescription: notarizationDocumentDescription.trim(),
+          notarizationReason: notarizationReason.trim(),
+          requesterName: requesterDisplayName.trim(),
+          requesterEmail: requesterEmail.trim(),
+          requesterPhone,
+          requesterPhoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
+        }),
+      });
+      const createPayload = (await createResponse.json().catch(() => null)) as
+        | DocumentUploadCreateResponsePayload
+        | null;
+
+      if (
+        !createResponse.ok ||
+        !createPayload?.document?.id ||
+        !createPayload.version?.id ||
+        !createPayload.upload?.signedUrl
+      ) {
+        throw new Error(createPayload?.message ?? "Failed to prepare document upload.");
+      }
+
+      const uploadResponse = await fetch(createPayload.upload.signedUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": uploadMimeType,
+        },
+        body: notarizationUploadFile,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error("Failed to upload the PDF.");
+      }
+
+      const finalizeResponse = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${createPayload.document.id}/upload-finalize`,
+        accessToken,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            documentVersionId: createPayload.version.id,
+          }),
+        },
+      );
+      const finalizePayload = (await finalizeResponse.json().catch(() => null)) as
+        | DocumentResponsePayload
+        | null;
+
+      if (!finalizeResponse.ok) {
+        throw new Error(finalizePayload?.message ?? "Failed to finalize the document upload.");
+      }
+
+      showToast({
+        tone: "success",
+        message: "Document uploaded for review.",
+      });
+      setSubmissionErrorMessage(null);
+      setShowContinueValidationDetails(false);
+      allowLeavingRef.current = true;
+      router.push(`/app/review?documentId=${encodeURIComponent(createPayload.document.id)}&submitted=1`);
+
+      return true;
+    } catch (error) {
+      captureAppException(error, {
+        level: "error",
+        tags: {
+          feature: "notarize_document_upload",
+          product_flow_mode: NOTARIZE_DOCUMENT_MODE_KEY,
+          jurisdiction: selectedJurisdiction,
+        },
+        fingerprint: ["notarize_document_upload", "submit_failed"],
+      });
+      setSubmissionErrorMessage(
+        error instanceof Error ? error.message : "Failed to upload this document for notarization.",
+      );
+      return false;
+    } finally {
+      setIsSubmittingNotarizationUpload(false);
+    }
+  }, [
+    accessToken,
+    notarizationDocumentDescription,
+    notarizationReason,
+    notarizationUploadFile,
+    notarizationUploadValidationMessages,
+    requesterDisplayName,
+    requesterEmail,
+    requesterPhone,
+    router,
+    selectedJurisdiction,
+    showToast,
+  ]);
+
   const handleFinalContinue = async () => {
     setShowContinueValidationDetails(true);
 
@@ -2636,6 +2879,11 @@ export default function StartDocumentPage() {
 
     if (continueValidationMessages.length > 0) {
       setSubmissionErrorMessage(formatMissingInformationAlert(continueValidationMessages));
+      return;
+    }
+
+    if (isNotarizationProductFlow) {
+      await submitNotarizationUpload();
       return;
     }
 
@@ -2752,6 +3000,7 @@ export default function StartDocumentPage() {
     setIsMockDataEnabled(false);
     setMemberForm(null);
     setFormValues({});
+    setNotarizationUploadFile(null);
     setCurrentFormStep(getDefaultFormStep(normalizedMode));
     setMissingRequirements([]);
     setErrorMessage(null);
@@ -2766,6 +3015,7 @@ export default function StartDocumentPage() {
       setIsMockDataEnabled(false);
       setMemberForm(null);
       setFormValues({});
+      setNotarizationUploadFile(null);
       setCurrentFormStep(getDefaultFormStep(selectedProductFlowMode));
       setMissingRequirements([]);
       setErrorMessage(null);
@@ -2833,6 +3083,174 @@ export default function StartDocumentPage() {
       ...current,
       [key]: value,
     }));
+  };
+
+  const handleNotarizationFilePick = (file: File | null | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    const isPdfFile = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdfFile) {
+      setSubmissionErrorMessage("Document upload: upload a PDF file.");
+      setShowContinueValidationDetails(true);
+      return;
+    }
+
+    setNotarizationUploadFile(file);
+    setSubmissionErrorMessage(null);
+    setShowContinueValidationDetails(false);
+  };
+
+  const renderRequesterDetail = (label: string, value: string) => {
+    return (
+      <div className="space-y-1 rounded-md border border-Color-Scheme-1-Border/40 bg-white px-3 py-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-Color-Neutral">{label}</div>
+        <div className="truncate text-sm font-medium text-Color-Scheme-1-Text">
+          {value || "Missing"}
+        </div>
+      </div>
+    );
+  };
+
+  const renderNotarizationUploadDropzone = () => {
+    const isUploadDisabled = !selectedJurisdiction || isSubmittingNotarizationUpload;
+    const isDropzoneActive =
+      !isUploadDisabled && activeDropzoneFieldKey === NOTARIZATION_UPLOAD_FIELD_KEY;
+    const selectedFileName = notarizationUploadFile?.name ?? "";
+
+    return (
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-Color-Scheme-1-Text">Document upload</label>
+        <label
+          className={`block rounded-md border border-dashed px-4 py-5 text-sm transition-colors ${
+            isUploadDisabled
+              ? "cursor-not-allowed border-Color-Scheme-1-Border/30 bg-Color-Neutral-Lightest text-Color-Neutral"
+              : isDropzoneActive
+                ? "cursor-pointer border-black bg-white text-black"
+                : "cursor-pointer border-Color-Scheme-1-Border/50 bg-white text-Color-Scheme-1-Text hover:border-Color-Scheme-1-Border"
+          }`}
+          onDragEnter={(event: DragEvent<HTMLLabelElement>) => {
+            if (isUploadDisabled) {
+              return;
+            }
+
+            event.preventDefault();
+            setActiveDropzoneFieldKey(NOTARIZATION_UPLOAD_FIELD_KEY);
+          }}
+          onDragOver={(event: DragEvent<HTMLLabelElement>) => {
+            if (isUploadDisabled) {
+              return;
+            }
+
+            event.preventDefault();
+            setActiveDropzoneFieldKey(NOTARIZATION_UPLOAD_FIELD_KEY);
+          }}
+          onDragLeave={(event: DragEvent<HTMLLabelElement>) => {
+            if (isUploadDisabled) {
+              return;
+            }
+
+            const related = event.relatedTarget;
+            if (related instanceof Node && event.currentTarget.contains(related)) {
+              return;
+            }
+
+            setActiveDropzoneFieldKey((current) => {
+              return current === NOTARIZATION_UPLOAD_FIELD_KEY ? null : current;
+            });
+          }}
+          onDrop={(event: DragEvent<HTMLLabelElement>) => {
+            if (isUploadDisabled) {
+              return;
+            }
+
+            event.preventDefault();
+            setActiveDropzoneFieldKey(null);
+            handleNotarizationFilePick(event.dataTransfer.files?.[0]);
+          }}
+        >
+          <div className="space-y-1">
+            <div className="font-medium">Drop PDF here or click to browse</div>
+            <div className={`text-xs ${isDropzoneActive ? "text-black" : "text-Color-Neutral"}`}>
+              {isUploadDisabled ? "Select a jurisdiction first to unlock uploads." : "PDF only, 25 MB maximum"}
+            </div>
+          </div>
+          <input
+            accept=".pdf,application/pdf"
+            className="hidden"
+            disabled={isUploadDisabled}
+            onChange={(event) => {
+              handleNotarizationFilePick(event.target.files?.[0]);
+            }}
+            type="file"
+          />
+        </label>
+        <div className={`text-xs ${selectedFileName ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"}`}>
+          {selectedFileName ? (
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">{`Selected file: ${selectedFileName}`}</span>
+              <button
+                aria-label={`Clear selected file ${selectedFileName}`}
+                className="inline-flex h-5 w-5 items-center justify-center text-xs text-Color-Neutral transition hover:text-Color-Scheme-1-Text"
+                onClick={() => {
+                  setNotarizationUploadFile(null);
+                }}
+                type="button"
+              >
+                x
+              </button>
+            </div>
+          ) : (
+            "No file selected yet."
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderNotarizationForm = () => {
+    return (
+      <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          {renderRequesterDetail("Name", requesterDisplayName)}
+          {renderRequesterDetail("Email", requesterEmail)}
+          {renderRequesterDetail("Phone", requesterPhone)}
+        </div>
+
+        {renderNotarizationUploadDropzone()}
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-Color-Scheme-1-Text" htmlFor="notarization-document-description">
+            Document description
+          </label>
+          <textarea
+            className="platform-control min-h-28"
+            id="notarization-document-description"
+            maxLength={2000}
+            onChange={(event) => {
+              handleFieldChange(NOTARIZATION_DOCUMENT_DESCRIPTION_KEY, event.target.value);
+            }}
+            value={notarizationDocumentDescription}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-Color-Scheme-1-Text" htmlFor="notarization-reason">
+            Reason for notarizing document <span className="font-normal text-Color-Neutral">optional</span>
+          </label>
+          <textarea
+            className="platform-control min-h-24"
+            id="notarization-reason"
+            maxLength={2000}
+            onChange={(event) => {
+              handleFieldChange(NOTARIZATION_REASON_KEY, event.target.value);
+            }}
+            value={notarizationReason}
+          />
+        </div>
+      </div>
+    );
   };
 
   const renderFieldLabel = (field: MemberFacingField) => {
@@ -3981,12 +4399,18 @@ export default function StartDocumentPage() {
   };
 
   const isContinueDisabled =
-    !selectedProductFlowMode ||
-    !selectedJurisdiction ||
-    isLoadingProductFlowModes ||
-    isValidatingMemberFormSubmission ||
-    isLoadingMemberForm ||
-    !memberForm;
+    isNotarizationProductFlow
+      ? !selectedProductFlowMode ||
+        !selectedJurisdiction ||
+        isLoadingProductFlowModes ||
+        isLoadingJurisdictions ||
+        isSubmittingNotarizationUpload
+      : !selectedProductFlowMode ||
+        !selectedJurisdiction ||
+        isLoadingProductFlowModes ||
+        isValidatingMemberFormSubmission ||
+        isLoadingMemberForm ||
+        !memberForm;
 
   const isContinueUnavailable = isContinueDisabled;
   const isContinueBlocked = continueValidationMessages.length > 0;
@@ -4116,6 +4540,7 @@ export default function StartDocumentPage() {
                             onChange={handleMockDataToggleChange}
                           />
                         ) : null}
+                        {!isNotarizationProductFlow ? (
                         <label className="inline-flex items-center gap-2 text-xs font-medium text-Color-Neutral">
                           <span>Show active sources</span>
                           <input
@@ -4128,10 +4553,13 @@ export default function StartDocumentPage() {
                             type="checkbox"
                           />
                         </label>
+                        ) : null}
                       </div>
                     </div>
                     <div className="mt-1 text-xs text-Color-Neutral">
-                      Answer each question in plain terms. If you&apos;re unsure, choose the closest option and continue.
+                      {isNotarizationProductFlow
+                        ? "Upload the document and confirm the request details before review."
+                        : "Answer each question in plain terms. If you&apos;re unsure, choose the closest option and continue."}
                     </div>
                   </div>
 
@@ -4203,7 +4631,9 @@ export default function StartDocumentPage() {
                     </div>
                   ) : null}
 
-                  {isLoadingMemberForm ? (
+                  {isNotarizationProductFlow ? (
+                    renderNotarizationForm()
+                  ) : isLoadingMemberForm ? (
                     <div className="text-sm text-Color-Neutral">Loading requirements...</div>
                   ) : memberForm ? (
                     <div className="space-y-4">
@@ -4296,9 +4726,13 @@ export default function StartDocumentPage() {
                           aria-disabled={shouldStyleContinueAsBlocked}
                           disabled={isContinueUnavailable}
                         >
-                          {isValidatingMemberFormSubmission
-                            ? "Validating..."
-                            : "Continue to generate documents"}
+                          {isSubmittingNotarizationUpload
+                            ? "Uploading..."
+                            : isNotarizationProductFlow
+                              ? "Continue to review"
+                              : isValidatingMemberFormSubmission
+                                ? "Validating..."
+                                : "Continue to generate documents"}
                         </button>
                       ) : null}
                     </div>

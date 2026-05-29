@@ -125,7 +125,7 @@ const fallbackSelections: Record<ProductFlowModeKey, Omit<ProductFlowModeSelecti
     idnType: "acknowledgment",
   },
   notarize_document: {
-    families: ["poa"],
+    families: [],
     poaType: "general",
     trustType: "rrr",
     idnType: "acknowledgment",
@@ -410,6 +410,10 @@ const buildSelectionFromRows = (
 ): ProductFlowModeSelection => {
   const fallback = buildFallbackSelection(modeKey);
 
+  if (modeKey === "notarize_document") {
+    return fallback;
+  }
+
   if (familyRows.length === 0) {
     return fallback;
   }
@@ -506,6 +510,10 @@ export const getDefaultProductFlowModeSelection = async (): Promise<ProductFlowM
 export const getJurisdictionsForMode = async (
   modeKey?: string,
 ): Promise<ProductFlowJurisdictionOption[]> => {
+  if (modeKey?.trim() === "notarize_document") {
+    return listPoaJurisdictions("general");
+  }
+
   const selection = await buildSelectionForMode(modeKey);
   const lists: ProductFlowJurisdictionOption[][] = [];
 
@@ -528,6 +536,10 @@ export const resolveExpectedOutputsForMode = async (
   modeKey?: string,
 ): Promise<ProductFlowModeOutputDefinition[]> => {
   const selection = await buildSelectionForMode(modeKey);
+  if (selection.modeKey === "notarize_document") {
+    return [];
+  }
+
   const mode = await getProductFlowMode(selection.modeKey);
 
   if (!mode || mode.outputs.length === 0) {

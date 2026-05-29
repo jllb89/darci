@@ -38,6 +38,11 @@ import {
   uploadGeneratedDocument,
 } from "./storageService";
 import { logDocumentTrace } from "../utils/documentTrace";
+
+const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
+const UPLOADED_DOCUMENT_OUTPUT_KEY = "uploaded_document";
+const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
+const UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY = "addendum_page";
 import { captureException } from "../utils/sentry";
 
 const PDF_PAGE_MARGINS = {
@@ -404,6 +409,21 @@ const parseSignatureFieldPlacement = (value: unknown): SignatureFieldPlacement |
     signatureRect,
     dateRect,
   };
+};
+
+const shouldUseUploadedNotarizationSignatureAddendum = (input: {
+  document: DocumentRecord;
+  run: DocumentGenerationRunRecord;
+  signer: DocumentOutputSignerRecord;
+}) => {
+  return (
+    input.document.product_flow_mode === NOTARIZE_DOCUMENT_MODE_KEY &&
+    input.run.output_key === UPLOADED_DOCUMENT_OUTPUT_KEY &&
+    input.run.template_key === UPLOADED_DOCUMENT_TEMPLATE_KEY &&
+    input.signer.metadata.source === "uploaded_pdf" &&
+    input.signer.metadata.signaturePlacementStrategy ===
+      UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY
+  );
 };
 
 const getLatestVersionForRun = <T extends { generation_run_id: string | null }>(
@@ -2304,17 +2324,87 @@ const fitTextToRect = (input: {
   return Math.max(fontSize, minSize);
 };
 
+const drawUploadedSignatureAddendumHeader = async (pdf: PdfLibDocument) => {
+  const page = pdf.addPage([612, 792]);
+  const headingFont = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const bodyFont = await pdf.embedFont(StandardFonts.Helvetica);
+
+  page.drawText("DARCi Signature Addendum", {
+    x: 72,
+    y: 720,
+    size: 18,
+    font: headingFont,
+    color: rgb(0.08, 0.08, 0.08),
+  });
+  page.drawText(
+    "Signatures for this uploaded document are placed on this addendum page so the original PDF content remains unchanged.",
+    {
+      x: 72,
+      y: 694,
+      size: 9,
+      font: bodyFont,
+      color: rgb(0.28, 0.28, 0.28),
+    },
+  );
+
+  return page;
+};
+
+const drawUploadedSignatureAddendumLabel = async (input: {
+  pdf: PdfLibDocument;
+  page: PDFPage;
+  placement: SignatureFieldPlacement;
+}) => {
+  const labelFont = await input.pdf.embedFont(StandardFonts.HelveticaBold);
+  const bodyFont = await input.pdf.embedFont(StandardFonts.Helvetica);
+  const signatureBox = toPdfLibRect(input.page.getHeight(), input.placement.signatureRect);
+
+  input.page.drawText(`Signature: ${input.placement.label}`, {
+    x: signatureBox.x,
+    y: signatureBox.y + signatureBox.height + 9,
+    size: 9,
+    font: labelFont,
+    color: rgb(0.16, 0.16, 0.16),
+  });
+
+  if (input.placement.dateRect) {
+    const dateBox = toPdfLibRect(input.page.getHeight(), input.placement.dateRect);
+    input.page.drawText("Date", {
+      x: dateBox.x,
+      y: dateBox.y + dateBox.height + 9,
+      size: 9,
+      font: bodyFont,
+      color: rgb(0.28, 0.28, 0.28),
+    });
+  }
+};
+
 const stampSignatureOnPdf = async (input: {
   pdfBytes: Buffer;
   placement: SignatureFieldPlacement;
   signatureRecord: SignatureRecord;
+  uploadedNotarizationAddendum?: {
+    appendPage: boolean;
+  };
 }) => {
   const pdf = await PdfLibDocument.load(input.pdfBytes);
   const pages = pdf.getPages();
-  const page = pages[input.placement.pageNumber - 1];
+  const page = input.uploadedNotarizationAddendum
+    ? input.uploadedNotarizationAddendum.appendPage
+      ? await drawUploadedSignatureAddendumHeader(pdf)
+      : pages[pages.length - 1]
+    : pages[input.placement.pageNumber - 1];
 
   if (!page) {
     throw new Error("Signature field page could not be resolved in the official PDF");
+  }
+
+  if (input.uploadedNotarizationAddendum) {
+    await drawUploadedSignatureAddendumLabel({
+      pdf,
+      page,
+      placement: input.placement,
+    });
   }
 
   const signatureBox = replaceSignatureFieldWithLine(page, input.placement.signatureRect);
@@ -2500,10 +2590,22 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
   }
 
   const currentPdf = await downloadDocumentObject(latestVersion.storage_path);
+  const useUploadedNotarizationAddendum = shouldUseUploadedNotarizationSignatureAddendum({
+    document: input.document,
+    run,
+    signer,
+  });
   const stampedPdf = await stampSignatureOnPdf({
     pdfBytes: currentPdf,
     placement,
     signatureRecord: input.signatureRecord,
+    ...(useUploadedNotarizationAddendum
+      ? {
+          uploadedNotarizationAddendum: {
+            appendPage: latestVersion.id === run.document_version_id,
+          },
+        }
+      : {}),
   });
   const baseFileName = (latestVersion.file_name ?? `${run.output_key}.pdf`).replace(/\.pdf$/i, "");
   const nextFileName = `${baseFileName.replace(/-signed$/i, "")}-signed.pdf`;
