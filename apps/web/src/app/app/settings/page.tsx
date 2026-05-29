@@ -400,7 +400,6 @@ function SelectField({
       return;
     }
 
-    updatePopoverPosition();
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);
 
@@ -454,7 +453,12 @@ function SelectField({
         disabled={disabled}
         className="flex h-10 w-full items-center justify-between rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-3 text-left text-sm text-Color-Scheme-1-Text outline-none transition-colors hover:bg-Color-Neutral-Lightest/50 focus-visible:border-Color-Scheme-1-Text disabled:cursor-not-allowed disabled:opacity-50"
         aria-expanded={isOpen}
-        onClick={() => onOpenChange(!isOpen)}
+        onClick={() => {
+          if (!isOpen) {
+            updatePopoverPosition();
+          }
+          onOpenChange(!isOpen);
+        }}
       >
         <span className={selectedOption ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"}>
           {selectedOption?.label ?? placeholder}
@@ -482,17 +486,15 @@ function SignatureCaptureField({
 }) {
   const [mode, setMode] = useState<"draw" | "upload" | "saved">("draw");
   const [isUsingDrawnSignature, setIsUsingDrawnSignature] = useState(false);
-  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
+  const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>(() =>
+    loadSavedSignatures(),
+  );
   const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
   const [isDraggingUpload, setIsDraggingUpload] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
   const hasInkRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    setSavedSignatures(loadSavedSignatures());
-  }, []);
 
   const resetCanvas = useCallback(() => {
     const canvas = canvasRef.current;

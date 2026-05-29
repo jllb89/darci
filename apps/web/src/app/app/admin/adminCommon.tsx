@@ -237,7 +237,6 @@ export function AdminSelectFilterControl({
       return;
     }
 
-    updatePopoverPosition();
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);
 
@@ -285,7 +284,12 @@ export function AdminSelectFilterControl({
       <button
         aria-expanded={isOpen}
         className="flex h-9 w-full items-center justify-between rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-3 text-left text-xs text-Color-Scheme-1-Text outline-none transition-colors hover:bg-Color-Neutral-Lightest/50 focus-visible:border-Color-Scheme-1-Text"
-        onClick={() => onOpenChange(!isOpen)}
+        onClick={() => {
+          if (!isOpen) {
+            updatePopoverPosition();
+          }
+          onOpenChange(!isOpen);
+        }}
         ref={triggerRef}
         type="button"
       >
