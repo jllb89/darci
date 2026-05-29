@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { pool } from "../db/pool";
 import {
   getUserIdentityContextBySupabaseId,
   getUserIdentityContextByUserId,
@@ -129,95 +128,23 @@ const isNotaryApplicationsSchemaCacheError = (error: { message?: string; code?: 
   );
 };
 
-const getNotaryApplicationByUserIdFromPool = async (userId: string) => {
-  const result = await pool.query(
-    `
-      select
-        id,
-        user_id,
-        jurisdiction,
-        service_area_kind,
-        service_area_name,
-        signature_data_url,
-        seal_data_url,
-        status,
-        review_notes,
-        reviewed_by_user_id,
-        reviewed_at,
-        created_at,
-        updated_at
-      from public.notary_profile_applications
-      where user_id = $1
-      limit 1
-    `,
-    [userId],
-  );
-
-  const row = (result.rows[0] ?? null) as Record<string, unknown> | null;
-  return row ? toNotaryApplicationRecord(row) : null;
+const isUniqueViolationError = (error: { code?: string } | null | undefined) => {
+  return error?.code === "23505";
 };
 
-const bootstrapNotarySchemaSql = `
-  create table if not exists public.notary_profile_applications (
-    id uuid primary key default gen_random_uuid(),
-    user_id uuid not null unique references public.users(id) on delete cascade,
-    jurisdiction text not null,
-    service_area_kind text not null,
-    service_area_name text not null,
-    signature_data_url text,
-    seal_data_url text,
-    status text not null default 'pending',
-    review_notes text,
-    reviewed_by_user_id uuid references public.users(id),
-    reviewed_at timestamptz,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
-  );
-
-  create index if not exists idx_notary_profile_applications_status on public.notary_profile_applications(status);
-  create index if not exists idx_notary_profile_applications_user on public.notary_profile_applications(user_id);
-
-  alter table public.notary_profiles
-    add column if not exists service_area_kind text,
-    add column if not exists service_area_name text,
-    add column if not exists signature_data_url text,
-    add column if not exists seal_data_url text,
-    add column if not exists updated_at timestamptz not null default now();
-`;
-
-let notarySchemaBootstrapPromise: Promise<void> | null = null;
-
-const ensureNotarySchema = async () => {
-  if (!notarySchemaBootstrapPromise) {
-    notarySchemaBootstrapPromise = (async () => {
-      await pool.query(bootstrapNotarySchemaSql);
-      await pool.query("select pg_notify('pgrst', 'reload schema');");
-    })().catch((error) => {
-      notarySchemaBootstrapPromise = null;
-      throw error;
-    });
-  }
-
-  return notarySchemaBootstrapPromise;
-};
-
-export const listMyNotaryApplication = async (supabaseUserId: string) => {
-  ensureNotaryDbReady();
-  await ensureNotarySchema();
-  const identity = await getUserIdentityContextBySupabaseId(supabaseUserId);
-  if (!identity) {
-    throw new NotaryProfileServiceError(404, "User not found");
-  }
-
+const getNotaryApplicationByUserId = async (userId: string) => {
   const { data, error } = await supabaseAdmin
     .from("notary_profile_applications")
     .select(notaryApplicationSelect)
-    .eq("user_id", identity.id)
+    .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
 
   if (isNotaryApplicationsSchemaCacheError(error)) {
-    return getNotaryApplicationByUserIdFromPool(identity.id);
+    throw new NotaryProfileServiceError(
+      500,
+      "Notary application schema is not available in PostgREST. Run the notary application migration in this environment.",
+    );
   }
 
   if (error) {
@@ -225,6 +152,16 @@ export const listMyNotaryApplication = async (supabaseUserId: string) => {
   }
 
   return data ? toNotaryApplicationRecord(data as Record<string, unknown>) : null;
+};
+
+export const listMyNotaryApplication = async (supabaseUserId: string) => {
+  ensureNotaryDbReady();
+  const identity = await getUserIdentityContextBySupabaseId(supabaseUserId);
+  if (!identity) {
+    throw new NotaryProfileServiceError(404, "User not found");
+  }
+
+  return getNotaryApplicationByUserId(identity.id);
 };
 
 export const submitNotaryApplication = async (input: {
@@ -236,21 +173,20 @@ export const submitNotaryApplication = async (input: {
   sealDataUrl?: string | null;
 }) => {
   ensureNotaryDbReady();
-  await ensureNotarySchema();
   const identity = await getUserIdentityContextBySupabaseId(input.supabaseUserId);
 
   if (!identity) {
     throw new NotaryProfileServiceError(404, "User not found");
   }
 
-  const existingApplication = await getNotaryApplicationByUserIdFromPool(identity.id);
+  const existingApplication = await getNotaryApplicationByUserId(identity.id);
   if (existingApplication) {
     throw new NotaryProfileServiceError(409, "A notary application has already been submitted for this account.");
   }
 
   const { data, error } = await supabaseAdmin
     .from("notary_profile_applications")
-    .upsert({
+    .insert({
       user_id: identity.id,
       jurisdiction: input.jurisdiction.trim(),
       service_area_kind: input.serviceAreaKind,
@@ -266,6 +202,10 @@ export const submitNotaryApplication = async (input: {
     .select(notaryApplicationSelect)
     .single();
 
+  if (isUniqueViolationError(error)) {
+    throw new NotaryProfileServiceError(409, "A notary application has already been submitted for this account.");
+  }
+
   if (error || !data) {
     throw new NotaryProfileServiceError(500, error?.message ?? "Failed to save notary application");
   }
@@ -275,7 +215,6 @@ export const submitNotaryApplication = async (input: {
 
 export const listNotaryApplications = async () => {
   ensureNotaryDbReady();
-  await ensureNotarySchema();
   const { data, error } = await supabaseAdmin
     .from("notary_profile_applications")
     .select(`${notaryApplicationSelect}, users!notary_profile_applications_user_id_fkey(id, supabase_user_id, email, phone, first_name, last_name)`)
@@ -307,7 +246,6 @@ export const listNotaryApplications = async () => {
 
 export const getMyNotaryProfile = async (supabaseUserId: string) => {
   ensureNotaryDbReady();
-  await ensureNotarySchema();
   const identity = await getUserIdentityContextBySupabaseId(supabaseUserId);
 
   if (!identity) {
@@ -339,7 +277,6 @@ export const upsertMyNotaryProfile = async (input: {
   sealDataUrl?: string | null;
 }) => {
   ensureNotaryDbReady();
-  await ensureNotarySchema();
   const identity = await getUserIdentityContextBySupabaseId(input.supabaseUserId);
 
   if (!identity) {
@@ -375,7 +312,6 @@ export const approveNotaryApplication = async (input: {
   reviewNotes?: string | null;
 }) => {
   ensureNotaryDbReady();
-  await ensureNotarySchema();
 
   const applicationQuery = await supabaseAdmin
     .from("notary_profile_applications")
@@ -451,7 +387,6 @@ export const rejectNotaryApplication = async (input: {
   reviewNotes?: string | null;
 }) => {
   ensureNotaryDbReady();
-  await ensureNotarySchema();
 
   const reviewer = await getUserIdentityContextBySupabaseId(input.reviewedBySupabaseUserId);
   if (!reviewer) {

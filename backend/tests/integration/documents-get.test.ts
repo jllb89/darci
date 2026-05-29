@@ -1989,7 +1989,7 @@ describe("GET documents endpoints", () => {
         renderer_job_id: rendererJobId,
         document_version_id: null,
         blocked_at: null,
-        started_at: "2026-03-05T00:20:00.000Z",
+        started_at: status === "queued" ? null : "2026-03-05T00:20:00.000Z",
         rendered_at: null,
         failed_at: failedAt,
         canceled_at: null,

@@ -2008,7 +2008,11 @@ const isStaleQueuedReviewRun = (run: DocumentGenerationRunRecord | null) => {
     return false;
   }
 
-  const queuedTimestamp = toTimestamp(run.created_at);
+  if (!("started_at" in run) || !("renderer_job_id" in run)) {
+    return false;
+  }
+
+  const queuedTimestamp = toTimestamp(run.started_at ?? run.created_at);
   return (
     queuedTimestamp > 0 &&
     Date.now() - queuedTimestamp >= RENDERING_RUN_STALE_AFTER_MS

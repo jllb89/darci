@@ -48,6 +48,12 @@ const templateKeysThatMustLoadSource = new Set([
   "oh_trust_rrr",
   "oh_trust_certificate",
 ]);
+const templateSourcePathFallbacks: Record<string, string> = {
+  ca_trust_rrr: "../docs/CA - DARCi Trust Registration Amendment (APE 260305) (1).md",
+  ca_trust_certificate: "../docs/CA - DARCi Trust Certification (APE 260305).md",
+  oh_trust_rrr: "../docs/OH - DARCi Trust Registration Amendment .md",
+  oh_trust_certificate: "../docs/OH - DARCi Trust Certification .md",
+};
 import { captureException } from "../utils/sentry";
 
 const PDF_PAGE_MARGINS = {
@@ -465,15 +471,21 @@ const formatExecutionDateForField = (value: string | null | undefined) => {
   return `${month}/${day}/${year}`;
 };
 
-const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
+export const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
   const metadata = getArtifactMetadata(artifact);
-  const localTemplatePath = asTrimmedString(metadata.localTemplatePath);
-  if (localTemplatePath) {
+  const localTemplatePaths = [
+    asTrimmedString(metadata.localTemplatePath),
+    templateSourcePathFallbacks[artifact.template_key] ?? "",
+  ].filter((candidate, index, paths) => candidate && paths.indexOf(candidate) === index);
+
+  for (const localTemplatePath of localTemplatePaths) {
     const candidatePaths = path.isAbsolute(localTemplatePath)
       ? [localTemplatePath]
       : [
           path.resolve(process.cwd(), localTemplatePath),
           path.resolve(process.cwd(), "..", localTemplatePath),
+          path.resolve("/app", localTemplatePath),
+          path.resolve("/docs", path.basename(localTemplatePath)),
         ];
 
     for (const candidatePath of new Set(candidatePaths)) {

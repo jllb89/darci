@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyPreviewWatermarkOverlay,
+  loadTemplateSource,
   PREVIEW_WATERMARK_TEXT,
   renderLegalTemplateText,
   stripRenderControlTokens,
@@ -86,6 +87,27 @@ describe("documentGenerationRenderService", () => {
     expect(visible).toContain("The Trust is revocable by The trustmaker only");
     expect(visible).toContain("The Trust is established under the laws of the state of California.");
     expect(rendered).not.toContain("\\<\\<");
+  });
+
+  it("loads OH trust source from the template-key fallback when artifact metadata is stale", async () => {
+    const source = await loadTemplateSource({
+      id: "artifact-oh-rrr",
+      template_key: "oh_trust_rrr",
+      template_version: "2026.04.14.v1",
+      template_hash: "sha256:oh-trustrrr-v1",
+      artifact_storage_path: "templates/oh_trust_rrr.template.json",
+      artifact_mime_type: "application/json",
+      render_engine: "other",
+      artifact_metadata: {
+        renderer: "context_snapshot",
+        templateLabel: "Ohio Trust Registration Amendment",
+      },
+      is_active: true,
+      created_at: "2026-04-14T00:00:00.000Z",
+    });
+
+    expect(source).toContain("DARCi Registration Amendment");
+    expect(source).toContain("TrustName");
   });
 
   it("promotes bold-only legal labels into headings and drops the et cetera trust bullet", () => {

@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { pool } from "../db/pool";
 import {
   resolveEmailNotificationProvider,
   resolveSmsNotificationProvider,
@@ -45,6 +44,11 @@ type NotificationUserRecord = {
   phone: string | null;
   first_name: string | null;
   last_name: string | null;
+};
+
+type NotificationUserRow = NotificationUserRecord & {
+  role?: string | null;
+  status?: string | null;
 };
 
 type NotificationDocumentRecord = {
@@ -663,34 +667,78 @@ const getUserById = async (userId: string) => {
   return (data as NotificationUserRecord | null) ?? null;
 };
 
+const notificationUserSelect = "id, email, phone, first_name, last_name, role, status";
+
+const toNotificationUserRecord = (row: NotificationUserRow): NotificationUserRecord => ({
+  id: String(row.id),
+  email: row.email == null ? null : String(row.email),
+  phone: row.phone == null ? null : String(row.phone),
+  first_name: row.first_name == null ? null : String(row.first_name),
+  last_name: row.last_name == null ? null : String(row.last_name),
+});
+
+const isActiveNotificationUser = (row: NotificationUserRow) => {
+  return (row.status ?? "active") === "active";
+};
+
+const hasNotificationEmail = (row: NotificationUserRow) => {
+  return typeof row.email === "string" && row.email.trim().length > 0;
+};
+
 const listActiveAdminUsers = async () => {
-  const result = await pool.query(
-    `
-      select distinct
-        u.id,
-        u.email,
-        u.phone,
-        u.first_name,
-        u.last_name
-      from public.users u
-      left join public.user_roles ur
-        on ur.user_id = u.id
-        and ur.role = 'admin'
-        and ur.status = 'active'
-      where (u.role = 'admin' or ur.id is not null)
-        and coalesce(u.status, 'active') = 'active'
-        and nullif(btrim(coalesce(u.email, '')), '') is not null
-      order by u.email asc
-    `,
+  const { data: legacyAdmins, error: legacyError } = await supabaseAdmin
+    .from("users")
+    .select(notificationUserSelect)
+    .eq("role", "admin");
+
+  if (legacyError) {
+    throw new Error(legacyError.message);
+  }
+
+  const { data: activeAdminRoles, error: roleError } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id")
+    .eq("role", "admin")
+    .eq("status", "active");
+
+  if (roleError) {
+    throw new Error(roleError.message);
+  }
+
+  const assignedAdminUserIds = Array.from(
+    new Set(
+      (activeAdminRoles ?? [])
+        .map((row: { user_id?: unknown }) => (typeof row.user_id === "string" ? row.user_id : null))
+        .filter((userId): userId is string => Boolean(userId)),
+    ),
   );
 
-  return result.rows.map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    email: row.email == null ? null : String(row.email),
-    phone: row.phone == null ? null : String(row.phone),
-    first_name: row.first_name == null ? null : String(row.first_name),
-    last_name: row.last_name == null ? null : String(row.last_name),
-  })) satisfies NotificationUserRecord[];
+  const assignedAdmins = assignedAdminUserIds.length > 0
+    ? await supabaseAdmin
+        .from("users")
+        .select(notificationUserSelect)
+        .in("id", assignedAdminUserIds)
+    : { data: [], error: null };
+
+  if (assignedAdmins.error) {
+    throw new Error(assignedAdmins.error.message);
+  }
+
+  const usersById = new Map<string, NotificationUserRecord>();
+  for (const row of [
+    ...((legacyAdmins ?? []) as NotificationUserRow[]),
+    ...((assignedAdmins.data ?? []) as NotificationUserRow[]),
+  ]) {
+    if (!isActiveNotificationUser(row) || !hasNotificationEmail(row)) {
+      continue;
+    }
+
+    usersById.set(String(row.id), toNotificationUserRecord(row));
+  }
+
+  return Array.from(usersById.values()).sort((left, right) =>
+    (left.email ?? "").localeCompare(right.email ?? ""),
+  );
 };
 
 const getDocumentById = async (documentId: string) => {
