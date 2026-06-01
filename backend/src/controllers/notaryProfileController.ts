@@ -15,6 +15,7 @@ import {
   queueNotaryApplicationRejectedNotification,
   queueNotaryApplicationSubmittedAdminNotification,
 } from "../services/notificationService";
+import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import { sendValidationError } from "../utils/validation";
 
 const serviceAreaKindSchema = z.enum([
@@ -78,6 +79,41 @@ const handleServiceError = (res: Response, error: unknown, fallbackMessage: stri
     error: "internal_error",
     message: error instanceof Error ? error.message : fallbackMessage,
   });
+};
+
+const processNotaryDecisionNotification = async (input: {
+  applicationId: string;
+  notificationType: "approved" | "rejected";
+  notificationResult: { jobId: string } | null;
+}) => {
+  if (!input.notificationResult?.jobId) {
+    return;
+  }
+
+  try {
+    const result = await runDueNotificationJobs({
+      limit: 1,
+      workerId: `notary-application-${input.notificationType}-inline`,
+      notificationJobIds: [input.notificationResult.jobId],
+    });
+
+    if (result.processedCount === 0) {
+      console.warn("Notary application decision notification was queued but not processed", {
+        applicationId: input.applicationId,
+        notificationType: input.notificationType,
+        notificationJobId: input.notificationResult.jobId,
+        scannedCount: result.scannedCount,
+        claimedCount: result.claimedCount,
+      });
+    }
+  } catch (error) {
+    console.error("Failed to process notary application decision notification", {
+      applicationId: input.applicationId,
+      notificationType: input.notificationType,
+      notificationJobId: input.notificationResult.jobId,
+      error: error instanceof Error ? error.message : error,
+    });
+  }
 };
 
 const mapNotaryProfile = (profile: Awaited<ReturnType<typeof getMyNotaryProfile>>) => {
@@ -263,11 +299,17 @@ export const approveNotaryApplicationAdminHandler = async (req: Request, res: Re
       reviewNotes: parsed.data.reviewNotes ?? null,
     });
 
-    await queueNotaryApplicationApprovedNotification({
+    const notificationResult = await queueNotaryApplicationApprovedNotification({
       applicationId: result.application.id,
       userId: result.applicant.id,
       reviewedBySupabaseUserId: supabaseUserId,
       reviewNotes: parsed.data.reviewNotes ?? null,
+    });
+
+    await processNotaryDecisionNotification({
+      applicationId: result.application.id,
+      notificationType: "approved",
+      notificationResult,
     });
 
     return res.status(200).json({
@@ -307,11 +349,17 @@ export const rejectNotaryApplicationAdminHandler = async (req: Request, res: Res
       reviewNotes: parsed.data.reviewNotes ?? null,
     });
 
-    await queueNotaryApplicationRejectedNotification({
+    const notificationResult = await queueNotaryApplicationRejectedNotification({
       applicationId: application.id,
       userId: application.userId,
       reviewedBySupabaseUserId: supabaseUserId,
       reviewNotes: parsed.data.reviewNotes ?? null,
+    });
+
+    await processNotaryDecisionNotification({
+      applicationId: application.id,
+      notificationType: "rejected",
+      notificationResult,
     });
 
     return res.status(200).json({ application: mapNotaryApplication(application) });
