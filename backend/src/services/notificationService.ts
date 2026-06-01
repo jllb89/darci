@@ -38,6 +38,24 @@ type NotificationDeliveryRecord = {
   provider: string | null;
 };
 
+type FallbackNotificationTemplate = {
+  template_key: string;
+  template_version: string;
+  locale: string;
+  channel: NotificationChannel;
+  template_kind: string;
+  audience_scope: string;
+  trigger_event: string;
+  invite_kind: null;
+  subject_template: string;
+  body_template: string;
+  body_format: string;
+  variables_schema: Record<string, unknown>;
+  is_active: boolean;
+  source_reference: string;
+  metadata: Record<string, unknown>;
+};
+
 type NotificationUserRecord = {
   id: string;
   email: string | null;
@@ -84,6 +102,77 @@ type QueueNotificationResult = {
   jobId: string;
   deliveryCount: number;
   existing: boolean;
+};
+
+const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate> = {
+  notary_application_approved_email: {
+    template_key: "notary_application_approved_email",
+    template_version: "2026.05.28.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "client",
+    trigger_event: "notary.application_approved",
+    invite_kind: null,
+    subject_template: "Your notary profile request was approved",
+    body_template: [
+      "Hi {{firstName}},",
+      "",
+      "Your request to become a notary was approved.",
+      "",
+      "Open your profile settings to review your notary information and finish setup:",
+      "",
+      "[Open notary settings]({{nextStepUrl}})",
+      "",
+      "{{approvalSummary}}",
+      "",
+      "- Your DARCi Team",
+    ].join("\n"),
+    body_format: "markdown",
+    variables_schema: {
+      required: ["firstName", "nextStepUrl"],
+      optional: ["approvalSummary", "dashboardUrl"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "runtime:notary_application_approved_email",
+    metadata: { seed_source: "runtime_notary_application_decision_fallback" },
+  },
+  notary_application_rejected_email: {
+    template_key: "notary_application_rejected_email",
+    template_version: "2026.05.28.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "client",
+    trigger_event: "notary.application_rejected",
+    invite_kind: null,
+    subject_template: "Update on your notary profile request",
+    body_template: [
+      "Hi {{firstName}},",
+      "",
+      "Thanks for submitting your notary profile request. After review, we are not able to approve it at this time.",
+      "",
+      "Review your profile settings here:",
+      "",
+      "[Open notary settings]({{nextStepUrl}})",
+      "",
+      "{{rejectionSummary}}",
+      "",
+      "If you have questions, reply to this email and our team can help.",
+      "",
+      "- Your DARCi Team",
+    ].join("\n"),
+    body_format: "markdown",
+    variables_schema: {
+      required: ["firstName", "nextStepUrl"],
+      optional: ["rejectionSummary", "dashboardUrl"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "runtime:notary_application_rejected_email",
+    metadata: { seed_source: "runtime_notary_application_decision_fallback" },
+  },
 };
 
 const documentTypeLabels: Record<string, string> = {
@@ -397,7 +486,7 @@ const resolveRequestedByUserId = async (supabaseUserId?: string) => {
 };
 
 const getActiveTemplateByKey = async (templateKey: string) => {
-  const { data, error } = await supabaseAdmin
+  const loadTemplate = () => supabaseAdmin
     .from("notification_templates")
     .select("id, template_key, channel, trigger_event")
     .eq("template_key", templateKey)
@@ -406,11 +495,38 @@ const getActiveTemplateByKey = async (templateKey: string) => {
     .limit(1)
     .maybeSingle();
 
+  const { data, error } = await loadTemplate();
+
   if (error) {
     throw new Error(error.message);
   }
 
-  return (data as NotificationTemplateRecord | null) ?? null;
+  if (data) {
+    return data as NotificationTemplateRecord;
+  }
+
+  const fallbackTemplate = fallbackNotificationTemplates[templateKey];
+  if (!fallbackTemplate) {
+    return null;
+  }
+
+  const { error: insertError } = await supabaseAdmin
+    .from("notification_templates")
+    .upsert(fallbackTemplate, {
+      onConflict: "template_key,template_version,locale,channel",
+    });
+
+  if (insertError) {
+    throw new Error(insertError.message);
+  }
+
+  const { data: seededTemplate, error: reloadError } = await loadTemplate();
+
+  if (reloadError) {
+    throw new Error(reloadError.message);
+  }
+
+  return (seededTemplate as NotificationTemplateRecord | null) ?? null;
 };
 
 const getNotificationJobByDedupeKey = async (dedupeKey: string) => {

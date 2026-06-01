@@ -25,7 +25,7 @@ values (
   'en-US',
   'email',
   'status_update',
-  'member',
+  'client',
   'notary.application_approved',
   null,
   'Your notary profile request was approved',
