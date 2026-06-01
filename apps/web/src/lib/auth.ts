@@ -33,7 +33,8 @@ export const hasCompleteStoredUserProfile = (user: StoredUser | null | undefined
     user &&
     hasProfileValue(user.firstName) &&
     hasProfileValue(user.lastName) &&
-    hasProfileValue(user.email)
+    hasProfileValue(user.email) &&
+    hasProfileValue(user.phone)
   );
 };
 

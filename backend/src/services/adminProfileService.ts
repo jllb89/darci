@@ -1,4 +1,12 @@
+import { createClient } from "@supabase/supabase-js";
 import { pool } from "../db/pool";
+
+const supabaseUrl = process.env.SUPABASE_URL ?? "";
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 export type AdminCapabilityKey =
   | "canManageAdmins"
@@ -271,12 +279,69 @@ const mapAuditRow = (row: Record<string, unknown>) => ({
     : null,
 });
 
+const adminContextUserSelect = "id, supabase_user_id, email";
+const adminPermissionsSelect = [
+  "can_manage_admins",
+  "can_review_notaries",
+  "can_manage_users",
+  "can_view_audit",
+  "can_manage_platform_rules",
+].join(", ");
+const adminDashboardUserSelect = "id, supabase_user_id, email, phone, first_name, last_name";
+
+const throwAdminSupabaseError = (error: { message?: string } | null | undefined, fallbackMessage: string) => {
+  if (error) {
+    throw new AdminProfileServiceError(500, error.message ?? fallbackMessage);
+  }
+};
+
+const countSupabaseRows = async (
+  tableName: string,
+  configure?: (query: any) => any,
+) => {
+  const query = supabaseAdmin.from(tableName).select("id", { count: "exact", head: true });
+  const { count, error } = await (configure?.(query) ?? query);
+  throwAdminSupabaseError(error, `Failed to count ${tableName}`);
+  return count ?? 0;
+};
+
+const toUserSummaryById = async (userIds: string[]) => {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select(adminDashboardUserSelect)
+    .in("id", uniqueUserIds);
+
+  throwAdminSupabaseError(error, "Failed to load user summaries");
+
+  return new Map(
+    ((data ?? []) as Record<string, unknown>[]).map((row) => [String(row.id), row]),
+  );
+};
+
+const withUserSummary = (row: Record<string, unknown>, user?: Record<string, unknown>) => ({
+  ...row,
+  email: user?.email ?? null,
+  phone: user?.phone ?? null,
+  first_name: user?.first_name ?? null,
+  last_name: user?.last_name ?? null,
+});
+
+const withActorSummary = (row: Record<string, unknown>, actor?: Record<string, unknown>) => ({
+  ...row,
+  actor_email: actor?.email ?? null,
+  actor_first_name: actor?.first_name ?? null,
+  actor_last_name: actor?.last_name ?? null,
+});
+
 export const getAdminProfileContext = async (input: {
   supabaseUserId?: string | null;
   role?: string | null;
 }): Promise<AdminProfileContext> => {
-  await ensureAdminProfileSchema();
-
   if (input.role === "service_role") {
     return {
       dbUserId: null,
@@ -290,35 +355,34 @@ export const getAdminProfileContext = async (input: {
     throw new AdminProfileServiceError(401, "Missing user context");
   }
 
-  const result = await pool.query(
-    `
-      select
-        u.id,
-        u.supabase_user_id,
-        u.email,
-        ap.can_manage_admins,
-        ap.can_review_notaries,
-        ap.can_manage_users,
-        ap.can_view_audit,
-        ap.can_manage_platform_rules
-      from public.users u
-      left join public.admin_permissions ap on ap.user_id = u.id
-      where u.supabase_user_id = $1
-      limit 1
-    `,
-    [input.supabaseUserId],
-  );
+  const { data: user, error: userError } = await supabaseAdmin
+    .from("users")
+    .select(adminContextUserSelect)
+    .eq("supabase_user_id", input.supabaseUserId)
+    .limit(1)
+    .maybeSingle();
 
-  const row = result.rows[0] as Record<string, unknown> | undefined;
-  if (!row) {
+  throwAdminSupabaseError(userError, "Failed to load admin user");
+
+  if (!user) {
     throw new AdminProfileServiceError(404, "Admin user not found");
   }
 
+  const userRow = user as Record<string, unknown>;
+  const { data: permissions, error: permissionsError } = await supabaseAdmin
+    .from("admin_permissions")
+    .select(adminPermissionsSelect)
+    .eq("user_id", String(userRow.id))
+    .limit(1)
+    .maybeSingle();
+
+  throwAdminSupabaseError(permissionsError, "Failed to load admin permissions");
+
   return {
-    dbUserId: String(row.id),
-    supabaseUserId: String(row.supabase_user_id),
-    email: row.email == null ? null : String(row.email),
-    capabilities: toCapabilities(row),
+    dbUserId: String(userRow.id),
+    supabaseUserId: String(userRow.supabase_user_id),
+    email: userRow.email == null ? null : String(userRow.email),
+    capabilities: toCapabilities(permissions as Record<string, unknown> | null),
   };
 };
 
@@ -329,73 +393,79 @@ export const assertAdminCapability = (context: AdminProfileContext, capability: 
 };
 
 export const getAdminDashboard = async (context: AdminProfileContext) => {
-  await ensureAdminProfileSchema();
+  const [
+    totalApplications,
+    pendingApplications,
+    approvedApplications,
+    rejectedApplications,
+    totalUsers,
+    activeUsers,
+    legacyAdmins,
+    roleAdmins,
+    recentApplicationsResult,
+    recentActivityResult,
+  ] = await Promise.all([
+    countSupabaseRows("notary_profile_applications"),
+    countSupabaseRows("notary_profile_applications", (query) => query.eq("status", "pending")),
+    countSupabaseRows("notary_profile_applications", (query) => query.eq("status", "approved")),
+    countSupabaseRows("notary_profile_applications", (query) => query.eq("status", "rejected")),
+    countSupabaseRows("users"),
+    countSupabaseRows("users", (query) => query.or("status.eq.active,status.is.null")),
+    supabaseAdmin.from("users").select("id").eq("role", "admin"),
+    supabaseAdmin.from("user_roles").select("user_id").eq("role", "admin").eq("status", "active"),
+    supabaseAdmin
+      .from("notary_profile_applications")
+      .select("id, user_id, status, jurisdiction, service_area_kind, service_area_name, created_at, updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(6),
+    supabaseAdmin
+      .from("audit_events")
+      .select("id, actor_id, entity_type, entity_id, action, metadata, created_at")
+      .order("created_at", { ascending: false })
+      .limit(8),
+  ]);
 
-  const [notaryCounts, userCounts, recentApplications, recentActivity] = await Promise.all([
-    pool.query(`
-      select
-        count(*)::int as total,
-        count(*) filter (where status = 'pending')::int as pending,
-        count(*) filter (where status = 'approved')::int as approved,
-        count(*) filter (where status = 'rejected')::int as rejected
-      from public.notary_profile_applications
-    `),
-    pool.query(`
-      select
-        count(*)::int as total,
-        count(*) filter (where coalesce(u.status, 'active') = 'active')::int as active,
-        count(distinct u.id) filter (
-          where u.role = 'admin' or (ur.role = 'admin' and ur.status = 'active')
-        )::int as admins
-      from public.users u
-      left join public.user_roles ur on ur.user_id = u.id
-    `),
-    pool.query(`
-      select
-        a.id,
-        a.user_id,
-        a.status,
-        a.jurisdiction,
-        a.service_area_kind,
-        a.service_area_name,
-        a.created_at,
-        a.updated_at,
-        u.email,
-        u.phone,
-        u.first_name,
-        u.last_name
-      from public.notary_profile_applications a
-      join public.users u on u.id = a.user_id
-      order by a.updated_at desc
-      limit 6
-    `),
-    pool.query(`
-      select
-        ae.id,
-        ae.actor_id,
-        ae.entity_type,
-        ae.entity_id,
-        ae.action,
-        ae.metadata,
-        ae.created_at,
-        actor.email as actor_email,
-        actor.first_name as actor_first_name,
-        actor.last_name as actor_last_name
-      from public.audit_events ae
-      left join public.users actor on actor.id = ae.actor_id
-      order by ae.created_at desc
-      limit 8
-    `),
+  throwAdminSupabaseError(legacyAdmins.error, "Failed to load admin users");
+  throwAdminSupabaseError(roleAdmins.error, "Failed to load admin role assignments");
+  throwAdminSupabaseError(recentApplicationsResult.error, "Failed to load recent notary applications");
+  throwAdminSupabaseError(recentActivityResult.error, "Failed to load recent admin activity");
+
+  const legacyAdminIds = ((legacyAdmins.data ?? []) as Record<string, unknown>[])
+    .map((row) => row.id)
+    .filter((value): value is string => typeof value === "string");
+  const roleAdminIds = ((roleAdmins.data ?? []) as Record<string, unknown>[])
+    .map((row) => row.user_id)
+    .filter((value): value is string => typeof value === "string");
+  const adminCount = new Set([...legacyAdminIds, ...roleAdminIds]).size;
+
+  const recentApplications = (recentApplicationsResult.data ?? []) as Record<string, unknown>[];
+  const recentActivity = (recentActivityResult.data ?? []) as Record<string, unknown>[];
+  const usersById = await toUserSummaryById([
+    ...recentApplications.map((row) => String(row.user_id ?? "")),
+    ...recentActivity.map((row) => String(row.actor_id ?? "")),
   ]);
 
   return {
     capabilities: context.capabilities,
     metrics: {
-      notaryApplications: notaryCounts.rows[0] ?? { total: 0, pending: 0, approved: 0, rejected: 0 },
-      users: userCounts.rows[0] ?? { total: 0, active: 0, admins: 0 },
+      notaryApplications: {
+        total: totalApplications,
+        pending: pendingApplications,
+        approved: approvedApplications,
+        rejected: rejectedApplications,
+      },
+      users: {
+        total: totalUsers,
+        active: activeUsers,
+        admins: adminCount,
+      },
     },
-    recentNotaryApplications: recentApplications.rows.map((row) => mapNotaryApplicationRow(row as Record<string, unknown>)),
-    recentActivity: recentActivity.rows.map((row) => mapAuditRow(row as Record<string, unknown>)),
+    recentNotaryApplications: recentApplications.map((row) =>
+      mapNotaryApplicationRow(withUserSummary(row, usersById.get(String(row.user_id ?? "")))),
+    ),
+    recentActivity: recentActivity.map((row) =>
+      mapAuditRow(withActorSummary(row, usersById.get(String(row.actor_id ?? "")))),
+    ),
   };
 };
 

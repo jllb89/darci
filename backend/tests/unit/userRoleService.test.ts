@@ -248,7 +248,7 @@ describe("user role service", () => {
     );
   });
 
-  it("keeps the dev notary test user on member without requiring a phone", async () => {
+  it("keeps the dev notary test user on member while requiring phone for profile completion", async () => {
     state.users = [
       {
         id: "db-user-1",
@@ -278,7 +278,7 @@ describe("user role service", () => {
     expect(context.phone).toBeNull();
     expect(context.role).toBe("member");
     expect(context.availableRoles).toEqual(["member"]);
-    expect(isUserProfileComplete(context)).toBe(true);
+    expect(isUserProfileComplete(context)).toBe(false);
     expect(state.users[0]?.role).toBe("member");
     expect(state.userRoles).toEqual(
       expect.arrayContaining([

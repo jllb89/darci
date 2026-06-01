@@ -767,7 +767,8 @@ export const isUserProfileComplete = (context: UserIdentityContext) => {
   return (
     hasProfileValue(context.firstName) &&
     hasProfileValue(context.lastName) &&
-    hasProfileValue(context.email)
+    hasProfileValue(context.email) &&
+    hasProfileValue(context.phone)
   );
 };
 
