@@ -70,6 +70,10 @@ const resolveQueueStatus = (request: NotaryQueueRequestSummary) => {
   return request.request.queueStatus ?? request.workflow?.latestStatus ?? request.workflow?.status ?? request.request.status;
 };
 
+const isSelectedNotaryRequest = (request: NotaryQueueRequestSummary) => {
+  return Boolean(request.workflow?.selectedNotaryUserId && !request.workflow?.assignedNotaryUserId);
+};
+
 const isOpenMeetingRequest = (request: NotaryQueueRequestSummary) => {
   return Boolean(
     request.meeting && !["completed", "cancelled", "canceled", "no_show"].includes(request.meeting.status ?? ""),
@@ -95,6 +99,7 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
   const memberName = request.owner?.displayName ?? request.owner?.email ?? "Member pending";
   const queueStatus = resolveQueueStatus(request);
   const rowStatus = formatStatusLabel(queueStatus);
+  const showSelectedBadge = isSelectedNotaryRequest(request);
 
   return (
     <Link
@@ -103,8 +108,15 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
     >
       <div className="min-w-0">
         <div className="truncate font-medium text-Color-Scheme-1-Text">{memberName}</div>
-        <div className="mt-1 inline-flex rounded-full bg-Color-Neutral-Lightest px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-Color-Neutral-Darkest">
-          {rowStatus}
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className="inline-flex rounded-full bg-Color-Neutral-Lightest px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-Color-Neutral-Darkest">
+            {rowStatus}
+          </span>
+          {showSelectedBadge ? (
+            <span className="inline-flex rounded-full border border-Color-Scheme-1-Border/60 bg-Color-White px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-Color-Scheme-1-Text">
+              Selected
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="min-w-0 sm:text-right">

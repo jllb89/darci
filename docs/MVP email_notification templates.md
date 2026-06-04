@@ -147,3 +147,21 @@ You can view, share, or manage your {POA} (\[Trust Name\]) anytime right here:
 Thanks for putting your trust in us.
 
 - Your DARCi Team
+
+**Notary Request Received**
+To: Selected Notary
+Subject: New Notary Request Ready For Review
+Body:
+
+Hi \[Notary First Name\],
+
+A member selected you to review a new notarization request in DARCi.
+
+Please open your notary queue and review the request details:
+\[Review request\]
+
+If this request should not be assigned to you, contact support.
+
+- Your DARCi Team
+
+Template key reference: `notary_request_received_email`

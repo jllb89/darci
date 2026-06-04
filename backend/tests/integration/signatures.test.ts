@@ -17,11 +17,14 @@ const mocks = vi.hoisted(() => ({
   createSignatureRecordMock: vi.fn(),
   getSignatureByIdMock: vi.fn(),
   updateSignatureRecordMock: vi.fn(),
+  upsertDocumentSystemValuesMock: vi.fn(),
+  updateDocumentMock: vi.fn(),
   createSignatureUploadUrlMock: vi.fn(),
   createDocumentDownloadUrlMock: vi.fn(),
   createSignatureDownloadUrlMock: vi.fn(),
   getSignatureObjectMetadataMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
+  queueMemberSignaturesRecordedNotificationMock: vi.fn(),
   applySignatureCaptureToDocumentOutputMock: vi.fn(),
   queueRemainingSignerInvitesAfterCreatorSignatureMock: vi.fn(),
   completeSigningWorkflowAfterSignatureCaptureMock: vi.fn(),
@@ -43,6 +46,8 @@ vi.mock("../../src/services/documentService", () => ({
   createSignatureRecord: mocks.createSignatureRecordMock,
   getSignatureById: mocks.getSignatureByIdMock,
   updateSignatureRecord: mocks.updateSignatureRecordMock,
+  upsertDocumentSystemValues: mocks.upsertDocumentSystemValuesMock,
+  updateDocument: mocks.updateDocumentMock,
 }));
 
 vi.mock("../../src/services/storageService", () => ({
@@ -55,6 +60,18 @@ vi.mock("../../src/services/storageService", () => ({
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
 }));
+
+vi.mock("../../src/services/notificationService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/notificationService")>(
+    "../../src/services/notificationService",
+  );
+
+  return {
+    ...actual,
+    queueMemberSignaturesRecordedNotification:
+      mocks.queueMemberSignaturesRecordedNotificationMock,
+  };
+});
 
 vi.mock("../../src/services/documentGenerationRenderService", async () => {
   const actual = await vi.importActual<typeof import("../../src/services/documentGenerationRenderService")>(
@@ -72,10 +89,17 @@ vi.mock("../../src/services/signerInvitationDispatchService", () => ({
     mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock,
 }));
 
-vi.mock("../../src/services/signingCompletionService", () => ({
-  completeSigningWorkflowAfterSignatureCapture:
-    mocks.completeSigningWorkflowAfterSignatureCaptureMock,
-}));
+vi.mock("../../src/services/signingCompletionService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/signingCompletionService")>(
+    "../../src/services/signingCompletionService",
+  );
+
+  return {
+    ...actual,
+    completeSigningWorkflowAfterSignatureCapture:
+      mocks.completeSigningWorkflowAfterSignatureCaptureMock,
+  };
+});
 
 vi.mock("../../src/services/signerInviteAccessService", () => ({
   resolveClaimedSignerInviteAccess: mocks.resolveClaimedSignerInviteAccessMock,
@@ -171,11 +195,14 @@ describe("member signature capture", () => {
     mocks.createSignatureRecordMock.mockReset();
     mocks.getSignatureByIdMock.mockReset();
     mocks.updateSignatureRecordMock.mockReset();
+    mocks.upsertDocumentSystemValuesMock.mockReset();
+    mocks.updateDocumentMock.mockReset();
     mocks.createSignatureUploadUrlMock.mockReset();
     mocks.createDocumentDownloadUrlMock.mockReset();
     mocks.createSignatureDownloadUrlMock.mockReset();
     mocks.getSignatureObjectMetadataMock.mockReset();
     mocks.recordAuditEventMock.mockReset();
+    mocks.queueMemberSignaturesRecordedNotificationMock.mockReset();
     mocks.applySignatureCaptureToDocumentOutputMock.mockReset();
     mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock.mockReset();
     mocks.completeSigningWorkflowAfterSignatureCaptureMock.mockReset();
@@ -183,6 +210,9 @@ describe("member signature capture", () => {
     mocks.resolveClaimedSignerInviteAccessMock.mockResolvedValue(null);
     mocks.getOrCreateUserIdMock.mockResolvedValue("owner-1");
     mocks.listCapturedSignaturesForSignerMock.mockResolvedValue([]);
+    mocks.upsertDocumentSystemValuesMock.mockResolvedValue(null);
+    mocks.updateDocumentMock.mockResolvedValue(null);
+    mocks.queueMemberSignaturesRecordedNotificationMock.mockResolvedValue({ jobId: "job-signatures-recorded" });
     mocks.completeSigningWorkflowAfterSignatureCaptureMock.mockResolvedValue(null);
     mocks.queueRemainingSignerInvitesAfterCreatorSignatureMock.mockResolvedValue({
       documentId: "doc-1",
@@ -250,6 +280,73 @@ describe("member signature capture", () => {
     mocks.createDocumentDownloadUrlMock.mockResolvedValue({ signedUrl: "https://download.example.com" });
     mocks.createSignatureDownloadUrlMock.mockResolvedValue({ signedUrl: "https://signature.example.com" });
     mocks.applySignatureCaptureToDocumentOutputMock.mockResolvedValue(null);
+  });
+
+  it("confirms completed signing and advances notarization-required documents", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "trust_bundle",
+      selected_families: [],
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      {
+        id: "sig-1",
+        document_id: "doc-1",
+        generation_run_id: generationRunId,
+        document_output_signer_id: outputSignerId,
+        signer_id: "owner-1",
+        capture_method: "type",
+        storage_path: null,
+        status: "captured",
+        mime_type: null,
+        size_bytes: null,
+        typed_value: "Owner One",
+        typed_kind: "name",
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/sign",
+      { confirmed: true },
+      "confirms completed signing",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateDocumentMock).toHaveBeenCalledWith("doc-1", { status: "pending_notary" });
+    expect(response.body.documentStatus).toEqual({
+      previousStatus: "pending_signature",
+      nextStatus: "pending_notary",
+      updated: true,
+      requiresNotarization: true,
+    });
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "member.document_signatures_confirmed",
+        metadata: expect.objectContaining({
+          next_status: "pending_notary",
+          status_updated: true,
+          requires_notarization: true,
+        }),
+      }),
+    );
   });
 
   it("requests a signature upload", async () => {

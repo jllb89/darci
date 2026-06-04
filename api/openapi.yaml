@@ -3129,13 +3129,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/available-notaries:
+    get:
+      summary: List available notaries for a document
+      description: |
+        Returns active notaries whose normalized profile jurisdiction matches the document jurisdiction. The response is document-scoped so members can only list notaries for their own document; admin and service-role callers can list for any document.
+
+        The endpoint excludes the document owner, notaries without an active notary role, and notary profiles with expired commissions. It does not expose notary email or phone details.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailableNotariesResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/submit-notarization:
     post:
       summary: Submit for notarization
       description: |
         Creates the compatibility notarization request plus the Phase 4 illuminotarization workflow row, returns the active code material, and enqueues the current notarization confirmation and next-step email templates in the internal notification outbox.
 
-        Runtime records `system.code_delivered` with notification-outbox delivery metadata and now also writes workflow status history and code-delivery ledger rows. An optional selected notary can be pre-bound through the Phase 1 multi-role identity model.
+        Runtime records `system.code_delivered` with notification-outbox delivery metadata and now also writes workflow status history and code-delivery ledger rows. An optional selected notary can be pre-bound through the Phase 1 multi-role identity model. When `selectedNotaryUserId` is present, the backend requires an active notary role, a notary profile in the same normalized jurisdiction as the document, a non-expired commission, and a user different from the document owner.
+
+        When selected-notary submission succeeds, the backend queues `notary_request_received_email` to the selected notary and best-effort processes that notification job inline for local/staging reliability. The email CTA text is `Review request` and currently points to `/app/notary`.
+
+        Non-skipped submissions must start from `pending_notary`. `signatureSkipped = true` is accepted only for `product_flow_mode = notarize_document`; POA, trust, and other product flows must complete required signatures first.
       x-roles:
         - member
         - admin
@@ -3147,6 +3193,7 @@ paths:
         - member.notary_selected
         - system.code_generated
         - system.code_delivered
+        - system.selected_notary_notified
       parameters:
         - in: path
           name: id
@@ -3165,10 +3212,10 @@ paths:
                   format: uri
                 selectedNotaryUserId:
                   type: string
-                  description: Optional internal user id for an active notary selected by the member. When present, only that notary may successfully resolve the code.
+                  description: Optional internal user id for an active notary selected by the member. When present, the selected notary must have an active notary role, a notary profile in the same normalized jurisdiction as the document, a non-expired commission, and cannot be the document owner. When present, only that notary may successfully resolve the code.
                 signatureSkipped:
                   type: boolean
-                  description: Allows document notarization uploads to continue to notarization without applying a member signature. Rejected for POA and Trust products.
+                  description: Allows document notarization uploads to continue to notarization without applying a member signature only when `product_flow_mode` is `notarize_document`. Rejected for POA, Trust, and other products.
                 signatureSkipReason:
                   type: string
                   maxLength: 200
@@ -7138,6 +7185,70 @@ components:
           $ref: "#/components/schemas/DocumentSigningExecution"
         completion:
           $ref: "#/components/schemas/DocumentSigningCompletion"
+        documentStatus:
+          $ref: "#/components/schemas/SignatureCompletionDocumentStatus"
+    AvailableNotariesDocument:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        normalizedJurisdiction:
+          type: string
+        productFlowMode:
+          type: string
+          nullable: true
+    AvailableNotariesNotarization:
+      type: object
+      properties:
+        activeRequestId:
+          type: string
+          nullable: true
+        activeRequestStatus:
+          type: string
+          nullable: true
+        assignedNotaryUserId:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+    AvailableNotary:
+      type: object
+      properties:
+        userId:
+          type: string
+        displayName:
+          type: string
+        jurisdiction:
+          type: string
+        serviceAreaKind:
+          type: string
+          nullable: true
+        serviceAreaName:
+          type: string
+          nullable: true
+        commissionExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+    AvailableNotariesResponse:
+      type: object
+      properties:
+        document:
+          $ref: "#/components/schemas/AvailableNotariesDocument"
+        notarization:
+          $ref: "#/components/schemas/AvailableNotariesNotarization"
+        notaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvailableNotary"
     NotarizationSubmitResponse:
       type: object
       properties:

@@ -33,9 +33,11 @@ This document defines the chronological document lifecycle and assigns responsib
    - member.signature_capture_started (each signer)
    - member.signature_capture_completed (each signer)
    - system.signature_linked_to_document (Platform)
+   - Exception: `product_flow_mode = notarize_document` may bypass member signature and records `member.document_signature_skipped`.
 
 6. Submit for illuminotarization (Member)
    - member.notarization_submit_started
+   - member.notary_selected (when a specific notary is chosen)
    - member.notarization_submitted
 
 7. Code generation + delivery (Platform)
@@ -112,3 +114,4 @@ Status mapping:
 - The acknowledgment page is appended by the Platform, not uploaded by members.
 - Watermarking is a Platform step after the acknowledgment page is appended.
 - Member and Notary both participate in meeting negotiation; the Notary finalizes scheduling.
+- `notarize_document` is the only product mode where signature skip is allowed before notarization submit.

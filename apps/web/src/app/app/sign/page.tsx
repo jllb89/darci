@@ -10,6 +10,7 @@ import {
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import { useAppToast } from "@/components/app/AppToastContext";
@@ -145,6 +146,33 @@ type SigningPayload = {
     completion: SigningCompletion;
     viewerAccess?: SigningViewerAccess;
   };
+  message?: string;
+};
+
+type AvailableNotary = {
+  userId: string;
+  displayName: string;
+  jurisdiction: string;
+  serviceAreaKind: string | null;
+  serviceAreaName: string | null;
+  commissionExpiresAt: string | null;
+};
+
+type AvailableNotariesPayload = {
+  document?: {
+    id: string;
+    status: string | null;
+    jurisdiction: string | null;
+    normalizedJurisdiction: string;
+    productFlowMode: string | null;
+  };
+  notarization?: {
+    activeRequestId: string | null;
+    activeRequestStatus: string | null;
+    assignedNotaryUserId: string | null;
+    submittedAt: string | null;
+  };
+  notaries?: AvailableNotary[];
   message?: string;
 };
 
@@ -402,6 +430,148 @@ const getCanvasCoordinates = (
   };
 };
 
+const formatJurisdictionLabel = (value: string | null | undefined) => {
+  return value?.trim().toUpperCase() || "Jurisdiction pending";
+};
+
+const formatServiceAreaLabel = (notary: AvailableNotary) => {
+  const serviceAreaName = notary.serviceAreaName?.trim();
+  if (serviceAreaName) {
+    return serviceAreaName;
+  }
+
+  const serviceAreaKind = notary.serviceAreaKind?.trim();
+  return serviceAreaKind ? formatStatusLabel(serviceAreaKind) : null;
+};
+
+const NotarySelectControl = ({
+  value,
+  options,
+  isOpen,
+  disabled,
+  onChange,
+  onOpenChange,
+}: {
+  value: string | null;
+  options: AvailableNotary[];
+  isOpen: boolean;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onOpenChange: (isOpen: boolean) => void;
+}) => {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const selectedNotary = options.find((notary) => notary.userId === value) ?? null;
+
+  const updatePopoverPosition = useCallback(() => {
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) {
+      return;
+    }
+
+    const popoverWidth = 360;
+    const leftBoundary = 16;
+    const rightBoundary = window.innerWidth - popoverWidth - leftBoundary;
+    setPopoverPosition({
+      left: Math.max(leftBoundary, Math.min(triggerRect.left, rightBoundary)),
+      top: triggerRect.bottom + 8,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    updatePopoverPosition();
+    window.addEventListener("resize", updatePopoverPosition);
+    window.addEventListener("scroll", updatePopoverPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePopoverPosition);
+      window.removeEventListener("scroll", updatePopoverPosition, true);
+    };
+  }, [isOpen, updatePopoverPosition]);
+
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+  const selectPopover =
+    isOpen && popoverPosition && portalTarget
+      ? createPortal(
+          <div
+            className="fixed z-[1000] max-h-80 w-[min(360px,calc(100vw-32px))] overflow-y-auto rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-2 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
+            style={{ left: popoverPosition.left, top: popoverPosition.top }}
+          >
+            {options.map((notary) => {
+              const isSelected = notary.userId === value;
+              const serviceAreaLabel = formatServiceAreaLabel(notary);
+
+              return (
+                <button
+                  key={notary.userId}
+                  type="button"
+                  className={`flex w-full items-start justify-between gap-4 rounded-md px-3 py-3 text-left text-xs transition-colors ${
+                    isSelected
+                      ? "bg-Green text-Color-Neutral-Darkest"
+                      : "text-Color-Scheme-1-Text hover:bg-Color-White"
+                  }`}
+                  onClick={() => {
+                    onChange(notary.userId);
+                    onOpenChange(false);
+                    triggerRef.current?.blur();
+                  }}
+                >
+                  <span>
+                    <span className="block text-sm font-medium">{notary.displayName}</span>
+                    <span className="mt-1 block text-[11px] leading-4 text-Color-Neutral">
+                      {formatJurisdictionLabel(notary.jurisdiction)}
+                      {serviceAreaLabel ? ` · ${serviceAreaLabel}` : ""}
+                    </span>
+                  </span>
+                  {isSelected ? <span className="text-[11px] font-medium">Selected</span> : null}
+                </button>
+              );
+            })}
+          </div>,
+          portalTarget,
+        )
+      : null;
+
+  return (
+    <div className="space-y-2 text-xs font-medium text-Color-Neutral-Darkest">
+      <span>Notary</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`flex min-h-11 w-full items-center justify-between rounded-md border px-3 text-left text-sm outline-none transition-colors ${
+          disabled
+            ? "cursor-not-allowed border-Color-Scheme-1-Border bg-Color-Neutral-Lightest text-Color-Neutral"
+            : "border-Color-Scheme-1-Border/50 bg-Color-White text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest/50 focus-visible:border-Color-Scheme-1-Text"
+        }`}
+        aria-expanded={isOpen}
+        disabled={disabled}
+        onClick={() => {
+          if (!isOpen) {
+            updatePopoverPosition();
+          }
+          onOpenChange(!isOpen);
+        }}
+      >
+        <span className={selectedNotary ? undefined : "text-Color-Neutral"}>
+          {selectedNotary?.displayName ?? "Choose a notary"}
+        </span>
+        <span aria-hidden="true" className="ml-3 h-1.5 w-1.5 rotate-45 border-b border-r border-Color-Neutral" />
+      </button>
+      {selectedNotary ? (
+        <div className="text-xs leading-5 text-Color-Neutral">
+          {formatJurisdictionLabel(selectedNotary.jurisdiction)}
+          {formatServiceAreaLabel(selectedNotary) ? ` · ${formatServiceAreaLabel(selectedNotary)}` : ""}
+        </div>
+      ) : null}
+      {selectPopover}
+    </div>
+  );
+};
+
 export default function SignPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -425,6 +595,7 @@ export default function SignPage() {
   const [isSavingCapture, setIsSavingCapture] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSkippingSignature, setIsSkippingSignature] = useState(false);
+  const [isSubmittingNotarization, setIsSubmittingNotarization] = useState(false);
   const [activeSignerId, setActiveSignerId] = useState<string | null>(null);
   const [activeOutputKey, setActiveOutputKey] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("type");
@@ -432,6 +603,11 @@ export default function SignPage() {
   const [typedKinds, setTypedKinds] = useState<Record<string, "name" | "initials">>({});
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>([]);
   const [isLoadingSavedSignatures, setIsLoadingSavedSignatures] = useState(false);
+  const [availableNotariesPayload, setAvailableNotariesPayload] = useState<AvailableNotariesPayload | null>(null);
+  const [isLoadingAvailableNotaries, setIsLoadingAvailableNotaries] = useState(false);
+  const [availableNotaryError, setAvailableNotaryError] = useState<string | null>(null);
+  const [selectedNotaryUserId, setSelectedNotaryUserId] = useState<string | null>(null);
+  const [isNotarySelectOpen, setIsNotarySelectOpen] = useState(false);
   const [isDraggingUpload, setIsDraggingUpload] = useState(false);
   const [selectedSavedSignatureId, setSelectedSavedSignatureId] = useState<string | null>(null);
   const [inviteDispatchSummary, setInviteDispatchSummary] = useState<InviteDispatchSummary>({
@@ -780,6 +956,26 @@ export default function SignPage() {
     isDocumentNotarization &&
     payload?.signing?.state !== "confirmed" &&
     payload?.document?.status === "pending_signature";
+  const shouldShowNotarySelection =
+    !isInvitedSigner &&
+    Boolean(payload?.document) &&
+    (payload?.document?.status === "pending_notary" || canContinueWithoutSignature);
+  const shouldFetchAvailableNotaries = Boolean(accessToken && documentId && shouldShowNotarySelection);
+  const availableNotaries = useMemo(
+    () => availableNotariesPayload?.notaries ?? [],
+    [availableNotariesPayload?.notaries],
+  );
+  const activeNotarizationRequestId = availableNotariesPayload?.notarization?.activeRequestId ?? null;
+  const selectedAvailableNotary = availableNotaries.find(
+    (notary) => notary.userId === selectedNotaryUserId,
+  ) ?? null;
+  const notarizationSubmitBusy = isSubmittingNotarization || isSkippingSignature;
+  const canSubmitSelectedNotary = Boolean(
+    selectedAvailableNotary &&
+      !activeNotarizationRequestId &&
+      !isLoadingAvailableNotaries &&
+      !notarizationSubmitBusy,
+  );
   const shouldShowCaptureContainer =
     Boolean(activeSignature) &&
     activeSignature?.status !== "captured" &&
@@ -787,6 +983,64 @@ export default function SignPage() {
   const selectedSavedSignature = savedSignatures.find(
     (savedSignature) => savedSignature.id === selectedSavedSignatureId,
   ) ?? null;
+
+  const fetchAvailableNotaries = useCallback(async () => {
+    if (!accessToken || !documentId) {
+      return null;
+    }
+
+    setIsLoadingAvailableNotaries(true);
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/documents/${documentId}/available-notaries`,
+        accessToken,
+        {
+          cache: "no-store",
+        },
+      );
+      const responsePayload = (await response.json().catch(() => null)) as
+        | AvailableNotariesPayload
+        | null;
+
+      if (!response.ok) {
+        throw new Error(responsePayload?.message ?? "Failed to load available notaries.");
+      }
+
+      setAvailableNotariesPayload(responsePayload);
+      setAvailableNotaryError(null);
+      return responsePayload;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load available notaries.";
+      setAvailableNotariesPayload(null);
+      setAvailableNotaryError(message);
+      return null;
+    } finally {
+      setIsLoadingAvailableNotaries(false);
+    }
+  }, [accessToken, documentId]);
+
+  useEffect(() => {
+    if (!shouldFetchAvailableNotaries) {
+      setAvailableNotariesPayload(null);
+      setAvailableNotaryError(null);
+      setSelectedNotaryUserId(null);
+      setIsNotarySelectOpen(false);
+      return;
+    }
+
+    void fetchAvailableNotaries();
+  }, [fetchAvailableNotaries, shouldFetchAvailableNotaries]);
+
+  useEffect(() => {
+    if (!selectedNotaryUserId) {
+      return;
+    }
+
+    if (!availableNotaries.some((notary) => notary.userId === selectedNotaryUserId)) {
+      setSelectedNotaryUserId(null);
+    }
+  }, [availableNotaries, selectedNotaryUserId]);
   const signingStateLabel = (() => {
     if (payload?.signing?.state === "confirmed") {
       return "Signing is confirmed for this document set.";
@@ -1270,12 +1524,27 @@ export default function SignPage() {
     }
   }, [accessToken, documentId, isConfirming, payload?.signing, refreshAfterCapture, showToast]);
 
-  const handleContinueWithoutSignature = useCallback(async () => {
-    if (!accessToken || !documentId || !canContinueWithoutSignature || isSkippingSignature) {
+  const handleSubmitToSelectedNotary = useCallback(async (options?: { signatureSkipped?: boolean }) => {
+    if (!accessToken || !documentId || notarizationSubmitBusy) {
       return;
     }
 
-    setIsSkippingSignature(true);
+    if (!selectedAvailableNotary) {
+      showToast({ tone: "error", message: "Choose a notary before sending the document." });
+      return;
+    }
+
+    if (activeNotarizationRequestId) {
+      showToast({ tone: "warning", message: "This document already has a notarization request." });
+      return;
+    }
+
+    const signatureSkipped = options?.signatureSkipped === true;
+    if (signatureSkipped) {
+      setIsSkippingSignature(true);
+    } else {
+      setIsSubmittingNotarization(true);
+    }
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -1287,8 +1556,13 @@ export default function SignPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            signatureSkipped: true,
-            signatureSkipReason: "member_selected_no_signature",
+            selectedNotaryUserId: selectedAvailableNotary.userId,
+            ...(signatureSkipped
+              ? {
+                  signatureSkipped: true,
+                  signatureSkipReason: "member_selected_no_signature",
+                }
+              : {}),
           }),
         },
       );
@@ -1302,25 +1576,115 @@ export default function SignPage() {
 
       showToast({
         tone: "success",
-        message: "Document sent to notarization without a member signature.",
+        message: "Document sent to selected notary for review.",
       });
       router.push("/app/documents?status=pending_notary");
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to continue without signature.";
+        error instanceof Error ? error.message : "Failed to send document to the selected notary.";
       setErrorMessage(message);
       showToast({ tone: "error", message });
     } finally {
       setIsSkippingSignature(false);
+      setIsSubmittingNotarization(false);
     }
   }, [
+    activeNotarizationRequestId,
     accessToken,
-    canContinueWithoutSignature,
     documentId,
-    isSkippingSignature,
+    notarizationSubmitBusy,
     router,
+    selectedAvailableNotary,
     showToast,
   ]);
+
+  const renderNotarySelectionCard = () => {
+    const submitLabel = canContinueWithoutSignature
+      ? "Continue without signature"
+      : "Send to selected notary";
+    const busyLabel = canContinueWithoutSignature ? "Continuing..." : "Sending...";
+
+    if (activeNotarizationRequestId) {
+      return (
+        <div className={`${signCardBaseClass} border-emerald-200 bg-emerald-50`}>
+          <div className="text-sm font-medium text-emerald-800">Sent to notary</div>
+          <div className="mt-3 text-sm leading-6 text-emerald-800/90">
+            This document already has a notarization request in progress.
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className={signCardBaseClass}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium text-Color-Scheme-1-Text">Choose a notary</div>
+            <div className="mt-2 text-sm leading-6 text-Color-Neutral">
+              {canContinueWithoutSignature
+                ? "Select a notary to review this uploaded document without applying a member signature."
+                : "Select a notary in the document jurisdiction to review the confirmed document."}
+            </div>
+          </div>
+          {availableNotariesPayload?.document?.normalizedJurisdiction ? (
+            <div className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white">
+              {formatJurisdictionLabel(availableNotariesPayload.document.normalizedJurisdiction)}
+            </div>
+          ) : null}
+        </div>
+
+        {(isLoadingAvailableNotaries || !availableNotariesPayload) && !availableNotaryError ? (
+          <div className="mt-5 rounded-xl border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4 text-sm text-Color-Neutral">
+            Loading available notaries...
+          </div>
+        ) : availableNotaryError ? (
+          <div className="mt-5 space-y-3 rounded-xl border border-red-200 px-4 py-4 text-sm text-red-700">
+            <div>{availableNotaryError}</div>
+            <button
+              type="button"
+              className="inline-flex min-h-9 items-center justify-center border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50"
+              onClick={() => {
+                void fetchAvailableNotaries();
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : availableNotaries.length === 0 ? (
+          <div className="mt-5 rounded-xl border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4 text-sm leading-6 text-Color-Neutral">
+            No active notaries are available for this document jurisdiction yet.
+          </div>
+        ) : (
+          <div className="mt-5 space-y-4">
+            <NotarySelectControl
+              value={selectedNotaryUserId}
+              options={availableNotaries}
+              isOpen={isNotarySelectOpen}
+              disabled={notarizationSubmitBusy}
+              onChange={setSelectedNotaryUserId}
+              onOpenChange={setIsNotarySelectOpen}
+            />
+            <button
+              type="button"
+              className={`inline-flex min-h-11 w-full items-center justify-center px-4 py-2 text-sm font-medium transition ${
+                canSubmitSelectedNotary
+                  ? "platform-btn-primary"
+                  : "cursor-not-allowed bg-Color-Neutral-Lighter text-Color-Neutral"
+              }`}
+              disabled={!canSubmitSelectedNotary}
+              onClick={() => {
+                void handleSubmitToSelectedNotary({
+                  signatureSkipped: canContinueWithoutSignature,
+                });
+              }}
+            >
+              {notarizationSubmitBusy ? busyLabel : submitLabel}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderPreviewPanel = () => {
     if (isLoading && !payload) {
@@ -1796,7 +2160,9 @@ export default function SignPage() {
               </div>
             ) : null}
 
-            {isInvitedSigner && principalSigningComplete ? (
+            {shouldShowNotarySelection ? (
+              renderNotarySelectionCard()
+            ) : isInvitedSigner && principalSigningComplete ? (
               <div className={`${signCardBaseClass} border-emerald-200 bg-emerald-50`}>
                 <div className="text-sm font-medium text-emerald-800">
                   Signature saved
@@ -1852,22 +2218,6 @@ export default function SignPage() {
                 >
                   {isConfirming ? "Confirming..." : "Confirm signatures"}
                 </button>
-                {isDocumentNotarization ? (
-                  <button
-                    className={`mt-3 inline-flex min-h-11 w-full items-center justify-center border px-4 py-2 text-sm font-medium transition ${
-                      canContinueWithoutSignature && !isSkippingSignature
-                        ? "border-Color-Scheme-1-Text text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
-                        : "cursor-not-allowed border-Color-Scheme-1-Border text-Color-Neutral"
-                    }`}
-                    disabled={!canContinueWithoutSignature || isSkippingSignature}
-                    onClick={() => {
-                      void handleContinueWithoutSignature();
-                    }}
-                    type="button"
-                  >
-                    {isSkippingSignature ? "Continuing..." : "Continue without signature"}
-                  </button>
-                ) : null}
               </div>
             )}
           </div>

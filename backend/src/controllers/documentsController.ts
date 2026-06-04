@@ -10,6 +10,7 @@ import {
   queueMemberSignaturesRecordedNotification,
   queueNotarizationSubmissionConfirmationNotification,
   queueNotaryNextStepNotification,
+  queueSelectedNotaryRequestNotification,
 } from "../services/notificationService";
 import {
   bootstrapDocumentIntakeDraft as bootstrapDocumentIntakeDraftFromDb,
@@ -124,7 +125,10 @@ import {
   queueRemainingSignerInvitesAfterCreatorSignature,
   type RemainingSignerInviteDispatchResult,
 } from "../services/signerInvitationDispatchService";
-import { completeSigningWorkflowAfterSignatureCapture } from "../services/signingCompletionService";
+import {
+  completeSigningWorkflowAfterSignatureCapture,
+  resolveCompletedSigningDocumentStatus,
+} from "../services/signingCompletionService";
 import {
   resolveClaimedSignerInviteAccess,
   type ClaimedSignerInviteAccess,
@@ -134,6 +138,14 @@ import {
   shouldExposeDocumentReviewOutput,
 } from "../services/documentVisibilityService";
 import {
+  getNotaryProfileByUserId,
+  hasActiveNotaryRole,
+  isNotaryCommissionExpired,
+  listAvailableNotariesByJurisdiction,
+  NotaryProfileServiceError,
+} from "../services/notaryProfileService";
+import { normalizeJurisdiction } from "../services/jurisdictionUtils";
+import {
   appendAcknowledgmentPage as appendAcknowledgmentPageToDocument,
   DocumentFinalizationConflictError,
   DocumentFinalizationForbiddenError,
@@ -141,6 +153,7 @@ import {
   listFinalizationStatusHistory,
   watermarkWithNotice as finalizeDocumentWithWatermark,
 } from "../services/documentFinalizationService";
+import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import { buildDocumentTimeline } from "../services/documentTimelineService";
 import { getUserIdentityContextByUserId, type RequestRole } from "../services/userRoleService";
 import { logDocumentTrace } from "../utils/documentTrace";
@@ -717,6 +730,10 @@ const submitNotarizationSchema = z.object({
   signatureSkipReason: z.string().trim().max(200).optional(),
 }).passthrough();
 
+const availableNotaryParamsSchema = z.object({
+  id: z.string().trim().min(1),
+});
+
 const reviewApprovalSchema = z
   .object({
     agreed: z.literal(true),
@@ -1242,6 +1259,100 @@ const buildIlluminotarizationWorkflowResponse = (
     selectedNotaryUserId: workflow.selected_notary_user_id,
     assignedNotaryUserId: workflow.assigned_notary_user_id,
     currentLegacyRequestId: workflow.current_legacy_request_id,
+  };
+};
+
+const sendSimpleValidationErrorResponse = (
+  res: Response,
+  path: string,
+  message: string,
+) => {
+  return res.status(400).json({
+    error: "validation_error",
+    message,
+    details: [
+      {
+        path,
+        message,
+      },
+    ],
+  });
+};
+
+const canAccessDocumentAsOwnerOrPrivileged = (input: {
+  document: DocumentRecord;
+  actorUserId: string | null;
+  role: string;
+}) => {
+  if (input.role === "admin" || input.role === "service_role") {
+    return true;
+  }
+
+  return Boolean(input.actorUserId && input.document.owner_id === input.actorUserId);
+};
+
+const validateSelectedNotaryForDocument = async (input: {
+  document: DocumentRecord;
+  selectedNotaryUserId: string;
+}) => {
+  if (input.selectedNotaryUserId === input.document.owner_id) {
+    return {
+      ok: false as const,
+      path: "selectedNotaryUserId",
+      message: "Selected notary cannot be the document owner",
+    };
+  }
+
+  const selectedNotaryContext = await getUserIdentityContextByUserId(
+    input.selectedNotaryUserId,
+  );
+  if (!hasActiveNotaryRole(selectedNotaryContext)) {
+    return {
+      ok: false as const,
+      path: "selectedNotaryUserId",
+      message: "Selected notary must be an active notary user",
+    };
+  }
+
+  const documentJurisdiction = normalizeJurisdiction(input.document.jurisdiction ?? "");
+  if (!documentJurisdiction) {
+    return {
+      ok: false as const,
+      path: "jurisdiction",
+      message: "Document jurisdiction is required before selecting a notary",
+    };
+  }
+
+  const selectedNotaryProfile = await getNotaryProfileByUserId(input.selectedNotaryUserId);
+  if (!selectedNotaryProfile) {
+    return {
+      ok: false as const,
+      path: "selectedNotaryUserId",
+      message: "Selected notary must have a notary profile",
+    };
+  }
+
+  const notaryJurisdiction = normalizeJurisdiction(selectedNotaryProfile.jurisdiction ?? "");
+  if (notaryJurisdiction !== documentJurisdiction) {
+    return {
+      ok: false as const,
+      path: "selectedNotaryUserId",
+      message: "Selected notary must belong to the document jurisdiction",
+    };
+  }
+
+  if (isNotaryCommissionExpired(selectedNotaryProfile.commissionExpiresAt)) {
+    return {
+      ok: false as const,
+      path: "selectedNotaryUserId",
+      message: "Selected notary commission is expired",
+    };
+  }
+
+  return {
+    ok: true as const,
+    profile: selectedNotaryProfile,
+    normalizedJurisdiction: documentJurisdiction,
   };
 };
 
@@ -5814,6 +5925,39 @@ export const cancelDocumentGenerationRunInternal = async (
   );
 };
 
+const buildDocumentActionEnrichmentsForList = async (documents: DocumentRecord[]) => {
+  const enrichmentByDocumentId = new Map<
+    string,
+    Awaited<ReturnType<typeof buildDocumentActionEnrichment>>
+  >();
+  const concurrency = Math.min(4, documents.length);
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < documents.length) {
+        const document = documents[nextIndex];
+        nextIndex += 1;
+        if (!document) {
+          continue;
+        }
+
+        try {
+          const enrichment = await buildDocumentActionEnrichment({ document });
+          enrichmentByDocumentId.set(document.id, enrichment);
+        } catch (error) {
+          console.warn("Document action enrichment skipped", {
+            documentId: document.id,
+            error: error instanceof Error ? error.message : error,
+          });
+        }
+      }
+    }),
+  );
+
+  return enrichmentByDocumentId;
+};
+
 export const listDocuments = async (req: Request, res: Response) => {
   if (!req.user?.id) {
     return res.status(401).json({
@@ -5844,12 +5988,7 @@ export const listDocuments = async (req: Request, res: Response) => {
     documents,
     viewerRole: req.user?.role ?? "member",
   });
-  const enrichments = await Promise.all(
-    documents.map((document) => buildDocumentActionEnrichment({ document })),
-  );
-  const enrichmentByDocumentId = new Map(
-    documents.map((document, index) => [document.id, enrichments[index]]),
-  );
+  const enrichmentByDocumentId = await buildDocumentActionEnrichmentsForList(documents);
 
   res.status(200).json({
     documents: documents.map((document) => ({
@@ -6379,6 +6518,14 @@ export const signDocument = async (req: Request, res: Response) => {
     ],
   });
 
+  const documentStatus = resolveCompletedSigningDocumentStatus(document);
+  const documentStatusUpdated = Boolean(
+    documentStatus.nextStatus && documentStatus.nextStatus !== document.status,
+  );
+  if (documentStatusUpdated && documentStatus.nextStatus) {
+    await updateDocument(document.id, { status: documentStatus.nextStatus });
+  }
+
   await recordAuditEvent({
     ...buildAuditActorContext(req),
     entityType: "document",
@@ -6390,6 +6537,10 @@ export const signDocument = async (req: Request, res: Response) => {
       generation_run_ids: signingExecution.generationRunIds,
       completed_output_signer_ids: signingExecution.completedOutputSignerIds,
       completed_signature_ids: signingExecution.completedSignatureIds,
+      previous_status: documentStatus.previousStatus,
+      next_status: documentStatus.nextStatus,
+      status_updated: documentStatusUpdated,
+      requires_notarization: documentStatus.requiresNotarization,
     },
   });
 
@@ -6403,6 +6554,12 @@ export const signDocument = async (req: Request, res: Response) => {
     status: "ok",
     signingExecution,
     completion: signing.completion,
+    documentStatus: {
+      previousStatus: documentStatus.previousStatus,
+      nextStatus: documentStatus.nextStatus,
+      updated: documentStatusUpdated,
+      requiresNotarization: documentStatus.requiresNotarization,
+    },
   });
 };
 
@@ -7052,6 +7209,82 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
   );
 };
 
+export const listDocumentAvailableNotaries = async (req: Request, res: Response) => {
+  const parsed = availableNotaryParamsSchema.safeParse(req.params ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  if (!req.user?.id) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
+
+  const document = await getDocumentById(parsed.data.id);
+  if (!document) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document not found",
+    });
+  }
+
+  const role = req.user.role ?? "member";
+  const actorUserId = req.user.dbUserId ?? await getUserIdBySupabaseId(req.user.id);
+  if (!canAccessDocumentAsOwnerOrPrivileged({ document, actorUserId, role })) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document not found",
+    });
+  }
+
+  const normalizedJurisdiction = normalizeJurisdiction(document.jurisdiction ?? "");
+  if (!normalizedJurisdiction) {
+    return sendSimpleValidationErrorResponse(
+      res,
+      "jurisdiction",
+      "Document jurisdiction is required to list available notaries",
+    );
+  }
+
+  try {
+    const [activeRequest, notaries] = await Promise.all([
+      getActiveNotarizationRequest(document.id),
+      listAvailableNotariesByJurisdiction({
+        jurisdiction: document.jurisdiction ?? normalizedJurisdiction,
+        excludeUserId: document.owner_id,
+      }),
+    ]);
+
+    return res.status(200).json({
+      document: {
+        id: document.id,
+        status: document.status,
+        jurisdiction: document.jurisdiction,
+        normalizedJurisdiction,
+        productFlowMode: document.product_flow_mode,
+      },
+      notarization: {
+        activeRequestId: activeRequest?.id ?? null,
+        activeRequestStatus: activeRequest?.status ?? null,
+        assignedNotaryUserId: activeRequest?.assigned_notary_id ?? null,
+        submittedAt: activeRequest?.submitted_at ?? null,
+      },
+      notaries,
+    });
+  } catch (error) {
+    if (error instanceof NotaryProfileServiceError) {
+      return res.status(error.statusCode).json({
+        error: error.statusCode >= 500 ? "internal_error" : "validation_error",
+        message: error.message,
+      });
+    }
+
+    throw error;
+  }
+};
+
 export const submitNotarization = async (req: Request, res: Response) => {
   const parsed = submitNotarizationSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -7088,14 +7321,12 @@ export const submitNotarization = async (req: Request, res: Response) => {
   }
 
   const role = req.user.role ?? "member";
-  const actorUserId = await getUserIdBySupabaseId(req.user.id);
-  if (role !== "admin" && role !== "service_role") {
-    if (!actorUserId || document.owner_id !== actorUserId) {
-      return res.status(404).json({
-        error: "not_found",
-        message: "Document not found",
-      });
-    }
+  const actorUserId = req.user.dbUserId ?? await getUserIdBySupabaseId(req.user.id);
+  if (!canAccessDocumentAsOwnerOrPrivileged({ document, actorUserId, role })) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Document not found",
+    });
   }
 
   const selectedNotaryUserId = parsed.data.selectedNotaryUserId?.trim() || null;
@@ -7116,25 +7347,17 @@ export const submitNotarization = async (req: Request, res: Response) => {
   }
 
   if (selectedNotaryUserId) {
-    const selectedNotaryContext = await getUserIdentityContextByUserId(
+    const selectedNotaryValidation = await validateSelectedNotaryForDocument({
+      document,
       selectedNotaryUserId,
-    );
-    const selectedNotaryHasActiveAssignment =
-      selectedNotaryContext?.roleAssignments.some(
-        (assignment) => assignment.role === "notary" && assignment.status === "active",
-      ) ?? false;
+    });
 
-    if (!selectedNotaryContext || !selectedNotaryHasActiveAssignment) {
-      return res.status(400).json({
-        error: "validation_error",
-        message: "Selected notary must be an active notary user",
-        details: [
-          {
-            path: "selectedNotaryUserId",
-            message: "Selected notary must be an active notary user",
-          },
-        ],
-      });
+    if (!selectedNotaryValidation.ok) {
+      return sendSimpleValidationErrorResponse(
+        res,
+        selectedNotaryValidation.path,
+        selectedNotaryValidation.message,
+      );
     }
   }
 
@@ -7146,6 +7369,19 @@ export const submitNotarization = async (req: Request, res: Response) => {
         {
           path: "status",
           message: "Document is not ready for notarization",
+        },
+      ],
+    });
+  }
+
+  if (document.status === "pending_signature" && !signatureSkipped) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Document signatures must be complete before notarization submission",
+      details: [
+        {
+          path: "status",
+          message: "Document signatures must be complete before notarization submission",
         },
       ],
     });
@@ -7407,6 +7643,50 @@ export const submitNotarization = async (req: Request, res: Response) => {
         selected_notary_user_id: selectedNotaryUserId,
       },
     });
+
+    const selectedNotaryNotification = await queueSelectedNotaryRequestNotification({
+      documentId,
+      requestId: request.id,
+      selectedNotaryUserId,
+      requestedBySupabaseUserId: req.user?.id,
+    });
+
+    let inlineProcessingResult: Awaited<ReturnType<typeof runDueNotificationJobs>> | null = null;
+    if (selectedNotaryNotification?.jobId) {
+      try {
+        inlineProcessingResult = await runDueNotificationJobs({
+          limit: 1,
+          notificationJobIds: [selectedNotaryNotification.jobId],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("Selected notary notification inline processing failed", {
+          documentId,
+          requestId: request.id,
+          selectedNotaryUserId,
+          notificationJobId: selectedNotaryNotification.jobId,
+          error: message,
+        });
+      }
+
+      await recordAuditEvent({
+        ...actorContext,
+        entityType: "illuminotarization_workflow",
+        entityId: workflow.id,
+        action: "system.selected_notary_notified",
+        metadata: {
+          workflow_id: workflow.id,
+          request_id: request.id,
+          document_id: documentId,
+          selected_notary_user_id: selectedNotaryUserId,
+          notification_job_id: selectedNotaryNotification.jobId,
+          notification_existing: selectedNotaryNotification.existing,
+          delivery_count: selectedNotaryNotification.deliveryCount,
+          inline_processed_count: inlineProcessingResult?.processedCount ?? 0,
+          inline_claimed_count: inlineProcessingResult?.claimedCount ?? 0,
+        },
+      });
+    }
   }
 
   await queueNotarizationSubmissionConfirmationNotification({

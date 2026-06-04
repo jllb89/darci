@@ -2,8 +2,10 @@ import { createClient } from "@supabase/supabase-js";
 import {
   getUserIdentityContextBySupabaseId,
   getUserIdentityContextByUserId,
+  type UserIdentityContext,
   upsertUserRoleAssignmentBySupabaseUserId,
 } from "./userRoleService";
+import { normalizeJurisdiction } from "./jurisdictionUtils";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -36,6 +38,15 @@ export type NotaryProfileRecord = {
   sealDataUrl: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AvailableNotaryRecord = {
+  userId: string;
+  displayName: string;
+  jurisdiction: string;
+  serviceAreaKind: NotaryServiceAreaKind | null;
+  serviceAreaName: string | null;
+  commissionExpiresAt: string | null;
 };
 
 export type NotaryApplicationStatus = "pending" | "approved" | "rejected";
@@ -107,6 +118,44 @@ const toNotaryApplicationRecord = (row: Record<string, unknown>): NotaryApplicat
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
+};
+
+const toFullName = (identity: UserIdentityContext) => {
+  return [identity.firstName, identity.lastName]
+    .map((value) => value?.trim() ?? "")
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+};
+
+const toDisplayName = (identity: UserIdentityContext) => {
+  return toFullName(identity) || identity.email?.trim() || identity.id;
+};
+
+export const hasActiveNotaryRole = (identity: UserIdentityContext | null | undefined) => {
+  if (!identity || identity.status === "suspended" || identity.status === "revoked") {
+    return false;
+  }
+
+  if (identity.role === "notary" || identity.availableRoles.includes("notary")) {
+    return true;
+  }
+
+  return identity.roleAssignments.some(
+    (assignment) => assignment.role === "notary" && assignment.status === "active",
+  );
+};
+
+export const isNotaryCommissionExpired = (
+  commissionExpiresAt: string | null | undefined,
+  now = new Date(),
+) => {
+  if (!commissionExpiresAt) {
+    return false;
+  }
+
+  const parsed = new Date(commissionExpiresAt);
+  return !Number.isNaN(parsed.getTime()) && parsed.getTime() < now.getTime();
 };
 
 const ensureNotaryDbReady = () => {
@@ -264,6 +313,79 @@ export const getMyNotaryProfile = async (supabaseUserId: string) => {
   }
 
   return data ? toNotaryProfileRecord(data as Record<string, unknown>) : null;
+};
+
+export const getNotaryProfileByUserId = async (userId: string) => {
+  ensureNotaryDbReady();
+
+  const { data, error } = await supabaseAdmin
+    .from("notary_profiles")
+    .select(notaryProfileSelect)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new NotaryProfileServiceError(500, error.message);
+  }
+
+  return data ? toNotaryProfileRecord(data as Record<string, unknown>) : null;
+};
+
+export const listAvailableNotariesByJurisdiction = async (input: {
+  jurisdiction: string;
+  excludeUserId?: string | null | undefined;
+  now?: Date | undefined;
+}) => {
+  ensureNotaryDbReady();
+  const normalizedJurisdiction = normalizeJurisdiction(input.jurisdiction);
+  if (!normalizedJurisdiction) {
+    throw new NotaryProfileServiceError(400, "Document jurisdiction is required to list available notaries");
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("notary_profiles")
+    .select(notaryProfileSelect);
+
+  if (error) {
+    throw new NotaryProfileServiceError(500, error.message);
+  }
+
+  const rows = (data ?? []) as Record<string, unknown>[];
+  const excludedUserId = input.excludeUserId?.trim() ?? "";
+  const notaries: AvailableNotaryRecord[] = [];
+
+  for (const row of rows) {
+    const profile = toNotaryProfileRecord(row);
+    if (!profile || profile.userId === excludedUserId) {
+      continue;
+    }
+
+    const profileJurisdiction = normalizeJurisdiction(profile.jurisdiction ?? "");
+    if (profileJurisdiction !== normalizedJurisdiction) {
+      continue;
+    }
+
+    if (isNotaryCommissionExpired(profile.commissionExpiresAt, input.now)) {
+      continue;
+    }
+
+    const identity = await getUserIdentityContextByUserId(profile.userId);
+    if (!identity || !hasActiveNotaryRole(identity)) {
+      continue;
+    }
+
+    notaries.push({
+      userId: profile.userId,
+      displayName: toDisplayName(identity),
+      jurisdiction: profileJurisdiction,
+      serviceAreaKind: profile.serviceAreaKind,
+      serviceAreaName: profile.serviceAreaName,
+      commissionExpiresAt: profile.commissionExpiresAt,
+    });
+  }
+
+  return notaries.sort((left, right) => left.displayName.localeCompare(right.displayName));
 };
 
 export const upsertMyNotaryProfile = async (input: {

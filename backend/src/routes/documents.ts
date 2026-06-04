@@ -13,6 +13,7 @@ import {
   listDocumentGenerationRuns,
   finalizeDocumentUpload,
   getDocument,
+  listDocumentAvailableNotaries,
   getDocumentParties,
   getDocumentSigning,
   getDocumentSignerObligations,
@@ -63,6 +64,11 @@ router.get(
   "/:id/next-action",
   requireRole(["member", "pro", "admin", "service_role"]),
   getDocumentNextAction,
+);
+router.get(
+  "/:id/available-notaries",
+  requireRole(["member", "admin", "service_role"]),
+  listDocumentAvailableNotaries,
 );
 router.get("/:id", getDocument);
 router.post(
@@ -178,7 +184,11 @@ router.post(
   requireRole(["member", "admin", "service_role"]),
   signDocument
 );
-router.post("/:id/submit-notarization", submitNotarization);
+router.post(
+  "/:id/submit-notarization",
+  requireRole(["member", "admin", "service_role"]),
+  submitNotarization,
+);
 router.post(
   "/:id/append-acknowledgment",
   requireRole(["notary", "admin", "service_role"]),

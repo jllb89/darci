@@ -116,16 +116,40 @@ export const buildDocumentWorkspaceSummaries = async (input: {
   documents: Array<Pick<DocumentRecord, "id" | "idn" | "status">>;
   viewerRole?: string | null | undefined;
 }) => {
-  const summaries = await Promise.all(
-    input.documents.map(async (document) => {
-      const summary = await buildDocumentWorkspaceSummary({
-        document,
-        viewerRole: input.viewerRole,
-      });
+  const summaries = new Map<string, DocumentWorkspaceSummary>();
+  const concurrency = Math.min(4, input.documents.length);
+  let nextIndex = 0;
 
-      return [document.id, summary] as const;
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < input.documents.length) {
+        const document = input.documents[nextIndex];
+        nextIndex += 1;
+        if (!document) {
+          continue;
+        }
+
+        try {
+          const summary = await buildDocumentWorkspaceSummary({
+            document,
+            viewerRole: input.viewerRole,
+          });
+          summaries.set(document.id, summary);
+        } catch (error) {
+          const visibleIdn = getVisibleDocumentIdn({
+            idn: document.idn,
+            status: document.status,
+            viewerRole: input.viewerRole,
+          });
+          summaries.set(document.id, buildDefaultSummary(visibleIdn));
+          console.warn("Document workspace summary fallback used", {
+            documentId: document.id,
+            error: error instanceof Error ? error.message : error,
+          });
+        }
+      }
     }),
   );
 
-  return new Map<string, DocumentWorkspaceSummary>(summaries);
+  return summaries;
 };

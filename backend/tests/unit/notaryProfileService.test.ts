@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   fromMock: vi.fn(),
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
+  getUserIdentityContextByUserIdMock: vi.fn(),
   maybeSingleMock: vi.fn(),
   singleMock: vi.fn(),
   insertMock: vi.fn(),
+  selectResultMock: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -16,11 +18,12 @@ vi.mock("@supabase/supabase-js", () => ({
 
 vi.mock("../../src/services/userRoleService", () => ({
   getUserIdentityContextBySupabaseId: mocks.getUserIdentityContextBySupabaseIdMock,
-  getUserIdentityContextByUserId: vi.fn(),
+  getUserIdentityContextByUserId: mocks.getUserIdentityContextByUserIdMock,
   upsertUserRoleAssignmentBySupabaseUserId: vi.fn(),
 }));
 
 import {
+  listAvailableNotariesByJurisdiction,
   NotaryProfileServiceError,
   submitNotaryApplication,
 } from "../../src/services/notaryProfileService";
@@ -53,6 +56,7 @@ const buildQuery = () => {
       return query;
     }),
     single: vi.fn(() => mocks.singleMock()),
+    then: vi.fn((resolve, reject) => Promise.resolve(mocks.selectResultMock()).then(resolve, reject)),
   };
 
   return query;
@@ -64,10 +68,13 @@ describe("notaryProfileService", () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
     mocks.fromMock.mockReset();
     mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
+    mocks.getUserIdentityContextByUserIdMock.mockReset();
     mocks.maybeSingleMock.mockReset();
     mocks.singleMock.mockReset();
     mocks.insertMock.mockReset();
+    mocks.selectResultMock.mockReset();
     mocks.fromMock.mockImplementation(() => buildQuery());
+    mocks.selectResultMock.mockResolvedValue({ data: [], error: null });
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
       id: "user-1",
       supabaseUserId: "supabase-user-1",
@@ -79,6 +86,7 @@ describe("notaryProfileService", () => {
       availableRoles: ["member"],
       roleAssignments: [],
     });
+    mocks.getUserIdentityContextByUserIdMock.mockResolvedValue(null);
   });
 
   it("submits a notary application through Supabase without direct database access", async () => {
@@ -154,5 +162,90 @@ describe("notaryProfileService", () => {
       statusCode: 409,
       message: "A notary application has already been submitted for this account.",
     } satisfies Partial<NotaryProfileServiceError>);
+  });
+
+  it("lists only active same-jurisdiction notaries that are not the owner and not expired", async () => {
+    mocks.selectResultMock.mockResolvedValue({
+      data: [
+        buildNotaryApplicationRow({
+          id: "profile-active",
+          user_id: "notary-active",
+          commission_number: null,
+          commission_expires_at: "2027-01-01T00:00:00.000Z",
+          seal_storage_path: null,
+        }),
+        buildNotaryApplicationRow({
+          id: "profile-wrong-jurisdiction",
+          user_id: "notary-ca",
+          jurisdiction: "US-CA",
+          commission_number: null,
+          commission_expires_at: "2027-01-01T00:00:00.000Z",
+          seal_storage_path: null,
+        }),
+        buildNotaryApplicationRow({
+          id: "profile-owner",
+          user_id: "owner-1",
+          commission_number: null,
+          commission_expires_at: "2027-01-01T00:00:00.000Z",
+          seal_storage_path: null,
+        }),
+        buildNotaryApplicationRow({
+          id: "profile-expired",
+          user_id: "notary-expired",
+          commission_number: null,
+          commission_expires_at: "2025-01-01T00:00:00.000Z",
+          seal_storage_path: null,
+        }),
+        buildNotaryApplicationRow({
+          id: "profile-inactive",
+          user_id: "notary-inactive",
+          commission_number: null,
+          commission_expires_at: "2027-01-01T00:00:00.000Z",
+          seal_storage_path: null,
+        }),
+      ],
+      error: null,
+    });
+    mocks.getUserIdentityContextByUserIdMock.mockImplementation(async (userId: string) => ({
+      id: userId,
+      supabaseUserId: `${userId}-supabase`,
+      email: `${userId}@example.com`,
+      phone: null,
+      role: userId === "notary-inactive" ? "member" : "notary",
+      status: "active",
+      firstName: userId === "notary-active" ? "Nora" : "Other",
+      lastName: userId === "notary-active" ? "Tary" : "Notary",
+      emailConfirmedAt: null,
+      phoneConfirmedAt: null,
+      lastSignInAt: null,
+      lastAuthSyncedAt: null,
+      availableRoles: userId === "notary-inactive" ? ["member"] : ["notary"],
+      roleAssignments: userId === "notary-inactive" ? [] : [{
+        id: `${userId}-role`,
+        role: "notary",
+        status: "active",
+        isActiveProfile: true,
+        grantedReason: null,
+        createdAt: "2026-05-29T00:00:00.000Z",
+        updatedAt: "2026-05-29T00:00:00.000Z",
+      }],
+    }));
+
+    const notaries = await listAvailableNotariesByJurisdiction({
+      jurisdiction: "OH",
+      excludeUserId: "owner-1",
+      now: new Date("2026-06-03T00:00:00.000Z"),
+    });
+
+    expect(notaries).toEqual([
+      {
+        userId: "notary-active",
+        displayName: "Nora Tary",
+        jurisdiction: "US-OH",
+        serviceAreaKind: "county",
+        serviceAreaName: "Franklin",
+        commissionExpiresAt: "2027-01-01T00:00:00.000Z",
+      },
+    ]);
   });
 });

@@ -74,6 +74,7 @@ type NotificationDocumentRecord = {
   owner_id: string;
   document_type: string | null;
   product_flow_mode: string | null;
+  jurisdiction: string | null;
   idn: string | null;
 };
 
@@ -105,6 +106,37 @@ type QueueNotificationResult = {
 };
 
 const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate> = {
+  notary_request_received_email: {
+    template_key: "notary_request_received_email",
+    template_version: "2026.06.03.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "notary",
+    trigger_event: "member.notary_selected",
+    invite_kind: null,
+    subject_template: "New notarization request ready for review",
+    body_template: [
+      "Hi {{firstName}},",
+      "",
+      "{{memberName}} selected you to review a {{documentName}} in {{jurisdiction}}.",
+      "",
+      "Open your notary workspace to review the request:",
+      "",
+      "[Review request]({{reviewRequestUrl}})",
+      "",
+      "- Your DARCi Team",
+    ].join("\n"),
+    body_format: "markdown",
+    variables_schema: {
+      required: ["firstName", "memberName", "documentName", "jurisdiction", "reviewRequestUrl"],
+      optional: ["dashboardUrl", "requestId", "documentId"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "docs/notarization-selected-notary-handoff-roadmap.md",
+    metadata: { seed_source: "runtime_selected_notary_request_fallback" },
+  },
   notary_application_approved_email: {
     template_key: "notary_application_approved_email",
     template_version: "2026.05.28.v1",
@@ -860,7 +892,7 @@ const listActiveAdminUsers = async () => {
 const getDocumentById = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("documents")
-    .select("id, owner_id, document_type, product_flow_mode, idn")
+    .select("id, owner_id, document_type, product_flow_mode, jurisdiction, idn")
     .eq("id", documentId)
     .limit(1)
     .maybeSingle();
@@ -1252,6 +1284,62 @@ export const queueNotaryNextStepNotification = async (input: {
       requestId: input.requestId,
       codeId: input.codeId,
       deliveryReason: input.deliveryReason,
+    });
+    return null;
+  }
+};
+
+export const queueSelectedNotaryRequestNotification = async (input: {
+  documentId: string;
+  requestId: string;
+  selectedNotaryUserId: string;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    const [owner, selectedNotary] = await Promise.all([
+      getUserById(document.owner_id),
+      getUserById(input.selectedNotaryUserId),
+    ]);
+    if (!selectedNotary?.email) {
+      return null;
+    }
+
+    const reviewRequestUrl = buildAppUrl("/app/notary");
+    return await queueTemplatedNotification({
+      templateKey: "notary_request_received_email",
+      jobKind: "status_update",
+      dedupeKey: `selected_notary_request:${input.requestId}:${input.selectedNotaryUserId}`,
+      documentId: document.id,
+      notarizationRequestId: input.requestId,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(selectedNotary),
+        memberName: owner ? toDisplayName(owner) : "A member",
+        documentName: getDocumentLabel(document),
+        jurisdiction: document.jurisdiction?.trim() || "the document jurisdiction",
+        reviewRequestUrl,
+        dashboardUrl: reviewRequestUrl,
+        requestId: input.requestId,
+        documentId: document.id,
+      },
+      recipients: [buildOwnerRecipient(selectedNotary)],
+      metadata: {
+        requestId: input.requestId,
+        selectedNotaryUserId: input.selectedNotaryUserId,
+        documentId: document.id,
+        reviewRequestPath: "/app/notary",
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("notary_request_received_email", error, {
+      documentId: input.documentId,
+      requestId: input.requestId,
+      selectedNotaryUserId: input.selectedNotaryUserId,
     });
     return null;
   }

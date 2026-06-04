@@ -158,4 +158,40 @@ describe("documentWorkspaceReadModelService", () => {
     expect(summaries.get("doc-1")?.verification.status).toBe("unavailable");
     expect(summaries.get("doc-2")?.verification.verifyPath).toBe("/verify/IDN-9999");
   });
+
+  it("uses a default summary when a list item summary lookup fails", async () => {
+    mocks.getLatestNotarizationRequestForDocumentMock.mockRejectedValueOnce(
+      new Error("TypeError: fetch failed"),
+    );
+
+    const summaries = await buildDocumentWorkspaceSummaries({
+      documents: [{ id: "doc-1", idn: "IDN-1234", status: "pending_signature" }],
+      viewerRole: "admin",
+    });
+
+    expect(summaries.get("doc-1")).toEqual({
+      workflow: {
+        requestId: null,
+        workflowId: null,
+        requestStatus: null,
+        latestWorkflowStatus: null,
+        latestWorkflowStatusAt: null,
+        submittedAt: null,
+        assignedNotaryId: null,
+        latestCodeStatus: null,
+        latestCodeExpiresAt: null,
+      },
+      finalization: {
+        latestStatus: null,
+        latestStatusAt: null,
+        isAnchored: false,
+        isVerificationChecked: false,
+      },
+      verification: {
+        status: "pending_finalization",
+        idn: "IDN-1234",
+        verifyPath: "/verify/IDN-1234",
+      },
+    });
+  });
 });

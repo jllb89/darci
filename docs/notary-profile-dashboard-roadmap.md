@@ -110,6 +110,7 @@ Primary tabs:
 
 1. `Review requests`
    - Unopened fully signed packages requesting this notary.
+   - Includes member-selected requests before assigned-notary claim is written.
    - Shows only member and IDN.
 2. `In-review`
    - Requests this notary opened but has not decided yet.

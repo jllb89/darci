@@ -129,7 +129,17 @@ describe("GET /notary workspace routes", () => {
             role: "member",
             status: "active",
           },
-          workflow: null,
+          workflow: {
+            id: "wf-1",
+            status: "submitted",
+            latestStatus: "submitted",
+            latestStatusAt: "2026-04-22T10:00:00.000Z",
+            reviewStartedAt: null,
+            closedAt: null,
+            selectedNotaryUserId: "notary-db-1",
+            assignedNotaryUserId: null,
+            lastCodeGeneratedAt: "2026-04-22T10:05:00.000Z",
+          },
           latestCodeDelivery: null,
           meeting: null,
           finalization: {
@@ -160,6 +170,7 @@ describe("GET /notary workspace routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.counts.total).toBe(1);
+    expect(response.body.requests[0].workflow.selectedNotaryUserId).toBe("notary-db-1");
     expect(mocks.listNotaryQueueMock).toHaveBeenCalledWith({
       role: "notary",
       viewerUserId: "notary-db-1",
@@ -260,6 +271,36 @@ describe("GET /notary workspace routes", () => {
       requestId: "req-1",
       role: "notary",
       viewerUserId: "notary-db-1",
+    });
+  });
+
+  it("returns not found when notary cannot access selected request context", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValueOnce({
+      id: "notary-db-2",
+      supabaseUserId: "notary-2",
+      email: "notary2@example.com",
+      role: "notary",
+      status: "active",
+      firstName: "Nora",
+      lastName: "Two",
+      availableRoles: ["notary"],
+      roleAssignments: [],
+    });
+    mocks.getNotaryRequestContextMock.mockResolvedValue(null);
+
+    const response = await request(app)
+      .get("/notary/requests/req-locked/context")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-2", app_metadata: { role: "notary" } })}`);
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({
+      error: "not_found",
+      message: "Notary request context not found",
+    });
+    expect(mocks.getNotaryRequestContextMock).toHaveBeenCalledWith({
+      requestId: "req-locked",
+      role: "notary",
+      viewerUserId: "notary-db-2",
     });
   });
 });

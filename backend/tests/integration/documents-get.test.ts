@@ -504,6 +504,48 @@ describe("GET documents endpoints", () => {
     });
   });
 
+  it("keeps the documents list available when action enrichment fails", async () => {
+    mocks.listDocumentsMock.mockResolvedValue([
+      {
+        id: "doc-1",
+        owner_id: "owner-1",
+        idn: null,
+        status: "draft",
+        document_type: "generic",
+        jurisdiction: "US-OH",
+        created_at: "2026-03-05T00:00:00.000Z",
+      },
+    ]);
+    mocks.buildDocumentActionEnrichmentMock.mockRejectedValueOnce(
+      new Error("TypeError: fetch failed"),
+    );
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents",
+      "keeps the documents list available when action enrichment fails",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.documents).toHaveLength(1);
+    expect(response.body.documents[0]).toMatchObject({
+      id: "doc-1",
+      idn: null,
+      status: "draft",
+      documentType: "generic",
+      jurisdiction: "US-OH",
+      summary: expect.any(Object),
+    });
+    expect(mocks.buildDocumentActionEnrichmentMock).toHaveBeenCalledWith({
+      document: expect.objectContaining({ id: "doc-1" }),
+    });
+  });
+
   it("does not list member documents while using the notary profile", async () => {
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValueOnce({
       id: "notary-user-1",

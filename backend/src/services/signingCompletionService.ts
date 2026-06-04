@@ -377,6 +377,16 @@ const resolveNextDocumentStatus = (input: {
   return input.requiresNotarization ? "pending_notary" : "completed";
 };
 
+export const resolveCompletedSigningDocumentStatus = (document: DocumentRecord) => {
+  const requiresNotarization = requiresNotarizationAfterSigning(document);
+
+  return {
+    previousStatus: document.status,
+    nextStatus: resolveNextDocumentStatus({ document, requiresNotarization }),
+    requiresNotarization,
+  };
+};
+
 export const completeSigningWorkflowAfterSignatureCapture = async (input: {
   documentId: string;
   completedOutputSignerId: string;
@@ -467,10 +477,9 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
     systemValues.find((value) => value.system_key === "signature_execution")?.value_json ?? null;
   const existingSigningExecution = parseSigningExecutionValue(rawSigningExecutionValue);
   const signingExecutionAlreadyConfirmed = Boolean(existingSigningExecution?.confirmedAt);
-  const requiresNotarization = requiresNotarizationAfterSigning(document);
-  const nextDocumentStatus = allSignerRequirementsSatisfied
-    ? resolveNextDocumentStatus({ document, requiresNotarization })
-    : null;
+  const completedStatus = resolveCompletedSigningDocumentStatus(document);
+  const requiresNotarization = completedStatus.requiresNotarization;
+  const nextDocumentStatus = allSignerRequirementsSatisfied ? completedStatus.nextStatus : null;
   let documentStatusUpdated = false;
 
   if (allSignerRequirementsSatisfied) {
