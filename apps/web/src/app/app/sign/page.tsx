@@ -537,7 +537,7 @@ const NotarySelectControl = ({
       : null;
 
   return (
-    <div className="space-y-2 text-xs font-medium text-Color-Neutral-Darkest">
+    <div className="space-y-3 text-xs font-medium text-Color-Neutral-Darkest">
       <span>Notary</span>
       <button
         ref={triggerRef}
@@ -1616,25 +1616,23 @@ export default function SignPage() {
     }
 
     return (
-      <div className={signCardBaseClass}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium text-Color-Scheme-1-Text">Choose a notary</div>
-            <div className="mt-2 text-sm leading-6 text-Color-Neutral">
-              {canContinueWithoutSignature
-                ? "Select a notary to review this uploaded document without applying a member signature."
-                : "Select a notary in the document jurisdiction to review the confirmed document."}
-            </div>
-          </div>
+      <div>
+        <div className="flex items-center gap-3">
+          <div className="text-2xl font-medium text-Color-Scheme-1-Text">Choose a notary</div>
           {availableNotariesPayload?.document?.normalizedJurisdiction ? (
-            <div className="rounded-full bg-black px-3 py-1 text-xs font-medium text-white">
+            <div className="ml-auto inline-flex shrink-0 whitespace-nowrap rounded-full bg-black px-3 py-1 text-xs font-medium text-white">
               {formatJurisdictionLabel(availableNotariesPayload.document.normalizedJurisdiction)}
             </div>
           ) : null}
         </div>
+        <div className="mt-2 text-sm text-Color-Neutral">
+              {canContinueWithoutSignature
+                ? "Select a notary to review this uploaded document without applying a member signature."
+                : "Select a notary in the document jurisdiction to review the confirmed document."}
+        </div>
 
         {(isLoadingAvailableNotaries || !availableNotariesPayload) && !availableNotaryError ? (
-          <div className="mt-5 rounded-xl border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4 text-sm text-Color-Neutral">
+          <div className="mt-5 rounded-xl bg-Color-Neutral-Lightest px-4 py-4 text-sm text-Color-Neutral">
             Loading available notaries...
           </div>
         ) : availableNotaryError ? (
@@ -1651,7 +1649,7 @@ export default function SignPage() {
             </button>
           </div>
         ) : availableNotaries.length === 0 ? (
-          <div className="mt-5 rounded-xl border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-4 text-sm leading-6 text-Color-Neutral">
+          <div className="mt-5 rounded-xl bg-Color-Neutral-Lightest px-4 py-4 text-sm leading-6 text-Color-Neutral">
             No active notaries are available for this document jurisdiction yet.
           </div>
         ) : (

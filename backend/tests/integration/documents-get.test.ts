@@ -22,6 +22,8 @@ vi.hoisted(() => {
 
 const mocks = vi.hoisted(() => ({
   listDocumentsMock: vi.fn(),
+  countDocumentsMock: vi.fn(),
+  listDocumentFilterFacetsMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   listDocumentPartiesMock: vi.fn(),
@@ -56,6 +58,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/services/documentService", () => ({
   listDocuments: mocks.listDocumentsMock,
+  countDocuments: mocks.countDocumentsMock,
+  listDocumentFilterFacets: mocks.listDocumentFilterFacetsMock,
   getDocumentById: mocks.getDocumentByIdMock,
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentParties: mocks.listDocumentPartiesMock,
@@ -245,6 +249,8 @@ describe("GET documents endpoints", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     mocks.listDocumentsMock.mockReset();
+    mocks.countDocumentsMock.mockReset();
+    mocks.listDocumentFilterFacetsMock.mockReset();
     mocks.getDocumentByIdMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentPartiesMock.mockReset();
@@ -345,6 +351,12 @@ describe("GET documents endpoints", () => {
       },
     );
     mocks.buildDocumentActionEnrichmentMock.mockResolvedValue(undefined);
+    mocks.countDocumentsMock.mockResolvedValue(0);
+    mocks.listDocumentFilterFacetsMock.mockResolvedValue({
+      documentTypes: [],
+      statuses: [],
+      jurisdictions: [],
+    });
 
     mocks.isDocumentIntakeLockedMock.mockImplementation(() => false);
     mocks.buildSelectionForModeMock.mockResolvedValue({
@@ -421,6 +433,12 @@ describe("GET documents endpoints", () => {
         created_at: "2026-03-05T00:01:00.000Z",
       },
     ]);
+    mocks.countDocumentsMock.mockResolvedValue(2);
+    mocks.listDocumentFilterFacetsMock.mockResolvedValue({
+      documentTypes: ["generic"],
+      statuses: ["draft", "pending_signature"],
+      jurisdictions: ["US-OH"],
+    });
 
     const token = signToken({
       sub: "admin-1",
@@ -501,6 +519,89 @@ describe("GET documents endpoints", () => {
           },
         },
       ],
+      pagination: {
+        page: 1,
+        pageSize: 10,
+        total: 2,
+        pageCount: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      },
+      facets: {
+        documentTypes: ["generic"],
+        statuses: ["draft", "pending_signature"],
+        jurisdictions: ["US-OH"],
+      },
+    });
+    expect(mocks.listDocumentsMock).toHaveBeenCalledWith(undefined, {
+      filters: {},
+      limit: 10,
+      offset: 0,
+    });
+    expect(mocks.countDocumentsMock).toHaveBeenCalledWith(undefined, {});
+  });
+
+  it("paginates documents before running page enrichments", async () => {
+    mocks.listDocumentsMock.mockResolvedValue([
+      {
+        id: "doc-21",
+        owner_id: "owner-21",
+        idn: null,
+        status: "pending_signature",
+        document_type: "generic",
+        jurisdiction: "US-OH",
+        created_at: "2026-03-05T00:20:00.000Z",
+      },
+    ]);
+    mocks.countDocumentsMock.mockResolvedValue(45);
+    mocks.listDocumentFilterFacetsMock.mockResolvedValue({
+      documentTypes: ["generic"],
+      statuses: ["pending_signature"],
+      jurisdictions: ["US-OH"],
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await getWithLog(
+      "/documents?page=3&pageSize=10&documentType=generic&status=pending&jurisdiction=us-oh&createdFrom=2026-03-01&createdTo=2026-03-31",
+      "paginates documents before running page enrichments",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listDocumentsMock).toHaveBeenCalledWith(undefined, {
+      filters: {
+        documentType: "generic",
+        status: "pending",
+        jurisdiction: "us-oh",
+        createdFrom: "2026-03-01",
+        createdTo: "2026-03-31",
+      },
+      limit: 10,
+      offset: 20,
+    });
+    expect(mocks.countDocumentsMock).toHaveBeenCalledWith(undefined, {
+      documentType: "generic",
+      status: "pending",
+      jurisdiction: "us-oh",
+      createdFrom: "2026-03-01",
+      createdTo: "2026-03-31",
+    });
+    expect(mocks.buildDocumentWorkspaceSummariesMock).toHaveBeenCalledWith({
+      documents: [expect.objectContaining({ id: "doc-21" })],
+      viewerRole: "admin",
+    });
+    expect(mocks.buildDocumentActionEnrichmentMock).toHaveBeenCalledTimes(1);
+    expect(response.body.pagination).toEqual({
+      page: 3,
+      pageSize: 10,
+      total: 45,
+      pageCount: 5,
+      hasPreviousPage: true,
+      hasNextPage: true,
     });
   });
 
@@ -516,6 +617,12 @@ describe("GET documents endpoints", () => {
         created_at: "2026-03-05T00:00:00.000Z",
       },
     ]);
+    mocks.countDocumentsMock.mockResolvedValue(1);
+    mocks.listDocumentFilterFacetsMock.mockResolvedValue({
+      documentTypes: ["generic"],
+      statuses: ["draft"],
+      jurisdictions: ["US-OH"],
+    });
     mocks.buildDocumentActionEnrichmentMock.mockRejectedValueOnce(
       new Error("TypeError: fetch failed"),
     );

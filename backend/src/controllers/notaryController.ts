@@ -10,6 +10,7 @@ import {
   queueNotaryNextStepNotification,
   queueNotaryRequestClaimedNotification,
 } from "../services/notificationService";
+import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import {
   createNotarizationCode,
   getDocumentById,
@@ -1455,13 +1456,37 @@ export const reviewRequestDecision = async (req: Request, res: Response) => {
 
   if (assignedNotaryId) {
     if (parsed.data.decision === "approved") {
-      await queueNotaryApprovalReceivedNotification({
+      const contactExchangeNotification = await queueNotaryApprovalReceivedNotification({
         documentId: updatedRequest.document_id,
         requestId: updatedRequest.id,
         notaryUserId: assignedNotaryId,
         summary,
         requestedBySupabaseUserId: req.user?.id,
       });
+
+      const notificationJobIds = Array.from(
+        new Set(
+          [
+            ...(contactExchangeNotification?.jobIds ?? []),
+            contactExchangeNotification?.jobId ?? null,
+          ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+        ),
+      );
+
+      if (notificationJobIds.length > 0) {
+        try {
+          await runDueNotificationJobs({
+            limit: notificationJobIds.length,
+            notificationJobIds,
+          });
+        } catch (error) {
+          console.warn("Approval contact exchange inline notification processing failed", {
+            requestId: updatedRequest.id,
+            notificationJobIds,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     } else if (parsed.data.decision === "changes_requested") {
       await queueNotaryChangesRequestedNotification({
         documentId: updatedRequest.document_id,

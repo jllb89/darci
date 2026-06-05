@@ -629,6 +629,66 @@ describe("notaryWorkspaceReadModelService", () => {
     });
   });
 
+  it("excludes unsigned selected-notary requests from the notary queue", async () => {
+    mocks.listNotarizationRequestsMock.mockResolvedValue([
+      {
+        id: "req-1",
+        document_id: "doc-1",
+        workflow_id: "wf-1",
+        assigned_notary_id: null,
+        status: "pending",
+        submitted_at: "2026-04-22T10:00:00.000Z",
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
+    ]);
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "pending_signature",
+      document_type: "uploaded_document",
+      jurisdiction: "US-CA",
+      product_flow_mode: "notarize_document",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      id: "wf-1",
+      owner_user_id: "member-db-1",
+      created_by_user_id: "member-db-1",
+      primary_document_id: "doc-1",
+      workflow_kind: "single_document",
+      status: "submitted",
+      selected_notary_user_id: "notary-db-1",
+      assigned_notary_user_id: null,
+      current_legacy_request_id: "req-1",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      last_code_generated_at: "2026-04-22T10:05:00.000Z",
+      review_started_at: null,
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-22T10:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+
+    const queue = await listNotaryQueue({
+      role: "notary",
+      viewerUserId: "notary-db-1",
+      limit: 25,
+      offset: 0,
+    });
+
+    expect(queue.counts.total).toBe(0);
+    expect(queue.requests).toEqual([]);
+  });
+
   it("allows selected notary to open context before assignment", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",
@@ -691,6 +751,62 @@ describe("notaryWorkspaceReadModelService", () => {
     });
   });
 
+  it("denies context for unsigned selected-notary requests", async () => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "draft",
+      document_type: "uploaded_document",
+      jurisdiction: "US-CA",
+      product_flow_mode: "notarize_document",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      id: "wf-1",
+      owner_user_id: "member-db-1",
+      created_by_user_id: "member-db-1",
+      primary_document_id: "doc-1",
+      workflow_kind: "single_document",
+      status: "submitted",
+      selected_notary_user_id: "notary-db-1",
+      assigned_notary_user_id: null,
+      current_legacy_request_id: "req-1",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      last_code_generated_at: "2026-04-22T10:05:00.000Z",
+      review_started_at: null,
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-22T10:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+
+    const context = await getNotaryRequestContext({
+      requestId: "req-1",
+      role: "notary",
+      viewerUserId: "notary-db-1",
+    });
+
+    expect(context).toBeNull();
+  });
+
   it("denies context for wrong notary when request is selected for another notary", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",
@@ -745,5 +861,80 @@ describe("notaryWorkspaceReadModelService", () => {
     });
 
     expect(context).toBeNull();
+  });
+
+  it("includes only signed PDF versions in notary review documents before finalization", async () => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: "notary-db-1",
+      status: "in_review",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "completed",
+      document_type: "power_of_attorney",
+      jurisdiction: "US-CA",
+      product_flow_mode: "poa_only",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-draft-1",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "documents/doc-1-draft.pdf",
+        file_name: "doc-1-draft.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1234,
+        is_final: false,
+        generation_run_id: "run-1",
+        created_by: null,
+        created_at: "2026-04-22T09:30:00.000Z",
+      },
+      {
+        id: "ver-signed-1",
+        document_id: "doc-1",
+        version: 2,
+        storage_path: "documents/doc-1-signed.pdf",
+        file_name: "doc-1-signed.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1456,
+        is_final: false,
+        generation_run_id: "run-1",
+        created_by: null,
+        created_at: "2026-04-22T09:40:00.000Z",
+      },
+    ]);
+
+    const context = await getNotaryRequestContext({
+      requestId: "req-1",
+      role: "notary",
+      viewerUserId: "notary-db-1",
+    });
+
+    expect(context).not.toBeNull();
+    expect(context?.document.versions).toHaveLength(2);
+    expect(context?.document.reviewDocuments).toMatchObject([
+      {
+        id: "ver-signed-1",
+        versionId: "ver-signed-1",
+        fileName: "doc-1-signed.pdf",
+        mimeType: "application/pdf",
+        isFinal: false,
+      },
+    ]);
   });
 });

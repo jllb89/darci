@@ -1233,7 +1233,10 @@ const resolvePlaceholderValue = (input: {
       return null;
     }
 
-    if (input.binding.placeholder === "CA_Notarial_Acknowledgment_Block") {
+    if (
+      input.binding.placeholder === "CA_Notarial_Acknowledgment_Block" ||
+      input.binding.placeholder === "OH_Notarial_Acknowledgment_Block"
+    ) {
       return null;
     }
 
@@ -1372,7 +1375,10 @@ export const buildGenerationRunBlockers = (input: {
       continue;
     }
 
-    if (binding.placeholder === "CA_Notarial_Acknowledgment_Block") {
+    if (
+      binding.placeholder === "CA_Notarial_Acknowledgment_Block" ||
+      binding.placeholder === "OH_Notarial_Acknowledgment_Block"
+    ) {
       continue;
     }
 

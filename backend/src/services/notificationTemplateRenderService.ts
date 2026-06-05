@@ -74,6 +74,7 @@ const wrapEmailHtml = (bodyHtml: string): string => `
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
+      /* Base content styles */
       .darci-content p {
         margin: 0 0 18px;
       }
@@ -82,17 +83,26 @@ const wrapEmailHtml = (bodyHtml: string): string => `
       }
       .darci-content strong {
         color: #191919;
-        font-weight: 500;
+        font-weight: 600;
       }
-      .darci-content a {
-        display: inline-block;
-        margin: 6px 0 8px;
-        padding: 13px 18px;
+      .darci-content .darci-cta-row {
+        margin: 8px 0 24px;
+      }
+      .darci-content .darci-button {
+        display: block;
+        padding: 14px 0;
         background: #0aff4a;
         color: #191919 !important;
+        text-align: center;
         text-decoration: none;
-        font-weight: 500;
+        font-weight: 600;
+        font-size: 14px;
         border: 0;
+      }
+      .darci-content .darci-inline-link {
+        color: #191919;
+        text-decoration: underline;
+        font-weight: 600;
       }
       .darci-content ul,
       .darci-content ol {
@@ -107,37 +117,45 @@ const wrapEmailHtml = (bodyHtml: string): string => `
         border-top: 1px solid #d8d8d8;
         margin: 24px 0;
       }
+      /* Mobile */
+      @media only screen and (max-width: 620px) {
+        .darci-outer { padding: 16px 8px !important; }
+        .darci-card { width: 100% !important; }
+        .darci-header { padding: 20px 20px !important; }
+        .darci-body { padding: 24px 20px !important; }
+        .darci-footer { padding: 16px 20px !important; }
+        .darci-contact-btn { display: block !important; width: 100% !important; box-sizing: border-box; margin-bottom: 10px !important; padding-right: 0 !important; }
+        .darci-contact-btn td { display: block !important; width: 100% !important; }
+        .darci-content .darci-button { width: 100% !important; box-sizing: border-box !important; }
+      }
     </style>
   </head>
   <body style="margin:0;padding:0;background:#f2f2f2;font-family:Arial,'Helvetica Neue',sans-serif;font-weight:500;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
+    <table class="darci-outer" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
       <tr>
         <td align="center">
-          <table width="640" cellpadding="0" cellspacing="0"
+          <table class="darci-card" width="640" cellpadding="0" cellspacing="0"
             style="background:#ffffff;border:1px solid #d8d8d8;max-width:640px;width:100%;">
             <tr>
-              <td style="padding:28px 34px;background:#000000;">
+              <td class="darci-header" style="padding:24px 34px;background:#000000;">
                 <table width="100%" cellpadding="0" cellspacing="0">
                   <tr>
                     <td align="left">
                       <img src="${getEmailLogoUrl()}" width="91" height="20" alt="DARCi" style="display:block;border:0;outline:none;text-decoration:none;width:91px;height:auto;color:#ffffff;font-size:16px;line-height:20px;" />
-                    </td>
-                    <td align="right" style="font-size:12px;line-height:16px;color:#ffffff;font-weight:500;">
-                      Signature request
                     </td>
                   </tr>
                 </table>
               </td>
             </tr>
             <tr>
-              <td style="padding:34px;color:#191919;font-size:14px;line-height:1.65;font-weight:500;">
+              <td class="darci-body" style="padding:34px;color:#191919;font-size:14px;line-height:1.7;font-weight:500;">
                 <div class="darci-content">
                   ${bodyHtml}
                 </div>
               </td>
             </tr>
             <tr>
-              <td style="background:#f2f2f2;padding:22px 34px;border-top:1px solid #d8d8d8;">
+              <td class="darci-footer" style="background:#f2f2f2;padding:22px 34px;border-top:1px solid #d8d8d8;">
                 <p style="margin:0;color:#7f7f7f;font-size:12px;line-height:18px;font-weight:500;">
                   DARCi document signing<br/>
                   Questions? Reply to this email or contact <a href="mailto:support@darciregistry.com" style="color:#191919;text-decoration:underline;">support@darciregistry.com</a>.
@@ -200,6 +218,16 @@ const resolveReplyToAddress = () => {
   return firstConfiguredValue(["NOTIFICATION_REPLY_TO", "RESEND_REPLY_TO_ADDRESS"]) ?? "support@darciregistry.com";
 };
 
+const enhanceMarkdownEmailHtml = (html: string) => {
+  const withButtons = html.replace(
+    /<p>\s*<a href="([^"]+)">([\s\S]*?)<\/a>\s*<\/p>/g,
+    (_match, href: string, label: string) =>
+      `<p class="darci-cta-row"><a class="darci-button" href="${href}">${label}</a></p>`,
+  );
+
+  return withButtons.replace(/<a href=/g, '<a class="darci-inline-link" href=');
+};
+
 export const renderNotificationTemplate = (
   input: RenderNotificationTemplateInput,
 ): RenderedNotificationTemplate => {
@@ -226,7 +254,7 @@ export const renderNotificationTemplate = (
     template.bodyFormat === "html"
       ? text
       : template.bodyFormat === "markdown"
-        ? (marked(text) as string)
+        ? enhanceMarkdownEmailHtml(marked(text) as string)
         : `<pre style="white-space:pre-wrap;font-family:inherit;">${text}</pre>`;
 
   const recipientEmail = input.recipientEmail?.trim() || null;

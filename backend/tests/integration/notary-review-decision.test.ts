@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   queueNotaryApprovalReceivedNotificationMock: vi.fn(),
   queueNotaryChangesRequestedNotificationMock: vi.fn(),
+  runDueNotificationJobsMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -62,6 +63,14 @@ vi.mock("../../src/services/notificationService", async (importOriginal) => {
   };
 });
 
+vi.mock("../../src/services/notificationOutboxService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/notificationOutboxService")>();
+  return {
+    ...actual,
+    runDueNotificationJobs: mocks.runDueNotificationJobsMock,
+  };
+});
+
 import { app } from "../../src/index";
 
 type TokenPayload = {
@@ -89,6 +98,7 @@ describe("POST /notary/requests/:id/review-decision", () => {
     mocks.recordAuditEventMock.mockReset();
     mocks.queueNotaryApprovalReceivedNotificationMock.mockReset();
     mocks.queueNotaryChangesRequestedNotificationMock.mockReset();
+    mocks.runDueNotificationJobsMock.mockReset();
   });
 
   it("records an approval decision and transitions the workflow", async () => {
@@ -167,6 +177,21 @@ describe("POST /notary/requests/:id/review-decision", () => {
       jobId: "job-1",
       deliveryCount: 1,
       existing: false,
+      jobIds: ["job-1", "job-2"],
+    });
+    mocks.runDueNotificationJobsMock.mockResolvedValue({
+      scanned: 2,
+      started: 2,
+      completed: 2,
+      failed: 0,
+      skipped: 0,
+      exhausted: false,
+      lastJobId: "job-2",
+      deliveriesProcessed: 2,
+      providerFailures: 0,
+      policySkippedDeliveries: 0,
+      policyForcedInternal: 0,
+      triggeredBy: "test",
     });
 
     const token = signToken({
@@ -219,6 +244,11 @@ describe("POST /notary/requests/:id/review-decision", () => {
         documentId: "doc-1",
         requestId: "req-1",
         summary: "All review checks passed",
+      }),
+    );
+    expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationJobIds: ["job-1", "job-2"],
       }),
     );
     expect(mocks.updateNotarizationRequestMock).not.toHaveBeenCalled();

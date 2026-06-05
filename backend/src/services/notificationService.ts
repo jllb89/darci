@@ -103,6 +103,7 @@ type QueueNotificationResult = {
   jobId: string;
   deliveryCount: number;
   existing: boolean;
+  jobIds?: string[];
 };
 
 const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate> = {
@@ -204,6 +205,93 @@ const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate
     is_active: true,
     source_reference: "runtime:notary_application_rejected_email",
     metadata: { seed_source: "runtime_notary_application_decision_fallback" },
+  },
+  notary_approval_received_email: {
+    template_key: "notary_approval_received_email",
+    template_version: "2026.06.05.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "client",
+    trigger_event: "notary.request_approved",
+    invite_kind: null,
+    subject_template: "Your notarization request was approved — contact details inside",
+    body_template: [
+      "<p>Hi {{firstName}},</p>",
+      "<p>{{illuminotaryName}} reviewed and approved your <strong>{{documentName}}</strong>.<br/>Their contact details are below so you can coordinate next steps.</p>",
+      "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f9f9f9;border:1px solid #e0e0e0;margin:24px 0;\"><tr><td style=\"padding:20px 24px;\">",
+      "<p style=\"margin:0 0 2px;font-size:11px;color:#7f7f7f;text-transform:uppercase;letter-spacing:0.5px;\">Your illuminotary</p>",
+      "<p style=\"margin:0 0 16px;font-size:16px;font-weight:600;color:#191919;\">{{notaryName}}</p>",
+      "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;\"><tr>",
+      "<td style=\"padding:0 8px 0 0;width:50%;\"><a href=\"mailto:{{notaryEmail}}\" style=\"display:block;padding:10px 0;background:#0aff4a;color:#191919;text-align:center;text-decoration:none;font-size:13px;font-weight:600;\">Email</a></td>",
+      "<td style=\"width:50%;\"><a href=\"{{notaryPhoneHref}}\" style=\"display:block;padding:10px 0;background:#191919;color:#ffffff;text-align:center;text-decoration:none;font-size:13px;font-weight:600;\">Call</a></td>",
+      "</tr></table>",
+      "<p style=\"margin:14px 0 0;font-size:12px;color:#7f7f7f;\">{{notaryEmail}} &nbsp;&bull;&nbsp; {{notaryPhone}}</p>",
+      "</td></tr></table>",
+      "<a href=\"{{nextStepUrl}}\" style=\"display:block;padding:14px 0;background:#0aff4a;color:#191919;text-align:center;text-decoration:none;font-size:14px;font-weight:600;margin:8px 0 24px;\">Open your request &rarr;</a>",
+      "<p style=\"margin:0;color:#7f7f7f;font-size:12px;\">— Your DARCi Team</p>",
+    ].join("\n"),
+    body_format: "html",
+    variables_schema: {
+      required: [
+        "firstName",
+        "illuminotaryName",
+        "documentName",
+        "notaryName",
+        "notaryEmail",
+        "notaryPhone",
+        "notaryPhoneHref",
+        "nextStepUrl",
+      ],
+      optional: ["approvalSummary", "continueUrl", "dashboardUrl"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "runtime:notary_approval_received_email",
+    metadata: { seed_source: "runtime_notary_contact_exchange_fallback" },
+  },
+  notary_member_contact_received_email: {
+    template_key: "notary_member_contact_received_email",
+    template_version: "2026.06.05.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "notary",
+    trigger_event: "notary.request_approved",
+    invite_kind: null,
+    subject_template: "Member contact details — {{documentName}}",
+    body_template: [
+      "<p>Hi {{firstName}},</p>",
+      "<p>You approved <strong>{{documentName}}</strong>.<br/>The member's contact details are ready so you can coordinate the signing meeting.</p>",
+      "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f9f9f9;border:1px solid #e0e0e0;margin:24px 0;\"><tr><td style=\"padding:20px 24px;\">",
+      "<p style=\"margin:0 0 2px;font-size:11px;color:#7f7f7f;text-transform:uppercase;letter-spacing:0.5px;\">Member</p>",
+      "<p style=\"margin:0 0 16px;font-size:16px;font-weight:600;color:#191919;\">{{memberName}}</p>",
+      "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;\"><tr>",
+      "<td style=\"padding:0 8px 0 0;width:50%;\"><a href=\"mailto:{{memberEmail}}\" style=\"display:block;padding:10px 0;background:#0aff4a;color:#191919;text-align:center;text-decoration:none;font-size:13px;font-weight:600;\">Email</a></td>",
+      "<td style=\"width:50%;\"><a href=\"{{memberPhoneHref}}\" style=\"display:block;padding:10px 0;background:#191919;color:#ffffff;text-align:center;text-decoration:none;font-size:13px;font-weight:600;\">Call</a></td>",
+      "</tr></table>",
+      "<p style=\"margin:14px 0 0;font-size:12px;color:#7f7f7f;\">{{memberEmail}} &nbsp;&bull;&nbsp; {{memberPhone}}</p>",
+      "</td></tr></table>",
+      "<a href=\"{{nextStepUrl}}\" style=\"display:block;padding:14px 0;background:#0aff4a;color:#191919;text-align:center;text-decoration:none;font-size:14px;font-weight:600;margin:8px 0 24px;\">Open the request &rarr;</a>",
+      "<p style=\"margin:0;color:#7f7f7f;font-size:12px;\">— Your DARCi Team</p>",
+    ].join("\n"),
+    body_format: "html",
+    variables_schema: {
+      required: [
+        "firstName",
+        "documentName",
+        "memberName",
+        "memberEmail",
+        "memberPhone",
+        "memberPhoneHref",
+        "nextStepUrl",
+      ],
+      optional: ["approvalSummary", "continueUrl", "dashboardUrl", "illuminotaryName"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "runtime:notary_member_contact_received_email",
+    metadata: { seed_source: "runtime_notary_contact_exchange_fallback" },
   },
 };
 
@@ -465,19 +553,37 @@ const buildOwnerRecipient = (user: NotificationUserRecord): NotificationRecipien
   };
 };
 
+const toPhoneHref = (phone: string | null | undefined) => {
+  const trimmed = phone?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) {
+    return null;
+  }
+
+  return `tel:${trimmed.startsWith("+") ? "+" : ""}${digits}`;
+};
+
 const buildContactPayload = (user: NotificationUserRecord | null) => {
   if (!user) {
     return {
       name: null,
       email: null,
       phone: null,
+      phoneHref: null,
     };
   }
+
+  const phone = user.phone?.trim() ?? null;
 
   return {
     name: toDisplayName(user),
     email: user.email?.trim() ?? null,
-    phone: user.phone?.trim() ?? null,
+    phone,
+    phoneHref: toPhoneHref(phone),
   };
 };
 
@@ -1309,7 +1415,10 @@ export const queueSelectedNotaryRequestNotification = async (input: {
       return null;
     }
 
-    const reviewRequestUrl = buildAppUrl("/app/notary");
+    const reviewRequestUrl = buildAppUrl("/start", {
+      returnTo: "/app/notary?role=notary",
+      intendedEmail: selectedNotary.email,
+    });
     return await queueTemplatedNotification({
       templateKey: "notary_request_received_email",
       jobKind: "status_update",
@@ -1332,7 +1441,7 @@ export const queueSelectedNotaryRequestNotification = async (input: {
         requestId: input.requestId,
         selectedNotaryUserId: input.selectedNotaryUserId,
         documentId: document.id,
-        reviewRequestPath: "/app/notary",
+        reviewRequestPath: `/start?returnTo=${encodeURIComponent("/app/notary?role=notary")}&intendedEmail=${encodeURIComponent(selectedNotary.email)}`,
       },
     });
   } catch (error) {
@@ -1464,7 +1573,11 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
     }
 
     const dashboardUrl = buildDocumentDetailsUrl(document.id);
-    const notaryUrl = buildAppUrl(`/app/notary/requests/${encodeURIComponent(input.requestId)}`);
+    const notaryRequestPath = `/app/notary/requests/${encodeURIComponent(input.requestId)}?role=notary`;
+    const notaryUrl = buildAppUrl("/start", {
+      returnTo: notaryRequestPath,
+      ...(notary?.email ? { intendedEmail: notary.email } : {}),
+    });
     const memberContact = buildContactPayload(owner);
     const notaryContact = buildContactPayload(notary);
     const ownerResult = await queueTemplatedNotification({
@@ -1484,6 +1597,7 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
         notaryName: notaryContact.name,
         notaryEmail: notaryContact.email,
         notaryPhone: notaryContact.phone,
+        notaryPhoneHref: notaryContact.phoneHref,
         documentName: getDocumentLabel(document),
       },
       recipients: [buildOwnerRecipient(owner)],
@@ -1513,6 +1627,7 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
             memberName: memberContact.name,
             memberEmail: memberContact.email,
             memberPhone: memberContact.phone,
+            memberPhoneHref: memberContact.phoneHref,
             documentName: getDocumentLabel(document),
           },
           recipients: [buildOwnerRecipient(notary)],
@@ -1526,7 +1641,25 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
         })
       : null;
 
-    return ownerResult ?? notaryResult;
+    const queuedJobIds = [ownerResult?.jobId, notaryResult?.jobId].filter(
+      (jobId): jobId is string => Boolean(jobId && jobId.trim()),
+    );
+
+    if (ownerResult) {
+      return {
+        ...ownerResult,
+        jobIds: queuedJobIds,
+      };
+    }
+
+    if (notaryResult) {
+      return {
+        ...notaryResult,
+        jobIds: queuedJobIds,
+      };
+    }
+
+    return null;
   } catch (error) {
     logNotificationFailure("notary_approval_received_email", error, {
       documentId: input.documentId,

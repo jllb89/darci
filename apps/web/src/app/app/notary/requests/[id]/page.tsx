@@ -603,7 +603,7 @@ export default function NotaryRequestWorkspacePage() {
                   })
                 ) : (
                   <div className="rounded-lg bg-Color-Neutral-Lightest px-4 py-5 text-sm leading-6 text-Color-Neutral">
-                    No reviewable PDFs are available for this request yet.
+                    This request is missing its generated PDF package and cannot be reviewed. Ask the member to regenerate the document and send it to the notary again.
                   </div>
                 )}
               </div>

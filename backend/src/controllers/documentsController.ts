@@ -50,6 +50,8 @@ import {
   getOrCreateUserId,
   getUserIdBySupabaseId,
   listDocumentParties as listDocumentPartiesFromDb,
+  countDocuments as countDocumentsFromDb,
+  listDocumentFilterFacets as listDocumentFilterFacetsFromDb,
   listDocuments as listDocumentsFromDb,
   listDocumentOutputSigners,
   listDocumentSignatures,
@@ -66,6 +68,7 @@ import {
   updateSignatureRecord,
   updateDocument,
   updateDocumentVersion,
+  type ListDocumentsFilters,
 } from "../services/documentService";
 import {
   createCodeDeliveryRecord,
@@ -2303,15 +2306,20 @@ const buildDocumentReviewState = async (input: {
   document: DocumentRecord;
   viewerRole?: string | null;
 }): Promise<DocumentReviewState> => {
-  const [rawSystemValues, rawVersions, rawGenerationRuns] = await Promise.all([
+  const [rawSystemValues, rawVersions, rawGenerationRuns, currentDraft] = await Promise.all([
     listDocumentSystemValues(input.document.id),
     listDocumentVersionsFromDb(input.document.id),
     listDocumentGenerationRunsFromDb(input.document.id),
+    getDocumentIntakeDraftFromDb(input.document.id),
   ]);
 
   const systemValues = Array.isArray(rawSystemValues) ? rawSystemValues : [];
   const versions = Array.isArray(rawVersions) ? rawVersions : [];
   const generationRuns = Array.isArray(rawGenerationRuns) ? rawGenerationRuns : [];
+  const currentIntakeRevision = currentDraft?.revision ?? null;
+  const isCurrentIntakeRun = (run: DocumentGenerationRunRecord) => {
+    return currentIntakeRevision === null || run.intake_revision === currentIntakeRevision;
+  };
 
   const reviewApproval = parseReviewApprovalValue(
     systemValues.find((value) => value.system_key === "review_approval")?.value_json,
@@ -2341,8 +2349,9 @@ const buildDocumentReviewState = async (input: {
   } else {
     for (const output of visibleOutputs) {
       const runsForOutput = generationRuns.filter((run) => run.output_key === output.outputKey);
-      const latestRun = runsForOutput[0] ?? null;
-      const latestRenderedRun = runsForOutput.find((run) => run.status === "rendered") ?? null;
+      const currentRunsForOutput = runsForOutput.filter(isCurrentIntakeRun);
+      const latestRun = currentRunsForOutput[0] ?? null;
+      const latestRenderedRun = currentRunsForOutput.find((run) => run.status === "rendered") ?? null;
       const latestVersion = latestRenderedRun
         ? getLatestVersionForRun(versions, latestRenderedRun.id)
         : null;
@@ -2410,9 +2419,12 @@ const buildDocumentReviewState = async (input: {
 
   const missingOutputKeys = visibleOutputs
     .filter((output) => {
-      const latestRun = generationRuns.find((run) => run.output_key === output.outputKey) ?? null;
-      const latestRenderedRun = generationRuns.find(
-        (run) => run.output_key === output.outputKey && run.status === "rendered",
+      const currentRunsForOutput = generationRuns.filter(
+        (run) => run.output_key === output.outputKey && isCurrentIntakeRun(run),
+      );
+      const latestRun = currentRunsForOutput[0] ?? null;
+      const latestRenderedRun = currentRunsForOutput.find(
+        (run) => run.status === "rendered",
       ) ?? null;
       const latestVersion = latestRenderedRun
         ? getLatestVersionForRun(versions, latestRenderedRun.id)
@@ -5958,6 +5970,59 @@ const buildDocumentActionEnrichmentsForList = async (documents: DocumentRecord[]
   return enrichmentByDocumentId;
 };
 
+const DOCUMENT_LIST_DEFAULT_PAGE_SIZE = 10;
+const DOCUMENT_LIST_MAX_PAGE_SIZE = 100;
+
+const readStringQueryParam = (value: unknown) => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const readPositiveIntegerQueryParam = (value: unknown, fallback: number) => {
+  const parsed = Number.parseInt(readStringQueryParam(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const buildDocumentListQuery = (query: Request["query"]) => {
+  const page = readPositiveIntegerQueryParam(query.page, 1);
+  const pageSize = Math.min(
+    DOCUMENT_LIST_MAX_PAGE_SIZE,
+    readPositiveIntegerQueryParam(query.pageSize, DOCUMENT_LIST_DEFAULT_PAGE_SIZE),
+  );
+  const filters: ListDocumentsFilters = {};
+  const documentType = readStringQueryParam(query.documentType);
+  const status = readStringQueryParam(query.status);
+  const jurisdiction = readStringQueryParam(query.jurisdiction);
+  const createdFrom = readStringQueryParam(query.createdFrom);
+  const createdTo = readStringQueryParam(query.createdTo);
+
+  if (documentType) {
+    filters.documentType = documentType;
+  }
+
+  if (status) {
+    filters.status = status;
+  }
+
+  if (jurisdiction) {
+    filters.jurisdiction = jurisdiction;
+  }
+
+  if (createdFrom) {
+    filters.createdFrom = createdFrom;
+  }
+
+  if (createdTo) {
+    filters.createdTo = createdTo;
+  }
+
+  return {
+    page,
+    pageSize,
+    offset: (page - 1) * pageSize,
+    filters,
+  };
+};
+
 export const listDocuments = async (req: Request, res: Response) => {
   if (!req.user?.id) {
     return res.status(401).json({
@@ -5983,12 +6048,23 @@ export const listDocuments = async (req: Request, res: Response) => {
     });
   }
 
-  const documents = await listDocumentsFromDb(ownerId);
-  const summaries = await buildDocumentWorkspaceSummaries({
-    documents,
-    viewerRole: req.user?.role ?? "member",
-  });
-  const enrichmentByDocumentId = await buildDocumentActionEnrichmentsForList(documents);
+  const listQuery = buildDocumentListQuery(req.query);
+  const [documents, total, facets] = await Promise.all([
+    listDocumentsFromDb(ownerId, {
+      filters: listQuery.filters,
+      limit: listQuery.pageSize,
+      offset: listQuery.offset,
+    }),
+    countDocumentsFromDb(ownerId, listQuery.filters),
+    listDocumentFilterFacetsFromDb(ownerId),
+  ]);
+  const [summaries, enrichmentByDocumentId] = await Promise.all([
+    buildDocumentWorkspaceSummaries({
+      documents,
+      viewerRole: req.user?.role ?? "member",
+    }),
+    buildDocumentActionEnrichmentsForList(documents),
+  ]);
 
   res.status(200).json({
     documents: documents.map((document) => ({
@@ -5996,6 +6072,15 @@ export const listDocuments = async (req: Request, res: Response) => {
       summary: summaries.get(document.id) ?? null,
       ...(enrichmentByDocumentId.get(document.id) ?? {}),
     })),
+    pagination: {
+      page: listQuery.page,
+      pageSize: listQuery.pageSize,
+      total,
+      pageCount: Math.max(1, Math.ceil(total / listQuery.pageSize)),
+      hasPreviousPage: listQuery.page > 1,
+      hasNextPage: listQuery.page < Math.max(1, Math.ceil(total / listQuery.pageSize)),
+    },
+    facets,
   });
 };
 
@@ -7347,6 +7432,24 @@ export const submitNotarization = async (req: Request, res: Response) => {
   }
 
   if (selectedNotaryUserId) {
+    const documentVersions = await listDocumentVersionsFromDb(document.id);
+    const hasReviewablePdfVersion = documentVersions.some((version) => {
+      const mimeType = version.mime_type?.trim().toLowerCase() ?? "";
+      const fileName = version.file_name?.trim().toLowerCase() ?? "";
+
+      return Boolean(
+        version.storage_path &&
+          (mimeType.includes("pdf") || fileName.endsWith(".pdf")),
+      );
+    });
+
+    if (!hasReviewablePdfVersion) {
+      return res.status(409).json({
+        error: "document_not_ready_for_notary",
+        message: "Generate the document PDF before sending it to a notary.",
+      });
+    }
+
     const selectedNotaryValidation = await validateSelectedNotaryForDocument({
       document,
       selectedNotaryUserId,

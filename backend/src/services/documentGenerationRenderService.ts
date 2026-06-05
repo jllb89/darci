@@ -45,10 +45,12 @@ const UPLOADED_DOCUMENT_TEMPLATE_KEY = "uploaded_pdf";
 const UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY = "addendum_page";
 
 const templateKeysThatMustLoadSource = new Set([
+  "oh_poa_general",
   "oh_trust_rrr",
   "oh_trust_certificate",
 ]);
 const templateSourcePathFallbacks: Record<string, string> = {
+  oh_poa_general: "../docs/OH DDPOA 1.0.docx.md",
   ca_trust_rrr: "../docs/CA - DARCi Trust Registration Amendment (APE 260305) (1).md",
   ca_trust_certificate: "../docs/CA - DARCi Trust Certification (APE 260305).md",
   oh_trust_rrr: "../docs/OH - DARCi Trust Registration Amendment .md",
@@ -141,6 +143,7 @@ const systemPlaceholderTokens = new Set([
   "Trust.RegDate",
   "QR Code",
   "CA_Notarial_Acknowledgment_Block",
+  "OH_Notarial_Acknowledgment_Block",
   "County",
   "Day",
   "Month",
@@ -196,7 +199,8 @@ const poaAuthorityKeyByLetter: Record<string, string> = {
   K: "government_and_military_benefits",
   L: "retirement_plan_transactions",
   M: "tax_matters",
-  N: "all_powers",
+  N: "digital_assets",
+  O: "all_powers",
 };
 
 const poaAuthorityKeyAliases: Record<string, string[]> = {
@@ -225,6 +229,12 @@ const poaAuthorityKeyAliases: Record<string, string[]> = {
   ],
   retirement_plan_transactions: ["retirement_plans", "retirement_plan"],
   tax_matters: ["taxes", "tax_matter"],
+  digital_assets: [
+    "access_digital_assets",
+    "digital_asset_transactions",
+    "electronic_communications",
+    "access_electronic_communications",
+  ],
   all_powers: ["all_of_the_powers_listed_above", "all_powers_listed_above"],
 };
 
@@ -244,7 +254,22 @@ const poaAuthorityDisplayLabels: Record<string, string> = {
     "Benefits from Social Security, Medicare, Medicaid, or other governmental programs, or civil or military service",
   retirement_plan_transactions: "Retirement plan transactions",
   tax_matters: "Tax matters",
+  digital_assets: "Digital assets",
   all_powers: "ALL OF THE POWERS LISTED ABOVE",
+};
+
+const resolvePoaAuthorityKey = (parsed: { letter: string; label: string }) => {
+  const normalizedLabel = normalizeOptionComparisonText(parsed.label);
+
+  if (normalizedLabel.includes("all of the powers") || normalizedLabel.includes("all powers")) {
+    return "all_powers";
+  }
+
+  if (normalizedLabel.includes("digital assets") || normalizedLabel.includes("electronic communications")) {
+    return "digital_assets";
+  }
+
+  return poaAuthorityKeyByLetter[parsed.letter] ?? "";
 };
 
 const asTrimmedString = (value: unknown) => {
@@ -667,6 +692,10 @@ const unescapeTemplateSource = (value: string) => {
     .replace(
       /^# \*\*{{CA_Notarial_Acknowledgment_Block}}\*\*$/gm,
       "{{CA_Notarial_Acknowledgment_Block}}",
+    )
+    .replace(
+      /^# \*\*{{OH_Notarial_Acknowledgment_Block}}\*\*$/gm,
+      "{{OH_Notarial_Acknowledgment_Block}}",
     );
 };
 
@@ -1509,7 +1538,7 @@ type RenderTransformContext = {
 };
 
 const parsePoaAuthorityLine = (line: string) => {
-  const match = line.trim().match(/^_+\s*\(([A-N])\)\s*(.+)$/i);
+  const match = line.trim().match(/^_+\s*\(([A-O])\)\s*(.+)$/i);
   if (!match) {
     return null;
   }
@@ -1559,7 +1588,7 @@ const transformPoaAuthorityLines = (
 
     sawAuthorityLine = true;
 
-    const key = poaAuthorityKeyByLetter[parsed.letter] ?? "";
+    const key = resolvePoaAuthorityKey(parsed);
     const aliases = poaAuthorityKeyAliases[key] ?? [];
     const matchedKeys = getMatchingSelectedAuthorityKeys(
       selectedKeys,
@@ -2102,7 +2131,10 @@ export const renderLegalTemplateText = (input: {
     (_match, curlyToken?: string, angleToken?: string) => {
       const token = normalizePlaceholderToken(curlyToken ?? angleToken ?? "");
 
-      if (token === "CA_Notarial_Acknowledgment_Block") {
+      if (
+        token === "CA_Notarial_Acknowledgment_Block" ||
+        token === "OH_Notarial_Acknowledgment_Block"
+      ) {
         return "";
       }
 

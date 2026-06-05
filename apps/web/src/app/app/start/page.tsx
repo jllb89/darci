@@ -4827,14 +4827,15 @@ export default function StartDocumentPage() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="text-sm font-medium">New document details</div>
                       <div className="flex flex-col items-start gap-1 sm:items-end">
-                        {isMockDataToggleVisible ? (
+                        {/* Hidden for now: debug-only contract form controls. */}
+                        {false && isMockDataToggleVisible ? (
                           <MockDataToggle
                             checked={isMockDataEnabled}
                             disabled={isMockDataToggleDisabled}
                             onChange={handleMockDataToggleChange}
                           />
                         ) : null}
-                        {!isNotarizationProductFlow ? (
+                        {false && !isNotarizationProductFlow ? (
                         <label className="inline-flex items-center gap-2 text-xs font-medium text-Color-Neutral">
                           <span>Show active sources</span>
                           <input
@@ -4853,7 +4854,7 @@ export default function StartDocumentPage() {
                     <div className="mt-1 text-xs text-Color-Neutral">
                       {isNotarizationProductFlow
                         ? "Upload the document and confirm the request details before review."
-                        : "Answer each question in plain terms. If you&apos;re unsure, choose the closest option and continue."}
+                        : "Answer each question in plain terms. If you're unsure, choose the closest option and continue."}
                     </div>
                   </div>
 
@@ -4866,7 +4867,7 @@ export default function StartDocumentPage() {
                       Jurisdiction determines which state law governs this document, including signing formalities, trustee authority language, and enforceability standards.
                     </div>
 
-                    <div className="relative max-w-sm">
+                    <div className="relative mt-4 max-w-sm">
                       <ContractSelectControl
                         ariaLabel="Jurisdiction"
                         disabled={

@@ -492,6 +492,7 @@ export default function ReviewPage() {
         tone: "success",
         message: savedAt ? `Draft saved at ${savedAt}.` : "Draft saved.",
       });
+      router.push("/app/documents");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save draft.";
       setErrorMessage(message);
@@ -499,7 +500,7 @@ export default function ReviewPage() {
     } finally {
       setIsSavingDraft(false);
     }
-  }, [accessToken, documentId, isSavingDraft, showToast]);
+  }, [accessToken, documentId, isSavingDraft, router, showToast]);
 
   useEffect(() => {
     generationAttemptRef.current = null;

@@ -600,6 +600,24 @@ export const upsertIlluminotarizationWorkflowAssignment = async (input: {
   startedAt?: string | undefined;
   metadata?: Record<string, unknown> | undefined;
 }) => {
+  const selectActiveAssignment = async () => {
+    const result = await supabaseAdmin
+      .from("workflow_assignments")
+      .select(workflowAssignmentSelectColumns)
+      .eq("workflow_id", input.workflowId)
+      .eq("assignment_kind", input.assignmentKind)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+
+    return (result.data as IlluminotarizationWorkflowAssignmentRecord | null) ?? null;
+  };
+
   const activeAssignmentsResult = await supabaseAdmin
     .from("workflow_assignments")
     .select(workflowAssignmentSelectColumns)
@@ -654,10 +672,31 @@ export const upsertIlluminotarizationWorkflowAssignment = async (input: {
     .select(workflowAssignmentSelectColumns)
     .single();
 
-  if (error || !data) {
+  if (error) {
+    const isActiveAssignmentConflict =
+      error.code === "23505" &&
+      (error.message ?? "").includes("ux_workflow_assignments_active_kind");
+
+    if (isActiveAssignmentConflict) {
+      const currentActiveAssignment = await selectActiveAssignment();
+      if (currentActiveAssignment && currentActiveAssignment.user_id === input.userId) {
+        return currentActiveAssignment;
+      }
+
+      if (currentActiveAssignment) {
+        throw new Error(
+          `Workflow assignment is already active for another user (${currentActiveAssignment.user_id})`,
+        );
+      }
+    }
+
     throw new Error(
       error?.message ?? "Failed to upsert illuminotarization workflow assignment",
     );
+  }
+
+  if (!data) {
+    throw new Error("Failed to upsert illuminotarization workflow assignment");
   }
 
   return data as IlluminotarizationWorkflowAssignmentRecord;

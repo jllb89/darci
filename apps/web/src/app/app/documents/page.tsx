@@ -66,6 +66,31 @@ type DocumentListItem = {
 
 type DocumentsPayload = {
   documents: DocumentListItem[];
+  pagination?: DocumentsPagination;
+  facets?: DocumentFilterFacets;
+};
+
+type DocumentsPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+};
+
+type DocumentFilterFacets = {
+  documentTypes: string[];
+  statuses: string[];
+  jurisdictions: string[];
+};
+
+type DocumentsCacheEntry = {
+  version: 2;
+  cachedAt: number;
+  documents: DocumentListItem[];
+  pagination: DocumentsPagination;
+  facets: DocumentFilterFacets;
 };
 
 type SignatureReminderPreview = {
@@ -133,6 +158,8 @@ type FilterOption = {
 type PageSize = 10 | 20 | 100;
 
 const pageSizeOptions: PageSize[] = [10, 20, 100];
+const DOCUMENTS_CACHE_KEY_PREFIX = "darci:documents:list:v1";
+const DOCUMENTS_CACHE_VERSION = 2;
 
 type ActionIconName = "alert" | "arrowRight" | "bell" | "check" | "eye" | "pen" | "send" | "x";
 
@@ -257,6 +284,148 @@ const fetchWithTokenRefresh = async (
     return requestWithToken(refreshed.accessToken);
   } catch {
     return response;
+  }
+};
+
+const createDocumentsPagination = (page: number, pageSize: number, total: number): DocumentsPagination => {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  return {
+    page,
+    pageSize,
+    total,
+    pageCount,
+    hasPreviousPage: page > 1,
+    hasNextPage: page < pageCount,
+  };
+};
+
+const createEmptyDocumentFilterFacets = (): DocumentFilterFacets => ({
+  documentTypes: [],
+  statuses: [],
+  jurisdictions: [],
+});
+
+const getDocumentsCacheKey = (
+  userId: string | null | undefined,
+  role: string | null | undefined,
+  queryString: string,
+) => {
+  if (!userId) {
+    return null;
+  }
+
+  return `${DOCUMENTS_CACHE_KEY_PREFIX}:${userId}:${role ?? "member"}:${queryString}`;
+};
+
+const isDocumentListItemArray = (value: unknown): value is DocumentListItem[] => {
+  return Array.isArray(value) && value.every((item) => {
+    return Boolean(
+      item &&
+        typeof item === "object" &&
+        "id" in item &&
+        typeof item.id === "string" &&
+        "createdAt" in item &&
+        typeof item.createdAt === "string",
+    );
+  });
+};
+
+const isDocumentsPagination = (value: unknown): value is DocumentsPagination => {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "page" in value &&
+      typeof value.page === "number" &&
+      "pageSize" in value &&
+      typeof value.pageSize === "number" &&
+      "total" in value &&
+      typeof value.total === "number" &&
+      "pageCount" in value &&
+      typeof value.pageCount === "number" &&
+      "hasPreviousPage" in value &&
+      typeof value.hasPreviousPage === "boolean" &&
+      "hasNextPage" in value &&
+      typeof value.hasNextPage === "boolean",
+  );
+};
+
+const isStringArray = (value: unknown): value is string[] => {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+};
+
+const isDocumentFilterFacets = (value: unknown): value is DocumentFilterFacets => {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "documentTypes" in value &&
+      isStringArray(value.documentTypes) &&
+      "statuses" in value &&
+      isStringArray(value.statuses) &&
+      "jurisdictions" in value &&
+      isStringArray(value.jurisdictions),
+  );
+};
+
+const readDocumentsCache = (cacheKey: string): DocumentsCacheEntry | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(cacheKey);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<DocumentsCacheEntry> | null;
+    if (
+      !parsed ||
+      parsed.version !== DOCUMENTS_CACHE_VERSION ||
+      !isDocumentListItemArray(parsed.documents) ||
+      !isDocumentsPagination(parsed.pagination) ||
+      !isDocumentFilterFacets(parsed.facets)
+    ) {
+      window.sessionStorage.removeItem(cacheKey);
+      return null;
+    }
+
+    return {
+      version: DOCUMENTS_CACHE_VERSION,
+      cachedAt: typeof parsed.cachedAt === "number" ? parsed.cachedAt : 0,
+      documents: parsed.documents,
+      pagination: parsed.pagination,
+      facets: parsed.facets,
+    };
+  } catch {
+    window.sessionStorage.removeItem(cacheKey);
+    return null;
+  }
+};
+
+const writeDocumentsCache = (
+  cacheKey: string,
+  documents: DocumentListItem[],
+  pagination: DocumentsPagination,
+  facets: DocumentFilterFacets,
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        version: DOCUMENTS_CACHE_VERSION,
+        cachedAt: Date.now(),
+        documents,
+        pagination,
+        facets,
+      } satisfies DocumentsCacheEntry),
+    );
+  } catch {
+    // Cache writes are best-effort; the network response remains authoritative.
   }
 };
 
@@ -1019,7 +1188,7 @@ const DateFilterControl = ({
 };
 
 const matchesDocumentFilters = (document: DocumentListItem, filters: DocumentFilters) => {
-  if (filters.documentType && normalizeFilterText(getDocumentTypeLabel(document)) !== filters.documentType) {
+  if (filters.documentType && normalizeFilterText(document.documentType) !== normalizeFilterText(filters.documentType)) {
     return false;
   }
 
@@ -1063,20 +1232,56 @@ export default function DocumentsPage() {
   }));
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<DocumentsPagination>(() => createDocumentsPagination(1, 10, 0));
+  const [facets, setFacets] = useState<DocumentFilterFacets>(() => createEmptyDocumentFilterFacets());
   const [openFilterId, setOpenFilterId] = useState<string | null>(null);
   const [reminderDocumentId, setReminderDocumentId] = useState<string | null>(null);
   const [reminderPreview, setReminderPreview] = useState<SignatureReminderPreview | null>(null);
   const [reminderStatus, setReminderStatus] = useState<ReminderStatus | null>(null);
   const [reminderSendTarget, setReminderSendTarget] = useState<"all" | string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUsingCachedDocuments, setIsUsingCachedDocuments] = useState(false);
   const [isReminderLoading, setIsReminderLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const currentUserName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+  const documentsQueryString = useMemo(() => {
+    const params = new URLSearchParams({
+      page: String(currentPage),
+      pageSize: String(pageSize),
+    });
+
+    if (filters.documentType) {
+      params.set("documentType", filters.documentType);
+    }
+
+    if (filters.status) {
+      params.set("status", filters.status);
+    }
+
+    if (filters.jurisdiction) {
+      params.set("jurisdiction", filters.jurisdiction);
+    }
+
+    if (filters.createdFrom) {
+      params.set("createdFrom", filters.createdFrom);
+    }
+
+    if (filters.createdTo) {
+      params.set("createdTo", filters.createdTo);
+    }
+
+    return params.toString();
+  }, [currentPage, filters.createdFrom, filters.createdTo, filters.documentType, filters.jurisdiction, filters.status, pageSize]);
+  const documentsCacheKey = useMemo(
+    () => getDocumentsCacheKey(user?.id, user?.role, documentsQueryString),
+    [documentsQueryString, user?.id, user?.role],
+  );
   const principalDisplayName = resolvePrincipalDisplayName(null, currentUserName);
   const isReminderSending = reminderSendTarget !== null;
 
   useEffect(() => {
+    setCurrentPage(1);
     setFilters((currentFilters) => {
       if (currentFilters.status === requestedStatusFilter) {
         return currentFilters;
@@ -1092,15 +1297,29 @@ export default function DocumentsPage() {
   const loadDocuments = useCallback(async () => {
     if (!accessToken) {
       setDocuments([]);
+      setPagination(createDocumentsPagination(1, pageSize, 0));
+      setFacets(createEmptyDocumentFilterFacets());
+      setIsUsingCachedDocuments(false);
       setReminderDocumentId(null);
       setReminderPreview(null);
       setReminderStatus(null);
       return;
     }
 
+    const cached = documentsCacheKey ? readDocumentsCache(documentsCacheKey) : null;
+    let servedCachedDocuments = false;
+    if (cached) {
+      setDocuments(cached.documents);
+      setPagination(cached.pagination);
+      setFacets(cached.facets);
+      setIsUsingCachedDocuments(true);
+      setErrorMessage(null);
+      servedCachedDocuments = true;
+    }
+
     setIsLoading(true);
     try {
-      const response = await fetchWithTokenRefresh(`${apiBaseUrl}/documents`, accessToken, {
+      const response = await fetchWithTokenRefresh(`${apiBaseUrl}/documents?${documentsQueryString}`, accessToken, {
         cache: "no-store",
       });
       const payload = (await response.json().catch(() => null)) as DocumentsPayload | null;
@@ -1109,15 +1328,27 @@ export default function DocumentsPage() {
         throw new Error("Failed to load documents.");
       }
 
+      const nextPagination = payload.pagination ?? createDocumentsPagination(currentPage, pageSize, payload.documents.length);
+      const nextFacets = payload.facets ?? createEmptyDocumentFilterFacets();
       setDocuments(payload.documents);
+      setPagination(nextPagination);
+      setFacets(nextFacets);
+      setIsUsingCachedDocuments(false);
+      if (documentsCacheKey) {
+        writeDocumentsCache(documentsCacheKey, payload.documents, nextPagination, nextFacets);
+      }
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to load documents.");
-      setDocuments([]);
+      if (!servedCachedDocuments) {
+        setDocuments([]);
+        setPagination(createDocumentsPagination(currentPage, pageSize, 0));
+        setIsUsingCachedDocuments(false);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, currentPage, documentsCacheKey, documentsQueryString, pageSize]);
 
   const previewReminders = useCallback(async (document: DocumentListItem) => {
     if (!accessToken) {
@@ -1235,14 +1466,11 @@ export default function DocumentsPage() {
   const filteredDocuments = useMemo(() => {
     return documents.filter((document) => matchesDocumentFilters(document, filters));
   }, [documents, filters]);
-  const pageCount = Math.max(1, Math.ceil(filteredDocuments.length / pageSize));
-  const activePage = Math.min(currentPage, pageCount);
-  const paginatedDocuments = useMemo(() => {
-    const startIndex = (activePage - 1) * pageSize;
-    return filteredDocuments.slice(startIndex, startIndex + pageSize);
-  }, [activePage, filteredDocuments, pageSize]);
-  const pageStart = filteredDocuments.length === 0 ? 0 : (activePage - 1) * pageSize + 1;
-  const pageEnd = Math.min(activePage * pageSize, filteredDocuments.length);
+  const pageCount = pagination.pageCount;
+  const activePage = Math.min(pagination.page, pageCount);
+  const paginatedDocuments = filteredDocuments;
+  const pageStart = pagination.total === 0 || paginatedDocuments.length === 0 ? 0 : (activePage - 1) * pagination.pageSize + 1;
+  const pageEnd = pagination.total === 0 ? 0 : Math.min(pageStart + paginatedDocuments.length - 1, pagination.total);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1253,40 +1481,28 @@ export default function DocumentsPage() {
   }, [pageCount]);
 
   const documentTypeOptions = useMemo(() => {
-    return Array.from(new Set(documents.map((document) => getDocumentTypeLabel(document)))).sort();
-  }, [documents]);
+    return facets.documentTypes;
+  }, [facets.documentTypes]);
   const statusOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        documents
-          .map((document) => normalizeFilterText(document.status))
-          .filter((status) => status.length > 0),
-      ),
-    ).sort();
-  }, [documents]);
+    return facets.statuses;
+  }, [facets.statuses]);
   const jurisdictionOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        documents
-          .map((document) => normalizeFilterText(document.jurisdiction))
-          .filter((jurisdiction) => jurisdiction.length > 0),
-      ),
-    ).sort();
-  }, [documents]);
+    return facets.jurisdictions;
+  }, [facets.jurisdictions]);
   const hasActiveFilters = Object.values(filters).some((value) => value.length > 0);
   const documentMetrics = useMemo(() => {
     return {
-      total: documents.length,
-      filtered: filteredDocuments.length,
-      pendingSignature: documents.filter(
+      total: pagination.total,
+      filtered: pagination.total,
+      pendingSignature: paginatedDocuments.filter(
         (document) => (document.signerSummary?.pendingRequiredSignatureCount ?? 0) > 0,
       ).length,
-      ready: documents.filter((document) => {
+      ready: paginatedDocuments.filter((document) => {
         const status = normalizeFilterText(document.status);
         return status.includes("complete") || status.includes("notar") || status.includes("final");
       }).length,
     };
-  }, [documents, filteredDocuments.length]);
+  }, [paginatedDocuments, pagination.total]);
 
   return (
     <div className="space-y-14">
@@ -1319,6 +1535,12 @@ export default function DocumentsPage() {
         </div>
       ) : null}
 
+      {isLoading && documents.length > 0 ? (
+        <div className="rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/70 px-4 py-3 text-sm text-Color-Neutral">
+          {isUsingCachedDocuments ? "Showing cached documents while refreshing." : "Refreshing documents."}
+        </div>
+      ) : null}
+
       <div className="rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/70">
         <div className="relative z-20 grid gap-4 overflow-visible border-b border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/45 p-4 md:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
           <SelectFilterControl
@@ -1329,15 +1551,18 @@ export default function DocumentsPage() {
             options={[
               { label: "All types", value: "" },
               ...documentTypeOptions.map((documentType) => ({
-                label: documentType,
-                value: normalizeFilterText(documentType),
+                label: resolveFriendlyDocumentType(documentType, null, null),
+                value: documentType,
               })),
             ]}
             onChange={(value) =>
-              setFilters((currentFilters) => ({
-                ...currentFilters,
-                documentType: value,
-              }))
+              {
+                setCurrentPage(1);
+                setFilters((currentFilters) => ({
+                  ...currentFilters,
+                  documentType: value,
+                }));
+              }
             }
             onOpenChange={(isOpen) => setOpenFilterId(isOpen ? "documentType" : null)}
           />
@@ -1350,14 +1575,17 @@ export default function DocumentsPage() {
               { label: "All statuses", value: "" },
               ...statusOptions.map((status) => ({
                 label: formatStatusLabel(status),
-                value: status,
+                value: normalizeFilterText(status),
               })),
             ]}
             onChange={(value) =>
-              setFilters((currentFilters) => ({
-                ...currentFilters,
-                status: value,
-              }))
+              {
+                setCurrentPage(1);
+                setFilters((currentFilters) => ({
+                  ...currentFilters,
+                  status: value,
+                }));
+              }
             }
             onOpenChange={(isOpen) => setOpenFilterId(isOpen ? "status" : null)}
           />
@@ -1370,14 +1598,17 @@ export default function DocumentsPage() {
               { label: "All jurisdictions", value: "" },
               ...jurisdictionOptions.map((jurisdiction) => ({
                 label: jurisdiction.toUpperCase(),
-                value: jurisdiction,
+                value: normalizeFilterText(jurisdiction),
               })),
             ]}
             onChange={(value) =>
-              setFilters((currentFilters) => ({
-                ...currentFilters,
-                jurisdiction: value,
-              }))
+              {
+                setCurrentPage(1);
+                setFilters((currentFilters) => ({
+                  ...currentFilters,
+                  jurisdiction: value,
+                }));
+              }
             }
             onOpenChange={(isOpen) => setOpenFilterId(isOpen ? "jurisdiction" : null)}
           />
@@ -1386,10 +1617,13 @@ export default function DocumentsPage() {
             value={filters.createdFrom}
             isOpen={openFilterId === "createdFrom"}
             onChange={(value) =>
-              setFilters((currentFilters) => ({
-                ...currentFilters,
-                createdFrom: value,
-              }))
+              {
+                setCurrentPage(1);
+                setFilters((currentFilters) => ({
+                  ...currentFilters,
+                  createdFrom: value,
+                }));
+              }
             }
             onOpenChange={(isOpen) => setOpenFilterId(isOpen ? "createdFrom" : null)}
           />
@@ -1398,10 +1632,13 @@ export default function DocumentsPage() {
             value={filters.createdTo}
             isOpen={openFilterId === "createdTo"}
             onChange={(value) =>
-              setFilters((currentFilters) => ({
-                ...currentFilters,
-                createdTo: value,
-              }))
+              {
+                setCurrentPage(1);
+                setFilters((currentFilters) => ({
+                  ...currentFilters,
+                  createdTo: value,
+                }));
+              }
             }
             onOpenChange={(isOpen) => setOpenFilterId(isOpen ? "createdTo" : null)}
           />
@@ -1411,6 +1648,7 @@ export default function DocumentsPage() {
               className="inline-flex h-9 items-center gap-1.5 border-0 bg-transparent p-0 text-xs font-medium text-Color-Neutral underline-offset-4 transition-colors hover:text-Color-Neutral-Darkest hover:underline disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!hasActiveFilters}
               onClick={() => {
+                setCurrentPage(1);
                 setFilters({
                   documentType: "",
                   status: "",
@@ -1627,10 +1865,10 @@ export default function DocumentsPage() {
           </table>
         </div>
 
-        {filteredDocuments.length > 0 ? (
+        {pagination.total > 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-Color-Scheme-1-Border/40 px-4 py-3 text-xs text-Color-Neutral">
             <div>
-              Showing {pageStart}-{pageEnd} of {filteredDocuments.length}
+              Showing {pageStart}-{pageEnd} of {pagination.total}
             </div>
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
@@ -1645,7 +1883,10 @@ export default function DocumentsPage() {
                           ? "bg-Green text-Color-Neutral-Darkest"
                           : "text-Color-Neutral hover:bg-Color-White hover:text-Color-Neutral-Darkest"
                       }`}
-                      onClick={() => setPageSize(option)}
+                      onClick={() => {
+                        setPageSize(option);
+                        setCurrentPage(1);
+                      }}
                     >
                       {option}
                     </button>
@@ -1677,7 +1918,7 @@ export default function DocumentsPage() {
           </div>
         ) : null}
 
-        {!isLoading && filteredDocuments.length === 0 ? (
+        {!isLoading && pagination.total === 0 ? (
           <div className="m-4 rounded border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest/45 px-3 py-2 text-sm text-Color-Neutral">
             {hasActiveFilters ? "No documents match these filters." : "No documents found."}
           </div>

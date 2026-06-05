@@ -32,6 +32,26 @@ export type DocumentRecord = {
   updated_at: string | null;
 };
 
+export type ListDocumentsFilters = {
+  documentType?: string;
+  status?: string;
+  jurisdiction?: string;
+  createdFrom?: string;
+  createdTo?: string;
+};
+
+export type ListDocumentsOptions = {
+  filters?: ListDocumentsFilters;
+  limit?: number;
+  offset?: number;
+};
+
+export type DocumentFilterFacets = {
+  documentTypes: string[];
+  statuses: string[];
+  jurisdictions: string[];
+};
+
 export type DocumentVersionRecord = {
   id: string;
   document_id: string;
@@ -301,6 +321,29 @@ const documentSystemValueSelectColumns =
 const documentSelectColumns =
   "id, owner_id, idn, status, document_type, jurisdiction, product_flow_mode, selected_families, output_bundle, intake_status, intake_schema_version, intake_last_saved_at, intake_submitted_at, created_at, updated_at";
 
+const normalizeListFilterValue = (value?: string) => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+};
+
+const dateFilterToBoundary = (value: string, boundary: "start" | "end") => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}T${boundary === "start" ? "00:00:00.000" : "23:59:59.999"}Z`;
+  }
+
+  return value;
+};
+
+const compactUniqueSortedStrings = (values: Array<string | null | undefined>) => {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value && value.length > 0)),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+};
+
 const documentIntakeDraftSelectColumns =
   "document_id, owner_id, product_flow_mode, jurisdiction, current_step, rules_snapshot_version, answers_json, canonical_answers_json, revision, created_at, updated_at";
 
@@ -561,12 +604,109 @@ export const getDocumentByIdn = async (idn: string) => {
   return data as DocumentRecord | null;
 };
 
-export const listDocuments = async (ownerId?: string) => {
+export const listDocuments = async (
+  ownerId?: string,
+  options: ListDocumentsOptions = {},
+) => {
   let query = supabaseAdmin
     .from("documents")
     .select(documentSelectColumns)
     .order("updated_at", { ascending: false })
     .order("created_at", { ascending: false });
+
+  if (ownerId) {
+    query = query.eq("owner_id", ownerId);
+  }
+
+  const documentType = normalizeListFilterValue(options.filters?.documentType);
+  if (documentType) {
+    query = query.eq("document_type", documentType);
+  }
+
+  const status = normalizeListFilterValue(options.filters?.status);
+  if (status) {
+    query = query.ilike("status", `%${status}%`);
+  }
+
+  const jurisdiction = normalizeListFilterValue(options.filters?.jurisdiction);
+  if (jurisdiction) {
+    query = query.ilike("jurisdiction", jurisdiction);
+  }
+
+  const createdFrom = normalizeListFilterValue(options.filters?.createdFrom);
+  if (createdFrom) {
+    query = query.gte("created_at", dateFilterToBoundary(createdFrom, "start"));
+  }
+
+  const createdTo = normalizeListFilterValue(options.filters?.createdTo);
+  if (createdTo) {
+    query = query.lte("created_at", dateFilterToBoundary(createdTo, "end"));
+  }
+
+  if (typeof options.limit === "number" && options.limit > 0) {
+    const offset = typeof options.offset === "number" && options.offset > 0 ? options.offset : 0;
+    query = query.range(offset, offset + options.limit - 1);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as DocumentRecord[];
+};
+
+export const countDocuments = async (
+  ownerId?: string,
+  filters: ListDocumentsFilters = {},
+) => {
+  let query = supabaseAdmin
+    .from("documents")
+    .select("id", { count: "exact", head: true });
+
+  if (ownerId) {
+    query = query.eq("owner_id", ownerId);
+  }
+
+  const documentType = normalizeListFilterValue(filters.documentType);
+  if (documentType) {
+    query = query.eq("document_type", documentType);
+  }
+
+  const status = normalizeListFilterValue(filters.status);
+  if (status) {
+    query = query.ilike("status", `%${status}%`);
+  }
+
+  const jurisdiction = normalizeListFilterValue(filters.jurisdiction);
+  if (jurisdiction) {
+    query = query.ilike("jurisdiction", jurisdiction);
+  }
+
+  const createdFrom = normalizeListFilterValue(filters.createdFrom);
+  if (createdFrom) {
+    query = query.gte("created_at", dateFilterToBoundary(createdFrom, "start"));
+  }
+
+  const createdTo = normalizeListFilterValue(filters.createdTo);
+  if (createdTo) {
+    query = query.lte("created_at", dateFilterToBoundary(createdTo, "end"));
+  }
+
+  const { count, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return count ?? 0;
+};
+
+export const listDocumentFilterFacets = async (ownerId?: string) => {
+  let query = supabaseAdmin
+    .from("documents")
+    .select("document_type, status, jurisdiction");
 
   if (ownerId) {
     query = query.eq("owner_id", ownerId);
@@ -578,7 +718,11 @@ export const listDocuments = async (ownerId?: string) => {
     throw new Error(error.message);
   }
 
-  return (data ?? []) as DocumentRecord[];
+  return {
+    documentTypes: compactUniqueSortedStrings((data ?? []).map((document) => document.document_type)),
+    statuses: compactUniqueSortedStrings((data ?? []).map((document) => document.status)),
+    jurisdictions: compactUniqueSortedStrings((data ?? []).map((document) => document.jurisdiction)),
+  } satisfies DocumentFilterFacets;
 };
 
 export const getDocumentVersionById = async (

@@ -10,7 +10,7 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
 
-type NavIcon = "start" | "documents" | "verify" | "notifications" | "requests" | "settings" | "history";
+type NavIcon = "start" | "documents" | "verify" | "notifications" | "requests" | "settings";
 
 type NavItem = {
   label: string;
@@ -136,7 +136,6 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
   notary: {
     primaryItems: [
       { label: "Queue", href: "/app/notary", icon: "requests", sectionLabel: "Notary" },
-      { label: "History", href: "/app/notary/history", icon: "history" },
       { label: "Verify a document", href: "/app/verification", icon: "verify" },
     ],
     settingsHref: "/app/settings",
@@ -250,22 +249,6 @@ const renderNavIcon = (icon: NavIcon) => {
           strokeWidth="1.5"
         />
         <path d="M10 17.5a2 2 0 0 0 4 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
-      </svg>
-    );
-  }
-
-  if (icon === "history") {
-    return (
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
-        <path
-          d="M12 5.25a6.75 6.75 0 1 1-6.6 8.2"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-        />
-        <path d="M4.25 7.75v4h4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
-        <path d="M12 8.5v3.75l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
       </svg>
     );
   }

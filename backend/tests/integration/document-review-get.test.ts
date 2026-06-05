@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   listDocumentSystemValuesMock: vi.fn(),
+  getDocumentIntakeDraftMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   listDocumentGenerationRunsMock: vi.fn(),
   createDocumentDownloadUrlMock: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
   getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
   listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
+  getDocumentIntakeDraft: mocks.getDocumentIntakeDraftMock,
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
 }));
@@ -43,9 +45,11 @@ describe("document review payload", () => {
     mocks.getDocumentByIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.listDocumentSystemValuesMock.mockReset();
+    mocks.getDocumentIntakeDraftMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentGenerationRunsMock.mockReset();
     mocks.createDocumentDownloadUrlMock.mockReset();
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue(null);
     mocks.createDocumentDownloadUrlMock.mockImplementation(async (storagePath: string) => ({
       bucket: "documents",
       path: storagePath,
@@ -228,6 +232,90 @@ describe("document review payload", () => {
     ]);
     expect(response.body.review.outputs).toEqual([]);
     expect(response.body.review.pendingOutputs).toHaveLength(2);
+  });
+
+  it("requires fresh review generation when rendered output is from an older intake revision", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: null,
+      status: "pending_review",
+      document_type: "poa_general",
+      jurisdiction: "US-OH",
+      product_flow_mode: "poa_only",
+      output_bundle: [
+        {
+          outputKey: "poa_document",
+          outputLabel: "Power of Attorney",
+          isRequired: true,
+          sortOrder: 10,
+          metadata: {},
+        },
+      ],
+      intake_status: "submitted",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([]);
+    mocks.getDocumentIntakeDraftMock.mockResolvedValue({
+      document_id: "doc-1",
+      owner_id: "owner-1",
+      product_flow_mode: "poa_only",
+      jurisdiction: "US-OH",
+      current_step: "poa_requirements",
+      rules_snapshot_version: "member_form_rules_contract_v1",
+      answers_json: {},
+      canonical_answers_json: {},
+      revision: 18,
+      created_at: "2026-03-05T00:00:00.000Z",
+      updated_at: "2026-03-05T00:03:00.000Z",
+    });
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-old",
+        document_id: "doc-1",
+        intake_revision: 15,
+        output_key: "poa_document",
+        status: "rendered",
+        created_at: "2026-03-05T00:01:00.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-old",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "owner-1/doc-1/generated/run-old/poa.pdf",
+        file_name: "poa.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1900,
+        is_final: false,
+        generation_run_id: "run-old",
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:01:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/review")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.review.requiresGeneration).toBe(true);
+    expect(response.body.review.missingOutputKeys).toEqual(["poa_document"]);
+    expect(response.body.review.outputs).toEqual([]);
+    expect(response.body.review.pendingOutputs).toEqual([
+      expect.objectContaining({
+        outputKey: "poa_document",
+        status: "not_started",
+      }),
+    ]);
+    expect(mocks.createDocumentDownloadUrlMock).not.toHaveBeenCalled();
   });
 
   it("holds member-visible bundle outputs until every review PDF is ready", async () => {

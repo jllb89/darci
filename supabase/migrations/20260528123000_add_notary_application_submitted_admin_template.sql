@@ -25,7 +25,7 @@ values (
   'en-US',
   'email',
   'transactional',
-  'admin',
+  'shared',
   'notary.application_submitted',
   null,
   'New notary request from {{applicantName}}',

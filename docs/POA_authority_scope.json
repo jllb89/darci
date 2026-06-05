@@ -68,6 +68,10 @@
       {
         "key": "exercise_fiduciary_powers",
         "label": "Exercise fiduciary powers"
+      },
+      {
+        "key": "access_digital_assets",
+        "label": "Digital assets"
       }
     ]
   },

@@ -404,6 +404,23 @@ const canAccessRequest = (input: {
   ].includes(viewerUserId);
 };
 
+const notaryReviewableDocumentStatuses = new Set(["pending_notary", "completed"]);
+
+const canAccessRequestDocument = (input: {
+  role: RequestRole;
+  document: DocumentRecord;
+}) => {
+  if (isPrivilegedRole(input.role)) {
+    return true;
+  }
+
+  if (input.role !== "notary") {
+    return false;
+  }
+
+  return notaryReviewableDocumentStatuses.has(input.document.status?.trim().toLowerCase() ?? "");
+};
+
 const mapWorkflowResponse = (input: {
   workflow: IlluminotarizationWorkflowRecord | null;
   workflowStatusHistory: IlluminotarizationWorkflowStatusHistoryRecord[];
@@ -583,16 +600,31 @@ const buildReviewDocumentLabel = (version: DocumentVersionRecord, index: number)
   return version.file_name?.trim() || `Document ${index + 1}`;
 };
 
+const isPdfDocumentVersion = (version: DocumentVersionRecord) => {
+  const mimeType = version.mime_type?.trim().toLowerCase() ?? "";
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+
+  return Boolean(version.storage_path && (mimeType === "application/pdf" || fileName.endsWith(".pdf")));
+};
+
+const isSignedOrFinalDocumentVersion = (version: DocumentVersionRecord) => {
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+  const storagePath = version.storage_path?.trim().toLowerCase() ?? "";
+
+  return Boolean(
+    version.is_final ||
+      fileName.endsWith("-signed.pdf") ||
+      storagePath.endsWith("-signed.pdf"),
+  );
+};
+
 const buildReviewDocuments = async (versions: DocumentVersionRecord[]) => {
   const pdfVersions = versions
-    .filter((version) => version.storage_path && version.mime_type === "application/pdf")
+    .filter((version) => isPdfDocumentVersion(version) && isSignedOrFinalDocumentVersion(version))
     .sort((left, right) => right.version - left.version);
-  const sourceVersions = pdfVersions.some((version) => version.is_final)
-    ? pdfVersions.filter((version) => version.is_final)
-    : pdfVersions;
   const latestByOutput = new Map<string, DocumentVersionRecord>();
 
-  for (const version of sourceVersions) {
+  for (const version of pdfVersions) {
     const key = version.generation_run_id ?? version.file_name ?? version.id;
     if (!latestByOutput.has(key)) {
       latestByOutput.set(key, version);
@@ -1001,6 +1033,10 @@ const getAuthorizedRequestResource = async (input: {
     return null;
   }
 
+  if (!canAccessRequestDocument({ role: input.role, document })) {
+    return null;
+  }
+
   return {
     request,
     document,
@@ -1041,6 +1077,10 @@ export const listNotaryQueue = async (input: {
           workflow,
         })
       ) {
+        return null;
+      }
+
+      if (!canAccessRequestDocument({ role: input.role, document })) {
         return null;
       }
 

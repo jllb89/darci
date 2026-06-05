@@ -330,6 +330,65 @@ describe("documentGenerationRenderService", () => {
     expect(rendered).not.toContain("[[DARCI_CHECKED]] Taxes");
   });
 
+  it("checks Ohio digital assets inside the POA authority checklist and preserves all-powers matching", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "_____ (M) Tax matters.",
+        "_____ (N) Digital assets.",
+        "_____ (O) ALL OF THE POWERS LISTED ABOVE",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        authority_scope_selection: ["access_digital_assets"],
+      },
+      selectionCatalogs: {
+        authority_scope_selection: {
+          allowedValues: ["access_digital_assets"],
+          allowedValueLabels: {
+            access_digital_assets: "Digital assets",
+          },
+        },
+      },
+      isPreview: true,
+    });
+
+    expect(rendered).toContain("[[DARCI_CHECKED]] (N) Digital assets");
+    expect(rendered).toContain("[[DARCI_UNCHECKED]] (O) ALL OF THE POWERS LISTED ABOVE");
+    expect(rendered).not.toContain("[[DARCI_CHECKED]] Digital assets");
+  });
+
+  it("still treats CA-style N as all powers when the label says all powers", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: "_____ (N) ALL OF THE POWERS LISTED ABOVE",
+      placeholders: {},
+      canonicalAnswers: {
+        authority_scope_selection: ["all_powers"],
+      },
+      selectionCatalogs: {
+        authority_scope_selection: {
+          allowedValues: ["all_powers"],
+          allowedValueLabels: {
+            all_powers: "ALL OF THE POWERS LISTED ABOVE",
+          },
+        },
+      },
+      isPreview: true,
+    });
+
+    expect(rendered).toContain("[[DARCI_CHECKED]] (N) ALL OF THE POWERS LISTED ABOVE");
+  });
+
+  it("renders Ohio IMPORTANT INFORMATION FOR AGENT as a smaller section heading", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: "**IMPORTANT INFORMATION FOR AGENT**",
+      placeholders: {},
+      canonicalAnswers: {},
+      isPreview: true,
+    });
+
+    expect(rendered).toBe("## IMPORTANT INFORMATION FOR AGENT");
+  });
+
   it("preserves the PDF cursor when applying the preview watermark", () => {
     const fakeDocument = {
       x: 54,

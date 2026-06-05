@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -12,10 +12,13 @@ import {
   clearStoredAuth,
   getStoredAuth,
   hasCompleteStoredUserProfile,
+  logoutStoredAuth,
   refreshStoredAuth,
   setStoredAuth,
+  switchStoredUserRole,
   syncStoredAuthFromSession,
   type StoredUser,
+  type StoredUserRole,
 } from "@/lib/auth";
 import { buildAuthCallbackUrl, sanitizeAuthReturnTo } from "@/lib/authRedirects";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
@@ -67,8 +70,20 @@ const MIN_OTP_LENGTH = 4;
 const MAX_OTP_LENGTH = 12;
 const DEFAULT_RESEND_COOLDOWN_SECONDS = 60;
 const MAX_RESEND_COOLDOWN_SECONDS = 10 * 60;
+const storedUserRoles: StoredUserRole[] = ["member", "pro", "notary", "admin"];
+
+const isStoredUserRole = (value: string | null): value is StoredUserRole => {
+  return Boolean(value && storedUserRoles.includes(value as StoredUserRole));
+};
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value: string | null | undefined) => value?.trim().toLowerCase() ?? "";
+
+const getStoredUserDisplayName = (user: StoredUser | null | undefined) => {
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+  return fullName || user?.email || "another account";
+};
 
 const normalizeOtpToken = (value: string) => value.replace(/\s+/g, "").trim();
 
@@ -123,6 +138,8 @@ function StartAuthPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = sanitizeAuthReturnTo(searchParams.get("returnTo"));
+  const intendedEmail = normalizeEmail(searchParams.get("intendedEmail"));
+  const isNotaryReturnTo = returnTo.startsWith("/app/notary");
   const [authStep, setAuthStep] = useState<AuthStep>("identifier");
   const [identifier, setIdentifier] = useState("");
   const [challenge, setChallenge] = useState<IdentifierChallenge | null>(null);
@@ -132,6 +149,8 @@ function StartAuthPageContent() {
   const [passwordEmail, setPasswordEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pendingAuthSession, setPendingAuthSession] = useState<PendingAuthSession | null>(null);
+  const [sessionMismatchUser, setSessionMismatchUser] = useState<StoredUser | null>(null);
+  const [notarySessionGuardUser, setNotarySessionGuardUser] = useState<StoredUser | null>(null);
   const [profileForm, setProfileForm] = useState<ProfileFormState>({
     firstName: "",
     lastName: "",
@@ -146,6 +165,85 @@ function StartAuthPageContent() {
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   const otpCode = useMemo(() => otpDigits.join(""), [otpDigits]);
+
+  const hasIntendedEmailMismatch = useCallback((user: StoredUser | null | undefined) => {
+    const sessionEmail = normalizeEmail(user?.email);
+    return Boolean(intendedEmail && sessionEmail && sessionEmail !== intendedEmail);
+  }, [intendedEmail]);
+
+  const showIntendedEmailMismatch = useCallback((user: StoredUser) => {
+    setSessionMismatchUser(user);
+    setIdentifier(intendedEmail);
+    setPasswordEmail(intendedEmail);
+    setPendingAuthSession(null);
+    setChallenge(null);
+    setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
+    setAuthStep("identifier");
+    setErrorMessage(null);
+    setNoticeMessage(null);
+  }, [intendedEmail]);
+
+  const assertIntendedEmailMatches = useCallback((user: StoredUser | null | undefined) => {
+    if (!user || !hasIntendedEmailMismatch(user)) {
+      setSessionMismatchUser(null);
+      return;
+    }
+
+    showIntendedEmailMismatch(user);
+    throw new Error(`This notary request was sent to ${intendedEmail}. Sign in with that email to continue.`);
+  }, [hasIntendedEmailMismatch, intendedEmail, showIntendedEmailMismatch]);
+
+  const shouldConfirmUnscopedNotarySession = useCallback((user: StoredUser | null | undefined) => {
+    return Boolean(user && isNotaryReturnTo && !intendedEmail);
+  }, [intendedEmail, isNotaryReturnTo]);
+
+  const showUnscopedNotarySessionGuard = useCallback((user: StoredUser) => {
+    setNotarySessionGuardUser(user);
+    setPendingAuthSession(null);
+    setChallenge(null);
+    setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
+    setAuthStep("identifier");
+    setErrorMessage(null);
+    setNoticeMessage(null);
+  }, []);
+
+  const getReturnToRoleHint = useCallback(() => {
+    try {
+      const url = new URL(returnTo, window.location.origin);
+      const role = url.searchParams.get("role");
+      return isStoredUserRole(role) ? role : null;
+    } catch {
+      return null;
+    }
+  }, [returnTo]);
+
+  const storeSessionAndActivateReturnRole = useCallback(async (input: {
+    accessToken: string | null | undefined;
+    refreshToken: string | null;
+    user: StoredUser;
+  }) => {
+    if (!input.accessToken) {
+      throw new Error("Missing session");
+    }
+
+    setStoredAuth({
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      user: input.user,
+    });
+
+    const roleHint = getReturnToRoleHint();
+    if (!roleHint || input.user.role === roleHint) {
+      return;
+    }
+
+    const availableRoles = input.user.availableRoles ?? [input.user.role];
+    if (!availableRoles.includes(roleHint)) {
+      throw new Error(`This account does not have access to the ${roleHint} profile.`);
+    }
+
+    await switchStoredUserRole(roleHint);
+  }, [getReturnToRoleHint]);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,8 +288,26 @@ function StartAuthPageContent() {
         }
 
         const nextAuth = syncedAuth ?? getStoredAuth();
+        if (nextAuth.user && hasIntendedEmailMismatch(nextAuth.user)) {
+          showIntendedEmailMismatch(nextAuth.user);
+          return;
+        }
+
         if (nextAuth.user && !hasCompleteStoredUserProfile(nextAuth.user) && showProfileStep(nextAuth)) {
           return;
+        }
+
+        if (nextAuth.user && shouldConfirmUnscopedNotarySession(nextAuth.user)) {
+          showUnscopedNotarySessionGuard(nextAuth.user);
+          return;
+        }
+
+        if (nextAuth.accessToken && nextAuth.user) {
+          await storeSessionAndActivateReturnRole({
+            accessToken: nextAuth.accessToken,
+            refreshToken: nextAuth.refreshToken,
+            user: nextAuth.user,
+          });
         }
 
         router.replace(returnTo);
@@ -213,11 +329,28 @@ function StartAuthPageContent() {
           return;
         }
 
+        if (refreshedAuth.user && hasIntendedEmailMismatch(refreshedAuth.user)) {
+          showIntendedEmailMismatch(refreshedAuth.user);
+          return;
+        }
+
         if (refreshedAuth.user && !hasCompleteStoredUserProfile(refreshedAuth.user) && showProfileStep(refreshedAuth)) {
           return;
         }
 
+        if (refreshedAuth.user && shouldConfirmUnscopedNotarySession(refreshedAuth.user)) {
+          showUnscopedNotarySessionGuard(refreshedAuth.user);
+          return;
+        }
+
         if (refreshedAuth.accessToken) {
+          if (refreshedAuth.user) {
+            await storeSessionAndActivateReturnRole({
+              accessToken: refreshedAuth.accessToken,
+              refreshToken: refreshedAuth.refreshToken,
+              user: refreshedAuth.user,
+            });
+          }
           router.replace(returnTo);
         }
       }
@@ -228,7 +361,14 @@ function StartAuthPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [returnTo, router]);
+  }, [hasIntendedEmailMismatch, returnTo, router, shouldConfirmUnscopedNotarySession, showIntendedEmailMismatch, showUnscopedNotarySessionGuard, storeSessionAndActivateReturnRole]);
+
+  useEffect(() => {
+    if (intendedEmail && authStep === "identifier" && !identifier.trim()) {
+      setIdentifier(intendedEmail);
+      setPasswordEmail(intendedEmail);
+    }
+  }, [authStep, identifier, intendedEmail]);
 
   const getActionRedirectTo = (intent: "otp" | "oauth") => {
     return buildAuthCallbackUrl({
@@ -243,7 +383,7 @@ function StartAuthPageContent() {
     setNoticeMessage(null);
   };
 
-  const finishVerifiedSession = (
+  const finishVerifiedSession = async (
     payload: AuthSessionResponsePayload,
     verifiedChallenge: IdentifierChallenge,
   ) => {
@@ -251,6 +391,8 @@ function StartAuthPageContent() {
       const validationMessage = payload.details?.[0]?.message;
       throw new Error(payload.message || validationMessage || "Invalid or expired code.");
     }
+
+    assertIntendedEmailMatches(payload.user);
 
     const refreshToken = payload.refreshToken ?? null;
 
@@ -263,7 +405,7 @@ function StartAuthPageContent() {
       setProfileForm({
         firstName: payload.user.firstName ?? "",
         lastName: payload.user.lastName ?? "",
-        email: payload.user.email || (verifiedChallenge.kind === "email" ? verifiedChallenge.value : ""),
+        email: payload.user.email || (verifiedChallenge.kind === "email" ? verifiedChallenge.value : "") || intendedEmail,
         phone: formatProfilePhoneInputValue(
           payload.user.phone ?? (verifiedChallenge.kind === "phone" ? verifiedChallenge.value : ""),
         ),
@@ -274,7 +416,7 @@ function StartAuthPageContent() {
       return;
     }
 
-    setStoredAuth({
+    await storeSessionAndActivateReturnRole({
       accessToken: payload.accessToken,
       refreshToken,
       user: payload.user,
@@ -406,7 +548,7 @@ function StartAuthPageContent() {
         throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
       }
 
-      finishVerifiedSession(payload, challenge);
+      await finishVerifiedSession(payload, challenge);
     } else {
       // ✅ FIXED: Phone OTP verify now uses backend endpoint (server-side like email OTP)
       const response = await fetch(`${apiBaseUrl}/auth/otp/phone/verify`, {
@@ -428,7 +570,7 @@ function StartAuthPageContent() {
         throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
       }
 
-      finishVerifiedSession(payload, challenge);
+      await finishVerifiedSession(payload, challenge);
     }
   };
 
@@ -571,8 +713,10 @@ function StartAuthPageContent() {
       throw new Error(payload?.message || validationMessage || "Request failed");
     }
 
+    assertIntendedEmailMatches(payload.user);
+
     if (payload.profileCompletionRequired || !hasCompleteStoredUserProfile(payload.user)) {
-      finishVerifiedSession(
+      await finishVerifiedSession(
         {
           accessToken: payload.accessToken,
           refreshToken: payload.refreshToken,
@@ -584,7 +728,7 @@ function StartAuthPageContent() {
       return;
     }
 
-    setStoredAuth({
+    await storeSessionAndActivateReturnRole({
       accessToken: payload.accessToken ?? null,
       refreshToken: payload.refreshToken ?? null,
       user: payload.user,
@@ -609,6 +753,10 @@ function StartAuthPageContent() {
 
     if (!emailPattern.test(email)) {
       throw new Error("Enter a valid email address.");
+    }
+
+    if (intendedEmail && email !== intendedEmail) {
+      throw new Error(`This notary request was sent to ${intendedEmail}. Sign in with that email to continue.`);
     }
 
     if (!parsedPhone?.isValid()) {
@@ -671,7 +819,7 @@ function StartAuthPageContent() {
       phone: parsedPhone.number,
     };
 
-    setStoredAuth({
+    await storeSessionAndActivateReturnRole({
       accessToken: activeAuthSession.accessToken,
       refreshToken: activeAuthSession.refreshToken,
       user: completedUser,
@@ -774,12 +922,87 @@ function StartAuthPageContent() {
     setPassword("");
   };
 
-  const supportingCopy = authStep === "profile"
+  const handleUseIntendedEmail = async () => {
+    resetMessages();
+    setIsSubmitting(true);
+
+    try {
+      await logoutStoredAuth();
+    } catch {
+      clearStoredAuth();
+    } finally {
+      setSessionMismatchUser(null);
+      setPendingAuthSession(null);
+      setChallenge(null);
+      setIdentifier(intendedEmail);
+      setPasswordEmail(intendedEmail);
+      setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
+      setAuthStep("identifier");
+      setNoticeMessage(`Sign in as ${intendedEmail} to open this notary request.`);
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleContinueWithCurrentNotarySession = async () => {
+    resetMessages();
+    const storedAuth = getStoredAuth();
+    if (!storedAuth.accessToken || !storedAuth.user) {
+      setNotarySessionGuardUser(null);
+      setAuthStep("identifier");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await storeSessionAndActivateReturnRole({
+        accessToken: storedAuth.accessToken,
+        refreshToken: storedAuth.refreshToken,
+        user: storedAuth.user,
+      });
+      setNotarySessionGuardUser(null);
+      router.replace(returnTo);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to continue with this account.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUseAssignedNotaryAccount = async () => {
+    resetMessages();
+    setIsSubmitting(true);
+
+    try {
+      await logoutStoredAuth();
+    } catch {
+      clearStoredAuth();
+    } finally {
+      setNotarySessionGuardUser(null);
+      setPendingAuthSession(null);
+      setChallenge(null);
+      setIdentifier("");
+      setPasswordEmail("");
+      setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
+      setAuthStep("identifier");
+      setNoticeMessage("Sign in with the assigned notary email to open this request.");
+      setIsSubmitting(false);
+    }
+  };
+
+  const hasSessionMismatch = Boolean(sessionMismatchUser && intendedEmail);
+  const hasUnscopedNotarySessionGuard = Boolean(notarySessionGuardUser && isNotaryReturnTo && !intendedEmail);
+  const supportingCopy = hasUnscopedNotarySessionGuard
+    ? "This notary request link does not identify the assigned email, so confirm the signed-in account before continuing."
+    : hasSessionMismatch
+    ? "This notary request belongs to a different signed-in email."
+    : authStep === "profile"
     ? "Add your name and contact details before entering your workspace."
     : authStep === "otp" && challenge
     ? `Verification code sent to ${challenge.displayValue}`
     : returnTo.startsWith("/app/invite")
       ? "Sign in to continue to the document signature."
+      : returnTo.startsWith("/app/notary")
+        ? "Sign in as the assigned notary to review this request."
       : "Sign in to continue your workspace.";
   const headingLabel = authStep === "profile" ? "Complete your profile" : "Access DARCi";
 
@@ -845,181 +1068,227 @@ function StartAuthPageContent() {
               </div>
 
               <form className="mt-10 space-y-4" onSubmit={handleSubmit}>
-                {authStep === "identifier" ? (
-                  <div>
-                    <label className="mb-2 block text-sm font-medium">
-                      Email or phone number
-                    </label>
-                    <input
-                      autoComplete="username"
-                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                      placeholder="Enter your email or phone number"
-                      type="text"
-                      value={identifier}
-                      onChange={(event) => setIdentifier(event.target.value)}
-                      required
-                    />
+                {hasSessionMismatch && sessionMismatchUser ? (
+                  <div className="border border-Color-Scheme-1-Border bg-black/5 px-4 py-3 text-sm leading-6 text-Color-Neutral">
+                    <div>
+                      You are signed in as {getStoredUserDisplayName(sessionMismatchUser)}. This notary request is for {intendedEmail}.
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-3 w-full bg-Green px-4 py-3 text-sm font-medium text-Color-Neutral-Darkest disabled:opacity-60"
+                      onClick={handleUseIntendedEmail}
+                      disabled={isSubmitting}
+                    >
+                      Log out and use assigned notary email
+                    </button>
                   </div>
                 ) : null}
 
-                {authStep === "otp" && challenge ? (
-                  <div>
-                    <label className="mb-2 block text-sm font-medium">Code</label>
-                    <div className="flex w-full items-center justify-between gap-2">
-                      {otpDigits.map((digit, index) => (
+                {hasUnscopedNotarySessionGuard && notarySessionGuardUser ? (
+                  <div className="border border-Color-Scheme-1-Border bg-black/5 px-4 py-3 text-sm leading-6 text-Color-Neutral">
+                    <div>
+                      You are signed in as {getStoredUserDisplayName(notarySessionGuardUser)}. Continue only if this is the notary account that received the request email.
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      <button
+                        type="button"
+                        className="w-full bg-Green px-4 py-3 text-sm font-medium text-Color-Neutral-Darkest disabled:opacity-60"
+                        onClick={handleContinueWithCurrentNotarySession}
+                        disabled={isSubmitting}
+                      >
+                        Continue with this notary account
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full border border-Color-Scheme-1-Border bg-white px-4 py-3 text-sm font-medium text-Color-Scheme-1-Text disabled:opacity-60"
+                        onClick={handleUseAssignedNotaryAccount}
+                        disabled={isSubmitting}
+                      >
+                        Log out and use assigned notary email
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {!hasSessionMismatch && !hasUnscopedNotarySessionGuard ? (
+                  <>
+                    {authStep === "identifier" ? (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium">
+                          Email or phone number
+                        </label>
                         <input
-                          key={`otp-digit-${index}`}
-                          ref={(element) => {
-                            otpInputRefs.current[index] = element;
-                          }}
-                          autoComplete={index === 0 ? "one-time-code" : "off"}
-                          className="h-12 min-w-0 flex-1 border border-Color-Scheme-1-Border text-center text-lg outline-none transition focus:border-Color-Scheme-1-Text md:h-14"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
+                          autoComplete="username"
+                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                          placeholder="Enter your email or phone number"
                           type="text"
-                          maxLength={1}
-                          value={digit}
-                          onChange={(event) => updateOtpDigitsFromInput(event.target.value, index)}
-                          onKeyDown={(event) => handleOtpDigitKeyDown(event, index)}
-                          onPaste={(event) => handleOtpPaste(event, index)}
-                          disabled={isSubmitting}
+                          value={identifier}
+                          onChange={(event) => setIdentifier(event.target.value)}
                           required
                         />
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="mt-3 text-xs text-Color-Neutral underline underline-offset-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
-                      onClick={requestAnotherCode}
-                      disabled={isSubmitting || resendCountdownSeconds > 0}
-                    >
-                      {resendCountdownSeconds > 0
-                        ? `Request another code in... ${resendCountdownSeconds} seconds`
-                        : "Request another code"}
-                    </button>
-                  </div>
-                ) : null}
+                      </div>
+                    ) : null}
 
-                {authStep === "password" ? (
-                  <>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium">Email</label>
-                      <input
-                        autoComplete="username"
-                        className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                        placeholder="you@example.com"
-                        type="email"
-                        value={passwordEmail}
-                        onChange={(event) => setPasswordEmail(event.target.value)}
-                        required
+                    {authStep === "otp" && challenge ? (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium">Code</label>
+                        <div className="flex w-full items-center justify-between gap-2">
+                          {otpDigits.map((digit, index) => (
+                            <input
+                              key={`otp-digit-${index}`}
+                              ref={(element) => {
+                                otpInputRefs.current[index] = element;
+                              }}
+                              autoComplete={index === 0 ? "one-time-code" : "off"}
+                              className="h-12 min-w-0 flex-1 border border-Color-Scheme-1-Border text-center text-lg outline-none transition focus:border-Color-Scheme-1-Text md:h-14"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              type="text"
+                              maxLength={1}
+                              value={digit}
+                              onChange={(event) => updateOtpDigitsFromInput(event.target.value, index)}
+                              onKeyDown={(event) => handleOtpDigitKeyDown(event, index)}
+                              onPaste={(event) => handleOtpPaste(event, index)}
+                              disabled={isSubmitting}
+                              required
+                            />
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="mt-3 text-xs text-Color-Neutral underline underline-offset-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
+                          onClick={requestAnotherCode}
+                          disabled={isSubmitting || resendCountdownSeconds > 0}
+                        >
+                          {resendCountdownSeconds > 0
+                            ? `Request another code in... ${resendCountdownSeconds} seconds`
+                            : "Request another code"}
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {authStep === "password" ? (
+                      <>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium">Email</label>
+                          <input
+                            autoComplete="username"
+                            className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                            placeholder="you@example.com"
+                            type="email"
+                            value={passwordEmail}
+                            onChange={(event) => setPasswordEmail(event.target.value)}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium">Password</label>
+                          <input
+                            autoComplete="current-password"
+                            className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
+                            placeholder="Enter your password"
+                            type="password"
+                            value={password}
+                            onChange={(event) => setPassword(event.target.value)}
+                            required
+                            minLength={8}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="text-xs text-Color-Neutral underline underline-offset-4"
+                          onClick={handlePasswordRecovery}
+                          disabled={isRecoverySubmitting}
+                        >
+                          {isRecoverySubmitting ? "Sending reset..." : "Reset your password"}
+                        </button>
+                      </>
+                    ) : null}
+
+                    {authStep === "profile" ? (
+                      <ProfileCompletionForm
+                        lockedEmail={challenge?.kind === "email" || Boolean(pendingAuthSession?.user.email?.trim()) || Boolean(intendedEmail)}
+                        lockedPhone={challenge?.kind === "phone" || Boolean(pendingAuthSession?.user.phone?.trim())}
+                        onChange={setProfileForm}
+                        value={profileForm}
                       />
+                    ) : null}
+
+                    {errorMessage ? (
+                      <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {errorMessage}
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-3 pt-2">
+                      <button
+                        className="w-full bg-Green px-4 py-3 text-sm font-medium text-Color-Neutral-Darkest disabled:opacity-60"
+                        type="submit"
+                        disabled={isSubmitting}
+                      >
+                        {submitLabel}
+                      </button>
+
+                      {authStep === "otp" ? (
+                        <button
+                          type="button"
+                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm font-medium"
+                          onClick={usePasswordFallback}
+                          disabled={isSubmitting}
+                        >
+                          Log in with password
+                        </button>
+                      ) : null}
+
+                      {authStep === "password" ? (
+                        <button
+                          type="button"
+                          className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm font-medium"
+                          onClick={() => {
+                            resetMessages();
+                            setAuthStep(challenge ? "otp" : "identifier");
+                          }}
+                          disabled={isSubmitting}
+                        >
+                          Use code instead
+                        </button>
+                      ) : null}
+
+                      <button
+                        className="flex w-full cursor-not-allowed items-center justify-center gap-3 border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-3 text-sm font-medium text-Color-Neutral disabled:opacity-70"
+                        type="button"
+                        onClick={handleGoogleAuth}
+                        disabled
+                        aria-disabled="true"
+                        title="Google sign-in is temporarily unavailable"
+                      >
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 24 24"
+                          className="h-4 w-4"
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.26-2.08 3.57-5.14 3.57-8.64Z"
+                          />
+                          <path
+                            fill="currentColor"
+                            d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.87-3c-1.07.72-2.44 1.15-4.08 1.15-3.14 0-5.8-2.12-6.75-4.96H1.25v3.09A12 12 0 0 0 12 24Z"
+                          />
+                          <path
+                            fill="currentColor"
+                            d="M5.25 14.28A7.2 7.2 0 0 1 4.87 12c0-.79.14-1.56.38-2.28V6.63H1.25A12 12 0 0 0 0 12c0 1.94.46 3.78 1.25 5.37l4-3.09Z"
+                          />
+                          <path
+                            fill="currentColor"
+                            d="M12 4.77c1.76 0 3.34.61 4.58 1.8l3.43-3.43C17.96 1.2 15.24 0 12 0A12 12 0 0 0 1.25 6.63l4 3.09c.95-2.84 3.61-4.95 6.75-4.95Z"
+                          />
+                        </svg>
+                        Continue with Google
+                      </button>
                     </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium">Password</label>
-                      <input
-                        autoComplete="current-password"
-                        className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                        placeholder="Enter your password"
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        required
-                        minLength={8}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="text-xs text-Color-Neutral underline underline-offset-4"
-                      onClick={handlePasswordRecovery}
-                      disabled={isRecoverySubmitting}
-                    >
-                      {isRecoverySubmitting ? "Sending reset..." : "Reset your password"}
-                    </button>
                   </>
                 ) : null}
-
-                {authStep === "profile" ? (
-                  <ProfileCompletionForm
-                    lockedEmail={challenge?.kind === "email" || Boolean(pendingAuthSession?.user.email?.trim())}
-                    lockedPhone={challenge?.kind === "phone" || Boolean(pendingAuthSession?.user.phone?.trim())}
-                    onChange={setProfileForm}
-                    value={profileForm}
-                  />
-                ) : null}
-
-                {errorMessage ? (
-                  <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {errorMessage}
-                  </div>
-                ) : null}
-
-                <div className="space-y-3 pt-2">
-                  <button
-                    className="w-full bg-Green px-4 py-3 text-sm font-medium text-Color-Neutral-Darkest disabled:opacity-60"
-                    type="submit"
-                    disabled={isSubmitting}
-                  >
-                    {submitLabel}
-                  </button>
-
-                  {authStep === "otp" ? (
-                    <button
-                      type="button"
-                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm font-medium"
-                      onClick={usePasswordFallback}
-                      disabled={isSubmitting}
-                    >
-                      Log in with password
-                    </button>
-                  ) : null}
-
-                  {authStep === "password" ? (
-                    <button
-                      type="button"
-                      className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm font-medium"
-                      onClick={() => {
-                        resetMessages();
-                        setAuthStep(challenge ? "otp" : "identifier");
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      Use code instead
-                    </button>
-                  ) : null}
-
-                  <button
-                    className="flex w-full cursor-not-allowed items-center justify-center gap-3 border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-4 py-3 text-sm font-medium text-Color-Neutral disabled:opacity-70"
-                    type="button"
-                    onClick={handleGoogleAuth}
-                    disabled
-                    aria-disabled="true"
-                    title="Google sign-in is temporarily unavailable"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 24 24"
-                      className="h-4 w-4"
-                    >
-                      <path
-                        fill="currentColor"
-                        d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.26-2.08 3.57-5.14 3.57-8.64Z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.87-3c-1.07.72-2.44 1.15-4.08 1.15-3.14 0-5.8-2.12-6.75-4.96H1.25v3.09A12 12 0 0 0 12 24Z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M5.25 14.28A7.2 7.2 0 0 1 4.87 12c0-.79.14-1.56.38-2.28V6.63H1.25A12 12 0 0 0 0 12c0 1.94.46 3.78 1.25 5.37l4-3.09Z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 4.77c1.76 0 3.34.61 4.58 1.8l3.43-3.43C17.96 1.2 15.24 0 12 0A12 12 0 0 0 1.25 6.63l4 3.09c.95-2.84 3.61-4.95 6.75-4.95Z"
-                      />
-                    </svg>
-                    Continue with Google
-                  </button>
-                </div>
               </form>
             </div>
 

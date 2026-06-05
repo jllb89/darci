@@ -41,31 +41,6 @@ const tabEmptyCopy: Record<QueueTab, string> = {
   completed: "No completed requests yet.",
 };
 
-const GooeyFilter = ({
-  id = "notary-tabs-goo-filter",
-  strength = 10,
-}: {
-  id?: string;
-  strength?: number;
-}) => {
-  return (
-    <svg className="absolute hidden">
-      <defs>
-        <filter id={id}>
-          <feGaussianBlur in="SourceGraphic" result="blur" stdDeviation={strength} />
-          <feColorMatrix
-            in="blur"
-            result="goo"
-            type="matrix"
-            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -9"
-          />
-          <feComposite in="SourceGraphic" in2="goo" operator="atop" />
-        </filter>
-      </defs>
-    </svg>
-  );
-};
-
 const resolveQueueStatus = (request: NotaryQueueRequestSummary) => {
   return request.request.queueStatus ?? request.workflow?.latestStatus ?? request.workflow?.status ?? request.request.status;
 };
@@ -164,8 +139,6 @@ export default function NotaryHomePage() {
 
   const requestsByTab = splitRequests(queue.requests);
   const visibleRequests = requestsByTab[activeTab];
-  const activeTabIndex = tabs.indexOf(activeTab);
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -174,12 +147,6 @@ export default function NotaryHomePage() {
           <div className="text-sm text-Color-Neutral">Review signed documents assigned to you.</div>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            className="rounded-lg border border-Color-Scheme-1-Border/60 px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text transition hover:border-Color-Scheme-1-Text"
-            href="/app/notary/history"
-          >
-            History
-          </Link>
           <button
             className="rounded-lg border border-Color-Scheme-1-Border/60 px-4 py-2 text-sm font-medium text-Color-Scheme-1-Text transition hover:border-Color-Scheme-1-Text disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isLoading}
@@ -196,33 +163,20 @@ export default function NotaryHomePage() {
       ) : null}
 
       <section className="space-y-4 text-sm">
-        <div>
-          <GooeyFilter />
-          <div className="relative grid grid-cols-1 gap-1 rounded-full bg-Color-Neutral-Lighter p-1 sm:grid-cols-4">
-            <div
-              aria-hidden
-              className="absolute inset-y-1 hidden rounded-full bg-Color-White shadow-[0_10px_26px_rgba(0,0,0,0.10)] transition-[left] duration-300 ease-out sm:block"
-              style={{
-                filter: "url(#notary-tabs-goo-filter)",
-                left: `calc(${activeTabIndex * (100 / tabs.length)}% + 0.25rem)`,
-                width: `calc(${100 / tabs.length}% - 0.5rem)`,
-              }}
-            />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2 rounded-xl bg-Color-Neutral-Lighter/70 p-1 text-sm">
             {tabs.map((tab) => {
             const isActive = activeTab === tab;
             return (
               <button
-                className={`relative z-10 flex min-h-10 items-center justify-between gap-3 rounded-full px-4 text-left transition ${
-                  isActive ? "bg-Color-White text-Color-Scheme-1-Text sm:bg-transparent" : "text-Color-Neutral hover:text-Color-Scheme-1-Text"
+                className={`rounded-lg px-3 py-2 font-medium transition ${
+                  isActive ? "bg-Color-White text-Color-Scheme-1-Text shadow-sm" : "text-Color-Neutral hover:text-Color-Scheme-1-Text"
                 }`}
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 type="button"
               >
-                <span className="font-medium">{tabLabels[tab]}</span>
-                <span className="rounded-full bg-Color-Neutral-Lighter px-2.5 py-1 text-xs font-medium text-Color-Neutral-Darkest">
-                  {requestsByTab[tab].length}
-                </span>
+                {tabLabels[tab]} ({requestsByTab[tab].length})
               </button>
             );
           })}

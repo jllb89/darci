@@ -104,6 +104,8 @@ function AppLayoutContent({
   const isPublicInviteRoute = pathname === "/app/invite";
   const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
   const searchParamsString = searchParams.toString();
+  const roleHintValue = searchParams.get("role");
+  const roleHint = isStoredUserRole(roleHintValue) ? roleHintValue : null;
   const profileCompletionReturnTo = `${pathname}${searchParamsString ? `?${searchParamsString}` : ""}`;
   const profileName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || user?.phone || "Profile";
   const profileEmail = user?.email || user?.phone || "Profile";
@@ -116,6 +118,7 @@ function AppLayoutContent({
   const [checkedSessionSyncKey, setCheckedSessionSyncKey] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isSwitchingRole, setIsSwitchingRole] = useState(false);
+  const roleHintHandledRef = useRef<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [toastPhase, setToastPhase] = useState<"hidden" | "visible" | "closing">("hidden");
   const hasCheckedCurrentSession = !sessionSyncKey || checkedSessionSyncKey === sessionSyncKey;
@@ -153,6 +156,54 @@ function AppLayoutContent({
       router.replace("/start");
     }
   }, [hasHydrated, isAuthorized, isPublicInviteRoute, router]);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthorized || !roleHint || isSwitchingRole) {
+      return;
+    }
+
+    if (roleHintHandledRef.current === `${pathname}?${searchParamsString}`) {
+      return;
+    }
+
+    roleHintHandledRef.current = `${pathname}?${searchParamsString}`;
+
+    if (roleHint !== role && availableRoles.includes(roleHint)) {
+      let cancelled = false;
+
+      setIsSwitchingRole(true);
+      void switchStoredUserRole(roleHint)
+        .catch(() => undefined)
+        .finally(() => {
+          if (!cancelled) {
+            setIsSwitchingRole(false);
+            const next = new URLSearchParams(searchParamsString);
+            next.delete("role");
+            const nextSearch = next.toString();
+            router.replace(nextSearch ? `${pathname}?${nextSearch}` : pathname);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const next = new URLSearchParams(searchParamsString);
+    next.delete("role");
+    const nextSearch = next.toString();
+    router.replace(nextSearch ? `${pathname}?${nextSearch}` : pathname);
+  }, [
+    availableRoles,
+    hasHydrated,
+    isAuthorized,
+    isSwitchingRole,
+    pathname,
+    role,
+    roleHint,
+    router,
+    searchParamsString,
+  ]);
 
   useEffect(() => {
     if (!hasHydrated || !isAuthorized || isPublicInviteRoute || !accessToken) {

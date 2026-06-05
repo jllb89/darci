@@ -231,8 +231,10 @@ describe("notificationService notary application decision notifications", () => 
           memberName: "Olivia Owner",
           documentName: "document notarization",
           jurisdiction: "US-OH",
-          reviewRequestUrl: "https://app.example.test/app/notary",
-          dashboardUrl: "https://app.example.test/app/notary",
+          reviewRequestUrl:
+            "https://app.example.test/start?returnTo=%2Fapp%2Fnotary%3Frole%3Dnotary&intendedEmail=notary%40example.test",
+          dashboardUrl:
+            "https://app.example.test/start?returnTo=%2Fapp%2Fnotary%3Frole%3Dnotary&intendedEmail=notary%40example.test",
           requestId: "req-1",
           documentId: "doc-1",
         }),
@@ -241,6 +243,7 @@ describe("notificationService notary application decision notifications", () => 
           triggerEvent: "member.notary_selected",
           requestId: "req-1",
           selectedNotaryUserId: "notary-1",
+          reviewRequestPath: "/start?returnTo=%2Fapp%2Fnotary%3Frole%3Dnotary&intendedEmail=notary%40example.test",
         }),
       }),
     );
