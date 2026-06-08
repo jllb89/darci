@@ -237,7 +237,7 @@ const partyRoleLabels: Record<string, string> = {
   principal: "Principal",
   agent: "Agent",
   successor_agent: "Successor agent",
-  grantor: "Grantor",
+  grantor: "Trustmaker",
   trustee: "Trustee",
   successor_trustee: "Successor trustee",
 };
@@ -424,7 +424,7 @@ const humanizeToken = (value: string) => {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 };
 
-const getDocumentLabel = (document: DocumentRecord) => {
+const getDocumentLabel = (document: Pick<DocumentRecord, "document_type" | "product_flow_mode">) => {
   if (document.product_flow_mode === "trust_bundle") {
     return "trust registration";
   }
@@ -445,7 +445,15 @@ const getDocumentLabel = (document: DocumentRecord) => {
   return "document";
 };
 
-const getDocumentTypeLabel = (document: DocumentRecord) => {
+export const resolveDocumentInviteDocumentTypeLabel = (document: Pick<DocumentRecord, "document_type" | "product_flow_mode">) => {
+  if (
+    document.product_flow_mode === "trust_bundle" ||
+    document.product_flow_mode === "poa_only" ||
+    document.product_flow_mode === "notarize_document"
+  ) {
+    return getDocumentLabel(document);
+  }
+
   const mappedLabel = document.document_type ? documentTypeLabels[document.document_type] : undefined;
   if (mappedLabel) {
     return mappedLabel;
@@ -458,7 +466,7 @@ const getDocumentTypeLabel = (document: DocumentRecord) => {
   return getDocumentLabel(document);
 };
 
-const getRoleLabel = (input: {
+export const resolveDocumentInviteRoleLabel = (input: {
   partyRole?: string | null | undefined;
   obligationType?: string | null | undefined;
 }) => {
@@ -1046,8 +1054,8 @@ const createInvitePayload = (input: {
     email: input.recipient.delivery_address,
   });
   const documentName = getDocumentLabel(input.document);
-  const documentType = getDocumentTypeLabel(input.document);
-  const roleLabel = getRoleLabel({
+  const documentType = resolveDocumentInviteDocumentTypeLabel(input.document);
+  const roleLabel = resolveDocumentInviteRoleLabel({
     partyRole: input.partyRole,
     obligationType: input.obligationType,
   });
@@ -1318,12 +1326,12 @@ const mapSigningRequestCard = (input: {
   const signerPhone = formatPartyPhone(input.party);
   const senderName = toDisplayName(input.sender);
   const senderEmail = input.sender?.email ?? null;
-  const roleLabel = getRoleLabel({
+  const roleLabel = resolveDocumentInviteRoleLabel({
     partyRole: input.invite.partyRole,
     obligationType: input.invite.obligationType,
   });
   const documentLabel = input.document ? getDocumentLabel(input.document) : "document";
-  const documentTypeLabel = input.document ? getDocumentTypeLabel(input.document) : "Document";
+  const documentTypeLabel = input.document ? resolveDocumentInviteDocumentTypeLabel(input.document) : "Document";
   const action = getSigningRequestAction({ direction: input.direction, invite: input.invite });
   const counterparty = input.direction === "incoming"
     ? senderName ?? "DARCi"
@@ -1693,8 +1701,8 @@ export const createDocumentInvite = async (input: {
       metadata: {
         inviteId: inviteRow.id,
         issuedAt: createdAt,
-        documentType: getDocumentTypeLabel(document),
-        roleLabel: getRoleLabel({
+        documentType: resolveDocumentInviteDocumentTypeLabel(document),
+        roleLabel: resolveDocumentInviteRoleLabel({
           partyRole: signer.party_role,
           obligationType: signer.obligation_type,
         }),
@@ -1886,8 +1894,8 @@ export const resendDocumentInvite = async (input: {
     metadata: {
       inviteId: context.invite.id,
       resend: true,
-      documentType: getDocumentTypeLabel(context.document),
-      roleLabel: getRoleLabel({
+      documentType: resolveDocumentInviteDocumentTypeLabel(context.document),
+      roleLabel: resolveDocumentInviteRoleLabel({
         partyRole: context.detail.partyRole,
         obligationType: context.detail.obligationType,
       }),

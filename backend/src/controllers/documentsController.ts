@@ -42,6 +42,7 @@ import {
   getDocumentOutputSignerById,
   getDocumentVersionById,
   getActiveNotarizationRequest,
+  findUserByPhoneForInviteValidation,
   listDocumentGenerationRuns as listDocumentGenerationRunsFromDb,
   listCapturedSignaturesForSigner,
   listDocumentSystemValues,
@@ -3662,6 +3663,36 @@ const buildTrustmakerCreatorEmailValidationError = (input: {
   };
 };
 
+const buildTrustmakerKnownPhoneValidationError = async (input: {
+  productFlowMode: string;
+  canonicalAnswers: Record<string, unknown>;
+  ownerId: string;
+}) => {
+  if (input.productFlowMode !== TRUST_BUNDLE_MODE_KEY) {
+    return null;
+  }
+
+  for (const trustmaker of parseTrustmakerRows(input.canonicalAnswers.grantors)) {
+    if (!trustmaker.phone) {
+      continue;
+    }
+
+    const matchedUser = await findUserByPhoneForInviteValidation({
+      phone: trustmaker.phone,
+      excludeUserId: input.ownerId,
+    });
+    if (matchedUser) {
+      return {
+        code: "trustmakers_phone_existing_user",
+        field: "grantors",
+        message: `The phone number for ${trustmaker.fullName} is already linked to another DARCi account. Use that person's account email/phone or enter a different phone number before sending signing invitations.`,
+      };
+    }
+  }
+
+  return null;
+};
+
 const toMemberFormSubmissionValueRecord = (
   answers: Record<string, unknown>,
 ): Record<string, MemberFormSubmissionValue> => {
@@ -5262,6 +5293,20 @@ export const submitDocumentIntakeDraft = async (req: Request, res: Response) => 
       valid: false,
       message: "Member form validation failed",
       errors: [trustmakerCreatorEmailError],
+    });
+  }
+
+  const trustmakerKnownPhoneError = await buildTrustmakerKnownPhoneValidationError({
+    productFlowMode: documentProductFlowMode,
+    canonicalAnswers: canonicalPayload,
+    ownerId: document.owner_id,
+  });
+
+  if (trustmakerKnownPhoneError) {
+    return res.status(422).json({
+      valid: false,
+      message: "Member form validation failed",
+      errors: [trustmakerKnownPhoneError],
     });
   }
 
@@ -7432,24 +7477,6 @@ export const submitNotarization = async (req: Request, res: Response) => {
   }
 
   if (selectedNotaryUserId) {
-    const documentVersions = await listDocumentVersionsFromDb(document.id);
-    const hasReviewablePdfVersion = documentVersions.some((version) => {
-      const mimeType = version.mime_type?.trim().toLowerCase() ?? "";
-      const fileName = version.file_name?.trim().toLowerCase() ?? "";
-
-      return Boolean(
-        version.storage_path &&
-          (mimeType.includes("pdf") || fileName.endsWith(".pdf")),
-      );
-    });
-
-    if (!hasReviewablePdfVersion) {
-      return res.status(409).json({
-        error: "document_not_ready_for_notary",
-        message: "Generate the document PDF before sending it to a notary.",
-      });
-    }
-
     const selectedNotaryValidation = await validateSelectedNotaryForDocument({
       document,
       selectedNotaryUserId,
@@ -7488,6 +7515,26 @@ export const submitNotarization = async (req: Request, res: Response) => {
         },
       ],
     });
+  }
+
+  if (selectedNotaryUserId) {
+    const documentVersions = await listDocumentVersionsFromDb(document.id);
+    const hasReviewablePdfVersion = documentVersions.some((version) => {
+      const mimeType = version.mime_type?.trim().toLowerCase() ?? "";
+      const fileName = version.file_name?.trim().toLowerCase() ?? "";
+
+      return Boolean(
+        version.storage_path &&
+          (mimeType.includes("pdf") || fileName.endsWith(".pdf")),
+      );
+    });
+
+    if (!hasReviewablePdfVersion) {
+      return res.status(409).json({
+        error: "document_not_ready_for_notary",
+        message: "Generate the document PDF before sending it to a notary.",
+      });
+    }
   }
 
   const existing = await getActiveNotarizationRequest(documentId);

@@ -18,6 +18,7 @@ vi.mock("@supabase/supabase-js", () => ({
 import {
   queueNotaryApplicationApprovedNotification,
   queueNotaryApplicationRejectedNotification,
+  queueNotaryApprovalReceivedNotification,
   queueSelectedNotaryRequestNotification,
 } from "../../src/services/notificationService";
 
@@ -259,6 +260,89 @@ describe("notificationService notary application decision notifications", () => 
           status: "queued",
         }),
       ],
+    );
+  });
+
+  it("queues notary approval contact emails with a member request deep-link CTA", async () => {
+    mocks.maybeSingleMock
+      .mockResolvedValueOnce({
+        data: {
+          id: "doc-1",
+          owner_id: "owner-1",
+          document_type: "generic",
+          product_flow_mode: "notarize_document",
+          jurisdiction: "US-OH",
+          idn: "IDN-123",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "owner-1",
+          email: "owner@example.test",
+          phone: "+15555550101",
+          first_name: "Olivia",
+          last_name: "Owner",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "notary-1",
+          email: "notary@example.test",
+          phone: "+15555550102",
+          first_name: "Nora",
+          last_name: "Tary",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-owner",
+          template_key: "notary_approval_received_email",
+          channel: "email",
+          trigger_event: "notary.request_approved",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-notary",
+          template_key: "notary_member_contact_received_email",
+          channel: "email",
+          trigger_event: "notary.request_approved",
+        },
+        error: null,
+      });
+
+    const result = await queueNotaryApprovalReceivedNotification({
+      documentId: "doc-1",
+      requestId: "req-1",
+      notaryUserId: "notary-1",
+    });
+
+    expect(result).toEqual({ jobId: "job-1", deliveryCount: 1, existing: false, jobIds: ["job-1", "job-1"] });
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_jobs",
+      expect.objectContaining({
+        template_id: "template-owner",
+        document_id: "doc-1",
+        notarization_request_id: "req-1",
+        payload_json: expect.objectContaining({
+          nextStepUrl:
+            "https://app.example.test/start?returnTo=%2Fapp%2Frequests%2Freq-1&intendedEmail=owner%40example.test",
+          dashboardUrl:
+            "https://app.example.test/start?returnTo=%2Fapp%2Frequests%2Freq-1&intendedEmail=owner%40example.test",
+          documentName: "document notarization",
+        }),
+        metadata: expect.objectContaining({
+          requestId: "req-1",
+          memberRequestPath: "/app/requests/req-1",
+          contactExchange: true,
+        }),
+      }),
     );
   });
 });

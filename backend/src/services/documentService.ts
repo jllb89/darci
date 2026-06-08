@@ -1,5 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeRuntimeRole } from "./userRoleService";
+import {
+  duplicatePhoneMessage,
+  isDuplicatePhoneUniqueConstraintError,
+  normalizePhoneForComparison,
+  normalizePhoneForStorage,
+} from "../utils/phone";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -481,6 +487,57 @@ export const getUserIdBySupabaseId = async (supabaseUserId: string) => {
   return user?.id ?? null;
 };
 
+export const findUserByPhoneForInviteValidation = async (input: {
+  phone: string | null | undefined;
+  excludeUserId?: string | null;
+}) => {
+  const normalizedStoragePhone = normalizePhoneForStorage(input.phone);
+  const normalizedComparisonPhone = normalizePhoneForComparison(input.phone);
+  if (!normalizedStoragePhone || !normalizedComparisonPhone) {
+    return null;
+  }
+
+  const nationalDigits = normalizedComparisonPhone.startsWith("1")
+    ? normalizedComparisonPhone.slice(1)
+    : normalizedComparisonPhone;
+  const formattedUsVariants = nationalDigits.length === 10
+    ? [
+        `(${nationalDigits.slice(0, 3)}) ${nationalDigits.slice(3, 6)}-${nationalDigits.slice(6)}`,
+        `${nationalDigits.slice(0, 3)}-${nationalDigits.slice(3, 6)}-${nationalDigits.slice(6)}`,
+        `${nationalDigits.slice(0, 3)} ${nationalDigits.slice(3, 6)} ${nationalDigits.slice(6)}`,
+        `${nationalDigits.slice(0, 3)}.${nationalDigits.slice(3, 6)}.${nationalDigits.slice(6)}`,
+      ]
+    : [];
+
+  const phoneVariants = Array.from(new Set([
+    input.phone?.trim() ?? "",
+    normalizedStoragePhone,
+    normalizedStoragePhone.replace(/^\+/, ""),
+    normalizedComparisonPhone,
+    nationalDigits,
+    ...formattedUsVariants,
+  ].filter((value) => value.length > 0)));
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, supabase_user_id, email, phone, role")
+    .in("phone", phoneVariants)
+    .limit(5);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const excludedUserId = input.excludeUserId?.trim() || null;
+  return ((data as UserRecord[] | null) ?? []).find((user) => {
+    if (excludedUserId && user.id === excludedUserId) {
+      return false;
+    }
+
+    return normalizePhoneForComparison(user.phone) === normalizedComparisonPhone;
+  }) ?? null;
+};
+
 export const getOrCreateUserId = async (
   supabaseUserId: string,
   email?: string,
@@ -497,11 +554,15 @@ export const getOrCreateUserId = async (
     .insert({
       supabase_user_id: supabaseUserId,
       email: email ?? null,
-      phone: phone ?? null,
+      phone: normalizePhoneForStorage(phone) ?? null,
       role: normalizeRuntimeRole(role),
     })
     .select("id")
     .single();
+
+  if (isDuplicatePhoneUniqueConstraintError(error)) {
+    throw new Error(duplicatePhoneMessage);
+  }
 
   if (error || !data?.id) {
     throw new Error(error?.message ?? "Failed to create user record");

@@ -7,7 +7,9 @@ vi.hoisted(() => {
 
 import {
   deriveDocumentSigningTemplateKey,
+  resolveDocumentInviteDocumentTypeLabel,
   resolveDocumentInviteEmailProvider,
+  resolveDocumentInviteRoleLabel,
 } from "../../src/services/documentInviteService";
 import {
   canClaimInviteToken,
@@ -99,6 +101,16 @@ describe("invite runtime helpers", () => {
     expect(access.token.length).toBeGreaterThan(20);
     expect(access.tokenPrefix).toBe(access.token.slice(0, 8));
     expect(hashInviteToken(access.token)).toBe(access.tokenHash);
+  });
+
+  it("uses client-facing trust labels for signer invitation payloads", () => {
+    expect(resolveDocumentInviteRoleLabel({ partyRole: "grantor" })).toBe("Trustmaker");
+    expect(
+      resolveDocumentInviteDocumentTypeLabel({
+        document_type: "intake",
+        product_flow_mode: "trust_bundle",
+      } as never),
+    ).toBe("trust registration");
   });
 
   it("blocks claim attempts when existing-account-only invites are anonymous", () => {

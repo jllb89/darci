@@ -252,6 +252,34 @@ describe("memberFormValidationService", () => {
     ).toBe(true);
   });
 
+  it("fails when trustmakers reuse the same phone number", () => {
+    const contract = buildTrustContract();
+    const grantorAlice = JSON.stringify({
+      fullName: "Alice Trustmaker",
+      isSigningTrustee: false,
+      email: "alice.trustmaker@example.com",
+      phone: "(555) 555-0123",
+    });
+    const grantorBob = JSON.stringify({
+      fullName: "Bob Trustmaker",
+      isSigningTrustee: false,
+      email: "bob.trustmaker@example.com",
+      phone: "+1 555-555-0123",
+    });
+
+    const result = validateMemberFormSubmission(
+      contract,
+      buildFormValues({
+        grantors: [grantorAlice, grantorBob],
+      }),
+    );
+
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) => error.code === "trustmakers_phone_unique"),
+    ).toBe(true);
+  });
+
   it("passes when trustmaker-bound tax ID owner matches entered trustmakers", () => {
     const contract = buildTrustContract();
 

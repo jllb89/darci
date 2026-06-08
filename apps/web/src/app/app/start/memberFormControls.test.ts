@@ -308,7 +308,10 @@ describe("memberFormControls", () => {
     expect(isValidPhoneCountryCode("1")).toBe(false);
 
     expect(isValidPhoneFormat("555-111-2222")).toBe(true);
+    expect(isValidPhoneFormat("1 (555) 111-2222")).toBe(true);
     expect(isValidPhoneFormat("123")).toBe(false);
+    expect(isValidPhoneFormat("555-1112")).toBe(false);
+    expect(isValidPhoneFormat("020 7946 0056", "GB")).toBe(true);
   });
 
   it("formats phone numbers as the user types", () => {

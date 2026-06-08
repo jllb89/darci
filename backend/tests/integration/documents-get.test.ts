@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   listDocumentVersionsMock: vi.fn(),
   listDocumentPartiesMock: vi.fn(),
   listDocumentOutputSignersMock: vi.fn(),
+  findUserByPhoneForInviteValidationMock: vi.fn(),
   updateDocumentMock: vi.fn(),
   replaceDocumentPartiesMock: vi.fn(),
   replaceDocumentOutputSignersMock: vi.fn(),
@@ -64,6 +65,8 @@ vi.mock("../../src/services/documentService", () => ({
   listDocumentVersions: mocks.listDocumentVersionsMock,
   listDocumentParties: mocks.listDocumentPartiesMock,
   listDocumentOutputSigners: mocks.listDocumentOutputSignersMock,
+  findUserByPhoneForInviteValidation:
+    mocks.findUserByPhoneForInviteValidationMock,
   updateDocument: mocks.updateDocumentMock,
   replaceDocumentParties: mocks.replaceDocumentPartiesMock,
   replaceDocumentOutputSigners: mocks.replaceDocumentOutputSignersMock,
@@ -255,6 +258,7 @@ describe("GET documents endpoints", () => {
     mocks.listDocumentVersionsMock.mockReset();
     mocks.listDocumentPartiesMock.mockReset();
     mocks.listDocumentOutputSignersMock.mockReset();
+    mocks.findUserByPhoneForInviteValidationMock.mockReset();
     mocks.updateDocumentMock.mockReset();
     mocks.replaceDocumentPartiesMock.mockReset();
     mocks.replaceDocumentOutputSignersMock.mockReset();
@@ -373,6 +377,7 @@ describe("GET documents endpoints", () => {
     });
     mocks.getActiveTemplateArtifactMock.mockResolvedValue(null);
     mocks.listDocumentOutputSignersMock.mockResolvedValue([]);
+    mocks.findUserByPhoneForInviteValidationMock.mockResolvedValue(null);
     mocks.updateDocumentMock.mockResolvedValue({
       id: "doc-1",
     });
@@ -1580,6 +1585,92 @@ describe("GET documents endpoints", () => {
         revocability_status: "revocable",
       },
     });
+  });
+
+  it("rejects trustmaker phones that already belong to another user before invites", async () => {
+    const trustmaker = JSON.stringify({
+      fullName: "Jorge Lopez",
+      email: "lopezb.jl@gmail.com",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "(415) 555-0103",
+      isSigningTrustee: false,
+    });
+
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [],
+      intake_status: "draft",
+      intake_submitted_at: null,
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [
+            {
+              fields: [
+                { canonical_key: "trust_name" },
+                { canonical_key: "grantors" },
+              ],
+            },
+          ],
+        },
+      },
+      missing: [],
+    });
+    mocks.validateMemberFormSubmissionMock.mockReturnValue({
+      valid: true,
+      errors: [],
+    });
+    mocks.findUserByPhoneForInviteValidationMock.mockResolvedValueOnce({
+      id: "other-user-1",
+      email: "other@example.test",
+      phone: "+14155550103",
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      email: "lopezb.jl@gmail.com",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-submit",
+      {
+        currentStep: "trust_requirements",
+        answers: {
+          trust_name: "Family Trust",
+          grantors: [trustmaker],
+        },
+      },
+      "rejects trustmaker phones that already belong to another user before invites",
+      token,
+    );
+
+    expect(response.status).toBe(422);
+    expect(response.body).toEqual({
+      valid: false,
+      message: "Member form validation failed",
+      errors: [
+        expect.objectContaining({
+          code: "trustmakers_phone_existing_user",
+          field: "grantors",
+          message: expect.stringContaining("already linked to another DARCi account"),
+        }),
+      ],
+    });
+    expect(mocks.findUserByPhoneForInviteValidationMock).toHaveBeenCalledWith({
+      phone: "(415) 555-0103",
+      excludeUserId: "owner-1",
+    });
+    expect(mocks.saveDocumentIntakeDraftMock).not.toHaveBeenCalled();
   });
 
   it("resubmits submitted pending-review intake after blocker fixes", async () => {

@@ -418,7 +418,7 @@ const hasInvalidPersonRowFormat = (item: PersonListItem) => {
     return true;
   }
 
-  if (!isValidPhoneFormat(item.phone)) {
+  if (!isValidPhoneFormat(item.phone, item.phoneCountryIso2)) {
     return true;
   }
 
@@ -435,7 +435,7 @@ export const validatePersonContact = (value: FormValue | undefined) => {
   const missingEmail = contact.email.trim().length === 0;
   const missingPhone = contact.phone.trim().length === 0;
   const invalidEmail = !missingEmail && !isValidEmailFormat(contact.email);
-  const invalidPhone = !missingPhone && !isValidPhoneFormat(contact.phone);
+  const invalidPhone = !missingPhone && !isValidPhoneFormat(contact.phone, contact.phoneCountryIso2);
   const invalidCountryCode = !isValidPhoneCountryCode(contact.phoneCountryCode);
 
   return {

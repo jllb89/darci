@@ -7,6 +7,11 @@ import {
   UserRoleServiceError,
 } from "../services/userRoleService";
 import { sendValidationError } from "../utils/validation";
+import {
+  duplicatePhoneMessage,
+  isDuplicatePhoneUniqueConstraintError,
+  normalizePhoneForStorage,
+} from "../utils/phone";
 
 const switchActiveRoleSchema = z.object({
   role: z.enum(["member", "pro", "notary", "admin"]),
@@ -67,8 +72,15 @@ export const updateMe = async (req: Request, res: Response) => {
     });
   }
 
-  const phone = parsed.data.phone.trim();
-  const sessionPhone = req.user.phone?.trim() ?? null;
+  const phone = normalizePhoneForStorage(parsed.data.phone);
+  if (!phone) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Enter a valid US phone number.",
+    });
+  }
+
+  const sessionPhone = normalizePhoneForStorage(req.user.phone) ?? null;
   if (sessionPhone && phone !== sessionPhone) {
     return res.status(400).json({
       error: "validation_error",
@@ -88,6 +100,13 @@ export const updateMe = async (req: Request, res: Response) => {
 
     return res.status(200).json({ user: toUserResponse(profile) });
   } catch (error) {
+    if (isDuplicatePhoneUniqueConstraintError(error)) {
+      return res.status(400).json({
+        error: "validation_error",
+        message: duplicatePhoneMessage,
+      });
+    }
+
     const statusCode = error instanceof UserRoleServiceError ? error.statusCode : 500;
     return res.status(statusCode).json({
       error: statusCode >= 500 ? "internal_error" : "validation_error",

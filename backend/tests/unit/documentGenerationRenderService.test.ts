@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyPreviewWatermarkOverlay,
+  formatExecutionDateForField,
+  formatExecutionDatePartsForLine,
+  isNotarialFinePrintLine,
   loadTemplateSource,
   PREVIEW_WATERMARK_TEXT,
   renderLegalTemplateText,
@@ -55,6 +58,56 @@ describe("documentGenerationRenderService", () => {
     expect(visible).toContain("Document: Original Trust Agreement on March 1, 2026");
     expect(visible).toContain("Signature authority: All trustees must sign");
     expect(visible).toContain("Incapacity standard: A court determination");
+  });
+
+  it("resolves seeded trust pseudo-loop placeholders from canonical parties", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "Trust Name: << Trust.Name >> Created on << Trust.Date >>",
+        "Trustmaker(s): {{ for each Trust.Maker, \\<\\< Name \\>\\> }}",
+        "Trustee(s): {{ for each Trust.Trustee, \\<\\< Name \\>\\> }}",
+        "The Trust is revocable by << Trust.Revoke >>",
+        "The Trust uses the tax ID number of: << Trust.Maker.Tax.Name >>",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        trust_name: "Orchid Trust",
+        trust_date: "2026-03-01",
+        grantors: [{ fullName: "Ava Trustmaker" }, { fullName: "Blake Trustmaker" }],
+        trustees: [{ fullName: "Taylor Trustee" }],
+        revocation_holders: "Either trustmaker may revoke",
+        tax_id_owner: "Ava Trustmaker",
+      },
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).toContain("Trust Name: Orchid Trust Created on March 1, 2026");
+    expect(visible).toContain("Trustmaker(s): Ava Trustmaker, Blake Trustmaker");
+    expect(visible).toContain("Trustee(s): Taylor Trustee");
+    expect(visible).toContain("The Trust is revocable by Either trustmaker may revoke");
+    expect(visible).toContain("The Trust uses the tax ID number of: Ava Trustmaker");
+  });
+
+  it("drops prior document bullets when seeded indexed placeholders are empty", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "* << Document1.Name >>, dated << Document1.Date >>",
+        "* << Document2.Name >>, dated << Document2.Date >>",
+        "* << Document3.Name >>, dated << Document3.Date >>",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        prior_document_items: [{ title: "Original Trust Agreement", date: "2026-03-01" }],
+      },
+      isPreview: false,
+    });
+    const visible = stripRenderControlTokens(rendered);
+    const lines = visible.split("\n").filter((line) => line.trim().length > 0);
+
+    expect(lines).toHaveLength(1);
+    expect(visible).toContain("Original Trust Agreement, dated March 1, 2026");
+    expect(visible).not.toMatch(/^\*\s*,\s*dated/m);
   });
 
   it("renders markdown-escaped trust placeholders from the real template format", () => {
@@ -433,5 +486,28 @@ describe("documentGenerationRenderService", () => {
 
     expect(fakeDocument.x).toBe(54);
     expect(fakeDocument.y).toBe(72);
+  });
+
+  it("formats execution dates from captured signature timestamps", () => {
+    expect(formatExecutionDateForField("2026-04-22T15:05:30.000Z")).toBe("04/22/2026");
+    expect(formatExecutionDateForField(null)).toBeNull();
+  });
+
+  it("formats execution date parts for POA execution lines", () => {
+    expect(formatExecutionDatePartsForLine("2026-06-01T15:30:00.000Z")).toEqual({
+      day: "1st",
+      month: "June",
+      year: "2026",
+    });
+    expect(formatExecutionDatePartsForLine("2026-06-12T15:30:00.000Z")?.day).toBe("12th");
+    expect(formatExecutionDatePartsForLine("not-a-date")).toBeNull();
+  });
+
+  it("classifies California acknowledgment body text as fine print", () => {
+    expect(
+      isNotarialFinePrintLine(
+        "On this ____ day of ________________ ________, before me, __________________, a notary public, personally appeared __________________, who proved to me on the basis of satisfactory evidence to be the person(s) whose name(s) is/are subscribed to the within instrument and acknowledged to me that he/she/they executed the same in his/her/their authorized capacity(ies), and that by his/her/their signature(s) on the instrument the person(s), or the entity upon behalf of which the person(s) acted, executed the instrument.",
+      ),
+    ).toBe(true);
   });
 });

@@ -52,7 +52,7 @@ const roleLabels: Record<string, string> = {
   principal: "Principal",
   agent: "Agent",
   successor_agent: "Successor agent",
-  grantor: "Grantor",
+  grantor: "Trustmaker",
   trustee: "Trustee",
   successor_trustee: "Successor trustee",
   trustmaker: "Trustmaker",

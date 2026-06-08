@@ -4,6 +4,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
+  listDocumentVersionsMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   getActiveNotarizationRequestMock: vi.fn(),
   createNotarizationRequestMock: vi.fn(),
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
+  listDocumentVersions: mocks.listDocumentVersionsMock,
   getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
   getActiveNotarizationRequest: mocks.getActiveNotarizationRequestMock,
   createNotarizationRequest: mocks.createNotarizationRequestMock,
@@ -218,6 +220,7 @@ describe("submit notarization", () => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     process.env.NOTARIZATION_CODE_TTL_MINUTES = "30";
     mocks.getDocumentByIdMock.mockReset();
+    mocks.listDocumentVersionsMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.getActiveNotarizationRequestMock.mockReset();
     mocks.createNotarizationRequestMock.mockReset();
@@ -244,6 +247,21 @@ describe("submit notarization", () => {
     mocks.getUserIdentityContextByUserIdMock.mockResolvedValue(null);
     mocks.getNotaryProfileByUserIdMock.mockResolvedValue(null);
     mocks.listAvailableNotariesByJurisdictionMock.mockResolvedValue([]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-1",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "documents/doc-1-signed.pdf",
+        file_name: "doc-1-signed.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1234,
+        is_final: false,
+        generation_run_id: "run-1",
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:00:00.000Z",
+      },
+    ]);
     mocks.upsertDocumentSystemValuesMock.mockResolvedValue(null);
     mocks.createIlluminotarizationWorkflowMock.mockResolvedValue(workflowRecord);
     mocks.createIlluminotarizationWorkflowDocumentMock.mockResolvedValue(null);

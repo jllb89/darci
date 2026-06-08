@@ -166,6 +166,23 @@ const normalizePhoneDigits = (value: string) => {
   return value.replace(/\D/g, "");
 };
 
+export const normalizePhoneForComparison = (value: string, countryIso2 = DEFAULT_PHONE_COUNTRY_ISO2) => {
+  const digits = normalizePhoneDigits(value);
+  const normalizedCountry = normalizePhoneCountryIso2(countryIso2);
+  if (!digits) {
+    return "";
+  }
+
+  if (normalizedCountry === "US") {
+    const nationalDigits = digits.length > US_PHONE_DIGIT_LIMIT && digits.startsWith("1")
+      ? digits.slice(1)
+      : digits;
+    return nationalDigits.length === US_PHONE_DIGIT_LIMIT ? `1${nationalDigits}` : "";
+  }
+
+  return digits.length >= 7 && digits.length <= 15 ? digits : "";
+};
+
 const limitPhoneDigitsForCountry = (value: string, countryIso2: string) => {
   const digits = normalizePhoneDigits(value);
   if (countryIso2 !== "US") {
@@ -192,9 +209,8 @@ export const isValidPhoneCountryCode = (value: string): boolean => {
   return phoneCountryOptionByCode.has(value.trim());
 };
 
-export const isValidPhoneFormat = (value: string): boolean => {
-  const digits = normalizePhoneDigits(value);
-  return digits.length >= 7 && digits.length <= 15;
+export const isValidPhoneFormat = (value: string, countryIso2 = DEFAULT_PHONE_COUNTRY_ISO2): boolean => {
+  return normalizePhoneForComparison(value, countryIso2).length > 0;
 };
 
 export const formatPhoneInput = (value: string, countryIso2?: string): string => {

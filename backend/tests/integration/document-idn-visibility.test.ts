@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   listDocumentsMock: vi.fn(),
+  countDocumentsMock: vi.fn(),
+  listDocumentFilterFacetsMock: vi.fn(),
   buildDocumentWorkspaceSummariesMock: vi.fn(),
   buildDocumentWorkspaceSummaryMock: vi.fn(),
   buildDocumentActionEnrichmentMock: vi.fn(),
@@ -15,6 +17,8 @@ vi.mock("../../src/services/documentService", () => ({
   getDocumentById: mocks.getDocumentByIdMock,
   getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
   listDocuments: mocks.listDocumentsMock,
+  countDocuments: mocks.countDocumentsMock,
+  listDocumentFilterFacets: mocks.listDocumentFilterFacetsMock,
 }));
 
 vi.mock("../../src/services/documentWorkspaceReadModelService", () => ({
@@ -46,9 +50,17 @@ describe("document IDN visibility", () => {
     mocks.getDocumentByIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.listDocumentsMock.mockReset();
+    mocks.countDocumentsMock.mockReset();
+    mocks.listDocumentFilterFacetsMock.mockReset();
     mocks.buildDocumentWorkspaceSummariesMock.mockReset();
     mocks.buildDocumentWorkspaceSummaryMock.mockReset();
     mocks.buildDocumentActionEnrichmentMock.mockReset();
+    mocks.countDocumentsMock.mockResolvedValue(0);
+    mocks.listDocumentFilterFacetsMock.mockResolvedValue({
+      documentTypes: [],
+      jurisdictions: [],
+      statuses: [],
+    });
     mocks.buildDocumentWorkspaceSummariesMock.mockResolvedValue(new Map());
     mocks.buildDocumentWorkspaceSummaryMock.mockResolvedValue(null);
     mocks.buildDocumentActionEnrichmentMock.mockResolvedValue(undefined);
@@ -85,6 +97,7 @@ describe("document IDN visibility", () => {
         created_at: "2026-03-05T00:02:00.000Z",
       },
     ]);
+    mocks.countDocumentsMock.mockResolvedValue(3);
 
     const token = signToken({
       sub: "user-1",

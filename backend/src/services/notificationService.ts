@@ -1572,7 +1572,11 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
       return null;
     }
 
-    const dashboardUrl = buildDocumentDetailsUrl(document.id);
+    const memberRequestPath = `/app/requests/${encodeURIComponent(input.requestId)}`;
+    const ownerUrl = buildAppUrl("/start", {
+      returnTo: memberRequestPath,
+      ...(owner.email ? { intendedEmail: owner.email } : {}),
+    });
     const notaryRequestPath = `/app/notary/requests/${encodeURIComponent(input.requestId)}?role=notary`;
     const notaryUrl = buildAppUrl("/start", {
       returnTo: notaryRequestPath,
@@ -1591,9 +1595,9 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
         firstName: toFirstName(owner),
         illuminotaryName: notary ? toDisplayName(notary) : "Your illuminotary",
         approvalSummary: input.summary?.trim() || null,
-        continueUrl: dashboardUrl,
-        dashboardUrl,
-        nextStepUrl: dashboardUrl,
+        continueUrl: ownerUrl,
+        dashboardUrl: ownerUrl,
+        nextStepUrl: ownerUrl,
         notaryName: notaryContact.name,
         notaryEmail: notaryContact.email,
         notaryPhone: notaryContact.phone,
@@ -1604,6 +1608,7 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
       metadata: {
         requestId: input.requestId,
         notaryUserId: input.notaryUserId,
+        memberRequestPath,
         summary: input.summary?.trim() || null,
         contactExchange: true,
       },

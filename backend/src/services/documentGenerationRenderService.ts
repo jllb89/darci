@@ -119,6 +119,7 @@ type TemplateBlock =
   | { kind: "blank" }
   | { kind: "title" | "heading" | "notice" | "fineprint" | "paragraph" | "bullet" | "table"; text: string }
   | { kind: "checklist"; text: string; checked: boolean }
+  | { kind: "executionDate"; text: string }
   | { kind: "signature"; text: string; includeDate: boolean };
 
 type SignatureFieldRect = {
@@ -128,12 +129,20 @@ type SignatureFieldRect = {
   height: number;
 };
 
+type ExecutionDatePlacement = {
+  lineRect?: SignatureFieldRect;
+  dayRect?: SignatureFieldRect;
+  monthRect?: SignatureFieldRect;
+  yearRect?: SignatureFieldRect;
+};
+
 export type SignatureFieldPlacement = {
   pageNumber: number;
   label: string;
   includeDate: boolean;
   signatureRect: SignatureFieldRect;
   dateRect: SignatureFieldRect | null;
+  executionDatePlacement?: ExecutionDatePlacement | null;
 };
 
 const systemPlaceholderTokens = new Set([
@@ -427,6 +436,7 @@ const parseSignatureFieldPlacement = (value: unknown): SignatureFieldPlacement |
   const includeDate = value.includeDate;
   const signatureRect = parseSignatureFieldRect(value.signatureRect);
   const dateRect = value.dateRect === null ? null : parseSignatureFieldRect(value.dateRect);
+  const executionDatePlacement = parseExecutionDatePlacement(value.executionDatePlacement);
 
   if (
     !isFiniteNumber(pageNumber) ||
@@ -444,6 +454,29 @@ const parseSignatureFieldPlacement = (value: unknown): SignatureFieldPlacement |
     includeDate,
     signatureRect,
     dateRect,
+    executionDatePlacement,
+  };
+};
+
+const parseExecutionDatePlacement = (value: unknown): ExecutionDatePlacement | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const lineRect = parseSignatureFieldRect(value.lineRect);
+  const dayRect = parseSignatureFieldRect(value.dayRect);
+  const monthRect = parseSignatureFieldRect(value.monthRect);
+  const yearRect = parseSignatureFieldRect(value.yearRect);
+
+  if (!lineRect && (!dayRect || !monthRect || !yearRect)) {
+    return null;
+  }
+
+  return {
+    ...(lineRect ? { lineRect } : {}),
+    ...(dayRect ? { dayRect } : {}),
+    ...(monthRect ? { monthRect } : {}),
+    ...(yearRect ? { yearRect } : {}),
   };
 };
 
@@ -479,7 +512,7 @@ const getLatestVersionForRun = <T extends { generation_run_id: string | null }>(
   return latestVersion;
 };
 
-const formatExecutionDateForField = (value: string | null | undefined) => {
+export const formatExecutionDateForField = (value: string | null | undefined) => {
   if (!value) {
     return null;
   }
@@ -494,6 +527,37 @@ const formatExecutionDateForField = (value: string | null | undefined) => {
   const year = parsed.getUTCFullYear();
 
   return `${month}/${day}/${year}`;
+};
+
+const formatOrdinalDay = (day: number) => {
+  const suffix = day % 100 >= 11 && day % 100 <= 13
+    ? "th"
+    : day % 10 === 1
+      ? "st"
+      : day % 10 === 2
+        ? "nd"
+        : day % 10 === 3
+          ? "rd"
+          : "th";
+
+  return `${day}${suffix}`;
+};
+
+export const formatExecutionDatePartsForLine = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return {
+    day: formatOrdinalDay(parsed.getUTCDate()),
+    month: new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(parsed),
+    year: `${parsed.getUTCFullYear()}`,
+  };
 };
 
 export const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
@@ -854,6 +918,48 @@ const renderAnnotatedText = (
     });
     isFirst = false;
   }
+};
+
+const matchExecutionDateLine = (value: string) => {
+  return value.trim().match(/^(Executed this\s+)(_{2,})(\s+day of\s+)(_{2,})(,\s+)(_{2,})([:.]?)$/i);
+};
+
+const isExecutionDateLine = (value: string) => {
+  return Boolean(matchExecutionDateLine(value));
+};
+
+const drawExecutionDateLine = (
+  document: PdfDocument,
+  text: string,
+  profile: TextRenderProfile,
+) => {
+  const match = matchExecutionDateLine(text);
+  if (!match) {
+    renderAnnotatedText(document, text, profile, {
+      lineGap: BODY_LINE_GAP,
+    });
+    return null;
+  }
+
+  const startX = document.x;
+  const startY = document.y;
+  const rectY = Math.max(startY - 2, 0);
+  const rectHeight = profile.fontSize + BODY_LINE_GAP + 5;
+  document.font(profile.baseFont).fontSize(profile.fontSize);
+  const lineWidth = document.page.width - document.page.margins.right - startX;
+
+  renderAnnotatedText(document, text, profile, {
+    lineGap: BODY_LINE_GAP,
+  });
+
+  return {
+    lineRect: {
+      x: startX,
+      y: rectY,
+      width: lineWidth,
+      height: rectHeight,
+    },
+  } satisfies ExecutionDatePlacement;
 };
 
 const drawSvgLogo = (document: PdfDocument, logo: BrandLogo, x: number, y: number) => {
@@ -1383,8 +1489,13 @@ const previewFallbackCopy: Record<string, string> = {
 };
 
 const placeholderCanonicalKeyAliases: Record<string, string> = {
+  "Trust.Name": "trust_name",
+  "Trust.Date": "trust_date",
+  "Trust.Revoke": "revocation_holders",
+  "Trust.Maker.Tax.Name": "tax_id_owner",
   TrustName: "trust_name",
   "Trustmaker(s)": "grantors",
+  Trustees: "trustees",
   "Trustee(s)": "trustees",
   TrustDate: "trust_date",
   RevokePower: "revocation_holders",
@@ -1426,6 +1537,14 @@ const resolveIndexedPriorDocumentValue = (
 };
 
 const resolveIndexedPartyValue = (canonicalAnswers: CanonicalAnswers, token: string) => {
+  const loopMatch = token.match(/^for each Trust\.(Maker|Trustee),\s*<<\s*Name\s*>>$/i);
+  if (loopMatch) {
+    const names = parsePersonNames(
+      loopMatch[1]?.toLowerCase() === "maker" ? canonicalAnswers.grantors : canonicalAnswers.trustees,
+    );
+    return names.length > 0 ? names.join(", ") : null;
+  }
+
   const trustmakerMatch = token.match(/^TM(\d+)$/i);
   if (trustmakerMatch) {
     const names = parsePersonNames(canonicalAnswers.grantors);
@@ -1692,6 +1811,13 @@ const buildTemplateBlocks = (renderedTemplate: string) => {
       };
     }
 
+    if (isExecutionDateLine(trimmed)) {
+      return {
+        kind: "executionDate",
+        text: trimmed,
+      };
+    }
+
     if (isNotarialFinePrintLine(trimmed)) {
       return {
         kind: "fineprint",
@@ -1740,6 +1866,10 @@ const shouldOmitRenderedLine = (line: string) => {
     return true;
   }
 
+  if (/^[*-]\s*,\s*dated\s*\.?$/i.test(trimmed)) {
+    return true;
+  }
+
   if (/^[*-]?\s*Et c(?:\.|…)+\s*$/i.test(trimmed)) {
     return true;
   }
@@ -1756,9 +1886,15 @@ const normalizeSectionLabel = (value: string) => {
     .toLowerCase();
 };
 
-const isNotarialFinePrintLine = (value: string) => {
-  return /^A notary public or other officer completing this certificate verifies only the identity/i.test(
-    value.trim(),
+export const isNotarialFinePrintLine = (value: string) => {
+  const trimmed = value.trim();
+  return (
+    /^A notary public or other officer completing this certificate verifies only the identity/i.test(
+      trimmed,
+    ) ||
+    /\bperson\(s\),\s+or the entity upon behalf of which the person\(s\) acted, executed the instrument\.?$/i.test(
+      trimmed,
+    )
   );
 };
 
@@ -2025,6 +2161,7 @@ const renderTemplateBlocks = (
     valueColor: MUTED_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
   };
+  let pendingExecutionDatePlacement: ExecutionDatePlacement | null = null;
 
   for (const block of blocks) {
     if (block.kind === "blank") {
@@ -2068,6 +2205,12 @@ const renderTemplateBlocks = (
       continue;
     }
 
+    if (block.kind === "executionDate") {
+      ensurePageSpace(document, 42);
+      pendingExecutionDatePlacement = drawExecutionDateLine(document, block.text, bodyProfile);
+      continue;
+    }
+
     if (block.kind === "bullet") {
       ensurePageSpace(document, 30);
       renderAnnotatedText(document, `• ${block.text}`, bodyProfile, {
@@ -2085,10 +2228,19 @@ const renderTemplateBlocks = (
 
     if (block.kind === "signature") {
       ensurePageSpace(document, 96);
+      const executionDatePlacement = pendingExecutionDatePlacement;
+      pendingExecutionDatePlacement = null;
       drawDigitalSignatureField(document, block.text, block.includeDate, fonts, {
         pageNumber: options?.getCurrentPageNumber?.() ?? 1,
         ...(options?.onRenderSignatureField
-          ? { onRender: options.onRenderSignatureField }
+          ? {
+              onRender: (placement) => {
+                options.onRenderSignatureField?.({
+                  ...placement,
+                  executionDatePlacement,
+                });
+              },
+            }
           : {}),
       });
       continue;
@@ -2330,7 +2482,7 @@ const coverSignatureFieldInterior = (
   return converted;
 };
 
-const replaceSignatureFieldWithLine = (
+const clearSignatureField = (
   page: PDFPage,
   rect: SignatureFieldRect,
 ) => {
@@ -2344,20 +2496,79 @@ const replaceSignatureFieldWithLine = (
     color: rgb(1, 1, 1),
   });
 
-  page.drawLine({
-    start: {
-      x: converted.x + 4,
-      y: converted.y + 5,
-    },
-    end: {
-      x: converted.x + converted.width - 4,
-      y: converted.y + 5,
-    },
-    thickness: 1,
-    color: rgb(0.52, 0.52, 0.52),
+  return converted;
+};
+
+const clearInlineTextRect = (
+  page: PDFPage,
+  rect: SignatureFieldRect,
+) => {
+  const converted = toPdfLibRect(page.getHeight(), rect);
+
+  page.drawRectangle({
+    x: converted.x,
+    y: converted.y,
+    width: converted.width,
+    height: converted.height,
+    color: rgb(1, 1, 1),
   });
 
   return converted;
+};
+
+const drawTextInRect = (input: {
+  page: PDFPage;
+  rect: SignatureFieldRect;
+  text: string;
+  font: PDFFont;
+  minSize?: number;
+  maxSize?: number;
+}) => {
+  const box = clearInlineTextRect(input.page, input.rect);
+  const fontSize = fitTextToRect({
+    text: input.text,
+    font: input.font,
+    width: box.width,
+    height: box.height,
+    minSize: input.minSize ?? BODY_FONT_SIZE,
+    maxSize: input.maxSize ?? BODY_FONT_SIZE,
+  });
+  const textHeight = input.font.heightAtSize(fontSize);
+
+  input.page.drawText(input.text, {
+    x: box.x + 1,
+    y: box.y + (box.height - textHeight) / 2,
+    size: fontSize,
+    font: input.font,
+    color: rgb(0.1, 0.1, 0.1),
+  });
+};
+
+const drawExecutionDateLineInRect = (input: {
+  page: PDFPage;
+  rect: SignatureFieldRect;
+  dateParts: NonNullable<ReturnType<typeof formatExecutionDatePartsForLine>>;
+  font: PDFFont;
+}) => {
+  const box = clearInlineTextRect(input.page, input.rect);
+  const text = `Executed this ${input.dateParts.day} day of ${input.dateParts.month}, ${input.dateParts.year}:`;
+  const fontSize = fitTextToRect({
+    text,
+    font: input.font,
+    width: box.width,
+    height: box.height,
+    minSize: BODY_FONT_SIZE,
+    maxSize: BODY_FONT_SIZE,
+  });
+  const textHeight = input.font.heightAtSize(fontSize);
+
+  input.page.drawText(text, {
+    x: box.x,
+    y: box.y + (box.height - textHeight) / 2,
+    size: fontSize,
+    font: input.font,
+    color: rgb(0.1, 0.1, 0.1),
+  });
 };
 
 const fitTextToRect = (input: {
@@ -2464,7 +2675,8 @@ const stampSignatureOnPdf = async (input: {
     });
   }
 
-  const signatureBox = replaceSignatureFieldWithLine(page, input.placement.signatureRect);
+  const signatureBox = clearSignatureField(page, input.placement.signatureRect);
+  const executionDateSource = input.signatureRecord.captured_at ?? input.signatureRecord.created_at;
   const signatureMethod =
     input.signatureRecord.capture_method === "upload" ||
     input.signatureRecord.capture_method === "type" ||
@@ -2514,8 +2726,46 @@ const stampSignatureOnPdf = async (input: {
     });
   }
 
+  if (input.placement.executionDatePlacement) {
+    const executionDateParts = formatExecutionDatePartsForLine(executionDateSource);
+    if (executionDateParts) {
+      const dateLineFont = await pdf.embedFont(StandardFonts.Helvetica);
+      if (input.placement.executionDatePlacement.lineRect) {
+        drawExecutionDateLineInRect({
+          page,
+          rect: input.placement.executionDatePlacement.lineRect,
+          dateParts: executionDateParts,
+          font: dateLineFont,
+        });
+      } else if (
+        input.placement.executionDatePlacement.dayRect &&
+        input.placement.executionDatePlacement.monthRect &&
+        input.placement.executionDatePlacement.yearRect
+      ) {
+        drawTextInRect({
+          page,
+          rect: input.placement.executionDatePlacement.dayRect,
+          text: executionDateParts.day,
+          font: dateLineFont,
+        });
+        drawTextInRect({
+          page,
+          rect: input.placement.executionDatePlacement.monthRect,
+          text: executionDateParts.month,
+          font: dateLineFont,
+        });
+        drawTextInRect({
+          page,
+          rect: input.placement.executionDatePlacement.yearRect,
+          text: executionDateParts.year,
+          font: dateLineFont,
+        });
+      }
+    }
+  }
+
   if (input.placement.dateRect) {
-    const executionDate = formatExecutionDateForField(input.signatureRecord.captured_at);
+    const executionDate = formatExecutionDateForField(executionDateSource);
     if (executionDate) {
       const dateBox = coverSignatureFieldInterior(page, input.placement.dateRect);
       const dateFont = await pdf.embedFont(StandardFonts.Helvetica);

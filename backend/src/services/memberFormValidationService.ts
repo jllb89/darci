@@ -1,4 +1,5 @@
 import type { MemberFormRulesContract } from "./memberFormRulesService";
+import { normalizePhoneForComparison } from "../utils/phone";
 
 export type MemberFormSubmissionValue = string | boolean | string[];
 
@@ -21,6 +22,7 @@ type TrusteeRow = {
   fullName: string;
   isSigningTrustee: boolean;
   email: string | null;
+  phone: string | null;
 };
 
 type PriorDocumentRow = {
@@ -136,12 +138,19 @@ const extractTrusteeRows = (value: MemberFormSubmissionValue | undefined) => {
           typeof parsed.email === "string" && emailPattern.test(parsed.email.trim())
             ? parsed.email.trim()
             : null;
+        const phone =
+          typeof parsed.phone === "string"
+            ? parsed.phone.trim()
+            : typeof parsed.phoneNumber === "string"
+              ? parsed.phoneNumber.trim()
+              : null;
 
         fallbackName = fullName || fallbackName;
         rows.push({
           fullName: fallbackName,
           isSigningTrustee,
           email,
+          phone: phone && phone.length > 0 ? phone : null,
         });
         continue;
       }
@@ -153,6 +162,7 @@ const extractTrusteeRows = (value: MemberFormSubmissionValue | undefined) => {
       fullName: fallbackName,
       isSigningTrustee: false,
       email: null,
+      phone: null,
     });
   }
 
@@ -427,6 +437,17 @@ export const validateMemberFormSubmission = (
             code: "trustmakers_email_unique",
             field: field.canonical_key,
             message: "Each Trustmaker must use a unique email address.",
+          });
+        }
+
+        const phones = trustees
+          .map((trustee) => normalizePhoneForComparison(trustee.phone))
+          .filter((phone): phone is string => Boolean(phone));
+        if (new Set(phones).size !== phones.length) {
+          errors.push({
+            code: "trustmakers_phone_unique",
+            field: field.canonical_key,
+            message: "Each Trustmaker must use a unique phone number.",
           });
         }
       }

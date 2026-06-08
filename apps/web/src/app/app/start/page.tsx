@@ -30,6 +30,7 @@ import {
   isValidPhoneCountryCode,
   isValidPhoneFormat,
   isTemporarilyHiddenCreateFlowField,
+  normalizePhoneForComparison,
   parseMultilineArrayFormInput,
   parsePriorDocumentItems,
   parsePersonContact,
@@ -2154,11 +2155,15 @@ export default function StartDocumentPage() {
     const emails = filledRows
       .map((item) => item.email.trim().toLowerCase())
       .filter((email) => email.length > 0);
+    const phones = filledRows
+      .map((item) => normalizePhoneForComparison(item.phone, item.phoneCountryIso2))
+      .filter((phone) => phone.length > 0);
 
     return {
       filledCount: filledRows.length,
       tooMany: filledRows.length > 2,
       duplicateEmailCount: emails.length - new Set(emails).size,
+      duplicatePhoneCount: phones.length - new Set(phones).size,
     };
   }, [formValues.grantors]);
 
@@ -2351,7 +2356,7 @@ export default function StartDocumentPage() {
 
             if (
               item.phone.trim().length > 0 &&
-              (!isValidPhoneCountryCode(item.phoneCountryCode) || !isValidPhoneFormat(item.phone))
+              (!isValidPhoneCountryCode(item.phoneCountryCode) || !isValidPhoneFormat(item.phone, item.phoneCountryIso2))
             ) {
               addMessage(`${rowLabel}: enter a valid phone country code and phone number.`);
             }
@@ -2519,6 +2524,10 @@ export default function StartDocumentPage() {
 
     if (trustmakerValidation.duplicateEmailCount > 0) {
       addMessage("Trustmakers: each Trustmaker must use a unique email address.");
+    }
+
+    if (trustmakerValidation.duplicatePhoneCount > 0) {
+      addMessage("Trustmakers: each Trustmaker must use a unique phone number.");
     }
 
     if (trusteeValidation.incompleteCount > 0) {

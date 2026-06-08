@@ -483,11 +483,12 @@ const NotarySelectControl = ({
       return;
     }
 
-    updatePopoverPosition();
+    const frameId = window.requestAnimationFrame(updatePopoverPosition);
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);
 
     return () => {
+      window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", updatePopoverPosition);
       window.removeEventListener("scroll", updatePopoverPosition, true);
     };
@@ -1793,7 +1794,7 @@ export default function SignPage() {
           style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "120ms" }}
         >
           <div
-            className="relative z-0 space-y-6 overflow-visible lg:sticky lg:self-start"
+            className="relative z-0 space-y-6 overflow-visible lg:sticky lg:max-h-[calc(100vh-var(--darci-process-band-follow-offset,5rem)-1.5rem)] lg:self-start lg:overflow-y-auto lg:pr-2"
             style={{ top: "var(--darci-process-band-follow-offset, 5rem)" }}
           >
             <div className="space-y-2 pb-2">

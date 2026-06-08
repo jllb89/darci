@@ -198,6 +198,7 @@ describe("document review approval", () => {
       {
         id: "run-1",
         document_id: "doc-1",
+        intake_revision: 7,
         output_key: "trust_rrr",
         status: "rendered",
       },

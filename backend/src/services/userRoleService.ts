@@ -1,4 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
+import {
+  duplicatePhoneMessage,
+  isDuplicatePhoneUniqueConstraintError,
+  normalizePhoneForStorage,
+} from "../utils/phone";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -91,15 +96,6 @@ export const normalizeRuntimeRole = (value?: string | null): RuntimeRole => {
   }
 
   return "member";
-};
-
-const normalizeAuthMirrorPhone = (value: string | null | undefined) => {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) {
-    return undefined;
-  }
-
-  return /^\+[1-9][0-9]{6,14}$/.test(trimmed) ? trimmed : undefined;
 };
 
 export const roleSatisfiesRequirement = (
@@ -426,7 +422,7 @@ export const ensureUserIdentityFromAuth = async (input: {
   lastAuthSyncedAt?: string | null;
 }) => {
   const existingUser = await selectUserRowBySupabaseId(input.supabaseUserId);
-  const normalizedInputPhone = normalizeAuthMirrorPhone(input.phone);
+  const normalizedInputPhone = normalizePhoneForStorage(input.phone);
   const inputRole = normalizeRuntimeRole(input.role);
 
   if (!existingUser) {
@@ -461,6 +457,10 @@ export const ensureUserIdentityFromAuth = async (input: {
       .single();
 
     const { data, error } = await runWithAuthMirrorColumnFallback(runInsert);
+
+    if (isDuplicatePhoneUniqueConstraintError(error)) {
+      throw new UserRoleServiceError(400, duplicatePhoneMessage);
+    }
 
     if (error || !data) {
       throw new Error(error?.message ?? "Failed to create user record");
@@ -533,6 +533,10 @@ export const ensureUserIdentityFromAuth = async (input: {
       .eq("id", existingUser.id);
 
     const { error } = await runWithAuthMirrorColumnFallback(runUpdate);
+
+    if (isDuplicatePhoneUniqueConstraintError(error)) {
+      throw new UserRoleServiceError(400, duplicatePhoneMessage);
+    }
 
     if (error) {
       throw new Error(error.message);

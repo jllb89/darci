@@ -43,6 +43,21 @@ type NotaryApplication = {
   updatedAt: string;
 };
 
+type NotaryProfile = {
+  id: string;
+  userId: string;
+  jurisdiction: string;
+  serviceAreaKind: NotaryServiceAreaKind;
+  serviceAreaName: string;
+  commissionNumber: string | null;
+  commissionExpiresAt: string | null;
+  sealStoragePath: string | null;
+  signatureDataUrl: string | null;
+  sealDataUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type AdminApplicationRow = {
   id: string;
   userId: string;
@@ -884,6 +899,7 @@ export default function SettingsPage() {
   const user = useStoredUser();
   const isAdmin = user?.role === "admin";
   const [application, setApplication] = useState<NotaryApplication | null>(null);
+  const [notaryProfile, setNotaryProfile] = useState<NotaryProfile | null>(null);
   const [adminApplications, setAdminApplications] = useState<AdminApplicationRow[]>([]);
   const [applicationForm, setApplicationForm] = useState(emptyApplicationForm);
   const [adminReviewNotes, setAdminReviewNotes] = useState("");
@@ -908,14 +924,15 @@ export default function SettingsPage() {
 
     setIsLoading(true);
     try {
-      const [applicationResponse, adminResponse] = await Promise.all([
+      const [applicationResponse, profileResponse, adminResponse] = await Promise.all([
         fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/notary-application`, accessToken, { cache: "no-store" }),
+        fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/notary-profile`, accessToken, { cache: "no-store" }),
         isAdmin
           ? fetchWithTokenRefresh(`${notaryApiBaseUrl}/admin/notary-applications`, accessToken, { cache: "no-store" })
           : Promise.resolve(null),
       ]);
 
-      if (applicationResponse.status === 401) {
+      if (applicationResponse.status === 401 || profileResponse.status === 401) {
         setHasAuthError(true);
         setErrorMessage("Session expired. Please sign in again.");
         return;
@@ -923,6 +940,9 @@ export default function SettingsPage() {
 
       if (!applicationResponse.ok) {
         throw new Error(await readApiErrorMessage(applicationResponse, "Unable to load your notary application."));
+      }
+      if (!profileResponse.ok) {
+        throw new Error(await readApiErrorMessage(profileResponse, "Unable to load your notary profile."));
       }
       if (adminResponse && !adminResponse.ok) {
         if (adminResponse.status === 401) {
@@ -934,18 +954,21 @@ export default function SettingsPage() {
       }
 
       const applicationPayload = (await applicationResponse.json()) as { application: NotaryApplication | null };
+      const profilePayload = (await profileResponse.json()) as { profile: NotaryProfile | null };
       const adminPayload = adminResponse ? ((await adminResponse.json()) as { applications: AdminApplicationRow[] }) : { applications: [] };
+      const formSource = profilePayload.profile ?? applicationPayload.application;
 
       setApplication(applicationPayload.application);
+      setNotaryProfile(profilePayload.profile);
       setAdminApplications(adminPayload.applications ?? []);
       setApplicationForm(
-        applicationPayload.application
+        formSource
           ? {
-              jurisdiction: applicationPayload.application.jurisdiction,
-              serviceAreaKind: applicationPayload.application.serviceAreaKind,
-              serviceAreaName: applicationPayload.application.serviceAreaName,
-              signatureDataUrl: applicationPayload.application.signatureDataUrl,
-              sealDataUrl: applicationPayload.application.sealDataUrl,
+              jurisdiction: formSource.jurisdiction,
+              serviceAreaKind: formSource.serviceAreaKind,
+              serviceAreaName: formSource.serviceAreaName,
+              signatureDataUrl: formSource.signatureDataUrl,
+              sealDataUrl: formSource.sealDataUrl,
             }
           : emptyApplicationForm,
       );
@@ -1080,7 +1103,8 @@ export default function SettingsPage() {
       return;
     }
 
-    if (application) {
+    const isProfileUpdate = application?.status === "approved";
+    if (application && !isProfileUpdate) {
       setErrorMessage("A notary application has already been submitted for this account.");
       return;
     }
@@ -1095,8 +1119,8 @@ export default function SettingsPage() {
     setErrorMessage(null);
 
     try {
-      const response = await fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/notary-application`, accessToken, {
-        method: "POST",
+      const response = await fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/${isProfileUpdate ? "notary-profile" : "notary-application"}`, accessToken, {
+        method: isProfileUpdate ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jurisdiction: applicationForm.jurisdiction.trim(),
@@ -1109,6 +1133,18 @@ export default function SettingsPage() {
 
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, "Unable to save notary application."));
+      }
+
+      if (isProfileUpdate) {
+        const payload = (await response.json()) as { profile: NotaryProfile | null };
+        setNotaryProfile(payload.profile);
+        setMessage("Notary profile updated.");
+        showToast({
+          tone: "success",
+          message: "Notary profile updated.",
+          durationMs: 4000,
+        });
+        return;
       }
 
       showToast({
@@ -1164,6 +1200,8 @@ export default function SettingsPage() {
     [adminApplications],
   );
   const hasSubmittedApplication = Boolean(application);
+  const canEditApprovedProfile = application?.status === "approved";
+  const isProfileFormLocked = Boolean(application && !canEditApprovedProfile);
   const applicationStatusLabel = application
     ? application.status.charAt(0).toUpperCase() + application.status.slice(1)
     : null;
@@ -1210,10 +1248,14 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-4 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
-            <div className="text-sm font-medium text-Color-Scheme-1-Text">Apply as a notary</div>
+            <div className="text-sm font-medium text-Color-Scheme-1-Text">
+              {canEditApprovedProfile ? "Notary profile" : "Apply as a notary"}
+            </div>
             {hasSubmittedApplication ? (
               <div className="rounded-xl bg-white p-4 text-sm text-Color-Neutral-Darkest">
-                Your notary application has already been submitted. Current status: {applicationStatusLabel}.
+                {canEditApprovedProfile
+                  ? `Your notary profile is active${notaryProfile ? "" : ", but profile details still need to be saved"}.`
+                  : `Your notary application has already been submitted. Current status: ${applicationStatusLabel}.`}
               </div>
             ) : null}
 
@@ -1224,7 +1266,7 @@ export default function SettingsPage() {
                 placeholder="Select a state"
                 options={jurisdictionSelectOptions}
                 isOpen={openSelectId === "jurisdiction"}
-                disabled={hasSubmittedApplication || isLoading || jurisdictionSelectOptions.length === 0}
+                disabled={isProfileFormLocked || isLoading || jurisdictionSelectOptions.length === 0}
                 onOpenChange={(isOpen) => setOpenSelectId(isOpen ? "jurisdiction" : null)}
                 onChange={(nextValue) => {
                   setApplicationForm((current) => ({
@@ -1242,7 +1284,7 @@ export default function SettingsPage() {
                 placeholder={isLoadingServiceAreas ? "Loading options..." : "Select one"}
                 options={serviceAreaOptions}
                 isOpen={openSelectId === "serviceArea"}
-                disabled={hasSubmittedApplication || isLoading || isLoadingServiceAreas || !applicationForm.jurisdiction}
+                disabled={isProfileFormLocked || isLoading || isLoadingServiceAreas || !applicationForm.jurisdiction}
                 onOpenChange={(isOpen) => setOpenSelectId(isOpen ? "serviceArea" : null)}
                 onChange={(nextValue) => {
                   setApplicationForm((current) => ({
@@ -1267,22 +1309,30 @@ export default function SettingsPage() {
             <SignatureCaptureField
               value={applicationForm.signatureDataUrl}
               onChange={(nextValue) => setApplicationForm((current) => ({ ...current, signatureDataUrl: nextValue }))}
-              disabled={hasSubmittedApplication || isSavingApplication || isLoading}
+              disabled={isProfileFormLocked || isSavingApplication || isLoading}
             />
 
             <SealDropzoneField
               value={applicationForm.sealDataUrl}
               onChange={(nextValue) => setApplicationForm((current) => ({ ...current, sealDataUrl: nextValue }))}
-              disabled={hasSubmittedApplication || isSavingApplication || isLoading}
+              disabled={isProfileFormLocked || isSavingApplication || isLoading}
             />
 
             <button
               className="w-full rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={hasSubmittedApplication || isSavingApplication || isLoading}
+              disabled={isProfileFormLocked || isSavingApplication || isLoading}
               onClick={() => void submitApplication()}
               type="button"
             >
-              {hasSubmittedApplication ? "Application already submitted" : isSavingApplication ? "Submitting" : "Submit notary application"}
+              {isProfileFormLocked
+                ? "Application already submitted"
+                : canEditApprovedProfile
+                ? isSavingApplication
+                  ? "Saving"
+                  : "Save notary profile"
+                : isSavingApplication
+                ? "Submitting"
+                : "Submit notary application"}
             </button>
 
             <div className="rounded-xl bg-Color-Neutral-Lightest/60 p-4 text-sm text-Color-Neutral-Darkest">
