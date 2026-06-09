@@ -163,6 +163,27 @@ describe("documentGenerationRenderService", () => {
     expect(source).toContain("TrustName");
   });
 
+  it("loads OH POA source from the template-key fallback when artifact metadata is stale", async () => {
+    const source = await loadTemplateSource({
+      id: "artifact-oh-poa",
+      template_key: "oh_poa_general",
+      template_version: "2026.06.05.v2",
+      template_hash: "sha256:oh-poa-v2",
+      artifact_storage_path: "templates/oh_poa_general.template.json",
+      artifact_mime_type: "application/json",
+      render_engine: "other",
+      artifact_metadata: {
+        renderer: "context_snapshot",
+        templateLabel: "Ohio DDPOA",
+      },
+      is_active: true,
+      created_at: "2026-06-05T00:00:00.000Z",
+    });
+
+    expect(source).toContain("DDPOA No.");
+    expect(source).toContain("IMPORTANT INFORMATION FOR AGENT");
+  });
+
   it("promotes bold-only legal labels into headings and drops the et cetera trust bullet", () => {
     const rendered = renderLegalTemplateText({
       templateSource: [

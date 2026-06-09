@@ -1,4 +1,4 @@
-import { access, readFile } from "fs/promises";
+import { access, readFile, readdir } from "fs/promises";
 import path from "path";
 import PDFDocument from "pdfkit";
 import {
@@ -55,6 +55,14 @@ const templateSourcePathFallbacks: Record<string, string> = {
   ca_trust_certificate: "../docs/CA - DARCi Trust Certification (APE 260305).md",
   oh_trust_rrr: "../docs/OH - DARCi Trust Registration Amendment .md",
   oh_trust_certificate: "../docs/OH - DARCi Trust Certification .md",
+};
+
+const templateSourceFallbackAliases: Record<string, string[]> = {
+  oh_poa_general: [
+    "../docs/OH DDPOA 1.0.docx.md",
+    "../docs/OH DDPOA 1.0.md",
+    "../docs/OH DDPOA.md",
+  ],
 };
 import { captureException } from "../utils/sentry";
 
@@ -565,6 +573,7 @@ export const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
   const localTemplatePaths = [
     asTrimmedString(metadata.localTemplatePath),
     templateSourcePathFallbacks[artifact.template_key] ?? "",
+    ...(templateSourceFallbackAliases[artifact.template_key] ?? []),
   ].filter((candidate, index, paths) => candidate && paths.indexOf(candidate) === index);
 
   for (const localTemplatePath of localTemplatePaths) {
@@ -586,6 +595,28 @@ export const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
     }
   }
 
+  if (artifact.template_key === "oh_poa_general") {
+    const docsDirectories = [
+      path.resolve(process.cwd(), "../docs"),
+      path.resolve("/docs"),
+    ];
+
+    for (const docsDirectory of new Set(docsDirectories)) {
+      try {
+        const entries = await readdir(docsDirectory);
+        const matchedName = entries.find((entry) => /^OH\s+.*DDPOA.*\.md$/i.test(entry));
+        if (!matchedName) {
+          continue;
+        }
+
+        const discoveredPath = path.resolve(docsDirectory, matchedName);
+        return await readFile(discoveredPath, "utf8");
+      } catch {
+        continue;
+      }
+    }
+  }
+
   const storageTemplatePath = asTrimmedString(artifact.artifact_storage_path);
   if (storageTemplatePath) {
     try {
@@ -600,6 +631,20 @@ export const loadTemplateSource = async (artifact: TemplateArtifactRecord) => {
   }
 
   return null;
+};
+
+const sanitizeStorageFileName = (fileName: string) => {
+  const normalized = fileName
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  const withDefault = normalized.length > 0 ? normalized : "document.pdf";
+  if (/\.pdf$/i.test(withDefault)) {
+    return withDefault;
+  }
+
+  return `${withDefault}.pdf`;
 };
 
 const resolveWorkspaceAssetPath = async (relativePath: string) => {
@@ -2916,7 +2961,8 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
   });
   const baseFileName = (latestVersion.file_name ?? `${run.output_key}.pdf`).replace(/\.pdf$/i, "");
   const nextFileName = `${baseFileName.replace(/-signed$/i, "")}-signed.pdf`;
-  const storagePath = `${input.document.owner_id}/${input.document.id}/generated/${input.generationRunId}/${Date.now()}-${nextFileName}`;
+  const storageFileName = sanitizeStorageFileName(nextFileName);
+  const storagePath = `${input.document.owner_id}/${input.document.id}/generated/${input.generationRunId}/${Date.now()}-${storageFileName}`;
 
   await uploadGeneratedDocument({
     storagePath,
