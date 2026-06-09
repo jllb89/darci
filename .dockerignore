@@ -47,6 +47,8 @@ trust & idn roadmap.md
 
 # Runtime template sources required by backend PDF rendering.
 !docs/CA DDPOA.md
+!docs/OH DDPOA 1.0.docx.md
+!docs/OH*DDPOA*.md
 !docs/CA - DARCi Trust Registration Amendment (APE 260305) (1).md
 !docs/CA - DARCi Trust Certification (APE 260305).md
 !docs/OH - DARCi Trust Registration Amendment .md
