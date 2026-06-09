@@ -293,13 +293,18 @@ const mapFinalizationVersionSummary = (version: {
 });
 
 const buildAuditActorContext = (req: Request) => {
-  const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
+  const actorContext: {
+    actorSupabaseId?: string;
+    actorRole?: string;
+    requestId?: string | null;
+  } = {};
   if (req.user?.id) {
     actorContext.actorSupabaseId = req.user.id;
   }
   if (req.user?.role) {
     actorContext.actorRole = req.user.role;
   }
+  actorContext.requestId = req.requestId ?? null;
   return actorContext;
 };
 

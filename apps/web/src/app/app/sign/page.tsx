@@ -15,6 +15,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
+import {
+  addFeatureBreadcrumb,
+  captureDomainException,
+  getResponseRequestId,
+} from "@/lib/clientTelemetry";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -611,6 +616,9 @@ export default function SignPage() {
   const [isNotarySelectOpen, setIsNotarySelectOpen] = useState(false);
   const [isDraggingUpload, setIsDraggingUpload] = useState(false);
   const [selectedSavedSignatureId, setSelectedSavedSignatureId] = useState<string | null>(null);
+  const [deletingSavedSignatureIds, setDeletingSavedSignatureIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [inviteDispatchSummary, setInviteDispatchSummary] = useState<InviteDispatchSummary>({
     status: "idle",
     message: null,
@@ -652,6 +660,13 @@ export default function SignPage() {
         setIsLoading(true);
       }
 
+      let requestId: string | null = null;
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "workspace.fetch_started",
+        data: { documentId, silent: Boolean(options?.silent) },
+      });
+
       try {
         const response = await fetchWithTokenRefresh(
           `${apiBaseUrl}/documents/${documentId}/signing`,
@@ -660,6 +675,7 @@ export default function SignPage() {
             cache: "no-store",
           },
         );
+        requestId = getResponseRequestId(response);
         const nextPayload = (await response.json().catch(() => null)) as
           | SigningPayload
           | null;
@@ -670,10 +686,44 @@ export default function SignPage() {
 
         setPayload(nextPayload);
         setErrorMessage(null);
+        addFeatureBreadcrumb({
+          feature: "document_signing",
+          action: "workspace.fetch_completed",
+          data: {
+            documentId,
+            requestId,
+            state: nextPayload.signing.state,
+            signatureCount: nextPayload.signing.signatures.length,
+            pendingOutputCount: nextPayload.signing.pendingOutputs.length,
+          },
+        });
         return nextPayload;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to load signing workspace.";
+        addFeatureBreadcrumb({
+          feature: "document_signing",
+          action: "workspace.fetch_failed",
+          level: "error",
+          data: { documentId, requestId },
+        });
+        captureDomainException(error, {
+          level: "error",
+          operation: "document_signing.fetch",
+          errorCode: "WEB_SIGNING_FETCH_FAILED",
+          errorFamily: "signing",
+          requestId,
+          tags: {
+            feature: "document_signing",
+            document_id: documentId,
+          },
+          contexts: {
+            document_signing: {
+              documentId,
+              stage: "fetch_signing_workspace",
+            },
+          },
+        });
         setErrorMessage(message);
         return null;
       } finally {
@@ -692,6 +742,7 @@ export default function SignPage() {
 
     setSavedSignatures([]);
     setSelectedSavedSignatureId(null);
+    setDeletingSavedSignatureIds(new Set());
     setInviteDispatchSummary({
       status: "idle",
       message: null,
@@ -767,6 +818,13 @@ export default function SignPage() {
 
     setIsLoadingSavedSignatures(true);
 
+    let requestId: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "document_signing",
+      action: "saved_signatures.fetch_started",
+      data: { documentId },
+    });
+
     try {
       const response = await fetchWithTokenRefresh(
         `${apiBaseUrl}/documents/${documentId}/signatures/saved`,
@@ -775,6 +833,7 @@ export default function SignPage() {
           cache: "no-store",
         },
       );
+      requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as
         | SavedSignaturesPayload
         | null;
@@ -785,10 +844,26 @@ export default function SignPage() {
 
       const nextSavedSignatures = responsePayload?.savedSignatures ?? [];
       setSavedSignatures(nextSavedSignatures);
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "saved_signatures.fetch_completed",
+        data: { documentId, requestId, savedSignatureCount: nextSavedSignatures.length },
+      });
       return nextSavedSignatures;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to load saved signatures.";
+      captureDomainException(error, {
+        level: "warning",
+        operation: "document_signing.fetch_saved_signatures",
+        errorCode: "WEB_SIGNING_SAVED_SIGNATURES_FETCH_FAILED",
+        errorFamily: "signing",
+        requestId,
+        tags: {
+          feature: "document_signing",
+          document_id: documentId,
+        },
+      });
       setErrorMessage(message);
       showToast({ tone: "error", message });
       return [] as SavedSignature[];
@@ -1201,6 +1276,19 @@ export default function SignPage() {
 
       setIsSavingCapture(true);
 
+      let requestId: string | null = null;
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "signature.upload_started",
+        data: {
+          documentId,
+          generationRunId: activeSignature.generationRunId,
+          outputSignerId: activeSignature.outputSignerId,
+          fileType: file.type,
+          fileSize: file.size,
+        },
+      });
+
       try {
         const requestResponse = await fetchWithTokenRefresh(
           `${apiBaseUrl}/documents/${documentId}/signatures/request`,
@@ -1219,6 +1307,7 @@ export default function SignPage() {
             }),
           },
         );
+        requestId = getResponseRequestId(requestResponse);
         const requestPayload = (await requestResponse.json().catch(() => null)) as
           | SignatureUploadResponse
           | null;
@@ -1254,6 +1343,7 @@ export default function SignPage() {
             }),
           },
         );
+        requestId = getResponseRequestId(finalizeResponse) ?? requestId;
         const finalizePayload = (await finalizeResponse.json().catch(() => null)) as
           | SignatureResponse
           | null;
@@ -1264,11 +1354,46 @@ export default function SignPage() {
 
         applyRemainingSignerInviteDispatchSummary(finalizePayload?.remainingSignerInvites);
         showToast({ tone: "success", message: "Uploaded signature saved." });
+        addFeatureBreadcrumb({
+          feature: "document_signing",
+          action: "signature.upload_completed",
+          data: {
+            documentId,
+            requestId,
+            generationRunId: activeSignature.generationRunId,
+            outputSignerId: activeSignature.outputSignerId,
+          },
+        });
         await refreshAfterCapture();
         void fetchSavedSignatures();
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to upload signature image.";
+        addFeatureBreadcrumb({
+          feature: "document_signing",
+          action: "signature.upload_failed",
+          level: "error",
+          data: { documentId, requestId, outputSignerId: activeSignature.outputSignerId },
+        });
+        captureDomainException(error, {
+          level: "error",
+          operation: "document_signing.capture_upload",
+          errorCode: "WEB_SIGNING_SIGNATURE_UPLOAD_FAILED",
+          errorFamily: "signing",
+          requestId,
+          tags: {
+            feature: "document_signing",
+            document_id: documentId,
+          },
+          contexts: {
+            document_signing: {
+              documentId,
+              generationRunId: activeSignature.generationRunId,
+              outputSignerId: activeSignature.outputSignerId,
+              captureMethod: "upload",
+            },
+          },
+        });
         setErrorMessage(message);
         showToast({ tone: "error", message });
       } finally {
@@ -1300,6 +1425,17 @@ export default function SignPage() {
     }
 
     setIsSavingCapture(true);
+    let requestId: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "document_signing",
+      action: "signature.type_started",
+      data: {
+        documentId,
+        generationRunId: activeSignature.generationRunId,
+        outputSignerId: activeSignature.outputSignerId,
+        typedKind,
+      },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -1319,6 +1455,7 @@ export default function SignPage() {
           }),
         },
       );
+      requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
 
       if (!response.ok) {
@@ -1327,11 +1464,40 @@ export default function SignPage() {
 
       applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
       showToast({ tone: "success", message: "Typed signature saved." });
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "signature.type_completed",
+        data: {
+          documentId,
+          requestId,
+          generationRunId: activeSignature.generationRunId,
+          outputSignerId: activeSignature.outputSignerId,
+        },
+      });
       await refreshAfterCapture();
       void fetchSavedSignatures();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to save typed signature.";
+      captureDomainException(error, {
+        level: "error",
+        operation: "document_signing.capture_type",
+        errorCode: "WEB_SIGNING_SIGNATURE_TYPE_FAILED",
+        errorFamily: "signing",
+        requestId,
+        tags: {
+          feature: "document_signing",
+          document_id: documentId,
+        },
+        contexts: {
+          document_signing: {
+            documentId,
+            generationRunId: activeSignature.generationRunId,
+            outputSignerId: activeSignature.outputSignerId,
+            captureMethod: "type",
+          },
+        },
+      });
       setErrorMessage(message);
       showToast({ tone: "error", message });
     } finally {
@@ -1367,6 +1533,16 @@ export default function SignPage() {
 
     const imageDataUrl = buildDrawSignatureDataUrl(canvas);
     setIsSavingCapture(true);
+    let requestId: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "document_signing",
+      action: "signature.draw_started",
+      data: {
+        documentId,
+        generationRunId: activeSignature.generationRunId,
+        outputSignerId: activeSignature.outputSignerId,
+      },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -1385,6 +1561,7 @@ export default function SignPage() {
           }),
         },
       );
+      requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
 
       if (!response.ok) {
@@ -1394,11 +1571,40 @@ export default function SignPage() {
       applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
       clearCanvas();
       showToast({ tone: "success", message: "Drawn signature saved." });
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "signature.draw_completed",
+        data: {
+          documentId,
+          requestId,
+          generationRunId: activeSignature.generationRunId,
+          outputSignerId: activeSignature.outputSignerId,
+        },
+      });
       await refreshAfterCapture();
       void fetchSavedSignatures();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to save drawn signature.";
+      captureDomainException(error, {
+        level: "error",
+        operation: "document_signing.capture_draw",
+        errorCode: "WEB_SIGNING_SIGNATURE_DRAW_FAILED",
+        errorFamily: "signing",
+        requestId,
+        tags: {
+          feature: "document_signing",
+          document_id: documentId,
+        },
+        contexts: {
+          document_signing: {
+            documentId,
+            generationRunId: activeSignature.generationRunId,
+            outputSignerId: activeSignature.outputSignerId,
+            captureMethod: "draw",
+          },
+        },
+      });
       setErrorMessage(message);
       showToast({ tone: "error", message });
     } finally {
@@ -1438,6 +1644,17 @@ export default function SignPage() {
       }
 
       setIsSavingCapture(true);
+      let requestId: string | null = null;
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "signature.saved_apply_started",
+        data: {
+          documentId,
+          generationRunId: activeSignature.generationRunId,
+          outputSignerId: activeSignature.outputSignerId,
+          savedSignatureId,
+        },
+      });
 
       try {
         const response = await fetchWithTokenRefresh(
@@ -1456,6 +1673,7 @@ export default function SignPage() {
             }),
           },
         );
+        requestId = getResponseRequestId(response);
         const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
 
         if (!response.ok) {
@@ -1464,11 +1682,41 @@ export default function SignPage() {
 
         applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
         showToast({ tone: "success", message: "Saved signature applied." });
+        addFeatureBreadcrumb({
+          feature: "document_signing",
+          action: "signature.saved_apply_completed",
+          data: {
+            documentId,
+            requestId,
+            generationRunId: activeSignature.generationRunId,
+            outputSignerId: activeSignature.outputSignerId,
+            savedSignatureId,
+          },
+        });
         await refreshAfterCapture();
         setSelectedSavedSignatureId(null);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to apply saved signature.";
+        captureDomainException(error, {
+          level: "error",
+          operation: "document_signing.capture_saved",
+          errorCode: "WEB_SIGNING_SIGNATURE_SAVED_APPLY_FAILED",
+          errorFamily: "signing",
+          requestId,
+          tags: {
+            feature: "document_signing",
+            document_id: documentId,
+          },
+          contexts: {
+            document_signing: {
+              documentId,
+              generationRunId: activeSignature.generationRunId,
+              outputSignerId: activeSignature.outputSignerId,
+              captureMethod: "saved",
+            },
+          },
+        });
         setErrorMessage(message);
         showToast({ tone: "error", message });
       } finally {
@@ -1486,12 +1734,101 @@ export default function SignPage() {
     ],
   );
 
+  const handleSavedSignatureDelete = useCallback(
+    async (savedSignatureId: string) => {
+      if (!accessToken || !documentId) {
+        return;
+      }
+
+      setDeletingSavedSignatureIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.add(savedSignatureId);
+        return nextIds;
+      });
+
+      let requestId: string | null = null;
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "saved_signatures.delete_started",
+        data: { documentId, savedSignatureId },
+      });
+
+      try {
+        const response = await fetchWithTokenRefresh(
+          `${apiBaseUrl}/documents/${documentId}/signatures/saved/${encodeURIComponent(savedSignatureId)}`,
+          accessToken,
+          { method: "DELETE" },
+        );
+        requestId = getResponseRequestId(response);
+        const responsePayload = (await response.json().catch(() => null)) as
+          | { message?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error(responsePayload?.message ?? "Failed to delete saved signature.");
+        }
+
+        setSavedSignatures((currentSignatures) =>
+          currentSignatures.filter((signature) => signature.id !== savedSignatureId),
+        );
+        setSelectedSavedSignatureId((currentId) =>
+          currentId === savedSignatureId ? null : currentId,
+        );
+        showToast({ tone: "success", message: "Saved signature deleted." });
+        addFeatureBreadcrumb({
+          feature: "document_signing",
+          action: "saved_signatures.delete_completed",
+          data: { documentId, requestId, savedSignatureId },
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to delete saved signature.";
+        captureDomainException(error, {
+          level: "warning",
+          operation: "document_signing.delete_saved_signature",
+          errorCode: "WEB_SIGNING_SAVED_SIGNATURE_DELETE_FAILED",
+          errorFamily: "signing",
+          requestId,
+          tags: {
+            feature: "document_signing",
+            document_id: documentId,
+          },
+          contexts: {
+            document_signing: {
+              documentId,
+              savedSignatureId,
+            },
+          },
+        });
+        setErrorMessage(message);
+        showToast({ tone: "error", message });
+      } finally {
+        setDeletingSavedSignatureIds((currentIds) => {
+          const nextIds = new Set(currentIds);
+          nextIds.delete(savedSignatureId);
+          return nextIds;
+        });
+      }
+    },
+    [accessToken, documentId, showToast],
+  );
+
   const handleConfirm = useCallback(async () => {
     if (!accessToken || !documentId || !payload?.signing || isConfirming) {
       return;
     }
 
     setIsConfirming(true);
+    let requestId: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "document_signing",
+      action: "confirm.started",
+      data: {
+        documentId,
+        requiredSignatureCount: payload.signing.completion.requiredSignatureCount,
+        capturedRequiredSignatureCount: payload.signing.completion.capturedRequiredSignatureCount,
+      },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -1505,6 +1842,7 @@ export default function SignPage() {
           body: JSON.stringify({ confirmed: true }),
         },
       );
+      requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as
         | { message?: string }
         | null;
@@ -1514,10 +1852,32 @@ export default function SignPage() {
       }
 
       showToast({ tone: "success", message: "Signing set confirmed." });
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "confirm.completed",
+        data: { documentId, requestId },
+      });
       await refreshAfterCapture();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to confirm signatures.";
+      addFeatureBreadcrumb({
+        feature: "document_signing",
+        action: "confirm.failed",
+        level: "error",
+        data: { documentId, requestId },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: "document_signing.confirm",
+        errorCode: "WEB_SIGNING_CONFIRM_FAILED",
+        errorFamily: "signing",
+        requestId,
+        tags: {
+          feature: "document_signing",
+          document_id: documentId,
+        },
+      });
       setErrorMessage(message);
       showToast({ tone: "error", message });
     } finally {
@@ -1546,6 +1906,16 @@ export default function SignPage() {
     } else {
       setIsSubmittingNotarization(true);
     }
+    let requestId: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "document_notarization",
+      action: "submit_to_notary.started",
+      data: {
+        documentId,
+        selectedNotaryUserId: selectedAvailableNotary.userId,
+        signatureSkipped,
+      },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -1567,6 +1937,7 @@ export default function SignPage() {
           }),
         },
       );
+      requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as
         | { message?: string }
         | null;
@@ -1579,10 +1950,37 @@ export default function SignPage() {
         tone: "success",
         message: "Document sent to selected notary for review.",
       });
+      addFeatureBreadcrumb({
+        feature: "document_notarization",
+        action: "submit_to_notary.completed",
+        data: {
+          documentId,
+          requestId,
+          selectedNotaryUserId: selectedAvailableNotary.userId,
+          signatureSkipped,
+        },
+      });
       router.push("/app/documents?status=pending_notary");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to send document to the selected notary.";
+      addFeatureBreadcrumb({
+        feature: "document_notarization",
+        action: "submit_to_notary.failed",
+        level: "error",
+        data: { documentId, requestId, signatureSkipped },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: "document_notarization.submit_to_notary",
+        errorCode: "WEB_NOTARIZATION_SUBMIT_FAILED",
+        errorFamily: "notarization",
+        requestId,
+        tags: {
+          feature: "document_notarization",
+          document_id: documentId,
+        },
+      });
       setErrorMessage(message);
       showToast({ tone: "error", message });
     } finally {
@@ -2089,40 +2487,77 @@ export default function SignPage() {
                     ) : savedSignatures.length > 0 ? (
                       <>
                         <div className="grid gap-3 md:grid-cols-2">
-                          {savedSignatures.map((savedSignature) => (
-                            <button
-                              key={savedSignature.id}
-                              className={`rounded-[18px] border px-4 py-4 text-left transition ${
-                                selectedSavedSignatureId === savedSignature.id
-                                  ? "border-Color-Scheme-1-Text bg-Color-Neutral-Lightest"
-                                  : "border-Color-Scheme-1-Border bg-white hover:border-Color-Scheme-1-Text"
-                              }`}
-                              disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
-                              onClick={() => {
-                                setSelectedSavedSignatureId(savedSignature.id);
-                              }}
-                              type="button"
-                            >
-                              <div className="text-[11px] leading-4 text-Color-Neutral">
-                                {savedSignature.captureMethod === "type" ? "Typed signature" : "Saved signature image"}
+                          {savedSignatures.map((savedSignature) => {
+                            const isSelected = selectedSavedSignatureId === savedSignature.id;
+                            const isDeletingSavedSignature = deletingSavedSignatureIds.has(savedSignature.id);
+
+                            return (
+                              <div
+                                key={savedSignature.id}
+                                className={`group relative overflow-hidden rounded-[18px] border transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out ${
+                                  isSelected
+                                    ? "border-Color-Scheme-1-Text bg-Color-Neutral-Lightest shadow-[0_14px_34px_rgba(0,0,0,0.08)]"
+                                    : "border-Color-Scheme-1-Border bg-white hover:-translate-y-0.5 hover:border-Color-Scheme-1-Text hover:shadow-[0_14px_34px_rgba(0,0,0,0.06)]"
+                                } ${isDeletingSavedSignature ? "opacity-60" : ""}`}
+                              >
+                                <button
+                                  className="block w-full px-4 py-4 pr-12 text-left"
+                                  disabled={isSavingCapture || payload?.signing?.state === "confirmed"}
+                                  onClick={() => {
+                                    setSelectedSavedSignatureId(savedSignature.id);
+                                  }}
+                                  type="button"
+                                >
+                                  <div className="text-[11px] leading-4 text-Color-Neutral">
+                                    {savedSignature.captureMethod === "type" ? "Typed signature" : "Saved signature image"}
+                                  </div>
+                                  {savedSignature.captureMethod === "type" ? (
+                                    <div className="mt-3 min-h-12 text-2xl italic text-Color-Scheme-1-Text" style={{ fontFamily: '"Times New Roman", serif' }}>
+                                      {savedSignature.typedValue}
+                                    </div>
+                                  ) : savedSignature.assetDownloadUrl ? (
+                                    <img
+                                      alt="Saved signature"
+                                      className="mt-3 h-24 w-full rounded-lg border border-Color-Scheme-1-Border bg-white object-contain p-2"
+                                      src={savedSignature.assetDownloadUrl}
+                                    />
+                                  ) : (
+                                    <div className="mt-3 rounded-lg border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-3 py-4 text-sm text-Color-Neutral">
+                                      Saved signature preview unavailable.
+                                    </div>
+                                  )}
+                                </button>
+                                <button
+                                  aria-label="Delete saved signature"
+                                  className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-Color-Scheme-1-Border/70 bg-white/95 text-Color-Neutral shadow-[0_8px_18px_rgba(0,0,0,0.08)] transition-[background-color,border-color,color,transform,opacity] duration-200 ease-out hover:-translate-y-0.5 hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-wait disabled:opacity-60"
+                                  disabled={
+                                    isDeletingSavedSignature ||
+                                    isSavingCapture ||
+                                    payload?.signing?.state === "confirmed"
+                                  }
+                                  onClick={() => {
+                                    void handleSavedSignatureDelete(savedSignature.id);
+                                  }}
+                                  title="Delete saved signature"
+                                  type="button"
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    className={`h-4 w-4 ${isDeletingSavedSignature ? "animate-pulse" : ""}`}
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path d="M9.25 5.75h5.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                                    <path d="M10.25 5.75 10.9 4.5h2.2l.65 1.25" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+                                    <path d="M6.75 8h10.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                                    <path d="m8.25 8 .55 10.25h6.4L15.75 8" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+                                    <path d="M10.75 11v4.25" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                                    <path d="M13.25 11v4.25" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                                  </svg>
+                                </button>
                               </div>
-                              {savedSignature.captureMethod === "type" ? (
-                                <div className="mt-3 min-h-12 text-2xl italic text-Color-Scheme-1-Text" style={{ fontFamily: '"Times New Roman", serif' }}>
-                                  {savedSignature.typedValue}
-                                </div>
-                              ) : savedSignature.assetDownloadUrl ? (
-                                <img
-                                  alt="Saved signature"
-                                  className="mt-3 h-24 w-full rounded-lg border border-Color-Scheme-1-Border bg-white object-contain p-2"
-                                  src={savedSignature.assetDownloadUrl}
-                                />
-                              ) : (
-                                <div className="mt-3 rounded-lg border border-Color-Scheme-1-Border bg-Color-Neutral-Lightest px-3 py-4 text-sm text-Color-Neutral">
-                                  Saved signature preview unavailable.
-                                </div>
-                              )}
-                            </button>
-                          ))}
+                            );
+                          })}
                         </div>
                         <div className="flex justify-end">
                           <button

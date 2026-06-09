@@ -1,7 +1,7 @@
 "use client";
 
-import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
+import { captureDomainException } from "@/lib/clientTelemetry";
 
 export default function GlobalError({
   error,
@@ -11,7 +11,20 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    captureDomainException(error, {
+      level: "fatal",
+      operation: "web.global_error_boundary",
+      errorCode: "WEB_GLOBAL_ERROR_BOUNDARY",
+      errorFamily: "internal",
+      tags: {
+        feature: "global_error_boundary",
+      },
+      contexts: {
+        global_error: {
+          digest: error.digest,
+        },
+      },
+    });
   }, [error]);
 
   return (

@@ -227,6 +227,21 @@ export const formatPhoneInput = (value: string, countryIso2?: string): string =>
   }
 };
 
+export const formatPhoneInputForEditing = (value: string, countryIso2?: string): string => {
+  const phoneCountryIso2 = normalizePhoneCountryIso2(countryIso2 ?? DEFAULT_PHONE_COUNTRY_ISO2);
+  const limitedValue = limitPhoneDigitsForCountry(value, phoneCountryIso2);
+
+  if (!limitedValue) {
+    return "";
+  }
+
+  if (phoneCountryIso2 === "US" && limitedValue.length <= 3) {
+    return limitedValue;
+  }
+
+  return formatPhoneInput(limitedValue, phoneCountryIso2);
+};
+
 export type MemberFieldControlKind =
   | "boolean"
   | "number"

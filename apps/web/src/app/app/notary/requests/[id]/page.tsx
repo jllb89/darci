@@ -5,6 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useStoredAuth } from "@/lib/auth";
 import {
+  addFeatureBreadcrumb,
+  captureDomainException,
+  getResponseRequestId,
+} from "@/lib/clientTelemetry";
+import {
   fetchWithTokenRefresh,
   formatStatusLabel,
   notaryApiBaseUrl,
@@ -192,12 +197,20 @@ export default function NotaryRequestWorkspacePage() {
     }
 
     setIsLoading(true);
+    let requestIdHeader: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "notary_workspace",
+      action: "context.fetch_started",
+      data: { requestId },
+    });
+
     try {
       const response = await fetchWithTokenRefresh(
         `${notaryApiBaseUrl}/notary/requests/${encodeURIComponent(requestId)}/context`,
         accessToken,
         { cache: "no-store" },
       );
+      requestIdHeader = getResponseRequestId(response);
 
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, "Unable to load notary request."));
@@ -214,6 +227,7 @@ export default function NotaryRequestWorkspacePage() {
           },
           body: JSON.stringify({ idn: nextContext.document.idn }),
         });
+        requestIdHeader = getResponseRequestId(claimResponse) ?? requestIdHeader;
 
         if (!claimResponse.ok) {
           throw new Error(await readApiErrorMessage(claimResponse, "Unable to open this review request."));
@@ -232,7 +246,40 @@ export default function NotaryRequestWorkspacePage() {
         return nextContext?.document.reviewDocuments[0]?.id ?? null;
       });
       setErrorMessage(null);
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: "context.fetch_completed",
+        data: {
+          requestId,
+          requestIdHeader,
+          queueStatus: nextContext ? resolveWorkspaceStatus(nextContext) : null,
+          reviewDocumentCount: nextContext?.document.reviewDocuments.length ?? 0,
+        },
+      });
     } catch (error) {
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: "context.fetch_failed",
+        level: "error",
+        data: { requestId, requestIdHeader },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: "notary_workspace.fetch_context",
+        errorCode: "WEB_NOTARY_CONTEXT_FETCH_FAILED",
+        errorFamily: "notarization",
+        requestId: requestIdHeader,
+        tags: {
+          feature: "notary_workspace",
+          notary_request_id: requestId,
+        },
+        contexts: {
+          notary_workspace: {
+            requestId,
+            stage: "fetch_context",
+          },
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Unable to load notary request.");
     } finally {
       setIsLoading(false);
@@ -267,6 +314,12 @@ export default function NotaryRequestWorkspacePage() {
 
     setIsSubmitting(true);
     setErrorMessage(null);
+    let requestIdHeader: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "notary_workspace",
+      action: "review_decision.started",
+      data: { requestId: context.request.id, decision },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -280,14 +333,43 @@ export default function NotaryRequestWorkspacePage() {
           body: JSON.stringify(body),
         },
       );
+      requestIdHeader = getResponseRequestId(response);
 
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, "Unable to record review decision."));
       }
 
       setSuccessMessage("Review approved. Contact details were sent to both parties.");
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: "review_decision.completed",
+        data: { requestId: context.request.id, requestIdHeader, decision },
+      });
       router.push("/app/notary");
     } catch (error) {
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: "review_decision.failed",
+        level: "error",
+        data: { requestId: context.request.id, requestIdHeader, decision },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: "notary_workspace.review_decision",
+        errorCode: "WEB_NOTARY_REVIEW_DECISION_FAILED",
+        errorFamily: "notarization",
+        requestId: requestIdHeader,
+        tags: {
+          feature: "notary_workspace",
+          notary_request_id: context.request.id,
+        },
+        contexts: {
+          notary_workspace: {
+            requestId: context.request.id,
+            decision,
+          },
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Unable to record review decision.");
     } finally {
       setIsSubmitting(false);
@@ -302,6 +384,12 @@ export default function NotaryRequestWorkspacePage() {
 
     setIsStartingSession(true);
     setErrorMessage(null);
+    let requestIdHeader: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "notary_workspace",
+      action: "meeting.start_started",
+      data: { requestId: context.request.id },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -315,14 +403,37 @@ export default function NotaryRequestWorkspacePage() {
           body: JSON.stringify({}),
         },
       );
+      requestIdHeader = getResponseRequestId(response);
 
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, "Unable to start the in-person session."));
       }
 
       setSuccessMessage("In-person session started.");
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: "meeting.start_completed",
+        data: { requestId: context.request.id, requestIdHeader },
+      });
       await loadContext();
     } catch (error) {
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: "meeting.start_failed",
+        level: "error",
+        data: { requestId: context.request.id, requestIdHeader },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: "notary_workspace.start_meeting",
+        errorCode: "WEB_NOTARY_MEETING_START_FAILED",
+        errorFamily: "notarization",
+        requestId: requestIdHeader,
+        tags: {
+          feature: "notary_workspace",
+          notary_request_id: context.request.id,
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Unable to start the in-person session.");
     } finally {
       setIsStartingSession(false);
@@ -344,6 +455,12 @@ export default function NotaryRequestWorkspacePage() {
     setActiveAction(actionKey);
     setErrorMessage(null);
     setSuccessMessage(null);
+    let requestIdHeader: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "notary_workspace",
+      action: `${actionKey}.started`,
+      data: { requestId: context.request.id, path },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -357,14 +474,45 @@ export default function NotaryRequestWorkspacePage() {
           body: JSON.stringify(body),
         },
       );
+      requestIdHeader = getResponseRequestId(response);
 
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, fallbackMessage));
       }
 
       setSuccessMessage(success);
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: `${actionKey}.completed`,
+        data: { requestId: context.request.id, requestIdHeader, path },
+      });
       await loadContext();
     } catch (error) {
+      addFeatureBreadcrumb({
+        feature: "notary_workspace",
+        action: `${actionKey}.failed`,
+        level: "error",
+        data: { requestId: context.request.id, requestIdHeader, path },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: `notary_workspace.${actionKey}`,
+        errorCode: "WEB_NOTARY_ACTION_FAILED",
+        errorFamily: "notarization",
+        requestId: requestIdHeader,
+        tags: {
+          feature: "notary_workspace",
+          notary_request_id: context.request.id,
+          notary_action: actionKey,
+        },
+        contexts: {
+          notary_workspace: {
+            requestId: context.request.id,
+            actionKey,
+            path,
+          },
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : fallbackMessage);
     } finally {
       setActiveAction(null);

@@ -237,6 +237,7 @@ describe("POST /notary/requests/:id/review-decision", () => {
       expect.objectContaining({
         action: "notary.request_approved",
         entityId: "req-1",
+        requestId: expect.any(String),
       }),
     );
     expect(mocks.queueNotaryApprovalReceivedNotificationMock).toHaveBeenCalledWith(

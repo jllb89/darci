@@ -37,6 +37,7 @@ import {
   downloadSignatureAsset,
   uploadGeneratedDocument,
 } from "./storageService";
+import { DomainError, getErrorTelemetryFields, isDomainError } from "../errors/domainError";
 import { logDocumentTrace } from "../utils/documentTrace";
 
 const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
@@ -64,7 +65,7 @@ const templateSourceFallbackAliases: Record<string, string[]> = {
     "../docs/OH DDPOA.md",
   ],
 };
-import { captureException } from "../utils/sentry";
+import { captureDomainException } from "../utils/sentry";
 
 const PDF_PAGE_MARGINS = {
   top: 86,
@@ -1299,6 +1300,109 @@ const parsePersonNames = (value: unknown) => {
     .filter((entry) => entry.length > 0);
 };
 
+const parsePersonListEntry = (value: unknown) => {
+  return typeof value === "string" ? parseJsonString(value) : value;
+};
+
+const getPersonEntryDisplayName = (value: unknown) => {
+  const parsed = parsePersonListEntry(value);
+  if (isRecord(parsed)) {
+    return (
+      asTrimmedString(parsed.fullName) ||
+      asTrimmedString(parsed.name) ||
+      asTrimmedString(parsed.displayName) ||
+      null
+    );
+  }
+
+  return asTrimmedString(parsed) || null;
+};
+
+const getSuccessorAgentEntries = (canonicalAnswers: CanonicalAnswers) => {
+  const value = canonicalAnswers.successor_agent_list ?? canonicalAnswers.successor_agents;
+  return Array.isArray(value) ? value : [];
+};
+
+const getDesignatedSuccessorAgentCount = (canonicalAnswers: CanonicalAnswers) => {
+  return getSuccessorAgentEntries(canonicalAnswers).filter((entry) => {
+    const parsed = parsePersonListEntry(entry);
+    const name = getPersonEntryDisplayName(parsed);
+    const contact = parseContactValue(parsed);
+    return Boolean(name || contact.phone || contact.email);
+  }).length;
+};
+
+const getIndexedSuccessorAgentValue = (
+  canonicalAnswers: CanonicalAnswers,
+  index: number,
+  field: "FullName" | "Phone" | "Email",
+) => {
+  if (index <= 0) {
+    return null;
+  }
+
+  const entry = getSuccessorAgentEntries(canonicalAnswers)[index - 1];
+  if (entry === undefined) {
+    return null;
+  }
+
+  const parsed = parsePersonListEntry(entry);
+  if (field === "FullName") {
+    return getPersonEntryDisplayName(parsed);
+  }
+
+  const contact = parseContactValue(parsed);
+  return field === "Phone" ? contact.phone : contact.email;
+};
+
+const omitPoaSuccessorAgentBlocks = (
+  templateSource: string,
+  canonicalAnswers: CanonicalAnswers,
+) => {
+  const successorAgentCount = getDesignatedSuccessorAgentCount(canonicalAnswers);
+  if (successorAgentCount >= 2 || !/Designation of Successor Agent\(s\)/i.test(templateSource)) {
+    return templateSource;
+  }
+
+  const lines = templateSource.replace(/\r\n/g, "\n").split("\n");
+  const sectionStartIndex = lines.findIndex((line) =>
+    /Designation of Successor Agent\(s\) \(Optional\)/i.test(stripRenderControlTokens(line)),
+  );
+
+  if (sectionStartIndex < 0) {
+    return templateSource;
+  }
+
+  const grantSectionIndex = lines.findIndex(
+    (line, index) =>
+      index > sectionStartIndex && /Grant of General Authority/i.test(stripRenderControlTokens(line)),
+  );
+
+  if (grantSectionIndex < 0) {
+    return templateSource;
+  }
+
+  if (successorAgentCount === 0) {
+    return [...lines.slice(0, sectionStartIndex), ...lines.slice(grantSectionIndex)].join("\n");
+  }
+
+  const secondSuccessorStartIndex = lines.findIndex(
+    (line, index) =>
+      index > sectionStartIndex &&
+      index < grantSectionIndex &&
+      /second successor agent/i.test(stripRenderControlTokens(line)),
+  );
+
+  if (secondSuccessorStartIndex < 0) {
+    return templateSource;
+  }
+
+  return [
+    ...lines.slice(0, secondSuccessorStartIndex),
+    ...lines.slice(grantSectionIndex),
+  ].join("\n");
+};
+
 const formatRenderableValue = (value: unknown): string | null => {
   if (value === null || value === undefined) {
     return null;
@@ -1622,11 +1726,15 @@ const resolveContactPlaceholderValue = (canonicalAnswers: CanonicalAnswers, toke
   const agentMatch = token.match(/^Agent\[(\d+)\]\.(FullName|Phone|Email)$/);
   if (agentMatch) {
     const index = Number.parseInt(agentMatch[1] ?? "0", 10);
-    if (index !== 0) {
+    const field = agentMatch[2];
+    if (field !== "FullName" && field !== "Phone" && field !== "Email") {
       return null;
     }
 
-    const field = agentMatch[2];
+    if (index !== 0) {
+      return getIndexedSuccessorAgentValue(canonicalAnswers, index, field);
+    }
+
     if (field === "FullName") {
       return asTrimmedString(canonicalAnswers.agent_full_name) || null;
     }
@@ -2316,6 +2424,10 @@ export const renderLegalTemplateText = (input: {
   documentKey?: string;
 }) => {
   const normalizedTemplateSource = unescapeTemplateSource(input.templateSource);
+  const templateSource =
+    input.documentKey === "poa_general"
+      ? omitPoaSuccessorAgentBlocks(normalizedTemplateSource, input.canonicalAnswers ?? {})
+      : normalizedTemplateSource;
   const placeholderLookup = new Map(
     Object.entries(input.placeholders).map(([key, value]) => [
       normalizePlaceholderToken(key),
@@ -2323,7 +2435,7 @@ export const renderLegalTemplateText = (input: {
     ]),
   );
 
-  const rendered = normalizedTemplateSource.replace(
+  const rendered = templateSource.replace(
     /{{\s*([^{}]+?)\s*}}|<<\s*([^<>]+?)\s*>>/g,
     (_match, curlyToken?: string, angleToken?: string) => {
       const token = normalizePlaceholderToken(curlyToken ?? angleToken ?? "");
@@ -2393,9 +2505,17 @@ const buildRenderedPdf = async (input: {
   const loadedTemplateSource = await loadTemplateSource(input.artifact);
 
   if (!loadedTemplateSource && templateKeysThatMustLoadSource.has(input.run.template_key)) {
-    throw new Error(
+    throw new DomainError({
+      code: "DOC_TEMPLATE_SOURCE_REQUIRED_MISSING",
+      family: "template_source",
+      message:
       `Template source could not be loaded for ${input.run.template_key}; confirm the active template artifact points at the deployed markdown source.`,
-    );
+      details: {
+        templateKey: input.run.template_key,
+        outputKey: input.run.output_key,
+        templateArtifactId: input.run.template_artifact_id,
+      },
+    });
   }
 
   const templateSource =
@@ -2407,9 +2527,17 @@ const buildRenderedPdf = async (input: {
     });
 
   if (!templateSource) {
-    throw new Error(
+    throw new DomainError({
+      code: "DOC_TEMPLATE_SOURCE_UNRESOLVED",
+      family: "template_source",
+      message:
       `Template source could not be loaded for ${input.run.output_key} member-facing rendering`,
-    );
+      details: {
+        outputKey: input.run.output_key,
+        templateKey: input.run.template_key,
+        templateArtifactId: input.run.template_artifact_id,
+      },
+    });
   }
 
   const pdf = new PDFDocument({
@@ -2709,7 +2837,14 @@ const stampSignatureOnPdf = async (input: {
     : pages[input.placement.pageNumber - 1];
 
   if (!page) {
-    throw new Error("Signature field page could not be resolved in the official PDF");
+    throw new DomainError({
+      code: "SIGNING_SIGNATURE_PAGE_UNRESOLVED",
+      family: "signing",
+      message: "Signature field page could not be resolved in the official PDF",
+      details: {
+        pageNumber: input.placement.pageNumber,
+      },
+    });
   }
 
   if (input.uploadedNotarizationAddendum) {
@@ -2902,7 +3037,15 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
   });
 
   if (!run) {
-    throw new Error("Generation run could not be resolved for signature application");
+    throw new DomainError({
+      code: "GENERATION_RUN_NOT_FOUND_FOR_SIGNATURE",
+      family: "generation",
+      message: "Generation run could not be resolved for signature application",
+      details: {
+        generationRunId: input.generationRunId,
+        documentId: input.document.id,
+      },
+    });
   }
 
   const signers = await listDocumentOutputSigners({
@@ -2915,7 +3058,16 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
   );
 
   if (!signer) {
-    throw new Error("Signature field mapping could not be resolved for this signer");
+    throw new DomainError({
+      code: "SIGNING_SIGNER_MAPPING_NOT_FOUND",
+      family: "signing",
+      message: "Signature field mapping could not be resolved for this signer",
+      details: {
+        outputSignerId: input.outputSignerId,
+        generationRunId: input.generationRunId,
+        documentId: input.document.id,
+      },
+    });
   }
 
   let placement = parseSignatureFieldPlacement(signer.metadata.signatureField);
@@ -2928,7 +3080,16 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
   }
 
   if (!placement) {
-    throw new Error("Signature field placement is not available for this signing output");
+    throw new DomainError({
+      code: "SIGNING_FIELD_PLACEMENT_MISSING",
+      family: "signing",
+      message: "Signature field placement is not available for this signing output",
+      details: {
+        outputSignerId: input.outputSignerId,
+        generationRunId: input.generationRunId,
+        documentId: input.document.id,
+      },
+    });
   }
 
   const versions = await listDocumentVersions(input.document.id);
@@ -2938,7 +3099,17 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
   );
 
   if (!latestVersion?.storage_path || latestVersion.mime_type !== "application/pdf") {
-    throw new Error("Official signing PDF could not be resolved for this generation run");
+    throw new DomainError({
+      code: "SIGNING_OFFICIAL_PDF_UNRESOLVED",
+      family: "signing",
+      message: "Official signing PDF could not be resolved for this generation run",
+      details: {
+        generationRunId: input.generationRunId,
+        documentId: input.document.id,
+        versionId: latestVersion?.id ?? null,
+        mimeType: latestVersion?.mime_type ?? null,
+      },
+    });
   }
 
   const currentPdf = await downloadDocumentObject(latestVersion.storage_path);
@@ -3005,6 +3176,7 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
 export const processDocumentGenerationRun = async (input: {
   runId: string;
   rendererJobId: string;
+  requestId?: string | null;
 }) => {
   const claimedRun = await claimDocumentGenerationRunById({
     runId: input.runId,
@@ -3018,16 +3190,40 @@ export const processDocumentGenerationRun = async (input: {
   try {
     const document = await getDocumentById(claimedRun.document_id);
     if (!document) {
-      throw new Error("Document not found for generation run");
+      throw new DomainError({
+        code: "GENERATION_DOCUMENT_NOT_FOUND",
+        family: "generation",
+        message: "Document not found for generation run",
+        details: {
+          documentId: claimedRun.document_id,
+          generationRunId: claimedRun.id,
+        },
+      });
     }
 
     if (!claimedRun.template_artifact_id) {
-      throw new Error("Template artifact is not linked to the generation run");
+      throw new DomainError({
+        code: "GENERATION_TEMPLATE_ARTIFACT_MISSING",
+        family: "generation",
+        message: "Template artifact is not linked to the generation run",
+        details: {
+          generationRunId: claimedRun.id,
+          templateKey: claimedRun.template_key,
+        },
+      });
     }
 
     const artifact = await getTemplateArtifactById(claimedRun.template_artifact_id);
     if (!artifact) {
-      throw new Error("Template artifact could not be resolved");
+      throw new DomainError({
+        code: "GENERATION_TEMPLATE_ARTIFACT_NOT_FOUND",
+        family: "generation",
+        message: "Template artifact could not be resolved",
+        details: {
+          generationRunId: claimedRun.id,
+          templateArtifactId: claimedRun.template_artifact_id,
+        },
+      });
     }
 
     const signers = await listDocumentOutputSigners({
@@ -3038,6 +3234,7 @@ export const processDocumentGenerationRun = async (input: {
     logDocumentTrace("generation.render_started", {
       documentId: document.id,
       generationRunId: claimedRun.id,
+      requestId: input.requestId ?? null,
       rendererJobId: input.rendererJobId,
       outputKey: claimedRun.output_key,
       documentKey: claimedRun.document_key,
@@ -3162,6 +3359,7 @@ export const processDocumentGenerationRun = async (input: {
     logDocumentTrace("generation.render_completed", {
       documentId: renderedRun.document_id,
       generationRunId: renderedRun.id,
+      requestId: input.requestId ?? null,
       rendererJobId: renderedRun.renderer_job_id,
       outputKey: renderedRun.output_key,
       documentVersionId: version.id,
@@ -3178,13 +3376,19 @@ export const processDocumentGenerationRun = async (input: {
       version,
     };
   } catch (error) {
+    const telemetry = getErrorTelemetryFields(error);
     const message = error instanceof Error ? error.message : "Generation run rendering failed";
     const failedRun = await updateDocumentGenerationRun(claimedRun.id, {
       status: "failed",
       failed_at: new Date().toISOString(),
-      failure_code: "renderer_error",
+      failure_code: isDomainError(error)
+        ? telemetry.code.toLowerCase()
+        : "renderer_error",
       failure_details_json: {
         rendererJobId: input.rendererJobId,
+        requestId: input.requestId ?? null,
+        errorCode: telemetry.code,
+        errorFamily: telemetry.family,
       },
       error_message: message,
     });
@@ -3204,16 +3408,20 @@ export const processDocumentGenerationRun = async (input: {
     logDocumentTrace("generation.render_failed", {
       documentId: failedRun.document_id,
       generationRunId: failedRun.id,
+      requestId: input.requestId ?? null,
       rendererJobId: input.rendererJobId,
       outputKey: failedRun.output_key,
       failureCode: failedRun.failure_code,
       errorMessage: failedRun.error_message,
     });
 
-    captureException(error, {
+    captureDomainException(error, {
+      service: "backend",
+      operation: "generation.render",
       level: "error",
       tags: {
         feature: "document_generation",
+        ...(input.requestId ? { request_id: input.requestId } : {}),
         document_id: failedRun.document_id,
         generation_run_id: failedRun.id,
         output_key: failedRun.output_key,
@@ -3224,6 +3432,7 @@ export const processDocumentGenerationRun = async (input: {
           documentId: failedRun.document_id,
           generationRunId: failedRun.id,
           rendererJobId: input.rendererJobId,
+          requestId: input.requestId ?? null,
           outputKey: failedRun.output_key,
           documentKey: failedRun.document_key,
           templateKey: failedRun.template_key,
@@ -3233,7 +3442,13 @@ export const processDocumentGenerationRun = async (input: {
           errorMessage: failedRun.error_message,
         },
       },
-      fingerprint: ["document_generation_render_failed", failedRun.output_key],
+      fingerprint: [
+        "backend",
+        "generation",
+        telemetry.code,
+        failedRun.output_key,
+        failedRun.template_key,
+      ],
     });
 
     throw error;

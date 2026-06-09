@@ -16,6 +16,9 @@ jobs:
         with:
           node-version: "20"
       - run: npm install
+      - run: npm run observability:validate
+      - run: npm run observability:kpis
+      - run: npm run observability:test
       - run: npm run test
 
   web:
@@ -29,6 +32,7 @@ jobs:
         with:
           node-version: "20"
       - run: npm install
+      - run: npm run observability:test
       - run: npm run lint
 
   types:

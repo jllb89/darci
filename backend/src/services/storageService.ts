@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { DomainError } from "../errors/domainError";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -12,21 +13,56 @@ export const signaturesBucket =
 export const notarizedBucket =
   process.env.SUPABASE_STORAGE_BUCKET_NOTARIZED ?? "notarized-copies";
 
+const throwStorageError = (
+  code: string,
+  message: string,
+  details: Record<string, unknown>,
+  cause?: unknown,
+): never => {
+  throw new DomainError({
+    code,
+    family: "storage",
+    message,
+    details,
+    cause,
+  });
+};
+
 export const createDocumentUploadUrl = async (storagePath: string) => {
   const { data, error } = await supabaseStorage
     .storage
     .from(documentsBucket)
     .createSignedUploadUrl(storagePath);
+  const payload = data;
 
-  if (error || !data?.signedUrl) {
-    throw new Error(error?.message ?? "Failed to create signed upload URL");
+  if (error) {
+    throwStorageError(
+      "STORAGE_CREATE_DOCUMENT_UPLOAD_URL_FAILED",
+      error?.message ?? "Failed to create signed upload URL",
+      {
+        bucket: documentsBucket,
+        storagePath,
+      },
+      error,
+    );
+  }
+
+  if (!payload || !payload.signedUrl) {
+    throwStorageError(
+      "STORAGE_CREATE_DOCUMENT_UPLOAD_URL_FAILED",
+      "Failed to create signed upload URL",
+      {
+        bucket: documentsBucket,
+        storagePath,
+      },
+    );
   }
 
   return {
     bucket: documentsBucket,
-    path: data.path,
-    signedUrl: data.signedUrl,
-    token: data.token,
+    path: payload!.path,
+    signedUrl: payload!.signedUrl,
+    token: payload!.token,
   };
 };
 
@@ -38,15 +74,37 @@ export const createDocumentDownloadUrl = async (
     .storage
     .from(documentsBucket)
     .createSignedUrl(storagePath, expiresInSeconds);
+  const payload = data;
 
-  if (error || !data?.signedUrl) {
-    throw new Error(error?.message ?? "Failed to create signed download URL");
+  if (error) {
+    throwStorageError(
+      "STORAGE_CREATE_DOCUMENT_DOWNLOAD_URL_FAILED",
+      error?.message ?? "Failed to create signed download URL",
+      {
+        bucket: documentsBucket,
+        storagePath,
+        expiresInSeconds,
+      },
+      error,
+    );
+  }
+
+  if (!payload || !payload.signedUrl) {
+    throwStorageError(
+      "STORAGE_CREATE_DOCUMENT_DOWNLOAD_URL_FAILED",
+      "Failed to create signed download URL",
+      {
+        bucket: documentsBucket,
+        storagePath,
+        expiresInSeconds,
+      },
+    );
   }
 
   return {
     bucket: documentsBucket,
     path: storagePath,
-    signedUrl: data.signedUrl,
+    signedUrl: payload!.signedUrl,
     expiresInSeconds,
   };
 };
@@ -68,12 +126,32 @@ export const downloadDocumentObject = async (storagePath: string) => {
     .storage
     .from(documentsBucket)
     .download(storagePath);
+  const payload = data;
 
-  if (error || !data) {
-    throw new Error(error?.message ?? "Failed to download document object");
+  if (error) {
+    throwStorageError(
+      "STORAGE_DOWNLOAD_DOCUMENT_OBJECT_FAILED",
+      error?.message ?? "Failed to download document object",
+      {
+        bucket: documentsBucket,
+        storagePath,
+      },
+      error,
+    );
   }
 
-  return toBuffer(data);
+  if (payload === null) {
+    throwStorageError(
+      "STORAGE_DOWNLOAD_DOCUMENT_OBJECT_FAILED",
+      "Failed to download document object",
+      {
+        bucket: documentsBucket,
+        storagePath,
+      },
+    );
+  }
+
+  return toBuffer(payload as Blob);
 };
 
 export const createSignatureUploadUrl = async (storagePath: string) => {
@@ -81,16 +159,36 @@ export const createSignatureUploadUrl = async (storagePath: string) => {
     .storage
     .from(signaturesBucket)
     .createSignedUploadUrl(storagePath);
+  const payload = data;
 
-  if (error || !data?.signedUrl) {
-    throw new Error(error?.message ?? "Failed to create signed upload URL");
+  if (error) {
+    throwStorageError(
+      "STORAGE_CREATE_SIGNATURE_UPLOAD_URL_FAILED",
+      error?.message ?? "Failed to create signed upload URL",
+      {
+        bucket: signaturesBucket,
+        storagePath,
+      },
+      error,
+    );
+  }
+
+  if (!payload || !payload.signedUrl) {
+    throwStorageError(
+      "STORAGE_CREATE_SIGNATURE_UPLOAD_URL_FAILED",
+      "Failed to create signed upload URL",
+      {
+        bucket: signaturesBucket,
+        storagePath,
+      },
+    );
   }
 
   return {
     bucket: signaturesBucket,
-    path: data.path,
-    signedUrl: data.signedUrl,
-    token: data.token,
+    path: payload!.path,
+    signedUrl: payload!.signedUrl,
+    token: payload!.token,
   };
 };
 
@@ -102,15 +200,37 @@ export const createSignatureDownloadUrl = async (
     .storage
     .from(signaturesBucket)
     .createSignedUrl(storagePath, expiresInSeconds);
+  const payload = data;
 
-  if (error || !data?.signedUrl) {
-    throw new Error(error?.message ?? "Failed to create signed signature URL");
+  if (error) {
+    throwStorageError(
+      "STORAGE_CREATE_SIGNATURE_DOWNLOAD_URL_FAILED",
+      error?.message ?? "Failed to create signed signature URL",
+      {
+        bucket: signaturesBucket,
+        storagePath,
+        expiresInSeconds,
+      },
+      error,
+    );
+  }
+
+  if (!payload || !payload.signedUrl) {
+    throwStorageError(
+      "STORAGE_CREATE_SIGNATURE_DOWNLOAD_URL_FAILED",
+      "Failed to create signed signature URL",
+      {
+        bucket: signaturesBucket,
+        storagePath,
+        expiresInSeconds,
+      },
+    );
   }
 
   return {
     bucket: signaturesBucket,
     path: storagePath,
-    signedUrl: data.signedUrl,
+    signedUrl: payload!.signedUrl,
     expiresInSeconds,
   };
 };
@@ -120,12 +240,32 @@ export const downloadSignatureAsset = async (storagePath: string) => {
     .storage
     .from(signaturesBucket)
     .download(storagePath);
+  const payload = data;
 
-  if (error || !data) {
-    throw new Error(error?.message ?? "Failed to download signature asset");
+  if (error) {
+    throwStorageError(
+      "STORAGE_DOWNLOAD_SIGNATURE_ASSET_FAILED",
+      error?.message ?? "Failed to download signature asset",
+      {
+        bucket: signaturesBucket,
+        storagePath,
+      },
+      error,
+    );
   }
 
-  return toBuffer(data);
+  if (payload === null) {
+    throwStorageError(
+      "STORAGE_DOWNLOAD_SIGNATURE_ASSET_FAILED",
+      "Failed to download signature asset",
+      {
+        bucket: signaturesBucket,
+        storagePath,
+      },
+    );
+  }
+
+  return toBuffer(payload as Blob);
 };
 
 export const getDocumentObjectMetadata = async (storagePath: string) => {
@@ -143,7 +283,16 @@ export const getDocumentObjectMetadata = async (storagePath: string) => {
     .list(directory, { limit: 200 });
 
   if (error) {
-    throw new Error(error.message);
+    throwStorageError(
+      "STORAGE_LIST_DOCUMENT_OBJECT_METADATA_FAILED",
+      error.message,
+      {
+        bucket: documentsBucket,
+        storagePath,
+        directory,
+      },
+      error,
+    );
   }
 
   const match = data?.find((item) => item.name === fileName);
@@ -192,7 +341,16 @@ export const uploadGeneratedDocument = async (input: {
   );
 
   if (error) {
-    throw new Error(error.message);
+    throwStorageError(
+      "STORAGE_UPLOAD_GENERATED_DOCUMENT_FAILED",
+      error.message,
+      {
+        bucket: documentsBucket,
+        storagePath: input.storagePath,
+        contentType: input.contentType,
+      },
+      error,
+    );
   }
 
   return {
@@ -218,7 +376,16 @@ export const getSignatureObjectMetadata = async (storagePath: string) => {
     .list(directory, { limit: 200 });
 
   if (error) {
-    throw new Error(error.message);
+    throwStorageError(
+      "STORAGE_LIST_SIGNATURE_OBJECT_METADATA_FAILED",
+      error.message,
+      {
+        bucket: signaturesBucket,
+        storagePath,
+        directory,
+      },
+      error,
+    );
   }
 
   const match = data?.find((item) => item.name === fileName);
@@ -254,7 +421,16 @@ export const uploadSignatureAsset = async (input: {
   );
 
   if (error) {
-    throw new Error(error.message);
+    throwStorageError(
+      "STORAGE_UPLOAD_SIGNATURE_ASSET_FAILED",
+      error.message,
+      {
+        bucket: signaturesBucket,
+        storagePath: input.storagePath,
+        contentType: input.contentType,
+      },
+      error,
+    );
   }
 
   return {

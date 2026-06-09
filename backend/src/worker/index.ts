@@ -9,6 +9,7 @@ import { captureException, flushSentry } from "../utils/sentry";
 
 type HashingJobData = {
   documentId: string;
+  requestId?: string | null;
   content?: string;
   idn?: string;
 };
@@ -16,15 +17,18 @@ type HashingJobData = {
 type LedgerJobData = {
   idn: string;
   hash: string;
+  requestId?: string | null;
 };
 
 type WebhookJobData = {
   url: string;
   payload: Record<string, unknown>;
+  requestId?: string | null;
 };
 
 type GenerationRunJobData = {
   runId: string;
+  requestId?: string | null;
 };
 
 const redisConnection = connection;
@@ -41,6 +45,7 @@ const summarizeJobData = (data: unknown) => {
     keys: Object.keys(record),
     documentId: typeof record.documentId === "string" ? record.documentId : null,
     generationRunId: typeof record.runId === "string" ? record.runId : null,
+    requestId: typeof record.requestId === "string" ? record.requestId : null,
     idn: typeof record.idn === "string" ? record.idn : null,
     urlHost:
       typeof record.url === "string"
@@ -163,6 +168,7 @@ if (!redisConnection) {
       async (job) => {
         return processDocumentGenerationRun({
           runId: job.data.runId,
+          requestId: typeof job.data.requestId === "string" ? job.data.requestId : null,
           rendererJobId: `${job.queueName}:${String(job.id ?? job.data.runId)}`,
         });
       },

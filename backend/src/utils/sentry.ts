@@ -1,8 +1,19 @@
 import * as Sentry from "@sentry/node";
+import { getErrorTelemetryFields } from "../errors/domainError";
 
-type CaptureLevel = "fatal" | "error" | "warning" | "info" | "debug";
+export type CaptureLevel = "fatal" | "error" | "warning" | "info" | "debug";
 
-type CaptureContextInput = {
+export type CaptureContextInput = {
+  level?: CaptureLevel;
+  tags?: Record<string, string | number | boolean | null | undefined>;
+  contexts?: Record<string, Record<string, unknown>>;
+  extra?: Record<string, unknown>;
+  fingerprint?: string[];
+};
+
+export type DomainCaptureContextInput = {
+  service: string;
+  operation: string;
   level?: CaptureLevel;
   tags?: Record<string, string | number | boolean | null | undefined>;
   contexts?: Record<string, Record<string, unknown>>;
@@ -85,4 +96,48 @@ export const flushSentry = async (timeoutMs = 2000) => {
   }
 
   await Sentry.flush(timeoutMs);
+};
+
+export const buildDomainCaptureContext = (
+  error: unknown,
+  context: DomainCaptureContextInput,
+): CaptureContextInput => {
+  const telemetry = getErrorTelemetryFields(error);
+
+  const captureContext: CaptureContextInput = {
+    level: context.level ?? "error",
+    tags: {
+      service: context.service,
+      operation: context.operation,
+      error_code: telemetry.code,
+      error_family: telemetry.family,
+      ...context.tags,
+    },
+    contexts: {
+      error: {
+        code: telemetry.code,
+        family: telemetry.family,
+        name: telemetry.name,
+        details: telemetry.details,
+      },
+      ...context.contexts,
+    },
+    fingerprint:
+      context.fingerprint ?? [context.service, telemetry.family, telemetry.code, context.operation],
+  };
+
+  if (context.extra) {
+    captureContext.extra = context.extra;
+  }
+
+  return captureContext;
+};
+
+export const captureDomainException = (
+  error: unknown,
+  context: DomainCaptureContextInput,
+) => {
+  const captureContext = buildDomainCaptureContext(error, context);
+
+  captureException(error, captureContext);
 };

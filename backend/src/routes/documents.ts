@@ -6,6 +6,7 @@ import {
   cancelDocumentGenerationRun,
   createDocumentGenerationRuns,
   createDocument,
+  deleteSavedSignature,
   getDocumentGenerationRun,
   getDocumentIntakeDraft,
   getDocumentReview,
@@ -158,6 +159,11 @@ router.get(
   "/:id/signatures/saved",
   requireRole(["member", "admin", "service_role"]),
   listSavedSignatures,
+);
+router.delete(
+  "/:id/signatures/saved/:signatureId",
+  requireRole(["member", "admin", "service_role"]),
+  deleteSavedSignature,
 );
 router.post(
   "/:id/signatures",

@@ -184,6 +184,42 @@ describe("documentGenerationRenderService", () => {
     expect(source).toContain("IMPORTANT INFORMATION FOR AGENT");
   });
 
+  it("omits the successor agent section from the real Ohio POA template when no successors are designated", async () => {
+    const source = await loadTemplateSource({
+      id: "artifact-oh-poa",
+      template_key: "oh_poa_general",
+      template_version: "2026.06.05.v2",
+      template_hash: "sha256:oh-poa-v2",
+      artifact_storage_path: "templates/oh_poa_general.template.json",
+      artifact_mime_type: "application/json",
+      render_engine: "other",
+      artifact_metadata: {
+        renderer: "context_snapshot",
+        templateLabel: "Ohio DDPOA",
+      },
+      is_active: true,
+      created_at: "2026-06-05T00:00:00.000Z",
+    });
+    const rendered = renderLegalTemplateText({
+      templateSource: source,
+      placeholders: {},
+      canonicalAnswers: {
+        principal_full_name: "Morgan Principal",
+        principal_contact: { phone: "6145550101", email: "morgan@example.com" },
+        agent_full_name: "Taylor Agent",
+        agent_contact: { phone: "6145550102", email: "taylor@example.com" },
+        successor_agent_list: [],
+      },
+      documentKey: "poa_general",
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).not.toContain("Designation of Successor Agent(s)");
+    expect(visible).not.toContain("I name as my successor agent");
+    expect(visible).toContain("Grant of General Authority");
+  });
+
   it("promotes bold-only legal labels into headings and drops the et cetera trust bullet", () => {
     const rendered = renderLegalTemplateText({
       templateSource: [
@@ -224,6 +260,161 @@ describe("documentGenerationRenderService", () => {
     expect(visible).not.toContain("]]"
     );
     expect(rendered).not.toContain("Pending completion");
+  });
+
+  it("omits the Ohio successor agent section when no successors are designated", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "**Designation of Successor Agent(s) (Optional)**",
+        "",
+        "If my agent is unable or unwilling to act for me, I name as my successor agent:",
+        "",
+        "{{Agent\\[1\\].FullName}}, ",
+        "",
+        "{{Agent\\[1\\].Phone}}, ",
+        "",
+        "{{Agent\\[1\\].Email}}.",
+        "",
+        "If my successor agent is unable or unwilling to act for me, I name as my second successor agent:",
+        "",
+        "{{Agent\\[2\\].FullName}}, ",
+        "",
+        "{{Agent\\[2\\].Phone}}, ",
+        "",
+        "{{Agent\\[2\\].Email}}.",
+        "",
+        "**Grant of General Authority**",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        successor_agent_list: [],
+      },
+      documentKey: "poa_general",
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).not.toContain("Designation of Successor Agent(s)");
+    expect(visible).not.toContain("I name as my successor agent");
+    expect(visible).not.toContain("________________");
+    expect(visible).toContain("Grant of General Authority");
+  });
+
+  it("renders only the first Ohio successor agent paragraph when one successor is designated", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "**Designation of Successor Agent(s) (Optional)**",
+        "",
+        "If my agent is unable or unwilling to act for me, I name as my successor agent:",
+        "",
+        "{{Agent\\[1\\].FullName}}, ",
+        "",
+        "{{Agent\\[1\\].Phone}}, ",
+        "",
+        "{{Agent\\[1\\].Email}}.",
+        "",
+        "If my successor agent is unable or unwilling to act for me, I name as my second successor agent:",
+        "",
+        "{{Agent\\[2\\].FullName}}, ",
+        "",
+        "{{Agent\\[2\\].Phone}}, ",
+        "",
+        "{{Agent\\[2\\].Email}}.",
+        "",
+        "**Grant of General Authority**",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        successor_agent_list: [
+          {
+            fullName: "Casey Successor",
+            phone: "6145550100",
+            email: "casey@example.com",
+          },
+        ],
+      },
+      documentKey: "poa_general",
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).toContain("Designation of Successor Agent(s)");
+    expect(visible).toContain("Casey Successor");
+    expect(visible).toContain("6145550100");
+    expect(visible).toContain("casey@example.com");
+    expect(visible).not.toContain("second successor agent");
+    expect(visible).not.toContain("________________");
+    expect(visible).toContain("Grant of General Authority");
+  });
+
+  it("renders both Ohio successor agent paragraphs when two successors are designated", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "**Designation of Successor Agent(s) (Optional)**",
+        "",
+        "If my agent is unable or unwilling to act for me, I name as my successor agent:",
+        "",
+        "{{Agent\\[1\\].FullName}}, ",
+        "",
+        "{{Agent\\[1\\].Phone}}, ",
+        "",
+        "{{Agent\\[1\\].Email}}.",
+        "",
+        "If my successor agent is unable or unwilling to act for me, I name as my second successor agent:",
+        "",
+        "{{Agent\\[2\\].FullName}}, ",
+        "",
+        "{{Agent\\[2\\].Phone}}, ",
+        "",
+        "{{Agent\\[2\\].Email}}.",
+        "",
+        "**Grant of General Authority**",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        successor_agent_list: [
+          {
+            fullName: "Casey Successor",
+            phone: "6145550100",
+            email: "casey@example.com",
+          },
+          {
+            fullName: "Riley Backup",
+            phone: "6145550101",
+            email: "riley@example.com",
+          },
+        ],
+      },
+      documentKey: "poa_general",
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).toContain("Casey Successor");
+    expect(visible).toContain("Riley Backup");
+    expect(visible).toContain("second successor agent");
+    expect(visible).not.toContain("________________");
+  });
+
+  it("leaves California POA templates without successor sections unchanged", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "**Multiple Agents**",
+        "",
+        "If I have designated more than one agent, {{all agents must act jointly to exercise these powers *OR* any may exercise these powers separately}}.",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        successor_agent_list: [],
+      },
+      documentKey: "poa_general",
+      isPreview: true,
+    });
+    const visible = stripRenderControlTokens(rendered);
+
+    expect(visible).toContain("Multiple Agents");
+    expect(visible).toContain("If I have designated more than one agent");
+    expect(visible).not.toContain("Designation of Successor Agent(s)");
   });
 
   it("omits the California notarial acknowledgment block from generated preview output", () => {

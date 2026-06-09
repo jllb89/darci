@@ -2331,6 +2331,7 @@ describe("GET documents endpoints", () => {
     );
     expect(mocks.enqueueDocumentGenerationRunMock).toHaveBeenCalledWith({
       runId: "run-retry",
+      requestId: expect.any(String),
     });
   });
 

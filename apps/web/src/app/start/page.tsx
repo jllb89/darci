@@ -22,6 +22,13 @@ import {
 } from "@/lib/auth";
 import { buildAuthCallbackUrl, sanitizeAuthReturnTo } from "@/lib/authRedirects";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import {
+  getNextOtpFocusIndexAfterInput,
+  getOtpCodeForAutoSubmit,
+  getOtpDigitsOnly,
+  getOtpVerificationFailureMessage,
+  isCompleteOtpDigits,
+} from "./otpInput";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -163,8 +170,13 @@ function StartAuthPageContent() {
   const [isRecoverySubmitting, setIsRecoverySubmitting] = useState(false);
   const [resendCountdownSeconds, setResendCountdownSeconds] = useState(0);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const lastAutoSubmittedOtpCodeRef = useRef<string | null>(null);
 
   const otpCode = useMemo(() => otpDigits.join(""), [otpDigits]);
+
+  useEffect(() => {
+    lastAutoSubmittedOtpCodeRef.current = null;
+  }, [authStep, challenge?.value]);
 
   const hasIntendedEmailMismatch = useCallback((user: StoredUser | null | undefined) => {
     const sessionEmail = normalizeEmail(user?.email);
@@ -545,7 +557,13 @@ function StartAuthPageContent() {
 
       if (!response.ok || !payload?.accessToken || !payload.user) {
         const validationMessage = payload?.details?.[0]?.message;
-        throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
+        throw new Error(
+          getOtpVerificationFailureMessage({
+            status: response.status,
+            message: payload?.message,
+            validationMessage,
+          }),
+        );
       }
 
       await finishVerifiedSession(payload, challenge);
@@ -567,7 +585,13 @@ function StartAuthPageContent() {
 
       if (!response.ok || !payload?.accessToken || !payload.user) {
         const validationMessage = payload?.details?.[0]?.message;
-        throw new Error(payload?.message || validationMessage || "Invalid or expired code.");
+        throw new Error(
+          getOtpVerificationFailureMessage({
+            status: response.status,
+            message: payload?.message,
+            validationMessage,
+          }),
+        );
       }
 
       await finishVerifiedSession(payload, challenge);
@@ -575,7 +599,8 @@ function StartAuthPageContent() {
   };
 
   const updateOtpDigitsFromInput = (value: string, index: number) => {
-    const digitsOnly = value.replace(/\D/g, "");
+    const digitsOnly = getOtpDigitsOnly(value);
+    setErrorMessage(null);
 
     setOtpDigits((currentDigits) => {
       const nextDigits = [...currentDigits];
@@ -597,13 +622,12 @@ function StartAuthPageContent() {
       return nextDigits;
     });
 
-    const nextFocusIndex = Math.min(
-      index + Math.max(digitsOnly.length, 1),
-      otpDigits.length - 1,
-    );
-    requestAnimationFrame(() => {
-      otpInputRefs.current[nextFocusIndex]?.focus();
-    });
+    const nextFocusIndex = getNextOtpFocusIndexAfterInput(value, index, otpDigits.length);
+    if (nextFocusIndex !== null) {
+      requestAnimationFrame(() => {
+        otpInputRefs.current[nextFocusIndex]?.focus();
+      });
+    }
   };
 
   const handleOtpDigitKeyDown = (
@@ -656,10 +680,19 @@ function StartAuthPageContent() {
       return;
     }
 
-    if (!otpDigits.every((digit) => digit.length === 1)) {
+    const nextAutoSubmittedOtpCode = getOtpCodeForAutoSubmit(
+      otpDigits,
+      lastAutoSubmittedOtpCodeRef.current,
+    );
+
+    if (!nextAutoSubmittedOtpCode) {
+      if (!isCompleteOtpDigits(otpDigits)) {
+        lastAutoSubmittedOtpCodeRef.current = null;
+      }
       return;
     }
 
+    lastAutoSubmittedOtpCodeRef.current = nextAutoSubmittedOtpCode;
     let cancelled = false;
 
     const runVerify = async () => {
@@ -837,6 +870,7 @@ function StartAuthPageContent() {
       if (authStep === "identifier") {
         await startOtpChallenge();
       } else if (authStep === "otp") {
+        lastAutoSubmittedOtpCodeRef.current = normalizeOtpToken(otpCode) || null;
         await verifyOtpChallenge();
       } else if (authStep === "profile") {
         await completeProfile();

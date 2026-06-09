@@ -367,6 +367,7 @@ describe("POST /documents with product flow mode", () => {
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "member.document_upload_started",
+        requestId: expect.any(String),
         metadata: expect.objectContaining({
           product_flow_mode: "trust_bundle",
           output_bundle_count: 2,

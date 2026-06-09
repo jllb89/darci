@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
 import { refreshStoredAuth, useStoredAuth, type StoredUserRole } from "@/lib/auth";
 
 const apiBaseUrl =
@@ -308,6 +309,7 @@ export default function AppSidebar({
   const [verificationQuery, setVerificationQuery] = useState("");
   const [isVerificationLookupLoading, setIsVerificationLookupLoading] = useState(false);
   const [verificationLookupMessage, setVerificationLookupMessage] = useState<string | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const verificationLookupRef = useRef<HTMLDivElement | null>(null);
 
   const profileRoleLabel = PROFILE_ROLE_LABELS[role];
@@ -320,6 +322,26 @@ export default function AppSidebar({
     setVerificationQuery("");
     setVerificationLookupMessage(null);
   }, []);
+
+  useEffect(() => {
+    const storedSidebarState = window.localStorage.getItem("darci.appSidebar.collapsed");
+    if (storedSidebarState === "true") {
+      setIsCollapsed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("darci.appSidebar.collapsed", isCollapsed ? "true" : "false");
+  }, [isCollapsed]);
+
+  useEffect(() => {
+    if (!isCollapsed) {
+      return;
+    }
+
+    setIsProfilePanelOpen(false);
+    closeVerificationLookup();
+  }, [closeVerificationLookup, isCollapsed]);
 
   useEffect(() => {
     if (!isVerificationLookupOpen) {
@@ -389,10 +411,53 @@ export default function AppSidebar({
   }, [accessToken, closeVerificationLookup, router, verificationQuery]);
 
   return (
-    <aside className="hidden h-screen w-60 flex-shrink-0 flex-col border-r border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest md:flex">
-      <div className="flex h-full flex-col justify-between px-2 py-4">
+    <motion.aside
+      animate={{ width: isCollapsed ? 52 : 240 }}
+      className="hidden h-screen flex-shrink-0 flex-col overflow-visible border-r border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest md:flex"
+      initial={false}
+      transition={{ type: "spring", stiffness: 430, damping: 42, mass: 0.85 }}
+    >
+      <AnimatePresence initial={false} mode="wait">
+        {isCollapsed ? (
+          <motion.div
+            key="collapsed"
+            animate={{ opacity: 1, filter: "blur(0px)" }}
+            className="flex h-full w-full flex-col items-center px-1.5 py-4"
+            exit={{ opacity: 0, filter: "blur(6px)" }}
+            initial={{ opacity: 0, filter: "blur(6px)" }}
+            transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <button
+              aria-expanded={false}
+              aria-label="Expand sidebar"
+              className="inline-flex h-9 w-9 items-center justify-center border-0 bg-transparent p-0 text-Color-Neutral transition-colors duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-Color-Scheme-1-Text"
+              onClick={() => setIsCollapsed(false)}
+              title="Expand sidebar"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <path d="M5.75 7.25h12.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                <path d="M5.75 12h12.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                <path d="M5.75 16.75h12.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+              </svg>
+            </button>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="expanded"
+            animate={{ opacity: 1, filter: "blur(0px)" }}
+            className="flex h-full w-full flex-col justify-between px-2 py-4"
+            exit={{ opacity: 0, filter: "blur(6px)" }}
+            initial={{ opacity: 0, filter: "blur(6px)" }}
+            transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
+          >
         <div className="flex flex-col gap-5">
-          <div className="px-2">
+          <div className="flex h-8 items-center justify-between px-2">
             <Image
               src="/icons/navbar/darci_black.svg"
               alt="DARCi"
@@ -400,6 +465,18 @@ export default function AppSidebar({
               height={12}
               className="h-3 w-auto"
             />
+            <button
+              aria-expanded
+              aria-label="Collapse sidebar"
+              className="inline-flex h-7 w-7 items-center justify-center border-0 bg-transparent p-0 text-Color-Neutral transition-colors duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:text-Color-Scheme-1-Text"
+              onClick={() => setIsCollapsed(true)}
+              title="Collapse sidebar"
+              type="button"
+            >
+              <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                <path d="m14 7-5 5 5 5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+              </svg>
+            </button>
           </div>
 
           <div className="group flex items-center gap-2 rounded-md bg-Color-Neutral-Lighter/40 px-2.5 py-1 text-sm text-Color-Neutral">
@@ -713,7 +790,9 @@ export default function AppSidebar({
             ) : null}
           </div>
         </div>
-      </div>
-    </aside>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.aside>
   );
 }

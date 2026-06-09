@@ -1198,7 +1198,11 @@ const transitionAllowed = (
 };
 
 const buildAuditActorContext = (req: Request) => {
-  const actorContext: { actorSupabaseId?: string; actorRole?: string } = {};
+  const actorContext: {
+    actorSupabaseId?: string;
+    actorRole?: string;
+    requestId?: string | null;
+  } = {};
 
   if (req.user?.id) {
     actorContext.actorSupabaseId = req.user.id;
@@ -1206,6 +1210,7 @@ const buildAuditActorContext = (req: Request) => {
   if (req.user?.role) {
     actorContext.actorRole = req.user.role;
   }
+  actorContext.requestId = req.requestId ?? null;
 
   return actorContext;
 };
@@ -1964,6 +1969,10 @@ const mapSavedSignatureResponse = async (
     capturedAt: signature.captured_at ?? null,
     createdAt: signature.created_at,
   };
+};
+
+const isSavedSignatureRemovedFromReuse = (signature: SignatureRecord) => {
+  return typeof signature.metadata.savedSignatureDeletedAt === "string";
 };
 
 const mapBlockingRequirementResponse = (
@@ -2989,6 +2998,7 @@ const createGenerationRunsForDocument = async (input: {
   document: DocumentRecord;
   outputKeys?: string[];
   reuseSatisfiedRunsCreatedAfter?: string | null;
+  requestId?: string | null;
   actorContext?: { actorSupabaseId?: string; actorRole?: string };
 }): Promise<GenerationRunCreationResult> => {
   if (!isDocumentIntakeLocked(input.document)) {
@@ -3249,6 +3259,7 @@ const createGenerationRunsForDocument = async (input: {
       {
         documentId: run.document_id,
         generationRunId: run.id,
+        requestId: input.requestId ?? null,
         outputKey: run.output_key,
         documentKey: run.document_key,
         templateKey: run.template_key,
@@ -3286,6 +3297,7 @@ const createGenerationRunsForDocument = async (input: {
     if (preparedRun.status === "queued") {
       await enqueueDocumentGenerationRun({
         runId: run.id,
+        requestId: input.requestId ?? null,
       });
     }
 
@@ -3322,6 +3334,7 @@ const createGenerationRunsForDocument = async (input: {
 const ensureSigningState = async (input: {
   document: DocumentRecord;
   viewerRole?: string | null;
+  requestId?: string | null;
   actorContext?: { actorSupabaseId?: string; actorRole?: string };
 }) => {
   let document = input.document;
@@ -3380,6 +3393,7 @@ const ensureSigningState = async (input: {
       document,
       outputKeys: signingState.missingOutputKeys,
       reuseSatisfiedRunsCreatedAfter: signingState.reviewApproval.approvedAt,
+      requestId: input.requestId ?? null,
       ...(input.actorContext ? { actorContext: input.actorContext } : {}),
     });
 
@@ -4973,6 +4987,7 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
       document: updatedDocument,
       outputKeys: approvedOutputKeys,
       reuseSatisfiedRunsCreatedAfter: approvedAt,
+      requestId: req.requestId ?? null,
       actorContext,
     });
 
@@ -5440,6 +5455,7 @@ export const createDocumentGenerationRuns = async (req: Request, res: Response) 
   const result = await createGenerationRunsForDocument({
     document,
     ...(parsed.data.outputKeys ? { outputKeys: parsed.data.outputKeys } : {}),
+    requestId: req.requestId ?? null,
     actorContext: buildAuditActorContext(req),
   });
 
@@ -5729,6 +5745,7 @@ export const recheckDocumentGenerationRun = async (req: Request, res: Response) 
   if (preparedRun.status === "queued") {
     await enqueueDocumentGenerationRun({
       runId: run.id,
+      requestId: req.requestId ?? null,
     });
   }
 
@@ -6501,7 +6518,9 @@ export const listSavedSignatures = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       savedSignatures: await Promise.all(
-        savedSignatures.map((signature) => mapSavedSignatureResponse(signature)),
+        savedSignatures
+          .filter((signature) => !isSavedSignatureRemovedFromReuse(signature))
+          .map((signature) => mapSavedSignatureResponse(signature)),
       ),
     });
   } catch (error) {
@@ -6510,6 +6529,84 @@ export const listSavedSignatures = async (req: Request, res: Response) => {
       documentId: typeof req.params.id === "string" ? req.params.id : null,
       actorSupabaseId: req.user?.id ?? null,
       actorRole: req.user?.role ?? null,
+    });
+  }
+};
+
+export const deleteSavedSignature = async (req: Request, res: Response) => {
+  let signerUserId: string | null = null;
+
+  try {
+    const signingAccess = await getAuthorizedSigningAccess(req, res);
+    if (!signingAccess) {
+      return;
+    }
+    signerUserId = signingAccess.signerUserId;
+
+    const signatureId =
+      typeof req.params.signatureId === "string" ? req.params.signatureId.trim() : "";
+    if (!signatureId) {
+      return res.status(400).json({
+        error: "validation_error",
+        message: "Saved signature id is required",
+        details: [
+          {
+            path: "signatureId",
+            message: "Saved signature id is required",
+          },
+        ],
+      });
+    }
+
+    const savedSignature = await getSignatureRecordById(signatureId);
+
+    if (
+      !savedSignature ||
+      savedSignature.signer_id !== signingAccess.signerUserId ||
+      savedSignature.status !== "captured" ||
+      isSavedSignatureRemovedFromReuse(savedSignature)
+    ) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Saved signature not found",
+      });
+    }
+
+    const deletedAt = new Date().toISOString();
+    await updateSignatureRecord(savedSignature.id, savedSignature.document_id, {
+      metadata: {
+        ...savedSignature.metadata,
+        savedSignatureDeletedAt: deletedAt,
+        savedSignatureDeletedBySupabaseId: req.user?.id ?? null,
+      },
+    });
+
+    await recordAuditEvent({
+      ...buildAuditActorContext(req),
+      entityType: "signature",
+      entityId: savedSignature.id,
+      action: "member.saved_signature_deleted",
+      metadata: {
+        signature_id: savedSignature.id,
+        document_id: savedSignature.document_id,
+        signer_id: savedSignature.signer_id,
+        storage_path: savedSignature.storage_path,
+        capture_method: savedSignature.capture_method,
+        deleted_at: deletedAt,
+      },
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      deletedSignatureId: savedSignature.id,
+    });
+  } catch (error) {
+    return sendSigningEndpointFailure(res, error, {
+      route: "delete_saved_signature",
+      documentId: typeof req.params.id === "string" ? req.params.id : null,
+      actorSupabaseId: req.user?.id ?? null,
+      actorRole: req.user?.role ?? null,
+      signerUserId,
     });
   }
 };
@@ -6529,6 +6626,7 @@ export const getDocumentSigning = async (req: Request, res: Response) => {
     let signing = await ensureSigningState({
       document,
       viewerRole: req.user?.role ?? "member",
+      requestId: req.requestId ?? null,
       actorContext: buildAuditActorContext(req),
     });
 
@@ -6542,6 +6640,7 @@ export const getDocumentSigning = async (req: Request, res: Response) => {
       signing = await ensureSigningState({
         document,
         viewerRole: req.user?.role ?? "member",
+        requestId: req.requestId ?? null,
         actorContext: buildAuditActorContext(req),
       });
     }
@@ -6593,6 +6692,7 @@ export const signDocument = async (req: Request, res: Response) => {
   const signing = await ensureSigningState({
     document,
     viewerRole: req.user?.role ?? "member",
+    requestId: req.requestId ?? null,
     actorContext: buildAuditActorContext(req),
   });
 
@@ -6994,7 +7094,8 @@ export const captureSignature = async (req: Request, res: Response) => {
     if (
       !savedSignature ||
       savedSignature.signer_id !== signingAccess.signerUserId ||
-      savedSignature.status !== "captured"
+      savedSignature.status !== "captured" ||
+      isSavedSignatureRemovedFromReuse(savedSignature)
     ) {
       return res.status(404).json({
         error: "not_found",
@@ -7849,6 +7950,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
   if (webhookUrl) {
     await enqueueWebhook({
       url: webhookUrl,
+      requestId: req.requestId ?? null,
       payload: {
         requestId: request.id,
         documentId,

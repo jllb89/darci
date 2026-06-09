@@ -6,7 +6,12 @@ import ProcessBand from "@/app/app/start/ProcessBand";
 import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
 import { formatLabel } from "@/app/app/start/startPageUtils";
 import { useAppToast } from "@/components/app/AppToastContext";
-import { captureAppException, captureAppMessage } from "@/lib/clientTelemetry";
+import {
+  addFeatureBreadcrumb,
+  captureAppMessage,
+  captureDomainException,
+  getResponseRequestId,
+} from "@/lib/clientTelemetry";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 
 const apiBaseUrl =
@@ -240,6 +245,13 @@ export default function ReviewPage() {
         setIsLoading(true);
       }
 
+      let requestId: string | null = null;
+      addFeatureBreadcrumb({
+        feature: "document_review",
+        action: "fetch.started",
+        data: { documentId, silent: Boolean(options?.silent) },
+      });
+
       try {
         const response = await fetchWithTokenRefresh(
           `${apiBaseUrl}/documents/${documentId}/review`,
@@ -248,6 +260,7 @@ export default function ReviewPage() {
             cache: "no-store",
           },
         );
+        requestId = getResponseRequestId(response);
         const nextPayload = (await response.json().catch(() => null)) as
           | ReviewPayload
           | null;
@@ -258,14 +271,35 @@ export default function ReviewPage() {
 
         setPayload(nextPayload);
         setErrorMessage(null);
+        addFeatureBreadcrumb({
+          feature: "document_review",
+          action: "fetch.completed",
+          data: {
+            documentId,
+            requestId,
+            state: nextPayload.review.state,
+            pendingOutputCount: nextPayload.review.pendingOutputs.length,
+            readyOutputCount: nextPayload.review.outputs.length,
+          },
+        });
         return nextPayload;
       } catch (error) {
         const message =
           error instanceof Error
             ? error.message
             : "Failed to load review documents.";
-        captureAppException(error, {
+        addFeatureBreadcrumb({
+          feature: "document_review",
+          action: "fetch.failed",
           level: "error",
+          data: { documentId, requestId },
+        });
+        captureDomainException(error, {
+          level: "error",
+          operation: "document_review.fetch",
+          errorCode: "WEB_REVIEW_FETCH_FAILED",
+          errorFamily: "review",
+          requestId,
           tags: {
             feature: "document_review",
             document_id: documentId,
@@ -296,6 +330,12 @@ export default function ReviewPage() {
       }
 
       setIsEnsuringGeneration(true);
+      let requestId: string | null = null;
+      addFeatureBreadcrumb({
+        feature: "document_generation",
+        action: "ensure.started",
+        data: { documentId, missingOutputKeys },
+      });
 
       try {
         const response = await fetchWithTokenRefresh(
@@ -311,6 +351,7 @@ export default function ReviewPage() {
             }),
           },
         );
+        requestId = getResponseRequestId(response);
         const responsePayload = (await response.json().catch(() => null)) as
           | {
               message?: string;
@@ -330,10 +371,17 @@ export default function ReviewPage() {
         );
 
         if (blockedRuns.length > 0) {
+          addFeatureBreadcrumb({
+            feature: "document_generation",
+            action: "ensure.blocked",
+            level: "warning",
+            data: { documentId, requestId, blockedRuns },
+          });
           captureAppMessage("Review PDF generation returned blocked runs", {
             level: "warning",
             tags: {
               feature: "document_generation",
+              ...(requestId ? { request_id: requestId } : {}),
               document_id: documentId,
             },
             contexts: {
@@ -348,10 +396,17 @@ export default function ReviewPage() {
         }
 
         if (!response.ok && response.status !== 409) {
+          addFeatureBreadcrumb({
+            feature: "document_generation",
+            action: "ensure.failed_response",
+            level: "error",
+            data: { documentId, requestId, status: response.status },
+          });
           captureAppMessage("Review PDF generation request failed", {
             level: "error",
             tags: {
               feature: "document_generation",
+              ...(requestId ? { request_id: requestId } : {}),
               document_id: documentId,
             },
             contexts: {
@@ -371,13 +426,22 @@ export default function ReviewPage() {
         }
 
         await fetchReview({ silent: true });
+        addFeatureBreadcrumb({
+          feature: "document_generation",
+          action: "ensure.completed",
+          data: { documentId, requestId, requestedOutputKeys: missingOutputKeys },
+        });
       } catch (error) {
         const message =
           error instanceof Error
             ? error.message
             : "Failed to start review PDF generation.";
-        captureAppException(error, {
+        captureDomainException(error, {
           level: "error",
+          operation: "document_generation.ensure_review_runs",
+          errorCode: "WEB_GENERATION_ENSURE_FAILED",
+          errorFamily: "generation",
+          requestId,
           tags: {
             feature: "document_generation",
             document_id: documentId,
@@ -406,6 +470,12 @@ export default function ReviewPage() {
     }
 
     setIsApproving(true);
+    let requestId: string | null = null;
+    addFeatureBreadcrumb({
+      feature: "document_review",
+      action: "approval.started",
+      data: { documentId },
+    });
 
     try {
       const response = await fetchWithTokenRefresh(
@@ -419,6 +489,7 @@ export default function ReviewPage() {
           body: JSON.stringify({ agreed: true }),
         },
       );
+      requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as
         | { message?: string }
         | null;
@@ -431,12 +502,40 @@ export default function ReviewPage() {
         tone: "success",
         message: "Review approved. Your documents are ready for signing.",
       });
+      addFeatureBreadcrumb({
+        feature: "document_review",
+        action: "approval.completed",
+        data: { documentId, requestId },
+      });
       router.push(`/app/sign?documentId=${encodeURIComponent(documentId)}`);
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : "Failed to approve document review.";
+      addFeatureBreadcrumb({
+        feature: "document_review",
+        action: "approval.failed",
+        level: "error",
+        data: { documentId, requestId },
+      });
+      captureDomainException(error, {
+        level: "error",
+        operation: "document_review.approve",
+        errorCode: "WEB_REVIEW_APPROVAL_FAILED",
+        errorFamily: "review",
+        requestId,
+        tags: {
+          feature: "document_review",
+          document_id: documentId,
+        },
+        contexts: {
+          document_review: {
+            documentId,
+            stage: "approve_review",
+          },
+        },
+      });
       setErrorMessage(message);
       showToast({ tone: "error", message });
     } finally {

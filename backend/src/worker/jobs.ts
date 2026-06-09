@@ -2,6 +2,7 @@ import { generationQueue, hashingQueue, ledgerQueue, webhookQueue } from "./queu
 
 type HashingJobInput = {
   documentId: string;
+  requestId?: string | null;
   content?: string;
   idn?: string;
 };
@@ -9,15 +10,18 @@ type HashingJobInput = {
 type LedgerJobInput = {
   idn: string;
   hash: string;
+  requestId?: string | null;
 };
 
 type WebhookJobInput = {
   url: string;
   payload: Record<string, unknown>;
+  requestId?: string | null;
 };
 
 type GenerationRunJobInput = {
   runId: string;
+  requestId?: string | null;
 };
 
 export const enqueueHashing = async (input: HashingJobInput) => {

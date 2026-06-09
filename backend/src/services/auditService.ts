@@ -8,6 +8,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 type AuditEventInput = {
   actorSupabaseId?: string;
   actorRole?: string;
+  requestId?: string | null;
   entityType: string;
   entityId?: string | null;
   action: string;
@@ -39,6 +40,7 @@ export const recordAuditEvent = async (input: AuditEventInput) => {
     ...input.metadata,
     actor_supabase_id: input.actorSupabaseId ?? null,
     actor_role: input.actorRole ?? null,
+    request_id: input.requestId ?? null,
   };
 
   const { error } = await supabaseAdmin.from("audit_events").insert({

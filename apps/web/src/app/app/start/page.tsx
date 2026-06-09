@@ -23,6 +23,7 @@ import {
   DEFAULT_PHONE_COUNTRY_ISO2,
   PHONE_COUNTRY_CODE_OPTIONS,
   formatPhoneInput,
+  formatPhoneInputForEditing,
   getPhoneCountryCodeByIso2,
   getMemberFieldControlKind,
   hasSigningTrustee,
@@ -925,6 +926,7 @@ export default function StartDocumentPage() {
 
   const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
+  const [blurredInputKeys, setBlurredInputKeys] = useState<Set<string>>(() => new Set());
 
   const [isLoadingJurisdictions, setIsLoadingJurisdictions] = useState(false);
   const [isLoadingMemberForm, setIsLoadingMemberForm] = useState(false);
@@ -1091,6 +1093,10 @@ export default function StartDocumentPage() {
   }, [user?.email, user?.firstName, user?.lastName, user?.phone]);
   const requesterEmail = user?.email?.trim() ?? "";
   const requesterPhone = user?.phone?.trim() ?? "";
+
+  useEffect(() => {
+    setBlurredInputKeys(new Set());
+  }, [memberForm]);
 
   const isMockDataToggleVisible = process.env.NODE_ENV !== "production" && !isNotarizationProductFlow;
   const isMockDataToggleDisabled =
@@ -3436,6 +3442,18 @@ export default function StartDocumentPage() {
     }));
   };
 
+  const markInputBlurred = (inputKey: string) => {
+    setBlurredInputKeys((current) => {
+      if (current.has(inputKey)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.add(inputKey);
+      return next;
+    });
+  };
+
   const handleNotarizationFilePick = (file: File | null | undefined) => {
     if (!file) {
       return;
@@ -3674,32 +3692,40 @@ export default function StartDocumentPage() {
     if (controlKind === "person-contact") {
       const contact = parsePersonContact(fieldValue);
       const {
-        missingEmail,
-        missingPhone,
         invalidEmail,
         invalidPhone,
         invalidCountryCode,
       } = validatePersonContact(fieldValue);
-      const hasFormatError = invalidCountryCode || invalidEmail || invalidPhone;
+      const emailInputKey = `${field.canonical_key}:email`;
+      const phoneInputKey = `${field.canonical_key}:phone`;
+      const showEmailFormatError = invalidEmail && blurredInputKeys.has(emailInputKey);
+      const showPhoneFormatError =
+        (invalidPhone || invalidCountryCode) && blurredInputKeys.has(phoneInputKey);
 
       return (
         <div className="space-y-2 border border-Color-Scheme-1-Border/40 bg-white p-3">
           <div className="space-y-2">
-            <input
-              className={baseInputClassName}
-              onChange={(event) => {
-                handleFieldChange(
-                  field.canonical_key,
-                  serializePersonContact({
-                    ...contact,
-                    email: event.target.value,
-                  }),
-                );
-              }}
-              placeholder="Email"
-              type="email"
-              value={contact.email}
-            />
+            <div className="space-y-1">
+              <input
+                className={baseInputClassName}
+                onBlur={() => markInputBlurred(emailInputKey)}
+                onChange={(event) => {
+                  handleFieldChange(
+                    field.canonical_key,
+                    serializePersonContact({
+                      ...contact,
+                      email: event.target.value,
+                    }),
+                  );
+                }}
+                placeholder="Email"
+                type="email"
+                value={contact.email}
+              />
+              {showEmailFormatError ? (
+                <div className="px-1 text-xs text-amber-800">Enter a valid email address.</div>
+              ) : null}
+            </div>
             <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
               <ContractSelectControl
                 ariaLabel="Phone country code"
@@ -3719,39 +3745,31 @@ export default function StartDocumentPage() {
                 placeholder="Country code"
                 value={contact.phoneCountryIso2 || DEFAULT_PHONE_COUNTRY_ISO2}
               />
-              <input
-                className={baseInputClassName}
-                onChange={(event) => {
-                  handleFieldChange(
-                    field.canonical_key,
-                    serializePersonContact({
-                      ...contact,
-                      phone: formatPhoneInput(event.target.value, contact.phoneCountryIso2),
-                    }),
-                  );
-                }}
-                placeholder="Phone"
-                type="tel"
-                value={contact.phone}
-              />
+              <div className="space-y-1">
+                <input
+                  className={baseInputClassName}
+                  onBlur={() => markInputBlurred(phoneInputKey)}
+                  onChange={(event) => {
+                    handleFieldChange(
+                      field.canonical_key,
+                      serializePersonContact({
+                        ...contact,
+                        phone: formatPhoneInputForEditing(event.target.value, contact.phoneCountryIso2),
+                      }),
+                    );
+                  }}
+                  placeholder="Phone"
+                  type="tel"
+                  value={contact.phone}
+                />
+                {showPhoneFormatError ? (
+                  <div className="px-1 text-xs text-amber-800">
+                    {invalidCountryCode ? "Select a valid country code." : "Enter a valid phone number."}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
-
-          {hasFormatError ? (
-            <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              {invalidCountryCode
-                ? "Select a valid country code."
-                : invalidEmail
-                  ? "Enter a valid email address."
-                  : invalidPhone
-                    ? "Enter a valid phone number."
-                    : null}
-            </div>
-          ) : null}
-
-          {!hasFormatError && (missingEmail || missingPhone) ? (
-            <div className="text-xs text-Color-Neutral">Email and phone are required.</div>
-          ) : null}
         </div>
       );
     }
@@ -4054,7 +4072,18 @@ export default function StartDocumentPage() {
       return (
         <div className="space-y-3 border border-Color-Scheme-1-Border/40 bg-white p-3">
           {items.length > 0 ? (
-            items.map((item, index) => (
+            items.map((item, index) => {
+              const emailInputKey = `${field.canonical_key}:${index}:email`;
+              const phoneInputKey = `${field.canonical_key}:${index}:phone`;
+              const itemEmailInvalid = item.email.trim().length > 0 && !isValidEmailFormat(item.email);
+              const itemPhoneInvalid =
+                item.phone.trim().length > 0 &&
+                (!isValidPhoneCountryCode(item.phoneCountryCode) ||
+                  !isValidPhoneFormat(item.phone, item.phoneCountryIso2));
+              const showItemEmailFormatError = itemEmailInvalid && blurredInputKeys.has(emailInputKey);
+              const showItemPhoneFormatError = itemPhoneInvalid && blurredInputKeys.has(phoneInputKey);
+
+              return (
               <div
                 key={`${field.canonical_key}-person-${index}`}
                 className="space-y-2 border border-Color-Scheme-1-Border/30 p-3"
@@ -4075,20 +4104,26 @@ export default function StartDocumentPage() {
                       type="text"
                       value={item.fullName}
                     />
-                    <input
-                      className={baseInputClassName}
-                      onChange={(event) => {
-                        const nextItems = [...items];
-                        nextItems[index] = {
-                          ...item,
-                          email: event.target.value,
-                        };
-                        updateItems(nextItems);
-                      }}
-                      placeholder="Email"
-                      type="email"
-                      value={item.email}
-                    />
+                    <div className="space-y-1">
+                      <input
+                        className={baseInputClassName}
+                        onBlur={() => markInputBlurred(emailInputKey)}
+                        onChange={(event) => {
+                          const nextItems = [...items];
+                          nextItems[index] = {
+                            ...item,
+                            email: event.target.value,
+                          };
+                          updateItems(nextItems);
+                        }}
+                        placeholder="Email"
+                        type="email"
+                        value={item.email}
+                      />
+                      {showItemEmailFormatError ? (
+                        <div className="px-1 text-xs text-amber-800">Enter a valid email address.</div>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
                     <ContractSelectControl
@@ -4108,20 +4143,30 @@ export default function StartDocumentPage() {
                       placeholder="Country code"
                       value={item.phoneCountryIso2 || DEFAULT_PHONE_COUNTRY_ISO2}
                     />
-                    <input
-                      className={baseInputClassName}
-                      onChange={(event) => {
-                        const nextItems = [...items];
-                        nextItems[index] = {
-                          ...item,
-                          phone: formatPhoneInput(event.target.value, item.phoneCountryIso2),
-                        };
-                        updateItems(nextItems);
-                      }}
-                      placeholder="Phone"
-                      type="tel"
-                      value={item.phone}
-                    />
+                    <div className="space-y-1">
+                      <input
+                        className={baseInputClassName}
+                        onBlur={() => markInputBlurred(phoneInputKey)}
+                        onChange={(event) => {
+                          const nextItems = [...items];
+                          nextItems[index] = {
+                            ...item,
+                            phone: formatPhoneInputForEditing(event.target.value, item.phoneCountryIso2),
+                          };
+                          updateItems(nextItems);
+                        }}
+                        placeholder="Phone"
+                        type="tel"
+                        value={item.phone}
+                      />
+                      {showItemPhoneFormatError ? (
+                        <div className="px-1 text-xs text-amber-800">
+                          {!isValidPhoneCountryCode(item.phoneCountryCode)
+                            ? "Select a valid country code."
+                            : "Enter a valid phone number."}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
@@ -4158,7 +4203,7 @@ export default function StartDocumentPage() {
                       Choose &quot;Named signing trustee&quot; in Signing Authority to select a specific signer.
                     </div>
                   ) : (
-                    <div className="text-xs text-Color-Neutral">Email and phone are required.</div>
+                    <div />
                   )}
 
                   <button
@@ -4173,18 +4218,19 @@ export default function StartDocumentPage() {
                   </button>
                 </div>
               </div>
-            ))
+              );
+            })
           ) : (
             <div className="text-xs text-Color-Neutral">No entries yet.</div>
           )}
 
-          {incompleteCount > 0 ? (
+          {showContinueValidationDetails && incompleteCount > 0 ? (
             <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Complete name, email, and phone for every {roleLabel.toLowerCase()} entry.
             </div>
           ) : null}
 
-          {invalidFormatCount > 0 ? (
+          {showContinueValidationDetails && invalidFormatCount > 0 ? (
             <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Use valid email and phone formats for every {roleLabel.toLowerCase()} entry.
             </div>

@@ -2810,6 +2810,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /documents/{id}/signatures/saved/{signatureId}:
+    delete:
+      summary: Remove a saved member signature from reuse
+      description: Hides a captured member signature from the saved-signature picker without changing already-stamped document PDFs.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      x-audit-events:
+        - member.saved_signature_deleted
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: signatureId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedSignatureDeleteResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /documents/{id}/signing:
     get:
       summary: Get signing workspace state
@@ -6628,6 +6674,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SavedSignature"
+    SavedSignatureDeleteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+        deletedSignatureId:
+          type: string
     UploadSession:
       type: object
       properties:

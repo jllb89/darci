@@ -42,18 +42,23 @@ const getHeaderValue = (value: string | string[] | undefined) => {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 };
 
-const getAuthOtpIngressRequestId = (req: Request) => {
-  const requestWithTrace = req as Request & { authOtpRequestId?: string };
-  if (requestWithTrace.authOtpRequestId) {
-    return requestWithTrace.authOtpRequestId;
-  }
-
-  const requestId =
+const resolveRequestId = (req: Request) => {
+  return (
+    req.requestId ??
     getHeaderValue(req.headers["x-request-id"]) ??
     getHeaderValue(req.headers["x-amzn-trace-id"]) ??
-    randomUUID();
+    randomUUID()
+  );
+};
 
-  requestWithTrace.authOtpRequestId = requestId;
+const getAuthOtpIngressRequestId = (req: Request) => {
+  if (req.authOtpRequestId) {
+    return req.authOtpRequestId;
+  }
+
+  const requestId = resolveRequestId(req);
+  req.requestId = requestId;
+  req.authOtpRequestId = requestId;
   req.headers["x-request-id"] = requestId;
   return requestId;
 };
@@ -78,9 +83,26 @@ app.use(
       "X-Request-Id",
       "X-Request-Signature",
     ],
-    exposedHeaders: ["X-DARCI-Auth-Otp-Logger", "X-DARCI-Auth-Otp-Trace-Id"],
+    exposedHeaders: ["X-DARCI-Auth-Otp-Logger", "X-DARCI-Auth-Otp-Trace-Id", "X-Request-Id"],
   })
 );
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const requestId = resolveRequestId(req);
+  req.requestId = requestId;
+  req.authOtpRequestId = req.authOtpRequestId ?? requestId;
+  req.headers["x-request-id"] = requestId;
+  res.setHeader("X-Request-Id", requestId);
+
+  Sentry.setTag("request_id", requestId);
+  Sentry.setContext("request", {
+    requestId,
+    method: req.method,
+    path: req.originalUrl,
+  });
+
+  next();
+});
 
 app.use("/webhooks", webhooksRoutes);
 

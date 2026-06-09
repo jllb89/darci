@@ -15,6 +15,45 @@ const usesExternalOtel = Boolean(
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT
 );
 
+const isValidHttpUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const parseSampleRate = (raw: string | undefined, fallback: number) => {
+  const parsed = Number(raw ?? fallback);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  if (parsed < 0 || parsed > 1) {
+    return fallback;
+  }
+
+  return parsed;
+};
+
+const normalizeOtelEndpoint = (raw: string) => {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    if (parsed.pathname === "/" || parsed.pathname.length === 0) {
+      parsed.pathname = "/v1/traces";
+    }
+
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
 const parseOtelHeaders = (raw?: string): Record<string, string> | undefined => {
   if (!raw) {
     return undefined;
@@ -36,6 +75,12 @@ const parseOtelHeaders = (raw?: string): Record<string, string> | undefined => {
 
 export const initTelemetry = async () => {
   const sentryDsn = process.env.SENTRY_DSN;
+  const serviceName = process.env.SERVICE_NAME ?? "backend";
+
+  if (sentryDsn && !isValidHttpUrl(sentryDsn)) {
+    console.warn("[telemetry] SENTRY_DSN is set but not a valid URL; skipping Sentry init.");
+  }
+
   if (sentryDsn) {
     const environment =
       process.env.SENTRY_ENVIRONMENT ??
@@ -55,7 +100,7 @@ export const initTelemetry = async () => {
       initialScope: {
         tags: {
           app_env: process.env.APP_ENV ?? environment,
-          service: process.env.SERVICE_NAME ?? "backend",
+          service: serviceName,
           runtime: "node",
         },
       },
@@ -66,19 +111,45 @@ export const initTelemetry = async () => {
     }
 
     if (!usesExternalOtel) {
-      sentryOptions.tracesSampleRate = Number(
-        process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1
+      sentryOptions.tracesSampleRate = parseSampleRate(
+        process.env.SENTRY_TRACES_SAMPLE_RATE,
+        0.1,
       );
     }
 
-    Sentry.init(sentryOptions);
+    if (isValidHttpUrl(sentryDsn)) {
+      Sentry.init(sentryOptions);
+      Sentry.captureMessage("telemetry.startup", {
+        level: "info",
+        tags: {
+          event_type: "service_startup",
+          service: serviceName,
+          telemetry_component: "sentry",
+        },
+        extra: {
+          release: sentryOptions.release ?? null,
+          environment,
+          tracesSampleRate: sentryOptions.tracesSampleRate ?? null,
+        },
+      });
+
+      if (!release) {
+        console.warn("[telemetry] Sentry release is not set (SENTRY_RELEASE/GIT_SHA/IMAGE_TAG).");
+      }
+    }
   }
 
   const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
   if (otelEndpoint && !usesAutoInstrumentation) {
+    const normalizedOtelEndpoint = normalizeOtelEndpoint(otelEndpoint);
+    if (!normalizedOtelEndpoint) {
+      console.warn("[telemetry] OTEL_EXPORTER_OTLP_ENDPOINT is invalid; skipping OpenTelemetry SDK init.");
+      return;
+    }
+
     const headers = parseOtelHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
     const exporterOptions: { url: string; headers?: Record<string, string> } = {
-      url: otelEndpoint,
+      url: normalizedOtelEndpoint,
     };
 
     if (headers) {
@@ -92,7 +163,15 @@ export const initTelemetry = async () => {
       instrumentations: [getNodeAutoInstrumentations()],
     });
 
-    await otelSdk.start();
+    try {
+      await otelSdk.start();
+    } catch (error) {
+      console.warn("[telemetry] OpenTelemetry SDK failed to start; continuing without OTEL exporter.", {
+        message: error instanceof Error ? error.message : "unknown",
+      });
+      otelSdk = null;
+      return;
+    }
 
     const shutdown = async () => {
       await otelSdk?.shutdown();

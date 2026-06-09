@@ -2,6 +2,8 @@ import "express";
 
 declare module "express" {
   interface Request {
+    requestId?: string;
+    authOtpRequestId?: string;
     user?: {
       id?: string;
       dbUserId?: string;

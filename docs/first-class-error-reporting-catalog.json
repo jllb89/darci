@@ -1,0 +1,515 @@
+{
+  "version": 1,
+  "lastUpdated": "2026-06-09",
+  "owners": {
+    "backend-platform": {
+      "label": "Backend platform on-call",
+      "scope": "API, workers, queues, telemetry bootstrap, generation orchestration"
+    },
+    "document-generation": {
+      "label": "Document generation owner",
+      "scope": "Template registry, artifact loading, renderer output, generation-run state"
+    },
+    "storage-platform": {
+      "label": "Storage platform owner",
+      "scope": "Supabase storage buckets, signed URLs, document/signature object IO"
+    },
+    "web-app": {
+      "label": "Web app owner",
+      "scope": "Next.js app, browser/server/edge Sentry, member review/signing UI"
+    },
+    "notary-operations": {
+      "label": "Notary operations owner",
+      "scope": "Notary handoff, request review, in-person meeting, final package workflow"
+    }
+  },
+  "alertRules": [
+    {
+      "id": "p0-critical-document-flow",
+      "severity": "P0",
+      "owner": "backend-platform",
+      "description": "Any production event that blocks document generation or signing finalization for a critical document path.",
+      "sentryQuery": "environment:production event.type:error error_code:[DOC_TEMPLATE_SOURCE_REQUIRED_MISSING,DOC_TEMPLATE_SOURCE_UNRESOLVED,GENERATION_TEMPLATE_ARTIFACT_MISSING,GENERATION_TEMPLATE_ARTIFACT_NOT_FOUND,SIGNING_FIELD_PLACEMENT_MISSING,SIGNING_OFFICIAL_PDF_UNRESOLVED,STORAGE_UPLOAD_GENERATED_DOCUMENT_FAILED]",
+      "threshold": {
+        "windowMinutes": 5,
+        "eventCountGte": 1
+      },
+      "runbookAnchor": "#p0-critical-document-flow"
+    },
+    {
+      "id": "p1-storage-dependency",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "description": "Storage dependency failures that can block uploads, downloads, signature assets, or generated document persistence.",
+      "sentryQuery": "environment:production event.type:error error_family:storage",
+      "threshold": {
+        "windowMinutes": 10,
+        "eventCountGte": 2
+      },
+      "runbookAnchor": "#storage-family"
+    },
+    {
+      "id": "p1-generation-template",
+      "severity": "P1",
+      "owner": "document-generation",
+      "description": "Generation/template failures outside the P0 single-event set, including data integrity misses.",
+      "sentryQuery": "environment:production event.type:error error_family:[generation,template_source]",
+      "threshold": {
+        "windowMinutes": 10,
+        "eventCountGte": 2
+      },
+      "runbookAnchor": "#generation-and-template-family"
+    },
+    {
+      "id": "p1-signing-notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "description": "Signing/notarization errors affecting member signing, notary handoff, review decisions, meeting evidence, or finalization.",
+      "sentryQuery": "environment:production event.type:error error_family:[signing,notarization]",
+      "threshold": {
+        "windowMinutes": 10,
+        "eventCountGte": 2
+      },
+      "runbookAnchor": "#signing-and-notarization-family"
+    },
+    {
+      "id": "p1-web-critical-flow",
+      "severity": "P1",
+      "owner": "web-app",
+      "description": "Web review/sign/notary UX failures that may leave users unable to continue a critical workflow.",
+      "sentryQuery": "environment:production event.type:error service:web error_code:WEB_*",
+      "threshold": {
+        "windowMinutes": 15,
+        "eventCountGte": 3
+      },
+      "runbookAnchor": "#web-family"
+    },
+    {
+      "id": "p1-unclassified-error",
+      "severity": "P1",
+      "owner": "backend-platform",
+      "description": "Unclassified errors indicate a gap in the first-class error contract and should be triaged into a stable code.",
+      "sentryQuery": "environment:production event.type:error (error_code:UNCLASSIFIED_ERROR OR !has:error_code)",
+      "threshold": {
+        "windowMinutes": 15,
+        "eventCountGte": 1
+      },
+      "runbookAnchor": "#unclassified-errors"
+    },
+    {
+      "id": "p1-release-regression",
+      "severity": "P1",
+      "owner": "backend-platform",
+      "description": "Release health guardrail for new error-code deltas after deploy.",
+      "sentryQuery": "environment:production event.type:error release:$current_release",
+      "threshold": {
+        "windowMinutes": 30,
+        "eventCountGte": 5,
+        "baselineDeltaGtePercent": 50
+      },
+      "runbookAnchor": "#release-health-guardrails"
+    },
+    {
+      "id": "p3-observability-smoke",
+      "severity": "P3",
+      "owner": "backend-platform",
+      "description": "Synthetic telemetry smoke event used to verify deploy-time Sentry tag/context shape.",
+      "sentryQuery": "event.type:error error_code:OBSERVABILITY_SMOKE_EVENT synthetic:true",
+      "threshold": {
+        "windowMinutes": 60,
+        "eventCountGte": 1
+      },
+      "runbookAnchor": "#synthetic-smoke-events"
+    }
+  ],
+  "releaseHealthGuardrails": {
+    "baselineWindowHours": 24,
+    "currentReleaseWindowMinutes": 30,
+    "p0Policy": "Pause rollout and page backend-platform on the first current-release P0 event.",
+    "p1Policy": "Open incident review when current-release P1 count is at least 5 and 50% above the previous 24-hour baseline for the same error_code/family.",
+    "correlationPolicy": "Do not promote when more than 2% of critical-flow events are missing request_id, document_id, or generation_run_id where applicable.",
+    "unknownCodePolicy": "Treat UNCLASSIFIED_ERROR or missing error_code as P1 until classified."
+  },
+  "errors": [
+    {
+      "code": "OBSERVABILITY_SMOKE_EVENT",
+      "family": "internal",
+      "severity": "P3",
+      "owner": "backend-platform",
+      "alertRuleIds": ["p3-observability-smoke"],
+      "runbookAnchor": "#synthetic-smoke-events",
+      "checks": ["Confirm the Sentry event contains service, operation, error_code, error_family, request_id, synthetic, and smoke_test tags.", "Confirm the event fingerprint is backend/internal/OBSERVABILITY_SMOKE_EVENT/observability.smoke."],
+      "mitigations": ["If the dry-run shape is correct but Sentry does not receive the event, check SENTRY_DSN, SENTRY_ENABLED, environment, and network egress.", "If tags or fingerprint are missing, block deployment until telemetry helpers are repaired."]
+    },
+    {
+      "code": "DOC_TEMPLATE_SOURCE_REQUIRED_MISSING",
+      "family": "template_source",
+      "severity": "P0",
+      "owner": "document-generation",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-generation-template"],
+      "runbookAnchor": "#generation-and-template-family",
+      "checks": ["Open the Sentry event and copy templateKey, outputKey, templateArtifactId, documentId, generationRunId, and request_id.", "Verify the active template artifact points at deployed markdown source and that the template key is in the expected release."],
+      "mitigations": ["Rollback the template registry/artifact pointer to the last known source-backed artifact.", "If only one output is affected, block that output/jurisdiction combination until source is restored."]
+    },
+    {
+      "code": "DOC_TEMPLATE_SOURCE_UNRESOLVED",
+      "family": "template_source",
+      "severity": "P0",
+      "owner": "document-generation",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-generation-template"],
+      "runbookAnchor": "#generation-and-template-family",
+      "checks": ["Compare outputKey/templateKey against template_registry and the deployed artifact metadata.", "Check whether fallback rendering is intentionally disabled or missing canonical answers for the output."],
+      "mitigations": ["Restore a source-backed artifact or deploy the missing template source.", "Requeue affected generation runs after the artifact/source correction is live."]
+    },
+    {
+      "code": "GENERATION_DOCUMENT_NOT_FOUND",
+      "family": "generation",
+      "severity": "P1",
+      "owner": "backend-platform",
+      "alertRuleIds": ["p1-generation-template"],
+      "runbookAnchor": "#generation-and-template-family",
+      "checks": ["Look up the generationRunId and documentId in document_generation_runs and documents.", "Check for recent deletes, failed draft creation, or queue retries against stale generation runs."],
+      "mitigations": ["Cancel or mark stale orphaned generation runs failed with the captured request_id.", "Repair the document/run link only if audit history proves the document still exists under a different id."]
+    },
+    {
+      "code": "GENERATION_TEMPLATE_ARTIFACT_MISSING",
+      "family": "generation",
+      "severity": "P0",
+      "owner": "document-generation",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-generation-template"],
+      "runbookAnchor": "#generation-and-template-family",
+      "checks": ["Inspect generationRunId for null template_artifact_id and compare against template_registry for the outputKey/templateKey.", "Check the release or migration that created generation runs without artifact pins."],
+      "mitigations": ["Pause affected submit/review path if new runs are missing artifact ids.", "Backfill or recreate affected generation runs with a valid active artifact id before requeueing."]
+    },
+    {
+      "code": "GENERATION_TEMPLATE_ARTIFACT_NOT_FOUND",
+      "family": "generation",
+      "severity": "P0",
+      "owner": "document-generation",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-generation-template"],
+      "runbookAnchor": "#generation-and-template-family",
+      "checks": ["Use templateArtifactId from Sentry to query template_artifacts and template_registry.", "Confirm whether an artifact row was deleted, deactivated, or never migrated to the environment."],
+      "mitigations": ["Restore the missing artifact row or repoint active registry rows to a valid artifact.", "Requeue failed generation runs once artifact resolution succeeds."]
+    },
+    {
+      "code": "GENERATION_RUN_NOT_FOUND_FOR_SIGNATURE",
+      "family": "generation",
+      "severity": "P1",
+      "owner": "backend-platform",
+      "alertRuleIds": ["p1-generation-template", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Check the signing request generationRunId, documentId, and current document_generation_runs rows.", "Confirm the signer is not applying a stale browser state after a run was regenerated."],
+      "mitigations": ["Have the user reload signing after generation repair completes.", "If the run was accidentally removed, regenerate the required output and invalidate stale signing state."]
+    },
+    {
+      "code": "SIGNING_FIELD_PLACEMENT_MISSING",
+      "family": "signing",
+      "severity": "P0",
+      "owner": "document-generation",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Inspect outputSignerId/generationRunId metadata.signatureField and rendered signaturePlacements.", "Confirm template binding/signature field metadata exists for the affected output."],
+      "mitigations": ["Repair signature placement metadata and regenerate the official signing PDF.", "Block the affected template/output until signature placement extraction is corrected."]
+    },
+    {
+      "code": "SIGNING_OFFICIAL_PDF_UNRESOLVED",
+      "family": "signing",
+      "severity": "P0",
+      "owner": "backend-platform",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Check latest document_versions for the generationRunId and confirm a PDF storage_path exists.", "Verify generation completed before signing capture attempted."],
+      "mitigations": ["Regenerate the missing official PDF and have the signer retry.", "If the storage object is missing, restore it or rerun generation from the pinned artifact."]
+    },
+    {
+      "code": "SIGNING_SIGNATURE_PAGE_UNRESOLVED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "document-generation",
+      "alertRuleIds": ["p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Compare pageNumber in signature metadata against the generated PDF page count.", "Check whether template page count changed after signature placement metadata was saved."],
+      "mitigations": ["Regenerate placement metadata and official PDFs for affected runs.", "Rollback the template change if page counts no longer match placement extraction."]
+    },
+    {
+      "code": "SIGNING_SIGNER_MAPPING_NOT_FOUND",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "backend-platform",
+      "alertRuleIds": ["p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Inspect document_output_signers for outputSignerId/generationRunId and obligation_type=signer.", "Check whether invited signer or member state references an old signer id."],
+      "mitigations": ["Refresh signing state for the member or invited signer.", "Rebuild signer rows from the generation output if the mapping is missing for active runs."]
+    },
+    {
+      "code": "STORAGE_CREATE_DOCUMENT_UPLOAD_URL_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Confirm documents bucket exists and Supabase service role credentials are valid.", "Check Supabase storage API status and bucket policy changes around the event time."],
+      "mitigations": ["Restore bucket policy or service credentials and retry upload URL creation.", "If Supabase is degraded, pause new uploads and communicate retry guidance."]
+    },
+    {
+      "code": "STORAGE_CREATE_DOCUMENT_DOWNLOAD_URL_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Verify the document storage_path exists in the documents bucket.", "Check signed URL permission failures or expired/misconfigured service role credentials."],
+      "mitigations": ["Restore the missing object or regenerate the document version.", "Repair Supabase credentials/policy and have the user retry download/preview."]
+    },
+    {
+      "code": "STORAGE_DOWNLOAD_DOCUMENT_OBJECT_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Open storagePath from Sentry and verify object presence, size, and content type.", "Check whether signing/generation is reading from the expected bucket and path prefix."],
+      "mitigations": ["Restore/regenerate the missing document object.", "Correct bucket/path configuration and rerun the affected generation or signing operation."]
+    },
+    {
+      "code": "STORAGE_CREATE_SIGNATURE_UPLOAD_URL_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Confirm signatures bucket exists and accepts signed upload URL creation.", "Check member signature capture events for repeated failures by storagePath prefix."],
+      "mitigations": ["Restore signatures bucket policy/credentials.", "Ask affected signers to retry capture after URL creation succeeds."]
+    },
+    {
+      "code": "STORAGE_CREATE_SIGNATURE_DOWNLOAD_URL_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Verify the signature asset exists and the signatures bucket can create signed URLs.", "Check whether saved signatures or signature previews share the same failing prefix."],
+      "mitigations": ["Restore bucket access or the missing signature asset.", "Regenerate affected saved signature metadata if paths are stale."]
+    },
+    {
+      "code": "STORAGE_DOWNLOAD_SIGNATURE_ASSET_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Check signatureRecord.storage_path and confirm the object exists with image/png or image/jpeg content.", "Verify the failure is not caused by unsupported mime_type metadata."],
+      "mitigations": ["Restore or re-upload the signature asset.", "If metadata is wrong, repair mime_type and reapply the signature capture."]
+    },
+    {
+      "code": "STORAGE_LIST_DOCUMENT_OBJECT_METADATA_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Check list permission for the documents bucket directory in details.directory.", "Compare object metadata reads with upload/download health for the same bucket."],
+      "mitigations": ["Restore list permissions or service role credentials.", "Use direct object metadata repair only after bucket-level access is healthy."]
+    },
+    {
+      "code": "STORAGE_LIST_SIGNATURE_OBJECT_METADATA_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Check list permission for the signatures bucket directory in details.directory.", "Confirm affected saved signature metadata points at the same directory."],
+      "mitigations": ["Restore list permissions or credentials.", "Repair stale signature metadata after confirming storage access is restored."]
+    },
+    {
+      "code": "STORAGE_UPLOAD_GENERATED_DOCUMENT_FAILED",
+      "family": "storage",
+      "severity": "P0",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p0-critical-document-flow", "p1-storage-dependency"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Confirm documents bucket write/upsert works for generated paths.", "Check Supabase storage quota, bucket policy, and service role validity."],
+      "mitigations": ["Restore write access or quota, then requeue affected generation runs.", "If storage is unavailable, pause submit/review flows that create generation runs."]
+    },
+    {
+      "code": "STORAGE_UPLOAD_SIGNATURE_ASSET_FAILED",
+      "family": "storage",
+      "severity": "P1",
+      "owner": "storage-platform",
+      "alertRuleIds": ["p1-storage-dependency", "p1-signing-notarization"],
+      "runbookAnchor": "#storage-family",
+      "checks": ["Confirm signatures bucket write/upsert works for captured signature paths.", "Check file size/content type and Supabase storage API errors in Sentry details."],
+      "mitigations": ["Restore write access and have the signer retry capture.", "If upload payloads are invalid, patch client/server validation before retrying at scale."]
+    },
+    {
+      "code": "WEB_GENERATION_ENSURE_FAILED",
+      "family": "generation",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-generation-template"],
+      "runbookAnchor": "#web-family",
+      "checks": ["Use request_id to find the backend /generation-runs event and generation_run_failed trace.", "Compare requestedOutputKeys against blocked runs in the Sentry context."],
+      "mitigations": ["Fix the backend generation/template/storage root cause first.", "Have the member retry review generation after backend runs are healthy."]
+    },
+    {
+      "code": "WEB_GLOBAL_ERROR_BOUNDARY",
+      "family": "internal",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-unclassified-error"],
+      "runbookAnchor": "#web-family",
+      "checks": ["Inspect route, digest, release, browser, and preceding breadcrumbs.", "Check whether the exception maps to a critical review/sign/notary route."],
+      "mitigations": ["Roll back the current web release if crashes cluster by release or route.", "Add a stable domain code at the throwing site once the root cause is known."]
+    },
+    {
+      "code": "WEB_NOTARIZATION_SUBMIT_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id to inspect POST /documents/{id}/submit-notarization backend logs.", "Confirm selectedNotaryUserId is active, same jurisdiction, non-owner, and commission-valid."],
+      "mitigations": ["Correct notary eligibility data or guide member to another eligible notary.", "Repair backend submission failure and have the member retry the handoff."]
+    },
+    {
+      "code": "WEB_NOTARY_ACTION_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Inspect notary_action, path, notary_request_id, and request_id in Sentry tags/context.", "Check the matching backend notary endpoint and audit events for rejection details."],
+      "mitigations": ["Repair the specific meeting/evidence/finalization state transition.", "If the workspace state is stale, reload context and retry the action after backend repair."]
+    },
+    {
+      "code": "WEB_NOTARY_CONTEXT_FETCH_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use notary_request_id and request_id to inspect GET /notary/requests/{id}/context.", "Check authorization, request assignment, and whether claim-by-IDN failed during context load."],
+      "mitigations": ["Repair assignment/claim state or route the notary back through the queue.", "Patch context loader/auth regression if failures cluster by release."]
+    },
+    {
+      "code": "WEB_NOTARY_MEETING_START_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id to inspect the meeting/start backend response and current meeting status.", "Confirm the notary request is assigned and eligible to enter in-person state."],
+      "mitigations": ["Move the request back to a valid pre-meeting state or repair missing meeting rows.", "Have the notary retry after state repair."]
+    },
+    {
+      "code": "WEB_NOTARY_REVIEW_DECISION_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Inspect decision, notary_request_id, request_id, and backend review-decision response.", "Confirm request status still permits approval/rejection."],
+      "mitigations": ["Repair duplicate or stale review state and retry the decision.", "If notification handoff failed after approval, reconcile notifications separately without reversing the decision." ]
+    },
+    {
+      "code": "WEB_REVIEW_APPROVAL_FAILED",
+      "family": "review",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow"],
+      "runbookAnchor": "#web-family",
+      "checks": ["Use request_id to inspect POST /review-approval and document review state.", "Confirm all required review outputs are rendered and the member has access."],
+      "mitigations": ["Repair missing generated outputs or review state, then have the member approve again.", "Roll back the web release if approval failures are client-only and release-scoped."]
+    },
+    {
+      "code": "WEB_REVIEW_FETCH_FAILED",
+      "family": "review",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow"],
+      "runbookAnchor": "#web-family",
+      "checks": ["Use request_id to inspect GET /documents/{id}/review.", "Check document ownership/auth and pending generation state for the documentId."],
+      "mitigations": ["Repair document access or backend review payload errors.", "If failures cluster by browser route/release, roll back or patch the review page payload handling." ]
+    },
+    {
+      "code": "WEB_SIGNING_CONFIRM_FAILED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id to inspect POST /documents/{id}/sign and signing completion counts.", "Confirm all required signatures are captured for the active signer group."],
+      "mitigations": ["Repair missing signature state or guide signer to complete remaining obligations.", "Retry confirmation after backend signing state is consistent." ]
+    },
+    {
+      "code": "WEB_SIGNING_FETCH_FAILED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id to inspect GET /documents/{id}/signing and current document status.", "Check invited signer/member authorization and generation-run readiness."],
+      "mitigations": ["Repair access or generation state and have the signer reload the workspace.", "Patch client payload assumptions if backend response is valid but rendering fails." ]
+    },
+    {
+      "code": "WEB_SIGNING_SAVED_SIGNATURES_FETCH_FAILED",
+      "family": "signing",
+      "severity": "P2",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow"],
+      "runbookAnchor": "#web-family",
+      "checks": ["Use request_id to inspect GET /signatures/saved and signer authorization.", "Check whether manual type/draw/upload capture still works for affected users."],
+      "mitigations": ["Restore saved signature lookup or allow users to proceed with alternate capture methods.", "Repair stale saved signature storage metadata if only some signatures fail." ]
+    },
+    {
+      "code": "WEB_SIGNING_SIGNATURE_DRAW_FAILED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id and outputSignerId to inspect POST /signatures backend failure.", "Check storage upload/finalize errors and signature placement errors in backend Sentry."],
+      "mitigations": ["Fix backend signature capture/storage root cause and have signer retry draw capture.", "Offer type/upload capture if draw-specific client payloads are failing." ]
+    },
+    {
+      "code": "WEB_SIGNING_SIGNATURE_SAVED_APPLY_FAILED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use savedSignatureId, outputSignerId, and request_id to inspect POST /signatures.", "Verify saved signature storage object and metadata are valid."],
+      "mitigations": ["Repair or remove the invalid saved signature and have the signer retry.", "Use alternate capture mode if saved asset recovery is not immediate." ]
+    },
+    {
+      "code": "WEB_SIGNING_SIGNATURE_TYPE_FAILED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id, outputSignerId, and typedKind to inspect POST /signatures.", "Check signer mapping and official PDF availability for the generation run."],
+      "mitigations": ["Repair backend signing state and have signer retry typed capture.", "If input validation is wrong, patch client/server typed signature validation." ]
+    },
+    {
+      "code": "WEB_SIGNING_SIGNATURE_UPLOAD_FAILED",
+      "family": "signing",
+      "severity": "P1",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use request_id, fileSize, fileType, and outputSignerId to inspect upload URL and finalize calls.", "Check storage signature upload failures and unsupported file types."],
+      "mitigations": ["Restore signature storage upload/finalize path and have signer retry upload.", "Guide signer to type/draw capture if upload-specific handling is degraded." ]
+    },
+    {
+      "code": "UNCLASSIFIED_ERROR",
+      "family": "internal",
+      "severity": "P1",
+      "owner": "backend-platform",
+      "alertRuleIds": ["p1-unclassified-error"],
+      "runbookAnchor": "#unclassified-errors",
+      "checks": ["Open the raw stack trace and surrounding breadcrumbs to identify the missing stable code.", "Check whether the error originated in a critical family and should be promoted to a DomainError or web captureDomainException."],
+      "mitigations": ["Patch the throw/capture site to emit a stable code and family.", "Backfill this catalog with owner, checks, mitigations, and alert severity before closing the incident." ]
+    }
+  ]
+}

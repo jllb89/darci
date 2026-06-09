@@ -2,7 +2,11 @@ import * as Sentry from "@sentry/nextjs";
 
 const parseSampleRate = (value: string | undefined, fallback: number) => {
   const parsed = Number(value ?? fallback);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    return fallback;
+  }
+
+  return parsed;
 };
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -27,6 +31,13 @@ Sentry.init({
     process.env.NEXT_PUBLIC_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE,
     0.1,
   ),
+  initialScope: {
+    tags: {
+      app_env: process.env.NEXT_PUBLIC_APP_ENV ?? "unknown",
+      service: "web",
+      runtime: "nextjs-browser",
+    },
+  },
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

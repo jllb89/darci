@@ -8,6 +8,7 @@
     "build": "node scripts/with-local-next-env.mjs next build",
     "start": "next start",
     "lint": "eslint",
+    "observability:test": "vitest run src/lib/clientTelemetry.test.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

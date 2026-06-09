@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   isDocumentIntakeLockedMock: vi.fn(),
   createSignatureRecordMock: vi.fn(),
   getSignatureByIdMock: vi.fn(),
+  getSignatureRecordByIdMock: vi.fn(),
   updateSignatureRecordMock: vi.fn(),
   upsertDocumentSystemValuesMock: vi.fn(),
   updateDocumentMock: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("../../src/services/documentService", () => ({
   isDocumentIntakeLocked: mocks.isDocumentIntakeLockedMock,
   createSignatureRecord: mocks.createSignatureRecordMock,
   getSignatureById: mocks.getSignatureByIdMock,
+  getSignatureRecordById: mocks.getSignatureRecordByIdMock,
   updateSignatureRecord: mocks.updateSignatureRecordMock,
   upsertDocumentSystemValues: mocks.upsertDocumentSystemValuesMock,
   updateDocument: mocks.updateDocumentMock,
@@ -194,6 +196,7 @@ describe("member signature capture", () => {
     mocks.isDocumentIntakeLockedMock.mockReset();
     mocks.createSignatureRecordMock.mockReset();
     mocks.getSignatureByIdMock.mockReset();
+    mocks.getSignatureRecordByIdMock.mockReset();
     mocks.updateSignatureRecordMock.mockReset();
     mocks.upsertDocumentSystemValuesMock.mockReset();
     mocks.updateDocumentMock.mockReset();
@@ -595,6 +598,24 @@ describe("member signature capture", () => {
         captured_at: "2026-03-04T00:00:20.000Z",
         created_at: "2026-03-04T00:00:20.000Z",
       },
+      {
+        id: "saved-deleted",
+        document_id: "old-doc-2",
+        generation_run_id: null,
+        document_output_signer_id: null,
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: null,
+        capture_method: "type",
+        typed_value: "Deleted Signature",
+        typed_kind: "name",
+        mime_type: null,
+        size_bytes: null,
+        status: "captured",
+        metadata: { savedSignatureDeletedAt: "2026-03-04T00:05:20.000Z" },
+        captured_at: "2026-03-04T00:00:20.000Z",
+        created_at: "2026-03-04T00:00:20.000Z",
+      },
     ]);
     mocks.createSignatureDownloadUrlMock.mockReset();
     mocks.createSignatureDownloadUrlMock
@@ -623,9 +644,80 @@ describe("member signature capture", () => {
           assetDownloadUrl: null,
         }),
       ]);
+      expect(mocks.createSignatureDownloadUrlMock).toHaveBeenCalledTimes(2);
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it("removes saved signatures from the reuse picker", async () => {
+    const savedSignature = {
+      id: "saved-delete",
+      document_id: "old-doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
+      signer_id: "owner-1",
+      signature_type: "member",
+      storage_path: "signatures/old-doc-1/saved-delete.png",
+      capture_method: "draw",
+      typed_value: null,
+      typed_kind: null,
+      mime_type: "image/png",
+      size_bytes: 1024,
+      status: "captured",
+      metadata: {},
+      captured_at: "2026-03-05T00:00:20.000Z",
+      created_at: "2026-03-05T00:00:20.000Z",
+    };
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.getSignatureRecordByIdMock.mockResolvedValue(savedSignature);
+    mocks.updateSignatureRecordMock.mockResolvedValue({
+      ...savedSignature,
+      metadata: { savedSignatureDeletedAt: "2026-03-05T00:01:20.000Z" },
+    });
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .delete("/documents/doc-1/signatures/saved/saved-delete")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body).toEqual({
+      status: "ok",
+      deletedSignatureId: "saved-delete",
+    });
+    expect(mocks.updateSignatureRecordMock).toHaveBeenCalledWith(
+      "saved-delete",
+      "old-doc-1",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          savedSignatureDeletedAt: expect.any(String),
+          savedSignatureDeletedBySupabaseId: "supabase-owner-1",
+        }),
+      }),
+    );
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "member.saved_signature_deleted",
+        entityId: "saved-delete",
+      }),
+    );
   });
 
   it("creates invited signer signature records with the claimed user id", async () => {
