@@ -462,6 +462,16 @@
       "mitigations": ["Restore saved signature lookup or allow users to proceed with alternate capture methods.", "Repair stale saved signature storage metadata if only some signatures fail." ]
     },
     {
+      "code": "WEB_SIGNING_SAVED_SIGNATURE_DELETE_FAILED",
+      "family": "signing",
+      "severity": "P2",
+      "owner": "web-app",
+      "alertRuleIds": ["p1-web-critical-flow"],
+      "runbookAnchor": "#web-family",
+      "checks": ["Use savedSignatureId and request_id to inspect DELETE /documents/{id}/signatures/saved/{signatureId}.", "Confirm the signature belongs to the current signer and has not already been removed from reuse."],
+      "mitigations": ["Have the signer reload saved signatures and retry deletion.", "If deletion remains degraded, keep signing unblocked by using type/draw/upload capture and repair saved-signature reuse metadata." ]
+    },
+    {
       "code": "WEB_SIGNING_SIGNATURE_DRAW_FAILED",
       "family": "signing",
       "severity": "P1",
