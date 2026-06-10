@@ -67,6 +67,8 @@ type SharedMeetingParticipantResponse = {
   status: string;
   presenceRequired: boolean;
   participantLabel: string | null;
+  arrivedAt: string | null;
+  departedAt: string | null;
 };
 
 type SharedMeetingResponse = {
@@ -212,6 +214,8 @@ const mapSharedMeetingResponse = (
       status: participant.status,
       presenceRequired: participant.presence_required,
       participantLabel: participant.participant_label,
+      arrivedAt: participant.arrived_at,
+      departedAt: participant.departed_at,
     })),
   };
 };

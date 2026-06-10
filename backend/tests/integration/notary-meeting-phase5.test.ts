@@ -16,7 +16,13 @@ const mocks = vi.hoisted(() => ({
   updateMeetingParticipantMock: vi.fn(),
   createMeetingCheckinMock: vi.fn(),
   createGeolocationSampleMock: vi.fn(),
+  createIdentityVerificationEventMock: vi.fn(),
+  getGeolocationSampleByIdMock: vi.fn(),
+  listMeetingGeolocationSamplesMock: vi.fn(),
+  createProximityEvaluationMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
+  queueInPersonSessionStartedNotificationMock: vi.fn(),
+  runDueNotificationJobsMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -59,11 +65,27 @@ vi.mock("../../src/services/meetingService", async (importOriginal) => {
     updateMeetingParticipant: mocks.updateMeetingParticipantMock,
     createMeetingCheckin: mocks.createMeetingCheckinMock,
     createGeolocationSample: mocks.createGeolocationSampleMock,
+    createIdentityVerificationEvent: mocks.createIdentityVerificationEventMock,
+    getGeolocationSampleById: mocks.getGeolocationSampleByIdMock,
+    listMeetingGeolocationSamples: mocks.listMeetingGeolocationSamplesMock,
+    createProximityEvaluation: mocks.createProximityEvaluationMock,
   };
 });
 
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
+}));
+
+vi.mock("../../src/services/notificationService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/notificationService")>();
+  return {
+    ...actual,
+    queueInPersonSessionStartedNotification: mocks.queueInPersonSessionStartedNotificationMock,
+  };
+});
+
+vi.mock("../../src/services/notificationOutboxService", () => ({
+  runDueNotificationJobs: mocks.runDueNotificationJobsMock,
 }));
 
 import { app } from "../../src/index";
@@ -76,6 +98,157 @@ type TokenPayload = {
 const signToken = (payload: TokenPayload) => {
   const secret = process.env.SUPABASE_JWT_SECRET ?? "test-secret";
   return jwt.sign(payload, secret, { expiresIn: "1h" });
+};
+
+const proximityParticipants = [
+  {
+    id: "participant-member-4",
+    meeting_id: "meeting-4",
+    user_id: "owner-4",
+    document_party_id: null,
+    participant_role: "member",
+    status: "checked_in",
+    presence_required: true,
+    participant_label: null,
+    arrived_at: "2026-05-27T15:00:00.000Z",
+    departed_at: null,
+    metadata: {},
+    created_at: "2026-05-27T15:00:00.000Z",
+    updated_at: "2026-05-27T15:00:00.000Z",
+  },
+  {
+    id: "participant-notary-4",
+    meeting_id: "meeting-4",
+    user_id: "notary-4",
+    document_party_id: null,
+    participant_role: "notary",
+    status: "checked_in",
+    presence_required: true,
+    participant_label: null,
+    arrived_at: "2026-05-27T15:00:00.000Z",
+    departed_at: null,
+    metadata: {},
+    created_at: "2026-05-27T15:00:00.000Z",
+    updated_at: "2026-05-27T15:00:00.000Z",
+  },
+];
+
+const buildProximitySample = (overrides: Record<string, unknown>) => ({
+  id: "geo-member-4",
+  meeting_id: "meeting-4",
+  meeting_participant_id: "participant-member-4",
+  meeting_checkin_id: "checkin-member-4",
+  captured_by_user_id: "owner-4",
+  sample_kind: "device_gps",
+  capture_stage: "checkin",
+  latitude: 41.4993,
+  longitude: -81.6944,
+  accuracy_meters: 9,
+  altitude_meters: null,
+  captured_at: "2026-05-27T15:00:00.000Z",
+  expires_at: null,
+  metadata: {},
+  created_at: "2026-05-27T15:00:00.000Z",
+  ...overrides,
+});
+
+const setupProximityScenario = () => {
+  mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+    id: "notary-4",
+    supabaseUserId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    email: "notary@example.com",
+    role: "notary",
+    status: "active",
+    firstName: "Nora",
+    lastName: "Tary",
+    availableRoles: ["notary"],
+    roleAssignments: [],
+  });
+  mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+    id: "req-4",
+    document_id: "doc-4",
+    workflow_id: "workflow-4",
+    assigned_notary_id: "notary-4",
+    status: "in_review",
+    submitted_at: "2026-05-27T14:00:00.000Z",
+    created_at: "2026-05-27T14:00:00.000Z",
+  });
+  mocks.getDocumentByIdMock.mockResolvedValue({
+    id: "doc-4",
+    owner_id: "owner-4",
+    idn: "IDN-999",
+    status: "pending_notary",
+    document_type: "generic",
+    jurisdiction: "US-OH",
+    product_flow_mode: "notarize_document",
+    selected_families: [],
+    output_bundle: [],
+    intake_status: "submitted",
+    intake_schema_version: null,
+    intake_last_saved_at: null,
+    intake_submitted_at: null,
+    created_at: "2026-05-27T14:00:00.000Z",
+    updated_at: "2026-05-27T14:00:00.000Z",
+  });
+  mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+    id: "workflow-4",
+    owner_user_id: "owner-4",
+    created_by_user_id: "owner-4",
+    primary_document_id: "doc-4",
+    workflow_kind: "single_document",
+    status: "approved",
+    selected_notary_user_id: null,
+    assigned_notary_user_id: "notary-4",
+    current_legacy_request_id: "req-4",
+    submitted_at: "2026-05-27T14:00:00.000Z",
+    last_code_generated_at: null,
+    review_started_at: "2026-05-27T14:05:00.000Z",
+    closed_at: null,
+    context_json: {},
+    metadata: {},
+    created_at: "2026-05-27T14:00:00.000Z",
+    updated_at: "2026-05-27T14:05:00.000Z",
+  });
+  mocks.getMeetingByRequestIdMock.mockResolvedValue({
+    id: "meeting-4",
+    request_id: "req-4",
+    workflow_id: "workflow-4",
+    scheduled_at: "2026-05-27T15:00:00.000Z",
+    timezone: null,
+    location: null,
+    status: "in_progress",
+    same_place_required: true,
+    same_place_status: "pending",
+    evidence_retention_until: null,
+    metadata: {},
+    created_at: "2026-05-27T15:00:00.000Z",
+    updated_at: "2026-05-27T15:00:00.000Z",
+  });
+  mocks.listMeetingParticipantsMock.mockResolvedValue(proximityParticipants);
+};
+
+const postProximityEvaluation = (body: Record<string, unknown>) => {
+  const token = signToken({
+    sub: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    app_metadata: { role: "notary" },
+  });
+
+  return request(app)
+    .post("/notary/requests/req-4/meeting/proximity-evaluation")
+    .set("Authorization", `Bearer ${token}`)
+    .send(body);
+};
+
+const postIdentityVerification = (body: Record<string, unknown>) => {
+  const token = signToken({
+    sub: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    app_metadata: { role: "notary" },
+  });
+
+  return request(app)
+    .post("/notary/requests/req-4/meeting/identity-verification")
+    .set("Authorization", `Bearer ${token}`)
+    .send(body);
 };
 
 describe("Phase 5 meeting runtime slice", () => {
@@ -439,6 +612,103 @@ describe("Phase 5 meeting runtime slice", () => {
     expect(mocks.recordAuditEventMock).not.toHaveBeenCalled();
   });
 
+  it("rejects notary-created member geolocation check-ins", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "notary-2",
+      supabaseUserId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      email: "notary@example.com",
+      role: "notary",
+      status: "active",
+      firstName: "Nora",
+      lastName: "Tary",
+      availableRoles: ["notary"],
+      roleAssignments: [],
+    });
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-2",
+      document_id: "doc-2",
+      workflow_id: "workflow-2",
+      assigned_notary_id: "notary-2",
+      status: "in_review",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      created_at: "2026-04-20T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-2",
+      owner_id: "owner-1",
+      idn: "IDN-456",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "notarize_document",
+      selected_families: [],
+      output_bundle: [],
+      intake_status: "submitted",
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-20T09:00:00.000Z",
+      updated_at: "2026-04-20T09:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      id: "workflow-2",
+      owner_user_id: "owner-1",
+      created_by_user_id: "owner-1",
+      primary_document_id: "doc-2",
+      workflow_kind: "single_document",
+      status: "approved",
+      selected_notary_user_id: null,
+      assigned_notary_user_id: "notary-2",
+      current_legacy_request_id: "req-2",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      last_code_generated_at: null,
+      review_started_at: "2026-04-20T10:05:00.000Z",
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-20T10:00:00.000Z",
+      updated_at: "2026-04-20T10:05:00.000Z",
+    });
+    mocks.getMeetingByRequestIdMock.mockResolvedValue({
+      id: "meeting-2",
+      request_id: "req-2",
+      workflow_id: "workflow-2",
+      scheduled_at: "2026-04-22T15:00:00.000Z",
+      timezone: "America/New_York",
+      location: "DARCi HQ",
+      status: "in_progress",
+      same_place_required: true,
+      same_place_status: "not_started",
+      evidence_retention_until: null,
+      metadata: {},
+      created_at: "2026-04-20T11:00:00.000Z",
+      updated_at: "2026-04-20T11:00:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      app_metadata: { role: "notary" },
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-2/meeting/check-in")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        participantRole: "member",
+        checkinKind: "arrival",
+        geolocation: {
+          latitude: 41.4993,
+          longitude: -81.6944,
+          accuracyMeters: 9,
+        },
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.message).toContain("member account");
+    expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();
+    expect(mocks.createGeolocationSampleMock).not.toHaveBeenCalled();
+  });
+
   it("starts an in-person session from an approved request without an existing meeting", async () => {
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
       id: "11111111-1111-1111-1111-111111111111",
@@ -572,6 +842,23 @@ describe("Phase 5 meeting runtime slice", () => {
       created_at: "2026-05-27T15:00:00.000Z",
       updated_at: "2026-05-27T15:00:00.000Z",
     });
+    mocks.createGeolocationSampleMock.mockResolvedValue({
+      id: "geo-start-3",
+      meeting_id: "meeting-3",
+      meeting_participant_id: "participant-notary-3",
+      meeting_checkin_id: "checkin-3",
+      captured_by_user_id: "11111111-1111-1111-1111-111111111111",
+      sample_kind: "device_gps",
+      capture_stage: "meeting_start",
+      latitude: 41.4993,
+      longitude: -81.6944,
+      accuracy_meters: 8,
+      altitude_meters: null,
+      captured_at: "2026-05-27T15:00:00.000Z",
+      expires_at: null,
+      metadata: {},
+      created_at: "2026-05-27T15:00:00.000Z",
+    });
     mocks.updateMeetingMock.mockResolvedValue({
       id: "meeting-3",
       request_id: "req-3",
@@ -581,12 +868,18 @@ describe("Phase 5 meeting runtime slice", () => {
       location: null,
       status: "in_progress",
       same_place_required: true,
-      same_place_status: "not_started",
+      same_place_status: "pending",
       evidence_retention_until: null,
       metadata: { lastCheckinAt: "2026-05-27T15:00:00.000Z" },
       created_at: "2026-05-27T15:00:00.000Z",
       updated_at: "2026-05-27T15:00:00.000Z",
     });
+    mocks.queueInPersonSessionStartedNotificationMock.mockResolvedValue({
+      jobId: "job-session-start-3",
+      deliveryCount: 1,
+      existing: false,
+    });
+    mocks.runDueNotificationJobsMock.mockResolvedValue({ processed: 1 });
 
     const token = signToken({
       sub: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -596,10 +889,18 @@ describe("Phase 5 meeting runtime slice", () => {
     const response = await request(app)
       .post("/notary/requests/req-3/meeting/start")
       .set("Authorization", `Bearer ${token}`)
-      .send({ recordedAt: "2026-05-27T15:00:00.000Z" });
+      .send({
+        recordedAt: "2026-05-27T15:00:00.000Z",
+        geolocation: {
+          latitude: 41.4993,
+          longitude: -81.6944,
+          accuracyMeters: 8,
+        },
+      });
 
     expect(response.status).toBe(201);
     expect(response.body.meeting.status).toBe("in_progress");
+    expect(response.body.checkin.geolocation.captureStage).toBe("meeting_start");
     expect(mocks.createMeetingMock).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: "req-3",
@@ -614,10 +915,337 @@ describe("Phase 5 meeting runtime slice", () => {
     );
     expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
       "meeting-3",
-      expect.objectContaining({ status: "in_progress" }),
+      expect.objectContaining({ status: "in_progress", same_place_status: "pending" }),
     );
+    expect(mocks.createGeolocationSampleMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId: "meeting-3",
+        meetingParticipantId: "participant-notary-3",
+        meetingCheckinId: "checkin-3",
+        capturedByUserId: "11111111-1111-1111-1111-111111111111",
+        captureStage: "meeting_start",
+      }),
+    );
+    expect(mocks.queueInPersonSessionStartedNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-3",
+        requestId: "req-3",
+        notaryUserId: "11111111-1111-1111-1111-111111111111",
+      }),
+    );
+    expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
+      limit: 1,
+      notificationJobIds: ["job-session-start-3"],
+    });
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "notary.meeting_started" }),
+    );
+  });
+
+  it("rejects vague identity document verification payloads", async () => {
+    setupProximityScenario();
+
+    const response = await postIdentityVerification({
+      participantRole: "member",
+      verificationMethod: "in_person_document",
+      status: "verified",
+      subjectName: "Mina Member",
+      documentType: "government_id",
+      issuingJurisdiction: "OH",
+      documentExpirationDate: "2030-01-01",
+      documentNumberTail: "1234",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.field).toBe("documentType");
+    expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();
+    expect(mocks.createIdentityVerificationEventMock).not.toHaveBeenCalled();
+  });
+
+  it("records structured identity verification metadata without full document numbers", async () => {
+    setupProximityScenario();
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-identity-4",
+      meeting_id: "meeting-4",
+      meeting_participant_id: "participant-member-4",
+      recorded_by_user_id: "notary-4",
+      checkin_kind: "identity",
+      status: "recorded",
+      recorded_at: "2026-05-27T15:06:00.000Z",
+      notes: "Verified state ID",
+      metadata: {},
+      created_at: "2026-05-27T15:06:00.000Z",
+      updated_at: "2026-05-27T15:06:00.000Z",
+    });
+    mocks.createIdentityVerificationEventMock.mockImplementation(async (input) => ({
+      id: "identity-4",
+      meeting_id: input.meetingId,
+      meeting_participant_id: input.meetingParticipantId,
+      verified_by_user_id: input.verifiedByUserId,
+      verification_method: input.verificationMethod,
+      status: input.status,
+      subject_name_snapshot: input.subjectNameSnapshot,
+      document_type: input.documentType,
+      document_last4: input.documentLast4,
+      issuing_jurisdiction: input.issuingJurisdiction,
+      verified_at: input.verifiedAt,
+      notes: input.notes,
+      metadata: input.metadata,
+      created_at: input.verifiedAt,
+      updated_at: input.verifiedAt,
+    }));
+
+    const response = await postIdentityVerification({
+      participantRole: "member",
+      verificationMethod: "in_person_document",
+      status: "verified",
+      subjectName: "Mina Member",
+      documentType: "state_identification_card",
+      issuingJurisdiction: "OH",
+      documentExpirationDate: "2030-01-01",
+      documentNumberTail: "ab12",
+      evidenceArtifactIds: ["artifact-front", "artifact-back"],
+      verifiedAt: "2026-05-27T15:06:00.000Z",
+      notes: "Verified state ID",
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.identityVerification.documentType).toBe("state_identification_card");
+    expect(response.body.identityVerification.documentNumberTail).toBe("AB12");
+    expect(response.body.identityVerification.documentExpirationDate).toBe("2030-01-01");
+    expect(response.body.identityVerification.evidenceArtifactIds).toEqual([
+      "artifact-front",
+      "artifact-back",
+    ]);
+    expect(mocks.createIdentityVerificationEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentType: "state_identification_card",
+        documentLast4: "AB12",
+        issuingJurisdiction: "OH",
+        metadata: expect.objectContaining({
+          identityDocument: expect.objectContaining({
+            policyVersion: "identity_document_v1",
+            documentExpirationDate: "2030-01-01",
+            evidenceArtifactIds: ["artifact-front", "artifact-back"],
+          }),
+        }),
+      }),
+    );
+    expect(mocks.createIdentityVerificationEventMock.mock.calls[0][0]).not.toHaveProperty("documentNumber");
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "notary.identity_verified",
+        metadata: expect.objectContaining({
+          doc_type: "state_identification_card",
+          doc_number_tail: "AB12",
+          issuing_jurisdiction: "OH",
+        }),
+      }),
+    );
+  });
+
+  it("rejects stale samples for same-place proximity evaluation", async () => {
+    setupProximityScenario();
+    mocks.listMeetingGeolocationSamplesMock
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-member-stale",
+          captured_at: "2026-05-27T15:00:00.000Z",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-notary-stale",
+          meeting_participant_id: "participant-notary-4",
+          meeting_checkin_id: "checkin-notary-4",
+          captured_by_user_id: "notary-4",
+          capture_stage: "meeting_start",
+          captured_at: "2026-05-27T15:00:00.000Z",
+        }),
+      ]);
+
+    const response = await postProximityEvaluation({
+      evaluatedAt: "2026-05-27T15:20:01.000Z",
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toContain("within 15 minutes");
+    expect(mocks.createProximityEvaluationMock).not.toHaveBeenCalled();
+    expect(mocks.updateMeetingMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects wrong-actor samples for same-place proximity evaluation", async () => {
+    setupProximityScenario();
+    mocks.listMeetingGeolocationSamplesMock
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-member-wrong-actor",
+          captured_by_user_id: "notary-4",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-notary-4",
+          meeting_participant_id: "participant-notary-4",
+          meeting_checkin_id: "checkin-notary-4",
+          captured_by_user_id: "notary-4",
+          capture_stage: "meeting_start",
+        }),
+      ]);
+
+    const response = await postProximityEvaluation({
+      evaluatedAt: "2026-05-27T15:05:00.000Z",
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.message).toContain("member account");
+    expect(mocks.createProximityEvaluationMock).not.toHaveBeenCalled();
+    expect(mocks.updateMeetingMock).not.toHaveBeenCalled();
+  });
+
+  it("passes same-place proximity with fresh actor-correct samples inside threshold", async () => {
+    setupProximityScenario();
+    mocks.listMeetingGeolocationSamplesMock
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-member-pass",
+          captured_at: "2026-05-27T15:04:00.000Z",
+          accuracy_meters: 9,
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-notary-pass",
+          meeting_participant_id: "participant-notary-4",
+          meeting_checkin_id: "checkin-notary-4",
+          captured_by_user_id: "notary-4",
+          capture_stage: "meeting_start",
+          latitude: 41.49931,
+          longitude: -81.69441,
+          captured_at: "2026-05-27T15:04:30.000Z",
+          accuracy_meters: 8,
+        }),
+      ]);
+    mocks.createProximityEvaluationMock.mockImplementation(async (input) => ({
+      id: "proximity-pass-4",
+      meeting_id: input.meetingId,
+      evaluated_by_user_id: input.evaluatedByUserId,
+      member_sample_id: input.memberSampleId,
+      notary_sample_id: input.notarySampleId,
+      evaluation_kind: "same_place",
+      status: input.status,
+      threshold_meters: input.thresholdMeters,
+      observed_distance_meters: input.observedDistanceMeters,
+      evaluated_at: input.evaluatedAt,
+      notes: input.notes,
+      metadata: input.metadata,
+      created_at: input.evaluatedAt,
+      updated_at: input.evaluatedAt,
+    }));
+    mocks.updateMeetingMock.mockResolvedValue({
+      id: "meeting-4",
+      request_id: "req-4",
+      workflow_id: "workflow-4",
+      scheduled_at: "2026-05-27T15:00:00.000Z",
+      timezone: null,
+      location: null,
+      status: "in_progress",
+      same_place_required: true,
+      same_place_status: "passed",
+      evidence_retention_until: null,
+      metadata: {},
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+
+    const response = await postProximityEvaluation({
+      evaluatedAt: "2026-05-27T15:05:00.000Z",
+      thresholdMeters: 100,
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.evaluation.status).toBe("passed");
+    expect(mocks.createProximityEvaluationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "passed",
+        thresholdMeters: 100,
+        metadata: expect.objectContaining({
+          policy: expect.objectContaining({ policyVersion: "same_place_v1" }),
+          sampleAgesSeconds: expect.objectContaining({ member: 60, notary: 30 }),
+          sampleAccuracyMeters: expect.objectContaining({ member: 9, notary: 8 }),
+        }),
+      }),
+    );
+    expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
+      "meeting-4",
+      expect.objectContaining({ same_place_status: "passed" }),
+    );
+  });
+
+  it("fails same-place proximity outside threshold and records failed meeting state", async () => {
+    setupProximityScenario();
+    mocks.listMeetingGeolocationSamplesMock
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-member-fail",
+          captured_at: "2026-05-27T15:04:00.000Z",
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-notary-fail",
+          meeting_participant_id: "participant-notary-4",
+          meeting_checkin_id: "checkin-notary-4",
+          captured_by_user_id: "notary-4",
+          capture_stage: "meeting_start",
+          latitude: 41.51,
+          longitude: -81.72,
+          captured_at: "2026-05-27T15:04:30.000Z",
+        }),
+      ]);
+    mocks.createProximityEvaluationMock.mockImplementation(async (input) => ({
+      id: "proximity-fail-4",
+      meeting_id: input.meetingId,
+      evaluated_by_user_id: input.evaluatedByUserId,
+      member_sample_id: input.memberSampleId,
+      notary_sample_id: input.notarySampleId,
+      evaluation_kind: "same_place",
+      status: input.status,
+      threshold_meters: input.thresholdMeters,
+      observed_distance_meters: input.observedDistanceMeters,
+      evaluated_at: input.evaluatedAt,
+      notes: input.notes,
+      metadata: input.metadata,
+      created_at: input.evaluatedAt,
+      updated_at: input.evaluatedAt,
+    }));
+    mocks.updateMeetingMock.mockResolvedValue({
+      id: "meeting-4",
+      request_id: "req-4",
+      workflow_id: "workflow-4",
+      scheduled_at: "2026-05-27T15:00:00.000Z",
+      timezone: null,
+      location: null,
+      status: "in_progress",
+      same_place_required: true,
+      same_place_status: "failed",
+      evidence_retention_until: null,
+      metadata: {},
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+
+    const response = await postProximityEvaluation({
+      evaluatedAt: "2026-05-27T15:05:00.000Z",
+      thresholdMeters: 100,
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.evaluation.status).toBe("failed");
+    expect(response.body.evaluation.observedDistanceMeters).toBeGreaterThan(100);
+    expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
+      "meeting-4",
+      expect.objectContaining({ same_place_status: "failed" }),
     );
   });
 });

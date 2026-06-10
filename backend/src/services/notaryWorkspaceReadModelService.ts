@@ -667,6 +667,8 @@ const buildReviewDocuments = async (versions: DocumentVersionRecord[]) => {
 const mapMeetingGeolocation = (sample: GeolocationSampleRecord) => {
   return {
     id: sample.id,
+    meetingParticipantId: sample.meeting_participant_id,
+    capturedByUserId: sample.captured_by_user_id,
     latitude: sample.latitude,
     longitude: sample.longitude,
     accuracyMeters: sample.accuracy_meters,
@@ -674,6 +676,7 @@ const mapMeetingGeolocation = (sample: GeolocationSampleRecord) => {
     sampleKind: sample.sample_kind,
     captureStage: sample.capture_stage,
     capturedAt: sample.captured_at,
+    expiresAt: sample.expires_at,
   };
 };
 
@@ -749,6 +752,7 @@ const mapProximityEvaluation = (input: {
     notes: input.evaluation.notes,
     memberSample: memberSample ? mapMeetingGeolocation(memberSample) : null,
     notarySample: notarySample ? mapMeetingGeolocation(notarySample) : null,
+    metadata: input.evaluation.metadata,
   };
 };
 

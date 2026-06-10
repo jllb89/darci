@@ -104,6 +104,20 @@ export type NotaryQueueResponse = {
   };
 };
 
+export type EvidenceGeolocationSample = {
+  id: string;
+  meetingParticipantId: string | null;
+  capturedByUserId: string | null;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number | null;
+  altitudeMeters: number | null;
+  sampleKind: string;
+  captureStage: string;
+  capturedAt: string;
+  expiresAt: string | null;
+};
+
 export type NotaryRequestContext = {
   request: NotaryQueueRequestSummary["request"];
   document: NotaryQueueRequestSummary["document"] & {
@@ -155,10 +169,32 @@ export type NotaryRequestContext = {
     }>;
   } | null;
   evidence: {
-    checkins: Array<{ id: string; status: string; participantRole: string; recordedAt: string }>;
-    geolocationSamples: Array<{ id: string; capturedAt: string }>;
+    checkins: Array<{
+      id: string;
+      meetingId: string;
+      meetingParticipantId: string;
+      participantRole: string;
+      checkinKind: string;
+      status: string;
+      recordedAt: string;
+      notes: string | null;
+      geolocation: EvidenceGeolocationSample | null;
+    }>;
+    geolocationSamples: EvidenceGeolocationSample[];
     identityVerifications: Array<{ id: string; status: string; subjectName: string | null }>;
-    proximityEvaluations: Array<{ id: string; status: string; observedDistanceMeters: number | null }>;
+    proximityEvaluations: Array<{
+      id: string;
+      meetingId: string;
+      evaluationKind: string;
+      status: string;
+      thresholdMeters: number;
+      observedDistanceMeters: number | null;
+      evaluatedAt: string;
+      notes: string | null;
+      memberSample: EvidenceGeolocationSample | null;
+      notarySample: EvidenceGeolocationSample | null;
+      metadata: Record<string, unknown>;
+    }>;
     artifacts: Array<{ id: string; artifactKind: string; status: string; capturedAt: string | null }>;
   };
   finalization: NotaryQueueRequestSummary["finalization"] & {

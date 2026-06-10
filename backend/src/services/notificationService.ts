@@ -250,6 +250,33 @@ const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate
     source_reference: "runtime:notary_approval_received_email",
     metadata: { seed_source: "runtime_notary_contact_exchange_fallback" },
   },
+  in_person_session_started_email: {
+    template_key: "in_person_session_started_email",
+    template_version: "2026.06.09.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "client",
+    trigger_event: "notary.meeting_started",
+    invite_kind: null,
+    subject_template: "Your in-person notarization session has started",
+    body_template: [
+      "<p>Hi {{firstName}},</p>",
+      "<p>{{illuminotaryName}} started the in-person session for <strong>{{documentName}}</strong>.</p>",
+      "<p>Open your request to check in from your device.</p>",
+      "<a href=\"{{sessionUrl}}\" style=\"display:block;padding:14px 0;background:#0aff4a;color:#191919;text-align:center;text-decoration:none;font-size:14px;font-weight:600;margin:8px 0 24px;\">Open request</a>",
+      "<p style=\"margin:0;color:#7f7f7f;font-size:12px;\">-- Your DARCi Team</p>",
+    ].join("\n"),
+    body_format: "html",
+    variables_schema: {
+      required: ["firstName", "illuminotaryName", "documentName", "sessionUrl"],
+      optional: ["dashboardUrl", "requestId", "documentId"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "docs/in-person-session-completion-roadmap.md",
+    metadata: { seed_source: "runtime_in_person_session_started_fallback" },
+  },
   notary_member_contact_received_email: {
     template_key: "notary_member_contact_received_email",
     template_version: "2026.06.05.v1",
@@ -1667,6 +1694,63 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
     return null;
   } catch (error) {
     logNotificationFailure("notary_approval_received_email", error, {
+      documentId: input.documentId,
+      requestId: input.requestId,
+      notaryUserId: input.notaryUserId,
+    });
+    return null;
+  }
+};
+
+export const queueInPersonSessionStartedNotification = async (input: {
+  documentId: string;
+  requestId: string;
+  notaryUserId: string;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    const owner = await getUserById(document.owner_id);
+    const notary = await getUserById(input.notaryUserId);
+    if (!owner) {
+      return null;
+    }
+
+    const memberRequestPath = `/app/requests/${encodeURIComponent(input.requestId)}`;
+    const sessionUrl = buildAppUrl("/start", {
+      returnTo: memberRequestPath,
+      ...(owner.email ? { intendedEmail: owner.email } : {}),
+    });
+
+    return await queueTemplatedNotification({
+      templateKey: "in_person_session_started_email",
+      jobKind: "status_update",
+      dedupeKey: `in_person_session_started:${input.requestId}`,
+      documentId: document.id,
+      notarizationRequestId: input.requestId,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(owner),
+        illuminotaryName: notary ? toDisplayName(notary) : "Your illuminotary",
+        documentName: getDocumentLabel(document),
+        sessionUrl,
+        dashboardUrl: sessionUrl,
+        requestId: input.requestId,
+        documentId: document.id,
+      },
+      recipients: [buildOwnerRecipient(owner)],
+      metadata: {
+        requestId: input.requestId,
+        notaryUserId: input.notaryUserId,
+        memberRequestPath,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("in_person_session_started_email", error, {
       documentId: input.documentId,
       requestId: input.requestId,
       notaryUserId: input.notaryUserId,

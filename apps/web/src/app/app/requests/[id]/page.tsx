@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
+import {
+  canRecordMemberSessionCheckIn,
+  getRequestSessionParticipant,
+  hasRequestSessionParticipantCheckedIn,
+  shouldShowMemberSessionCheckIn,
+} from "../requestSession";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -54,12 +60,42 @@ type RequestDetailPayload = {
   notary: {
     displayName: string | null;
   } | null;
+  meeting: {
+    meetingId: string;
+    requestId: string;
+    workflowId: string | null;
+    scheduledAt: string | null;
+    timezone: string | null;
+    location: string | null;
+    status: string | null;
+    samePlaceRequired: boolean;
+    samePlaceStatus: string | null;
+    proposedSlots: string[];
+    participants: Array<{
+      id: string;
+      userId: string | null;
+      participantRole: string;
+      status: string;
+      presenceRequired: boolean;
+      participantLabel: string | null;
+      arrivedAt: string | null;
+      departedAt: string | null;
+    }>;
+  } | null;
   warnings: Array<{
     code: string;
     severity: "info" | "warning";
     message: string;
   }>;
   nextAction: string | null;
+};
+
+type BrowserGeolocationSample = {
+  latitude: number;
+  longitude: number;
+  accuracyMeters?: number;
+  altitudeMeters?: number;
+  sampleKind: "device_gps";
 };
 
 type TimelinePayload = {
@@ -118,6 +154,36 @@ const formatDateTime = (value: string | null) => {
   return parsed.toLocaleString();
 };
 
+const getCurrentGeolocationSample = async (): Promise<BrowserGeolocationSample | null> => {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : undefined,
+          altitudeMeters:
+            typeof position.coords.altitude === "number" && Number.isFinite(position.coords.altitude)
+              ? position.coords.altitude
+              : undefined,
+          sampleKind: "device_gps",
+        });
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
+    );
+  });
+};
+
+const readApiErrorMessage = async (response: Response, fallback: string) => {
+  const payload = await response.json().catch(() => null) as { message?: unknown } | null;
+  return typeof payload?.message === "string" && payload.message.trim() ? payload.message : fallback;
+};
+
 export default function RequestWorkspacePage() {
   const params = useParams<{ id: string }>();
   const requestId = typeof params?.id === "string" ? params.id : "";
@@ -125,6 +191,8 @@ export default function RequestWorkspacePage() {
   const [payload, setPayload] = useState<RequestDetailPayload | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload["timeline"]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadRequest = useCallback(async () => {
@@ -170,7 +238,61 @@ export default function RequestWorkspacePage() {
     void loadRequest();
   }, [loadRequest]);
 
+  const handleMemberCheckIn = async () => {
+    if (!accessToken || !requestId) {
+      setErrorMessage("Sign in again to check in for the in-person session.");
+      return;
+    }
+
+    setIsCheckingIn(true);
+    setErrorMessage(null);
+    setSessionMessage(null);
+
+    try {
+      const geolocation = await getCurrentGeolocationSample();
+      if (!geolocation) {
+        throw new Error("Location permission is needed to check in for the in-person session.");
+      }
+
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/notary/requests/${encodeURIComponent(requestId)}/meeting/check-in`,
+        accessToken,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            participantRole: "member",
+            checkinKind: "arrival",
+            recordedAt: new Date().toISOString(),
+            notes: "Member checked in from the member request workspace.",
+            geolocation,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readApiErrorMessage(response, "Unable to record member check-in."));
+      }
+
+      setSessionMessage("Location check-in recorded. Your Illuminotary can continue the session.");
+      await loadRequest();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to record member check-in.");
+    } finally {
+      setIsCheckingIn(false);
+    }
+  };
+
   const detail = payload?.request;
+  const liveMeeting = payload?.meeting?.status === "in_progress" ? payload.meeting : null;
+  const memberParticipant = getRequestSessionParticipant(liveMeeting, "member");
+  const notaryParticipant = getRequestSessionParticipant(liveMeeting, "notary");
+  const hasMemberCheckIn = hasRequestSessionParticipantCheckedIn(liveMeeting, "member");
+  const hasNotaryCheckIn = hasRequestSessionParticipantCheckedIn(liveMeeting, "notary");
+  const isInitialMemberCheckIn = shouldShowMemberSessionCheckIn(liveMeeting);
+  const canCheckIn = canRecordMemberSessionCheckIn(liveMeeting);
 
   return (
     <div className="space-y-6">
@@ -190,9 +312,51 @@ export default function RequestWorkspacePage() {
         </div>
       ) : null}
 
+      {sessionMessage ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {sessionMessage}
+        </div>
+      ) : null}
+
       {!isLoading && payload ? (
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <div className="space-y-4">
+            {liveMeeting ? (
+              <div className="rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-Color-Scheme-1-Text">In-person session</div>
+                    <div className="mt-1 text-sm text-Color-Neutral">
+                      Same place: {liveMeeting.samePlaceStatus ?? "pending"}
+                    </div>
+                  </div>
+                  {canCheckIn ? (
+                    <button
+                      className="rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isCheckingIn}
+                      onClick={() => void handleMemberCheckIn()}
+                      type="button"
+                    >
+                      {isCheckingIn ? "Checking in" : isInitialMemberCheckIn ? "Check in" : "Refresh check-in"}
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-2 text-sm text-Color-Neutral md:grid-cols-2">
+                  <div className="rounded-lg bg-Color-White px-3 py-2 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+                    <div className="font-medium text-Color-Scheme-1-Text">Illuminotary</div>
+                    <div className="mt-1">{hasNotaryCheckIn ? "Checked in" : "Pending"}</div>
+                    <div className="mt-1 text-xs">{formatDateTime(notaryParticipant?.arrivedAt ?? null)}</div>
+                  </div>
+                  <div className="rounded-lg bg-Color-White px-3 py-2 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+                    <div className="font-medium text-Color-Scheme-1-Text">Member</div>
+                    <div className="mt-1">{hasMemberCheckIn ? "Checked in" : "Pending"}</div>
+                    <div className="mt-1 text-xs">{formatDateTime(memberParticipant?.arrivedAt ?? null)}</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
               <div className="text-sm font-medium">Request summary</div>
               <div className="mt-4 grid gap-3 text-sm text-Color-Neutral md:grid-cols-2">

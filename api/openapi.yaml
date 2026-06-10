@@ -4439,6 +4439,71 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/meeting/start:
+    post:
+      summary: Start in-person session
+      description: Starts the in-person notarization session, records the assigned illuminotary's meeting-start check-in, optionally stores the illuminotary geolocation sample, and queues the member check-in notification.
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      x-audit-events:
+        - notary.meeting_started
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingStartRequest"
+      responses:
+        "200":
+          description: Existing meeting started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingCheckinResponse"
+        "201":
+          description: Meeting created and started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingCheckinResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/meeting/propose:
     post:
       summary: Propose meeting times
@@ -4863,7 +4928,7 @@ paths:
   /notary/requests/{id}/meeting/proximity-evaluation:
     post:
       summary: Record same-place evaluation
-      description: Computes and persists a Phase 5 same-place proximity evaluation using member and illuminotary geolocation samples.
+      description: Computes and persists a Phase 5 same-place proximity evaluation using fresh member and illuminotary geolocation samples captured by the correct actors. Samples must be from the current meeting, match the expected participant role, and be captured within the configured freshness window before a pass can be stored.
       x-roles:
         - notary
         - admin
@@ -7835,6 +7900,12 @@ components:
       properties:
         id:
           type: string
+        meetingParticipantId:
+          type: string
+          nullable: true
+        capturedByUserId:
+          type: string
+          nullable: true
         latitude:
           type: number
         longitude:
@@ -7852,6 +7923,10 @@ components:
         capturedAt:
           type: string
           format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
     MeetingCheckin:
       type: object
       properties:
@@ -7892,6 +7967,44 @@ components:
           type: string
         location:
           type: string
+    MeetingStartRequest:
+      type: object
+      properties:
+        participantRole:
+          type: string
+          enum:
+            - notary
+        recordedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        geolocation:
+          type: object
+          properties:
+            latitude:
+              type: number
+            longitude:
+              type: number
+            accuracyMeters:
+              type: number
+            altitudeMeters:
+              type: number
+            sampleKind:
+              type: string
+              enum:
+                - device_gps
+                - network
+                - manual_pin
+                - derived
+            captureStage:
+              type: string
+              enum:
+                - checkin
+                - checkin_confirmation
+                - proximity_validation
+                - meeting_start
+                - meeting_end
     MeetingCheckinRequest:
       type: object
       required:
@@ -8041,10 +8154,31 @@ components:
           type: string
         documentType:
           type: string
+          enum:
+            - state_driver_license
+            - state_identification_card
+            - passport
+            - passport_card
+            - military_id
+            - permanent_resident_card
+            - tribal_identification_card
+            - foreign_passport
         documentLast4:
+          type: string
+          deprecated: true
+        documentNumberTail:
+          type: string
+        maskedIdentifier:
           type: string
         issuingJurisdiction:
           type: string
+        documentExpirationDate:
+          type: string
+          description: Identity document expiration date in YYYY-MM-DD format.
+        evidenceArtifactIds:
+          type: array
+          items:
+            type: string
         verifiedAt:
           type: string
           format: date-time
@@ -8074,9 +8208,22 @@ components:
         documentLast4:
           type: string
           nullable: true
+        documentNumberTail:
+          type: string
+          nullable: true
+        maskedIdentifier:
+          type: string
+          nullable: true
         issuingJurisdiction:
           type: string
           nullable: true
+        documentExpirationDate:
+          type: string
+          nullable: true
+        evidenceArtifactIds:
+          type: array
+          items:
+            type: string
         verifiedAt:
           type: string
           format: date-time
@@ -8142,6 +8289,9 @@ components:
           allOf:
             - $ref: "#/components/schemas/MeetingGeolocation"
           nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
     MeetingProximityEvaluationResponse:
       type: object
       properties:

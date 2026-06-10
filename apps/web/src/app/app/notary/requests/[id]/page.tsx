@@ -14,8 +14,16 @@ import {
   formatStatusLabel,
   notaryApiBaseUrl,
   readApiErrorMessage,
+  type EvidenceGeolocationSample,
   type NotaryRequestContext,
 } from "@/lib/notaryWorkspace";
+import {
+  defaultIdentityDocumentType,
+  getIdentityDocumentOption,
+  identityDocumentOptions,
+  parseEvidenceArtifactIds,
+  validateIdentityDocumentForm,
+} from "../identityDocument";
 
 type ReviewDecision = "approved" | "changes_requested" | "rejected";
 type VisibleReviewDecision = Extract<ReviewDecision, "approved">;
@@ -105,6 +113,108 @@ const formatProductLabel = (documentType: string | null | undefined) => {
   return label === "Not set" ? "Document" : label;
 };
 
+const samePlaceFreshnessWindowSeconds = 15 * 60;
+const lowAccuracyWarningMeters = 50;
+
+const formatMeters = (value: number | null | undefined) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "Pending";
+  }
+
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)} km`;
+  }
+
+  return `${Math.round(value)} m`;
+};
+
+const formatAge = (capturedAt: string | null | undefined) => {
+  if (!capturedAt) {
+    return "Pending";
+  }
+
+  const capturedAtMs = new Date(capturedAt).getTime();
+  if (!Number.isFinite(capturedAtMs)) {
+    return "Unknown";
+  }
+
+  const ageSeconds = Math.max(0, Math.round((Date.now() - capturedAtMs) / 1000));
+  if (ageSeconds < 60) {
+    return `${ageSeconds}s ago`;
+  }
+
+  return `${Math.round(ageSeconds / 60)}m ago`;
+};
+
+const getLatestSampleForRole = (
+  context: NotaryRequestContext | null,
+  participantRole: "member" | "notary",
+) => {
+  const participantId = context?.meeting?.participants.find(
+    (participant) => participant.participantRole === participantRole,
+  )?.id;
+  if (!participantId) {
+    return null;
+  }
+
+  return context.evidence.geolocationSamples.find(
+    (sample) => sample.meetingParticipantId === participantId,
+  ) ?? null;
+};
+
+const getLatestProximityEvaluation = (context: NotaryRequestContext | null) => {
+  return context?.evidence.proximityEvaluations[0] ?? null;
+};
+
+const getSampleAgeSeconds = (sample: EvidenceGeolocationSample | null) => {
+  if (!sample) {
+    return null;
+  }
+
+  const capturedAtMs = new Date(sample.capturedAt).getTime();
+  if (!Number.isFinite(capturedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((Date.now() - capturedAtMs) / 1000));
+};
+
+const getSampleWarning = (sample: EvidenceGeolocationSample | null) => {
+  if (!sample) {
+    return "Missing";
+  }
+
+  const ageSeconds = getSampleAgeSeconds(sample);
+  if (ageSeconds === null || ageSeconds > samePlaceFreshnessWindowSeconds) {
+    return "Stale";
+  }
+
+  if (typeof sample.accuracyMeters === "number" && sample.accuracyMeters > lowAccuracyWarningMeters) {
+    return "Low accuracy";
+  }
+
+  return "Ready";
+};
+
+function EvidenceSampleCard({ label, sample }: { label: string; sample: EvidenceGeolocationSample | null }) {
+  const warning = getSampleWarning(sample);
+  const isReady = warning === "Ready";
+
+  return (
+    <div className="rounded-lg bg-Color-White px-3 py-3 text-xs leading-5 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-medium text-Color-Scheme-1-Text">{label}</div>
+        <div className={isReady ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>{warning}</div>
+      </div>
+      <div className="mt-2 grid gap-1">
+        <div>Captured: {sample ? formatAge(sample.capturedAt) : "Pending"}</div>
+        <div>Accuracy: {formatMeters(sample?.accuracyMeters)}</div>
+        <div>Stage: {formatStatusLabel(sample?.captureStage)}</div>
+      </div>
+    </div>
+  );
+}
+
 function ChevronLeftIcon() {
   return (
     <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
@@ -162,8 +272,12 @@ export default function NotaryRequestWorkspacePage() {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [identitySubjectName, setIdentitySubjectName] = useState("");
-  const [identityDocumentType, setIdentityDocumentType] = useState("government_id");
-  const [identityDocumentLast4, setIdentityDocumentLast4] = useState("");
+  const [identityDocumentType, setIdentityDocumentType] = useState(defaultIdentityDocumentType);
+  const [identityIssuingJurisdiction, setIdentityIssuingJurisdiction] = useState("");
+  const [identityDocumentExpirationDate, setIdentityDocumentExpirationDate] = useState("");
+  const [identityDocumentNumberTail, setIdentityDocumentNumberTail] = useState("");
+  const [identityMaskedIdentifier, setIdentityMaskedIdentifier] = useState("");
+  const [identityEvidenceArtifactIds, setIdentityEvidenceArtifactIds] = useState("");
   const [notarialNotes, setNotarialNotes] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notaryProfile, setNotaryProfile] = useState<NotaryProfileSummary | null>(null);
@@ -392,6 +506,11 @@ export default function NotaryRequestWorkspacePage() {
     });
 
     try {
+      const geolocation = await getCurrentGeolocationSample();
+      if (!geolocation) {
+        throw new Error("Location permission is needed to start the in-person session.");
+      }
+
       const response = await fetchWithTokenRefresh(
         `${notaryApiBaseUrl}/notary/requests/${encodeURIComponent(context.request.id)}/meeting/start`,
         accessToken,
@@ -400,7 +519,7 @@ export default function NotaryRequestWorkspacePage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ geolocation }),
         },
       );
       requestIdHeader = getResponseRequestId(response);
@@ -519,26 +638,6 @@ export default function NotaryRequestWorkspacePage() {
     }
   };
 
-  const recordParticipantCheckin = async (participantRole: "member" | "notary") => {
-    const geolocation = await getCurrentGeolocationSample();
-    await postRequestAction(
-      `checkin-${participantRole}`,
-      "/meeting/check-in",
-      {
-        participantRole,
-        checkinKind: "arrival",
-        recordedAt: new Date().toISOString(),
-        notes:
-          participantRole === "member"
-            ? "Member presence recorded in person by the illuminotary."
-            : "Illuminotary presence recorded from the notary workspace.",
-        ...(geolocation ? { geolocation } : {}),
-      },
-      "Unable to record participant check-in.",
-      participantRole === "member" ? "Member check-in recorded." : "Illuminotary check-in recorded.",
-    );
-  };
-
   const recordProximity = async () => {
     await postRequestAction(
       "proximity",
@@ -553,8 +652,46 @@ export default function NotaryRequestWorkspacePage() {
     );
   };
 
+  const refreshNotaryLocationSample = async () => {
+    const geolocation = await getCurrentGeolocationSample();
+    if (!geolocation) {
+      setErrorMessage("Location permission is needed to refresh illuminotary location.");
+      return;
+    }
+
+    await postRequestAction(
+      "refresh-notary-location",
+      "/meeting/check-in",
+      {
+        participantRole: "notary",
+        checkinKind: "proximity",
+        recordedAt: new Date().toISOString(),
+        notes: "Illuminotary proximity location refreshed from the notary workspace.",
+        geolocation: {
+          ...geolocation,
+          captureStage: "proximity_validation",
+        },
+      },
+      "Unable to refresh illuminotary location.",
+      "Illuminotary location refreshed.",
+    );
+  };
+
   const recordIdentity = async () => {
+    const identityValidation = validateIdentityDocumentForm({
+      documentType: identityDocumentType,
+      issuingJurisdiction: identityIssuingJurisdiction,
+      documentExpirationDate: identityDocumentExpirationDate,
+      documentNumberTail: identityDocumentNumberTail,
+      maskedIdentifier: identityMaskedIdentifier,
+    });
+    if (!identityValidation.isValid) {
+      setErrorMessage(identityValidation.firstError ?? "Complete identity verification details.");
+      return;
+    }
+
     const subjectName = identitySubjectName.trim() || context?.owner?.displayName || undefined;
+    const evidenceArtifactIds = parseEvidenceArtifactIds(identityEvidenceArtifactIds);
     await postRequestAction(
       "identity",
       "/meeting/identity-verification",
@@ -564,8 +701,16 @@ export default function NotaryRequestWorkspacePage() {
         status: "verified",
         verifiedAt: new Date().toISOString(),
         subjectName,
-        documentType: identityDocumentType.trim() || "government_id",
-        ...(identityDocumentLast4.trim() ? { documentLast4: identityDocumentLast4.trim() } : {}),
+        documentType: identityDocumentType,
+        issuingJurisdiction: identityIssuingJurisdiction.trim(),
+        documentExpirationDate: identityDocumentExpirationDate.trim(),
+        ...(identityDocumentNumberTail.trim()
+          ? { documentNumberTail: identityDocumentNumberTail.trim() }
+          : {}),
+        ...(identityMaskedIdentifier.trim()
+          ? { maskedIdentifier: identityMaskedIdentifier.trim() }
+          : {}),
+        ...(evidenceArtifactIds.length ? { evidenceArtifactIds } : {}),
       },
       "Unable to record identity verification.",
       "Identity verification recorded.",
@@ -656,12 +801,21 @@ export default function NotaryRequestWorkspacePage() {
   const isSessionInProgress = context?.meeting?.status === "in_progress";
   const isMeetingCompleted = context?.meeting?.status === "completed";
   const hasMemberCheckin = Boolean(context?.evidence.checkins.some((checkin) => checkin.participantRole === "member"));
-  const hasNotaryCheckin = Boolean(context?.evidence.checkins.some((checkin) => checkin.participantRole === "notary"));
+  const hasSessionStart = Boolean(
+    context?.evidence.checkins.some(
+      (checkin) => checkin.participantRole === "notary" && checkin.checkinKind === "meeting_start",
+    ),
+  );
   const hasVerifiedIdentity = Boolean(context?.evidence.identityVerifications.some((event) => event.status === "verified"));
   const hasPassedProximity = Boolean(
     context?.meeting?.samePlaceStatus === "passed" ||
       context?.evidence.proximityEvaluations.some((event) => event.status === "passed"),
   );
+  const memberSample = getLatestSampleForRole(context, "member");
+  const notarySample = getLatestSampleForRole(context, "notary");
+  const latestProximityEvaluation = getLatestProximityEvaluation(context);
+  const hasFreshMemberSample = getSampleWarning(memberSample) === "Ready";
+  const hasFreshNotarySample = getSampleWarning(notarySample) === "Ready";
   const hasAcknowledgment = Boolean(
     context?.finalization.history.some((event) => event.status === "acknowledgment_appended"),
   );
@@ -682,6 +836,14 @@ export default function NotaryRequestWorkspacePage() {
   );
   const finalPreviewDocument =
     context?.document.reviewDocuments.find((document) => document.isFinal) ?? selectedDocument;
+  const identityDocumentOption = getIdentityDocumentOption(identityDocumentType);
+  const identityValidation = validateIdentityDocumentForm({
+    documentType: identityDocumentType,
+    issuingJurisdiction: identityIssuingJurisdiction,
+    documentExpirationDate: identityDocumentExpirationDate,
+    documentNumberTail: identityDocumentNumberTail,
+    maskedIdentifier: identityMaskedIdentifier,
+  });
 
   return (
     <div className="space-y-6">
@@ -827,7 +989,7 @@ export default function NotaryRequestWorkspacePage() {
 
             <div className="mt-4 grid gap-2">
               <CompletionStep done={hasMemberCheckin} label="Member check-in" />
-              <CompletionStep done={hasNotaryCheckin} label="Illuminotary check-in" />
+              <CompletionStep done={hasSessionStart} label="Session started" />
               <CompletionStep done={hasPassedProximity} label="Same-place evidence" />
               <CompletionStep done={hasVerifiedIdentity} label="Identity verified" />
               <CompletionStep done={hasNotaryProfileReadyForCompletion} label="Notary profile ready" />
@@ -874,26 +1036,41 @@ export default function NotaryRequestWorkspacePage() {
 
             {isSessionInProgress ? (
               <div className="mt-5 space-y-4">
+                <div className="space-y-3 rounded-lg bg-Color-Neutral-Lightest p-3 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+                  <div className="flex items-center justify-between gap-2 text-xs font-medium uppercase tracking-wide text-Color-Neutral">
+                    <span>Same-place evidence</span>
+                    <span>{formatStatusLabel(context.meeting?.samePlaceStatus)}</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                    <EvidenceSampleCard label="Member sample" sample={memberSample} />
+                    <EvidenceSampleCard label="Illuminotary sample" sample={notarySample} />
+                  </div>
+                  {latestProximityEvaluation ? (
+                    <div className="rounded-lg bg-Color-White px-3 py-3 text-xs leading-5 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+                      <div className="font-medium text-Color-Scheme-1-Text">Latest evaluation</div>
+                      <div className="mt-1">Distance: {formatMeters(latestProximityEvaluation.observedDistanceMeters)}</div>
+                      <div>Threshold: {formatMeters(latestProximityEvaluation.thresholdMeters)}</div>
+                      <div>Status: {formatStatusLabel(latestProximityEvaluation.status)}</div>
+                    </div>
+                  ) : null}
+                  {!hasFreshMemberSample ? (
+                    <div className="text-xs leading-5 text-amber-700">
+                      Member location needs a fresh member-device check-in from the member request page.
+                    </div>
+                  ) : null}
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                   <ActionButton
-                    active={activeAction === "checkin-member"}
+                    active={activeAction === "refresh-notary-location"}
                     disabled={hasRunningAction}
-                    loadingLabel="Recording member"
-                    onClick={() => void recordParticipantCheckin("member")}
+                    loadingLabel="Refreshing"
+                    onClick={() => void refreshNotaryLocationSample()}
                   >
-                    Record member GPS check-in
-                  </ActionButton>
-                  <ActionButton
-                    active={activeAction === "checkin-notary"}
-                    disabled={hasRunningAction}
-                    loadingLabel="Recording illuminotary"
-                    onClick={() => void recordParticipantCheckin("notary")}
-                  >
-                    Record illuminotary GPS check-in
+                    Refresh illuminotary location
                   </ActionButton>
                   <ActionButton
                     active={activeAction === "proximity"}
-                    disabled={hasRunningAction || !hasMemberCheckin || !hasNotaryCheckin}
+                    disabled={hasRunningAction || !hasMemberCheckin || !hasSessionStart || !hasFreshMemberSample || !hasFreshNotarySample}
                     loadingLabel="Evaluating"
                     onClick={() => void recordProximity()}
                   >
@@ -909,24 +1086,61 @@ export default function NotaryRequestWorkspacePage() {
                     placeholder={context.owner?.displayName ?? "Member name"}
                     value={identitySubjectName}
                   />
+                  <select
+                    className="w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                    onChange={(event) => setIdentityDocumentType(event.target.value)}
+                    value={identityDocumentType}
+                  >
+                    {identityDocumentOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                     <input
                       className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                      onChange={(event) => setIdentityDocumentType(event.target.value)}
-                      placeholder="Document type"
-                      value={identityDocumentType}
+                      onChange={(event) => setIdentityIssuingJurisdiction(event.target.value)}
+                      placeholder={identityDocumentOption.jurisdictionLabel}
+                      value={identityIssuingJurisdiction}
                     />
                     <input
                       className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                      maxLength={4}
-                      onChange={(event) => setIdentityDocumentLast4(event.target.value)}
-                      placeholder="Last 4"
-                      value={identityDocumentLast4}
+                      onChange={(event) => setIdentityDocumentExpirationDate(event.target.value)}
+                      placeholder="Expiration date"
+                      type="date"
+                      value={identityDocumentExpirationDate}
                     />
                   </div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                    <input
+                      className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                      maxLength={4}
+                      onChange={(event) => setIdentityDocumentNumberTail(event.target.value)}
+                      placeholder={identityDocumentOption.identifierLabel}
+                      value={identityDocumentNumberTail}
+                    />
+                    <input
+                      className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                      onChange={(event) => setIdentityMaskedIdentifier(event.target.value)}
+                      placeholder="Masked identifier"
+                      value={identityMaskedIdentifier}
+                    />
+                  </div>
+                  <textarea
+                    className="min-h-16 w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                    onChange={(event) => setIdentityEvidenceArtifactIds(event.target.value)}
+                    placeholder="Evidence artifact IDs"
+                    value={identityEvidenceArtifactIds}
+                  />
+                  {!identityValidation.isValid ? (
+                    <div className="rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+                      {identityValidation.firstError}
+                    </div>
+                  ) : null}
                   <ActionButton
                     active={activeAction === "identity"}
-                    disabled={hasRunningAction}
+                    disabled={hasRunningAction || !identityValidation.isValid}
                     loadingLabel="Recording identity"
                     onClick={() => void recordIdentity()}
                   >

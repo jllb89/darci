@@ -4,6 +4,11 @@ import { z } from "zod";
 import { sendValidationError } from "../utils/validation";
 import { recordAuditEvent } from "../services/auditService";
 import {
+  identityDocumentPolicyVersion,
+  validateIdentityDocument,
+} from "../services/identityDocumentPolicy";
+import {
+  queueInPersonSessionStartedNotification,
   queueMeetingScheduledConfirmationNotification,
   queueNotaryApprovalReceivedNotification,
   queueNotaryChangesRequestedNotification,
@@ -106,6 +111,21 @@ const meetingProposalSchema = z.object({
   location: z.string().trim().min(1).optional(),
 }).passthrough();
 
+const meetingGeolocationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracyMeters: z.number().nonnegative().optional(),
+  altitudeMeters: z.number().optional(),
+  sampleKind: z.enum(["device_gps", "network", "manual_pin", "derived"]).optional(),
+  captureStage: z.enum([
+    "checkin",
+    "checkin_confirmation",
+    "proximity_validation",
+    "meeting_start",
+    "meeting_end",
+  ]).optional(),
+});
+
 const meetingCheckinSchema = z.object({
   participantRole: z.enum(["member", "notary"]).optional(),
   checkinKind: z.enum([
@@ -118,26 +138,14 @@ const meetingCheckinSchema = z.object({
   ]),
   recordedAt: z.string().datetime().optional(),
   notes: z.string().trim().max(2000).optional(),
-  geolocation: z.object({
-    latitude: z.number().min(-90).max(90),
-    longitude: z.number().min(-180).max(180),
-    accuracyMeters: z.number().nonnegative().optional(),
-    altitudeMeters: z.number().optional(),
-    sampleKind: z.enum(["device_gps", "network", "manual_pin", "derived"]).optional(),
-    captureStage: z.enum([
-      "checkin",
-      "checkin_confirmation",
-      "proximity_validation",
-      "meeting_start",
-      "meeting_end",
-    ]).optional(),
-  }).optional(),
+  geolocation: meetingGeolocationSchema.optional(),
 }).passthrough();
 
 const startInPersonSessionSchema = z.object({
   participantRole: z.enum(["notary"]).optional(),
   recordedAt: z.string().datetime().optional(),
   notes: z.string().trim().max(2000).optional(),
+  geolocation: meetingGeolocationSchema.optional(),
 }).passthrough();
 
 const meetingConfirmSchema = z.object({
@@ -177,8 +185,12 @@ const identityVerificationSchema = z.object({
   status: z.enum(["pending", "verified", "failed", "manual_review"]).optional(),
   subjectName: z.string().trim().min(1).max(255).optional(),
   documentType: z.string().trim().min(1).max(255).optional(),
-  documentLast4: z.string().trim().min(1).max(4).optional(),
+  documentLast4: z.string().trim().min(2).max(4).optional(),
+  documentNumberTail: z.string().trim().min(2).max(4).optional(),
+  maskedIdentifier: z.string().trim().min(4).max(64).optional(),
   issuingJurisdiction: z.string().trim().min(1).max(255).optional(),
+  documentExpirationDate: z.string().trim().min(10).max(10).optional(),
+  evidenceArtifactIds: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   verifiedAt: z.string().datetime().optional(),
   notes: z.string().trim().max(2000).optional(),
 }).passthrough();
@@ -190,6 +202,10 @@ const proximityEvaluationSchema = z.object({
   evaluatedAt: z.string().datetime().optional(),
   notes: z.string().trim().max(2000).optional(),
 }).passthrough();
+
+const defaultSamePlaceThresholdMeters = 100;
+const samePlaceSampleFreshnessMs = 15 * 60 * 1000;
+const samePlaceSampleFreshnessMinutes = samePlaceSampleFreshnessMs / 60_000;
 
 const meetingArtifactSchema = z.object({
   participantRole: meetingParticipantRoleSchema.optional(),
@@ -432,6 +448,8 @@ const buildMeetingResponse = (meeting: MeetingRecord, participants: MeetingParti
 const buildMeetingGeolocationResponse = (geolocation: GeolocationSampleRecord) => {
   return {
     id: geolocation.id,
+    meetingParticipantId: geolocation.meeting_participant_id,
+    capturedByUserId: geolocation.captured_by_user_id,
     latitude: geolocation.latitude,
     longitude: geolocation.longitude,
     accuracyMeters: geolocation.accuracy_meters,
@@ -439,6 +457,7 @@ const buildMeetingGeolocationResponse = (geolocation: GeolocationSampleRecord) =
     sampleKind: geolocation.sample_kind,
     captureStage: geolocation.capture_stage,
     capturedAt: geolocation.captured_at,
+    expiresAt: geolocation.expires_at,
   };
 };
 
@@ -460,11 +479,40 @@ const buildMeetingCheckinResponse = (
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+};
+
+const getIdentityDocumentMetadata = (metadata: Record<string, unknown>) => {
+  const identityDocument = isRecord(metadata.identityDocument) ? metadata.identityDocument : {};
+  const evidenceArtifactIds = Array.isArray(identityDocument.evidenceArtifactIds)
+    ? identityDocument.evidenceArtifactIds.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return {
+    documentExpirationDate:
+      typeof identityDocument.documentExpirationDate === "string"
+        ? identityDocument.documentExpirationDate
+        : null,
+    documentNumberTail:
+      typeof identityDocument.documentNumberTail === "string"
+        ? identityDocument.documentNumberTail
+        : null,
+    maskedIdentifier:
+      typeof identityDocument.maskedIdentifier === "string"
+        ? identityDocument.maskedIdentifier
+        : null,
+    evidenceArtifactIds,
+  };
+};
+
 const buildIdentityVerificationResponse = (
   verificationEvent: IdentityVerificationEventRecord,
   participant: MeetingParticipantRecord,
   checkin: MeetingCheckinRecord,
 ) => {
+  const identityDocumentMetadata = getIdentityDocumentMetadata(verificationEvent.metadata);
+
   return {
     id: verificationEvent.id,
     meetingId: verificationEvent.meeting_id,
@@ -476,6 +524,10 @@ const buildIdentityVerificationResponse = (
     documentType: verificationEvent.document_type,
     documentLast4: verificationEvent.document_last4,
     issuingJurisdiction: verificationEvent.issuing_jurisdiction,
+    documentExpirationDate: identityDocumentMetadata.documentExpirationDate,
+    documentNumberTail: identityDocumentMetadata.documentNumberTail,
+    maskedIdentifier: identityDocumentMetadata.maskedIdentifier,
+    evidenceArtifactIds: identityDocumentMetadata.evidenceArtifactIds,
     verifiedAt: verificationEvent.verified_at,
     notes: verificationEvent.notes,
     meetingCheckinId: checkin.id,
@@ -536,6 +588,33 @@ const calculateDistanceMeters = (
   const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 
   return Math.round(earthRadiusMeters * arc * 100) / 100;
+};
+
+const calculateSampleAgeSeconds = (sampleCapturedAt: string, evaluatedAt: string) => {
+  const capturedAtMs = new Date(sampleCapturedAt).getTime();
+  const evaluatedAtMs = new Date(evaluatedAt).getTime();
+  if (!Number.isFinite(capturedAtMs) || !Number.isFinite(evaluatedAtMs)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.max(0, Math.round((evaluatedAtMs - capturedAtMs) / 1000));
+};
+
+const isSampleFresh = (sample: GeolocationSampleRecord, evaluatedAt: string) => {
+  const ageSeconds = calculateSampleAgeSeconds(sample.captured_at, evaluatedAt);
+  if (!Number.isFinite(ageSeconds)) {
+    return false;
+  }
+
+  if (ageSeconds > samePlaceSampleFreshnessMs / 1000) {
+    return false;
+  }
+
+  if (!sample.expires_at) {
+    return true;
+  }
+
+  return new Date(sample.expires_at).getTime() >= new Date(evaluatedAt).getTime();
 };
 
 const resolveRequestIdParam = (req: Request) => {
@@ -2292,14 +2371,61 @@ export const startInPersonSession = async (req: Request, res: Response) => {
     },
   });
 
+  let geolocation: GeolocationSampleRecord | null = null;
+  if (parsed.data.geolocation) {
+    geolocation = await createGeolocationSample({
+      meetingId: meeting.id,
+      meetingParticipantId: participant.id,
+      meetingCheckinId: checkin.id,
+      capturedByUserId: actorUserId,
+      sampleKind: parsed.data.geolocation.sampleKind as GeolocationSampleKind | undefined,
+      captureStage:
+        (parsed.data.geolocation.captureStage as GeolocationCaptureStage | undefined) ??
+        "meeting_start",
+      latitude: parsed.data.geolocation.latitude,
+      longitude: parsed.data.geolocation.longitude,
+      accuracyMeters: parsed.data.geolocation.accuracyMeters,
+      altitudeMeters: parsed.data.geolocation.altitudeMeters,
+      capturedAt: recordedAt,
+      metadata: {
+        requestId: request.id,
+      },
+    });
+  }
+
   const refreshedMeeting = await updateMeeting(meeting.id, {
     status: "in_progress",
+    ...(geolocation && (!meeting.same_place_status || meeting.same_place_status === "not_started")
+      ? { same_place_status: "pending" as const }
+      : {}),
     metadata: {
       ...meeting.metadata,
       lastCheckinAt: recordedAt,
       startedAt: recordedAt,
     },
   });
+
+  const sessionNotification = await queueInPersonSessionStartedNotification({
+    documentId: document.id,
+    requestId: request.id,
+    notaryUserId: request.assigned_notary_id,
+    requestedBySupabaseUserId: req.user?.id,
+  });
+
+  if (sessionNotification?.jobId) {
+    try {
+      await runDueNotificationJobs({
+        limit: 1,
+        notificationJobIds: [sessionNotification.jobId],
+      });
+    } catch (error) {
+      console.warn("In-person session start inline notification processing failed", {
+        requestId: request.id,
+        notificationJobId: sessionNotification.jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   await recordAuditEvent({
     ...buildAuditActorContext(req),
@@ -2329,7 +2455,7 @@ export const startInPersonSession = async (req: Request, res: Response) => {
       arrivedAt: nextParticipant.arrived_at,
       departedAt: nextParticipant.departed_at,
     },
-    checkin: buildMeetingCheckinResponse(checkin, nextParticipant, null),
+    checkin: buildMeetingCheckinResponse(checkin, nextParticipant, geolocation),
   });
 };
 
@@ -2403,6 +2529,13 @@ export const recordMeetingCheckin = async (req: Request, res: Response) => {
     return res.status(403).json({
       error: "forbidden",
       message: "Member cannot record that check-in type",
+    });
+  }
+
+  if (req.user?.role === "notary" && participantRole === "member" && parsed.data.geolocation) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Member geolocation check-in must be captured from the member account",
     });
   }
 
@@ -2547,6 +2680,35 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
     return sendValidationError(res, parsed.error);
   }
 
+  const identityDocument = validateIdentityDocument({
+    documentType: parsed.data.documentType,
+    documentLast4: parsed.data.documentLast4,
+    documentNumberTail: parsed.data.documentNumberTail,
+    maskedIdentifier: parsed.data.maskedIdentifier,
+    issuingJurisdiction: parsed.data.issuingJurisdiction,
+    documentExpirationDate: parsed.data.documentExpirationDate,
+    evidenceArtifactIds: parsed.data.evidenceArtifactIds,
+  });
+  if (!identityDocument.ok) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: identityDocument.message,
+      field: identityDocument.field,
+    });
+  }
+
+  const normalizedIdentityDocument = identityDocument.value;
+  const identityDocumentMetadata = {
+    policyVersion: identityDocumentPolicyVersion,
+    documentType: normalizedIdentityDocument.documentType,
+    documentLabel: normalizedIdentityDocument.documentLabel,
+    documentNumberTail: normalizedIdentityDocument.documentNumberTail,
+    maskedIdentifier: normalizedIdentityDocument.maskedIdentifier,
+    issuingJurisdiction: normalizedIdentityDocument.issuingJurisdiction,
+    documentExpirationDate: normalizedIdentityDocument.documentExpirationDate,
+    evidenceArtifactIds: normalizedIdentityDocument.evidenceArtifactIds,
+  };
+
   const requestId = resolveRequestIdParam(req);
   if (!requestId) {
     return res.status(400).json({
@@ -2619,8 +2781,7 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
     metadata: {
       requestId: request.id,
       verificationMethod: parsed.data.verificationMethod,
-      documentType: parsed.data.documentType?.trim() ?? null,
-      documentLast4: parsed.data.documentLast4?.trim() ?? null,
+      identityDocument: identityDocumentMetadata,
     },
   });
   const verificationEvent = await createIdentityVerificationEvent({
@@ -2630,14 +2791,15 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
     verificationMethod: parsed.data.verificationMethod as IdentityVerificationMethod,
     status: verificationStatus,
     subjectNameSnapshot: parsed.data.subjectName?.trim() ?? null,
-    documentType: parsed.data.documentType?.trim() ?? null,
-    documentLast4: parsed.data.documentLast4?.trim() ?? null,
-    issuingJurisdiction: parsed.data.issuingJurisdiction?.trim() ?? null,
+    documentType: normalizedIdentityDocument.documentType,
+    documentLast4: normalizedIdentityDocument.documentNumberTail,
+    issuingJurisdiction: normalizedIdentityDocument.issuingJurisdiction,
     verifiedAt: verificationStatus === "verified" ? recordedAt : null,
     notes: parsed.data.notes?.trim() ?? null,
     metadata: {
       requestId: request.id,
       meetingCheckinId: checkin.id,
+      identityDocument: identityDocumentMetadata,
     },
   });
 
@@ -2654,8 +2816,11 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
         meeting_id: meeting.id,
         meeting_checkin_id: checkin.id,
         verification_method: parsed.data.verificationMethod,
-        doc_type: parsed.data.documentType?.trim() ?? null,
-        doc_last4: parsed.data.documentLast4?.trim() ?? null,
+        doc_type: normalizedIdentityDocument.documentType,
+        doc_number_tail: normalizedIdentityDocument.documentNumberTail,
+        issuing_jurisdiction: normalizedIdentityDocument.issuingJurisdiction,
+        document_expiration_date: normalizedIdentityDocument.documentExpirationDate,
+        evidence_artifact_count: normalizedIdentityDocument.evidenceArtifactIds.length,
       },
     });
   }
@@ -2773,7 +2938,36 @@ export const recordProximityEvaluation = async (req: Request, res: Response) => 
   }
 
   const evaluatedAt = parsed.data.evaluatedAt ?? new Date().toISOString();
-  const thresholdMeters = parsed.data.thresholdMeters ?? 100;
+
+  if (memberSample.captured_by_user_id !== document.owner_id) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Member geolocation sample must be captured by the member account",
+    });
+  }
+
+  if (notarySample.captured_by_user_id !== request.assigned_notary_id) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Illuminotary geolocation sample must be captured by the assigned illuminotary",
+    });
+  }
+
+  const memberSampleAgeSeconds = calculateSampleAgeSeconds(memberSample.captured_at, evaluatedAt);
+  const notarySampleAgeSeconds = calculateSampleAgeSeconds(notarySample.captured_at, evaluatedAt);
+  if (!isSampleFresh(memberSample, evaluatedAt) || !isSampleFresh(notarySample, evaluatedAt)) {
+    return res.status(409).json({
+      error: "conflict",
+      message: `Same-place samples must be captured within ${samePlaceSampleFreshnessMinutes} minutes of evaluation`,
+      details: {
+        freshnessWindowSeconds: samePlaceSampleFreshnessMs / 1000,
+        memberSampleAgeSeconds,
+        notarySampleAgeSeconds,
+      },
+    });
+  }
+
+  const thresholdMeters = parsed.data.thresholdMeters ?? defaultSamePlaceThresholdMeters;
   const observedDistanceMeters = calculateDistanceMeters(memberSample, notarySample);
   const evaluationStatus = observedDistanceMeters <= thresholdMeters ? "passed" : "failed";
   const evaluation = await createProximityEvaluation({
@@ -2788,6 +2982,27 @@ export const recordProximityEvaluation = async (req: Request, res: Response) => 
     notes: parsed.data.notes?.trim() ?? null,
     metadata: {
       requestId: request.id,
+      policy: {
+        policyVersion: "same_place_v1",
+        thresholdMeters,
+        freshnessWindowSeconds: samePlaceSampleFreshnessMs / 1000,
+        requiredActors: {
+          memberUserId: document.owner_id,
+          notaryUserId: request.assigned_notary_id,
+        },
+      },
+      sampleAgesSeconds: {
+        member: memberSampleAgeSeconds,
+        notary: notarySampleAgeSeconds,
+      },
+      sampleAccuracyMeters: {
+        member: memberSample.accuracy_meters,
+        notary: notarySample.accuracy_meters,
+      },
+      sampleCaptureStages: {
+        member: memberSample.capture_stage,
+        notary: notarySample.capture_stage,
+      },
     },
   });
   const updatedMeeting = await updateMeeting(meeting.id, {
@@ -2797,6 +3012,11 @@ export const recordProximityEvaluation = async (req: Request, res: Response) => 
       lastProximityEvaluationAt: evaluatedAt,
       lastProximityEvaluationStatus: evaluationStatus,
       lastProximityDistanceMeters: observedDistanceMeters,
+      lastProximityThresholdMeters: thresholdMeters,
+      lastProximitySampleAgesSeconds: {
+        member: memberSampleAgeSeconds,
+        notary: notarySampleAgeSeconds,
+      },
     },
   });
 
