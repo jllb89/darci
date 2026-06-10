@@ -9,6 +9,7 @@ vi.hoisted(() => {
 import {
   appendAcknowledgmentPageToPdf,
   applyFinalizationWatermarkToPdf,
+  renderAcknowledgmentContent,
   renderWatermarkTextTemplate,
   resolvePublicVerificationStatus,
   type PublicVerificationEvidence,
@@ -19,6 +20,34 @@ const createSamplePdf = async () => {
   pdf.addPage([612, 792]);
   return Buffer.from(await pdf.save());
 };
+
+const baseRenderInput = {
+  document: {
+    id: "doc-1",
+    idn: "AB12CD34EF56",
+    jurisdiction: "US-OH",
+  },
+  venue: {
+    state: "OH",
+    county: "Franklin",
+    city: "Columbus",
+    addressLine1: "123 Session Way",
+    locationLabel: "DARCi HQ",
+    completedAt: "2026-04-22T15:20:00.000Z",
+  },
+  notaryProfile: {
+    notaryName: "Nora Tary",
+    jurisdiction: "US-OH",
+    serviceAreaKind: "county",
+    serviceAreaName: "Franklin County",
+    commissionNumber: "OH-12345",
+    commissionExpiresAt: "2028-04-22",
+    signatureDataUrl: "data:image/png;base64,aGVsbG8=",
+    sealDataUrl: "data:image/png;base64,aGVsbG8=",
+  },
+  meetingId: "meeting-1",
+  identityMethodSummary: "in_person; passport; US",
+} as const;
 
 describe("documentFinalizationService", () => {
   it("appends a real acknowledgment page to the PDF", async () => {
@@ -41,6 +70,70 @@ describe("documentFinalizationService", () => {
     expect(transformedPdf.getPageCount()).toBe(sourcePdf.getPageCount() + 1);
     expect(transformedPdf.getPage(1).getWidth()).toBe(sourcePdf.getPage(0).getWidth());
     expect(transformedPdf.getPage(1).getHeight()).toBe(sourcePdf.getPage(0).getHeight());
+  });
+
+  it("renders California acknowledgment content without internal boilerplate", () => {
+    const rendered = renderAcknowledgmentContent({
+      ...baseRenderInput,
+      document: {
+        ...baseRenderInput.document,
+        jurisdiction: "US-CA",
+      } as never,
+      config: {
+        acknowledgmentTemplateId: "us_ca_acknowledgment_v1",
+        acknowledgmentTemplateVersion: "2026.04.21.v1",
+        watermarkTextTemplate: "DIGITAL ORIGINAL {{idn}}",
+      },
+      venue: {
+        ...baseRenderInput.venue,
+        state: "CA",
+        county: "Los Angeles",
+      },
+      notaryProfile: {
+        ...baseRenderInput.notaryProfile,
+        jurisdiction: "US-CA",
+        serviceAreaName: "Los Angeles County",
+        commissionNumber: "CA-12345",
+      },
+      documentFamily: "trust_certificate",
+      acknowledgerNames: ["Taylor Trustee", "Riley Trustee"],
+    });
+
+    expect(rendered.rendererKey).toBe("us_ca_acknowledgment_v1");
+    expect(rendered.documentFamily).toBe("trust_certificate");
+    expect(rendered.content).toContain("State of California");
+    expect(rendered.content).toContain("County of Los Angeles");
+    expect(rendered.content).toContain("Taylor Trustee, Riley Trustee");
+    expect(rendered.content).toContain("I certify under penalty of perjury under the laws of the State of California");
+    expect(rendered.content).not.toContain("Template:");
+    expect(rendered.content).not.toContain("Signer consent required.");
+    expect(rendered.content).not.toContain("Venue confirmation required.");
+  });
+
+  it("renders Ohio acknowledgment content with venue and commission details", () => {
+    const rendered = renderAcknowledgmentContent({
+      ...baseRenderInput,
+      document: baseRenderInput.document as never,
+      config: {
+        acknowledgmentTemplateId: "us_oh_acknowledgment_v1",
+        acknowledgmentTemplateVersion: "2026.04.21.v1",
+        watermarkTextTemplate: "DIGITAL ORIGINAL {{idn}}",
+      },
+      documentFamily: "poa_general",
+      acknowledgerNames: ["Pat Principal"],
+    });
+
+    expect(rendered.rendererKey).toBe("us_oh_acknowledgment_v1");
+    expect(rendered.documentFamily).toBe("poa_general");
+    expect(rendered.content).toContain("ACKNOWLEDGMENT CERTIFICATE");
+    expect(rendered.content).toContain("State of Ohio");
+    expect(rendered.content).toContain("County of Franklin");
+    expect(rendered.content).toContain("The foregoing instrument was acknowledged before me on this April 22, 2026 by Pat Principal.");
+    expect(rendered.content).toContain("My commission expires: 2028-04-22");
+    expect(rendered.venue.formattedVenue).toContain("Franklin County");
+    expect(rendered.content).not.toContain("Template:");
+    expect(rendered.content).not.toContain("Signer consent required.");
+    expect(rendered.content).not.toContain("Venue confirmation required.");
   });
 
   it("applies a digital-original watermark to the finalized PDF bytes", async () => {

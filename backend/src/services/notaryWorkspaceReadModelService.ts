@@ -112,6 +112,8 @@ export type NotaryQueueRequestSummary = {
     latestStatusAt: string | null;
     isAnchored: boolean;
     isVerificationChecked: boolean;
+    isWatermarked: boolean;
+    isHashRecorded: boolean;
     verificationStatus: PublicVerificationStatus | null;
     anchoredAt: string | null;
     lastCheckedAt: string | null;
@@ -573,6 +575,8 @@ const mapFinalizationSummary = (input: {
     latestStatusAt: input.documentSummary.finalization.latestStatusAt,
     isAnchored: input.documentSummary.finalization.isAnchored,
     isVerificationChecked: input.documentSummary.finalization.isVerificationChecked,
+    isWatermarked: input.documentSummary.finalization.isWatermarked,
+    isHashRecorded: input.documentSummary.finalization.isHashRecorded,
     verificationStatus: input.visibleIdn ? resolvePublicVerificationStatus(input.snapshot) : null,
     anchoredAt: input.snapshot.ledgerEntry?.anchored_at ?? null,
     lastCheckedAt: getLastCheckedAt({

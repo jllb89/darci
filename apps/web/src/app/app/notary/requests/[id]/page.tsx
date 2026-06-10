@@ -23,6 +23,7 @@ import {
   identityDocumentOptions,
   parseEvidenceArtifactIds,
   validateIdentityDocumentForm,
+  type IdentityDocumentType,
 } from "../identityDocument";
 
 type ReviewDecision = "approved" | "changes_requested" | "rejected";
@@ -113,6 +114,15 @@ const formatProductLabel = (documentType: string | null | undefined) => {
   return label === "Not set" ? "Document" : label;
 };
 
+const jurisdictionToVenueState = (jurisdiction: string | null | undefined) => {
+  const trimmed = jurisdiction?.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed.startsWith("US-") ? trimmed.slice(3) : trimmed;
+};
+
 const samePlaceFreshnessWindowSeconds = 15 * 60;
 const lowAccuracyWarningMeters = 50;
 
@@ -146,6 +156,19 @@ const formatAge = (capturedAt: string | null | undefined) => {
   return `${Math.round(ageSeconds / 60)}m ago`;
 };
 
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
+};
+
 const getLatestSampleForRole = (
   context: NotaryRequestContext | null,
   participantRole: "member" | "notary",
@@ -163,7 +186,7 @@ const getLatestSampleForRole = (
 };
 
 const getLatestProximityEvaluation = (context: NotaryRequestContext | null) => {
-  return context?.evidence.proximityEvaluations[0] ?? null;
+  return context?.evidence.proximityEvaluations.at(-1) ?? null;
 };
 
 const getSampleAgeSeconds = (sample: EvidenceGeolocationSample | null) => {
@@ -194,6 +217,11 @@ const getSampleWarning = (sample: EvidenceGeolocationSample | null) => {
   }
 
   return "Ready";
+};
+
+const isSampleFreshEnoughForEvaluation = (sample: EvidenceGeolocationSample | null) => {
+  const ageSeconds = getSampleAgeSeconds(sample);
+  return ageSeconds !== null && ageSeconds <= samePlaceFreshnessWindowSeconds;
 };
 
 function EvidenceSampleCard({ label, sample }: { label: string; sample: EvidenceGeolocationSample | null }) {
@@ -272,12 +300,17 @@ export default function NotaryRequestWorkspacePage() {
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [identitySubjectName, setIdentitySubjectName] = useState("");
-  const [identityDocumentType, setIdentityDocumentType] = useState(defaultIdentityDocumentType);
+  const [identityDocumentType, setIdentityDocumentType] = useState<IdentityDocumentType>(defaultIdentityDocumentType);
   const [identityIssuingJurisdiction, setIdentityIssuingJurisdiction] = useState("");
   const [identityDocumentExpirationDate, setIdentityDocumentExpirationDate] = useState("");
   const [identityDocumentNumberTail, setIdentityDocumentNumberTail] = useState("");
   const [identityMaskedIdentifier, setIdentityMaskedIdentifier] = useState("");
   const [identityEvidenceArtifactIds, setIdentityEvidenceArtifactIds] = useState("");
+  const [venueState, setVenueState] = useState("");
+  const [venueCounty, setVenueCounty] = useState("");
+  const [venueCity, setVenueCity] = useState("");
+  const [venueAddressLine1, setVenueAddressLine1] = useState("");
+  const [venueLocationLabel, setVenueLocationLabel] = useState("");
   const [notarialNotes, setNotarialNotes] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notaryProfile, setNotaryProfile] = useState<NotaryProfileSummary | null>(null);
@@ -407,6 +440,10 @@ export default function NotaryRequestWorkspacePage() {
   useEffect(() => {
     void loadNotaryProfile();
   }, [loadNotaryProfile]);
+
+  useEffect(() => {
+    setVenueState((current) => current.trim() || jurisdictionToVenueState(notaryProfile?.jurisdiction));
+  }, [notaryProfile?.jurisdiction]);
 
   const submitDecision = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -633,6 +670,9 @@ export default function NotaryRequestWorkspacePage() {
         },
       });
       setErrorMessage(error instanceof Error ? error.message : fallbackMessage);
+      if (actionKey === "submit") {
+        await loadContext();
+      }
     } finally {
       setActiveAction(null);
     }
@@ -733,10 +773,17 @@ export default function NotaryRequestWorkspacePage() {
   };
 
   const signAcknowledgment = async () => {
+    const completedAt = new Date().toISOString();
     const resolvedNotarialFields = {
       documentIdn: context?.document.idn ?? null,
       memberName: context?.owner?.displayName ?? null,
       meetingId: context?.meeting?.meetingId ?? null,
+      venueState: venueState.trim(),
+      venueCounty: venueCounty.trim(),
+      venueCity: venueCity.trim() || null,
+      venueAddressLine1: venueAddressLine1.trim() || null,
+      venueLocationLabel: venueLocationLabel.trim() || null,
+      venueCompletedAt: completedAt,
       notaryName: context?.notary?.displayName ?? null,
       notaryJurisdiction: notaryProfile?.jurisdiction ?? null,
       notaryServiceAreaKind: notaryProfile?.serviceAreaKind ?? null,
@@ -757,6 +804,18 @@ export default function NotaryRequestWorkspacePage() {
       "sign",
       "/sign",
       {
+        venue: {
+          state: venueState.trim(),
+          county: venueCounty.trim(),
+          city: venueCity.trim() || undefined,
+          addressLine1: venueAddressLine1.trim() || undefined,
+          locationLabel: venueLocationLabel.trim() || undefined,
+          completedAt,
+        },
+        acknowledgment: {
+          signerAppeared: true,
+          signerAcknowledged: true,
+        },
         notarialFields: resolvedNotarialFields,
         sealLabel: resolvedSealLabel,
         signatureLabel: resolvedSignatureLabel,
@@ -814,20 +873,50 @@ export default function NotaryRequestWorkspacePage() {
   const memberSample = getLatestSampleForRole(context, "member");
   const notarySample = getLatestSampleForRole(context, "notary");
   const latestProximityEvaluation = getLatestProximityEvaluation(context);
-  const hasFreshMemberSample = getSampleWarning(memberSample) === "Ready";
-  const hasFreshNotarySample = getSampleWarning(notarySample) === "Ready";
+  const hasFreshMemberSample = isSampleFreshEnoughForEvaluation(memberSample);
+  const hasFreshNotarySample = isSampleFreshEnoughForEvaluation(notarySample);
   const hasAcknowledgment = Boolean(
     context?.finalization.history.some((event) => event.status === "acknowledgment_appended"),
   );
+  const hasFinalWatermark = Boolean(
+    context?.finalization.isWatermarked || context?.finalization.history.some((event) => event.status === "watermark_applied"),
+  );
+  const hasHashRecorded = Boolean(
+    context?.finalization.isHashRecorded || context?.finalization.hash || context?.finalization.history.some((event) => event.status === "hash_recorded"),
+  );
   const isAnchored = Boolean(context?.finalization.isAnchored);
+  const hasLedgerFailure = Boolean(
+    context?.finalization.anchorAttempt?.status === "failed" || context?.finalization.latestStatus === "failed",
+  );
+  const isVerificationReady = Boolean(
+    context?.capabilities.canOpenVerification || (context?.finalization.publicVerifyPath && isAnchored),
+  );
+  const recentFinalizationHistory = context?.finalization.history.slice(-4).reverse() ?? [];
   const hasRunningAction = activeAction !== null;
   const canStartSession = Boolean(context?.capabilities.canManageMeeting && !isSessionInProgress && !isMeetingCompleted);
   const hasProfileJurisdiction = Boolean(notaryProfile?.jurisdiction?.trim());
   const hasProfileServiceArea = Boolean(notaryProfile?.serviceAreaName?.trim());
+  const hasProfileCommissionNumber = Boolean(notaryProfile?.commissionNumber?.trim());
+  const hasProfileCommissionExpiration = Boolean(notaryProfile?.commissionExpiresAt?.trim());
   const hasProfileSignature = Boolean(notaryProfile?.signatureDataUrl);
   const hasProfileSeal = Boolean(notaryProfile?.sealDataUrl);
   const hasNotaryProfileReadyForCompletion =
-    hasProfileJurisdiction && hasProfileServiceArea && hasProfileSignature && hasProfileSeal;
+    hasProfileJurisdiction &&
+    hasProfileServiceArea &&
+    hasProfileCommissionNumber &&
+    hasProfileCommissionExpiration &&
+    hasProfileSignature &&
+    hasProfileSeal;
+  const hasAcknowledgmentVenue = Boolean(venueState.trim() && venueCounty.trim());
+  const samePlaceDisabledReason = !hasSessionStart
+    ? "Start the in-person session before evaluating same-place evidence."
+    : !hasMemberCheckin
+      ? "Member check-in is required before evaluating same-place evidence."
+      : !hasFreshMemberSample
+        ? "Member location needs a fresh member-device check-in from the member request page."
+        : !hasFreshNotarySample
+          ? "Refresh illuminotary location before evaluating same-place evidence."
+          : null;
   const canUnlockFinalPreview = Boolean(
     context?.meeting &&
       (context.meeting.status === "in_progress" || context.meeting.status === "completed") &&
@@ -988,12 +1077,13 @@ export default function NotaryRequestWorkspacePage() {
             </div>
 
             <div className="mt-4 grid gap-2">
-              <CompletionStep done={hasMemberCheckin} label="Member check-in" />
               <CompletionStep done={hasSessionStart} label="Session started" />
+              <CompletionStep done={hasMemberCheckin} label="Member checked in" />
               <CompletionStep done={hasPassedProximity} label="Same-place evidence" />
               <CompletionStep done={hasVerifiedIdentity} label="Identity verified" />
-              <CompletionStep done={hasNotaryProfileReadyForCompletion} label="Notary profile ready" />
-              <CompletionStep done={hasAcknowledgment} label="Acknowledgment appended" />
+              <CompletionStep done={hasAcknowledgmentVenue} label="Venue captured" />
+              <CompletionStep done={hasAcknowledgment} label="Acknowledgment sealed" />
+              <CompletionStep done={isMeetingCompleted} label="Session completed" />
               <CompletionStep done={isAnchored} label="Final package anchored" />
             </div>
 
@@ -1001,6 +1091,8 @@ export default function NotaryRequestWorkspacePage() {
               <div className="font-medium text-Color-Scheme-1-Text">Notary profile data for completion</div>
               <div className="mt-1">Jurisdiction: {notaryProfile?.jurisdiction?.trim() || "Missing"}</div>
               <div>Service area: {notaryProfile?.serviceAreaName?.trim() || "Missing"}</div>
+              <div>Commission number: {notaryProfile?.commissionNumber?.trim() || "Missing"}</div>
+              <div>Commission expires: {notaryProfile?.commissionExpiresAt?.trim() || "Missing"}</div>
               <div>Signature: {hasProfileSignature ? "Configured" : "Missing"}</div>
               <div>Seal: {hasProfileSeal ? "Configured" : "Missing"}</div>
               {!hasNotaryProfileReadyForCompletion ? (
@@ -1053,9 +1145,9 @@ export default function NotaryRequestWorkspacePage() {
                       <div>Status: {formatStatusLabel(latestProximityEvaluation.status)}</div>
                     </div>
                   ) : null}
-                  {!hasFreshMemberSample ? (
+                  {samePlaceDisabledReason ? (
                     <div className="text-xs leading-5 text-amber-700">
-                      Member location needs a fresh member-device check-in from the member request page.
+                      {samePlaceDisabledReason}
                     </div>
                   ) : null}
                 </div>
@@ -1088,7 +1180,7 @@ export default function NotaryRequestWorkspacePage() {
                   />
                   <select
                     className="w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                    onChange={(event) => setIdentityDocumentType(event.target.value)}
+                    onChange={(event) => setIdentityDocumentType(event.target.value as IdentityDocumentType)}
                     value={identityDocumentType}
                   >
                     {identityDocumentOptions.map((option) => (
@@ -1148,6 +1240,49 @@ export default function NotaryRequestWorkspacePage() {
                   </ActionButton>
                 </div>
 
+                <div className="space-y-3 rounded-lg bg-Color-White p-3 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+                  <div className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Acknowledgment venue</div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                    <input
+                      className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                      onChange={(event) => setVenueState(event.target.value)}
+                      placeholder="State"
+                      value={venueState}
+                    />
+                    <input
+                      className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                      onChange={(event) => setVenueCounty(event.target.value)}
+                      placeholder="County"
+                      value={venueCounty}
+                    />
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                    <input
+                      className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                      onChange={(event) => setVenueCity(event.target.value)}
+                      placeholder="City"
+                      value={venueCity}
+                    />
+                    <input
+                      className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                      onChange={(event) => setVenueAddressLine1(event.target.value)}
+                      placeholder="Address or place"
+                      value={venueAddressLine1}
+                    />
+                  </div>
+                  <input
+                    className="w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
+                    onChange={(event) => setVenueLocationLabel(event.target.value)}
+                    placeholder="Location label"
+                    value={venueLocationLabel}
+                  />
+                  {!hasAcknowledgmentVenue ? (
+                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+                      State and county are required before sealing the acknowledgment.
+                    </div>
+                  ) : null}
+                </div>
+
                 <label className="block">
                   <span className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Notarial notes</span>
                   <textarea
@@ -1174,12 +1309,13 @@ export default function NotaryRequestWorkspacePage() {
                       !hasVerifiedIdentity ||
                       !hasPassedProximity ||
                       hasAcknowledgment ||
-                      !hasNotaryProfileReadyForCompletion
+                      !hasNotaryProfileReadyForCompletion ||
+                      !hasAcknowledgmentVenue
                     }
                     loadingLabel="Appending acknowledgment"
                     onClick={() => void signAcknowledgment()}
                   >
-                    Append acknowledgment and seal
+                    Seal acknowledgment
                   </ActionButton>
                   <ActionButton
                     active={activeAction === "complete-meeting"}
@@ -1233,6 +1369,50 @@ export default function NotaryRequestWorkspacePage() {
                 {isAnchored ? (
                   <div className="text-xs leading-5 text-emerald-700">
                     Final package is anchored. Verification is ready for the member record.
+                  </div>
+                ) : null}
+                {context?.finalization ? (
+                  <div className="rounded-lg bg-Color-White px-3 py-3 text-xs leading-5 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="font-medium text-Color-Scheme-1-Text">Final package status</div>
+                      <div className={hasLedgerFailure ? "font-medium text-red-700" : "text-Color-Neutral"}>
+                        {formatStatusLabel(context.finalization.latestStatus)}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <CompletionStep done={hasFinalWatermark} label="Watermarked" />
+                      <CompletionStep done={hasHashRecorded} label="Hash recorded" />
+                      <CompletionStep done={isAnchored} label="Ledger anchored" />
+                      <CompletionStep done={isVerificationReady} label="Verification ready" />
+                    </div>
+                    <div className="mt-3 grid gap-1 break-words">
+                      <div>Hash: {context.finalization.hash ?? "-"}</div>
+                      <div>Ledger TX: {context.finalization.ledgerTxId ?? "-"}</div>
+                      <div>Anchored: {formatDateTime(context.finalization.anchoredAt)}</div>
+                      <div>Last checked: {formatDateTime(context.finalization.lastCheckedAt)}</div>
+                    </div>
+                    {context.finalization.publicVerifyPath ? (
+                      <Link
+                        className="mt-3 inline-flex rounded-lg border border-Color-Scheme-1-Border/40 px-3 py-2 text-xs font-medium text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
+                        href={context.finalization.publicVerifyPath}
+                      >
+                        Open public verification
+                      </Link>
+                    ) : null}
+                    {hasLedgerFailure ? (
+                      <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+                        Ledger anchoring failed{context.finalization.anchorAttempt?.errorMessage ? `: ${context.finalization.anchorAttempt.errorMessage}` : "."} Retry final package submission after the ledger provider is available.
+                      </div>
+                    ) : null}
+                    {recentFinalizationHistory.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        {recentFinalizationHistory.map((event) => (
+                          <div key={event.id} className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2">
+                            {formatStatusLabel(event.status)} · {formatDateTime(event.createdAt)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

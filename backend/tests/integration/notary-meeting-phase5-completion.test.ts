@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
+  getUserIdentityContextByUserIdMock: vi.fn(),
   getNotarizationRequestByIdMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
   getIlluminotarizationWorkflowByIdMock: vi.fn(),
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   watermarkWithNoticeMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   queueMeetingScheduledConfirmationNotificationMock: vi.fn(),
+  getNotaryProfileByUserIdMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -32,6 +34,15 @@ vi.mock("../../src/services/userRoleService", async (importOriginal) => {
   return {
     ...actual,
     getUserIdentityContextBySupabaseId: mocks.getUserIdentityContextBySupabaseIdMock,
+    getUserIdentityContextByUserId: mocks.getUserIdentityContextByUserIdMock,
+  };
+});
+
+vi.mock("../../src/services/notaryProfileService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/notaryProfileService")>();
+  return {
+    ...actual,
+    getNotaryProfileByUserId: mocks.getNotaryProfileByUserIdMock,
   };
 });
 
@@ -294,6 +305,31 @@ const seedMeetingContext = (input: {
     lastName: role === "member" ? "Member" : "Tary",
     availableRoles: [role],
     roleAssignments: [],
+  });
+  mocks.getUserIdentityContextByUserIdMock.mockResolvedValue({
+    id: "notary-1",
+    supabaseUserId: "notary-sub",
+    email: "notary@example.com",
+    role: "notary",
+    status: "active",
+    firstName: "Nora",
+    lastName: "Tary",
+    availableRoles: ["notary"],
+    roleAssignments: [],
+  });
+  mocks.getNotaryProfileByUserIdMock.mockResolvedValue({
+    id: "profile-1",
+    userId: "notary-1",
+    jurisdiction: "US-OH",
+    serviceAreaKind: "county",
+    serviceAreaName: "Franklin County",
+    commissionNumber: "OH-12345",
+    commissionExpiresAt: "2028-04-22",
+    sealStoragePath: null,
+    signatureDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+    sealDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+    createdAt: "2026-04-20T10:00:00.000Z",
+    updatedAt: "2026-04-20T10:00:00.000Z",
   });
   mocks.getNotarizationRequestByIdMock.mockResolvedValue({
     ...baseRequest,
@@ -562,8 +598,9 @@ describe("Phase 5 meeting runtime completion", () => {
         participantRole: "member",
         subjectName: "Mina Member",
         documentType: "passport",
-        documentLast4: "1234",
+        documentNumberTail: "1234",
         issuingJurisdiction: "US",
+        documentExpirationDate: "2031-04-22",
         verifiedAt: "2026-04-22T15:05:00.000Z",
         notes: "Passport verified",
       });
@@ -808,6 +845,18 @@ describe("Phase 5 meeting runtime completion", () => {
       .post("/notary/requests/req-1/sign")
       .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
       .send({
+        venue: {
+          state: "OH",
+          county: "Franklin",
+          city: "Columbus",
+          addressLine1: "123 Session Way",
+          locationLabel: "DARCi HQ",
+          completedAt: "2026-04-22T15:20:00.000Z",
+        },
+        acknowledgment: {
+          signerAppeared: true,
+          signerAcknowledged: true,
+        },
         sealLabel: "DARCi illuminotary seal",
         signatureLabel: "Nora Tary",
         notes: "Verified in person",
@@ -817,7 +866,17 @@ describe("Phase 5 meeting runtime completion", () => {
     expect(response.body.acknowledgmentPage.id).toBe("ack-page-1");
     expect(response.body.sealArtifact.artifactKind).toBe("seal_preview");
     expect(mocks.appendAcknowledgmentPageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ documentId: "doc-1", actorSupabaseId: "notary-sub" }),
+      expect.objectContaining({
+        documentId: "doc-1",
+        actorSupabaseId: "notary-sub",
+        meetingId: "meeting-1",
+        venue: expect.objectContaining({ county: "Franklin", state: "OH" }),
+        notaryProfile: expect.objectContaining({
+          notaryName: "Nora Tary",
+          jurisdiction: "US-OH",
+          commissionNumber: "OH-12345",
+        }),
+      }),
     );
     expect(mocks.createMeetingArtifactMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -898,14 +957,111 @@ describe("Phase 5 meeting runtime completion", () => {
       .send({ notes: "Final package ready" });
 
     expect(response.status).toBe(200);
+    expect(response.body.documentStatus).toBe("completed");
+    expect(response.body.requestStatus).toBe("completed");
     expect(response.body.version.isFinal).toBe(true);
     expect(response.body.hashRecord.hash).toBe("hash-final");
     expect(response.body.ledger.status).toBe("anchored");
+    expect(response.body.finalizationStatus).toEqual({
+      watermarked: true,
+      hashRecorded: true,
+      ledgerAnchored: true,
+      verificationReady: true,
+      recoveryAction: null,
+    });
     expect(mocks.watermarkWithNoticeMock).toHaveBeenCalledWith(
       expect.objectContaining({ documentId: "doc-1", actorSupabaseId: "notary-sub" }),
     );
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "notary.final_package_submitted" }),
     );
+  });
+
+  it("returns a recoverable failure when ledger anchoring fails", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: {
+        status: "completed",
+        same_place_status: "passed",
+      },
+      participants: buildParticipants({
+        member: { status: "completed" },
+        notary: { status: "completed" },
+      }),
+    });
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([buildVerifiedIdentityEvent()]);
+    mocks.watermarkWithNoticeMock.mockResolvedValue({
+      document: { ...baseDocument, status: "pending_notary" },
+      request: { ...baseRequest, status: "in_review" },
+      execution: buildFinalizationExecution({
+        id: "execution-watermark-1",
+        execution_kind: "watermark_notice",
+        output_document_version_id: "version-final-1",
+        watermark_text: "DARCi verified",
+      }),
+      version: buildFinalizationVersion(),
+      hashRecord: {
+        id: "hash-1",
+        document_id: "doc-1",
+        document_version_id: "version-final-1",
+        algorithm: "sha256",
+        hash: "hash-final",
+        status: "recorded",
+        completed_at: "2026-04-22T15:35:00.000Z",
+        metadata: {},
+        created_at: "2026-04-22T15:35:00.000Z",
+        updated_at: "2026-04-22T15:35:00.000Z",
+      },
+      ledgerEntry: {
+        id: "ledger-1",
+        document_id: "doc-1",
+        document_version_id: "version-final-1",
+        hash_record_id: "hash-1",
+        ledger_tx_id: null,
+        anchored_at: null,
+        metadata: {},
+        created_at: "2026-04-22T15:36:00.000Z",
+        updated_at: "2026-04-22T15:36:00.000Z",
+      },
+      ledgerAnchorAttempt: {
+        id: "anchor-attempt-1",
+        ledger_entry_id: "ledger-1",
+        status: "failed",
+        attempt_number: 1,
+        requested_at: "2026-04-22T15:35:00.000Z",
+        completed_at: null,
+        failed_at: "2026-04-22T15:36:00.000Z",
+        error_message: "Ledger provider unavailable",
+        metadata: {},
+        created_at: "2026-04-22T15:35:00.000Z",
+        updated_at: "2026-04-22T15:36:00.000Z",
+      },
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/submit")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({ notes: "Final package ready" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe("ledger_anchor_failed");
+    expect(response.body.documentStatus).toBe("pending_notary");
+    expect(response.body.requestStatus).toBe("in_review");
+    expect(response.body.hashRecord.hash).toBe("hash-final");
+    expect(response.body.ledger).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        ledgerTxId: null,
+        anchoredAt: null,
+        errorMessage: "Ledger provider unavailable",
+      }),
+    );
+    expect(response.body.finalizationStatus).toEqual({
+      watermarked: true,
+      hashRecorded: true,
+      ledgerAnchored: false,
+      verificationReady: false,
+      recoveryAction: "retry_final_package_submission",
+    });
   });
 });

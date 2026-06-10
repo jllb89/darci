@@ -36,10 +36,36 @@ type RequestDetailPayload = {
     jurisdiction: string | null;
     summary: {
       verification: {
+        status: string;
+        idn: string | null;
         verifyPath: string | null;
       };
       finalization: {
         latestStatus: string | null;
+        latestStatusAt: string | null;
+        isAnchored: boolean;
+        isVerificationChecked: boolean;
+        isWatermarked: boolean;
+        isHashRecorded: boolean;
+        hash: string | null;
+        ledgerTxId: string | null;
+        anchoredAt: string | null;
+        anchorAttempt: {
+          id: string;
+          status: string;
+          attemptNumber: number;
+          requestedAt: string;
+          completedAt: string | null;
+          failedAt: string | null;
+          errorMessage: string | null;
+        } | null;
+        history: Array<{
+          id: string;
+          status: string;
+          changeSource: string;
+          changeReason: string | null;
+          createdAt: string;
+        }>;
       };
     };
   };
@@ -153,6 +179,27 @@ const formatDateTime = (value: string | null) => {
 
   return parsed.toLocaleString();
 };
+
+const formatStatusLabel = (value: string | null | undefined) => {
+  if (!value) {
+    return "-";
+  }
+
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+function FinalizationStep({ done, label }: { done: boolean; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-Color-White px-3 py-2 text-xs shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+      <span className="text-Color-Neutral-Darkest">{label}</span>
+      <span className={done ? "font-medium text-emerald-700" : "text-Color-Neutral"}>{done ? "Done" : "Pending"}</span>
+    </div>
+  );
+}
 
 const getCurrentGeolocationSample = async (): Promise<BrowserGeolocationSample | null> => {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -293,6 +340,17 @@ export default function RequestWorkspacePage() {
   const hasNotaryCheckIn = hasRequestSessionParticipantCheckedIn(liveMeeting, "notary");
   const isInitialMemberCheckIn = shouldShowMemberSessionCheckIn(liveMeeting);
   const canCheckIn = canRecordMemberSessionCheckIn(liveMeeting);
+  const finalization = payload?.document.summary.finalization ?? null;
+  const verification = payload?.document.summary.verification ?? null;
+  const hasFinalWatermark = Boolean(
+    finalization?.isWatermarked || finalization?.history.some((event) => event.status === "watermark_applied"),
+  );
+  const hasHashRecorded = Boolean(
+    finalization?.isHashRecorded || finalization?.hash || finalization?.history.some((event) => event.status === "hash_recorded"),
+  );
+  const hasLedgerFailure = Boolean(finalization?.anchorAttempt?.status === "failed" || finalization?.latestStatus === "failed");
+  const isVerificationReady = Boolean(finalization?.isAnchored && verification?.verifyPath);
+  const recentFinalizationHistory = finalization?.history.slice(-4).reverse() ?? [];
 
   return (
     <div className="space-y-6">
@@ -394,6 +452,50 @@ export default function RequestWorkspacePage() {
           </div>
 
           <div className="space-y-4">
+            {finalization ? (
+              <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-sm font-medium">Final package</div>
+                  <div className={hasLedgerFailure ? "text-xs font-medium text-red-700" : "text-xs text-Color-Neutral"}>
+                    {formatStatusLabel(finalization.latestStatus)}
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-2">
+                  <FinalizationStep done={hasFinalWatermark} label="Watermarked" />
+                  <FinalizationStep done={hasHashRecorded} label="Hash recorded" />
+                  <FinalizationStep done={finalization.isAnchored} label="Ledger anchored" />
+                  <FinalizationStep done={isVerificationReady} label="Verification ready" />
+                </div>
+                <div className="mt-4 space-y-2 break-words text-sm text-Color-Neutral">
+                  <div>Hash: {finalization.hash ?? "-"}</div>
+                  <div>Ledger TX: {finalization.ledgerTxId ?? "-"}</div>
+                  <div>Anchored: {formatDateTime(finalization.anchoredAt)}</div>
+                </div>
+                {verification?.verifyPath ? (
+                  <Link
+                    className="mt-4 block rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm hover:bg-Color-Neutral-Lightest"
+                    href={verification.verifyPath}
+                  >
+                    Open public verification
+                  </Link>
+                ) : null}
+                {hasLedgerFailure ? (
+                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    Ledger anchoring failed{finalization.anchorAttempt?.errorMessage ? `: ${finalization.anchorAttempt.errorMessage}` : "."} Your Illuminotary can retry final package submission.
+                  </div>
+                ) : null}
+                {recentFinalizationHistory.length > 0 ? (
+                  <div className="mt-4 space-y-2 text-xs text-Color-Neutral">
+                    {recentFinalizationHistory.map((event) => (
+                      <div key={event.id} className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2">
+                        {formatStatusLabel(event.status)} • {formatDateTime(event.createdAt)}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
               <div className="text-sm font-medium">Code delivery</div>
               <div className="mt-4 space-y-2 text-sm text-Color-Neutral">

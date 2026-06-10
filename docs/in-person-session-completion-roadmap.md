@@ -417,15 +417,28 @@ Acceptance criteria:
 
 ### Phase 4: Acknowledgment Renderer And Venue
 
-Status: planned; acknowledgment-source audit completed on 2026-06-10.
+Status: completed on 2026-06-10.
 
-Phase 4 audit findings:
+Completed implementation:
+
+1. Added structured CA/OH acknowledgment renderers for `trust_certificate`, `trust_rrr`, and `poa_general`, with server-side document-family and acknowledger resolution.
+2. Replaced the generic finalization text with jurisdiction-specific certificate content that omits internal template IDs, omits consent boilerplate, and renders actual venue details.
+3. Extended acknowledgment finalization to require assigned-notary profile facts, commission details, signature data URL, and seal data URL before append.
+4. Embedded notary signature and seal images into the appended PDF page with `pdf-lib` when finalization runs.
+5. Persisted rendered acknowledgment content in `acknowledgment_pages` and stored renderer key, renderer version, document family, venue, acknowledger names, notary facts, identity summary, meeting ID, and embedded-asset flags in execution/finalization metadata.
+6. Updated `POST /notary/requests/{id}/sign` to require structured venue and positive acknowledgment confirmation, load the assigned notary profile server-side, and pass identity summary into finalization.
+7. Updated the notary workspace with acknowledgment venue fields, profile commission preflight checks, a venue-captured step, and structured sign payloads.
+8. Deprecated the unsafe direct `/documents/{id}/append-acknowledgment` compatibility route so generic acknowledgment append cannot bypass live-session venue/profile requirements.
+9. Updated OpenAPI with `NotarySignRequest`, `NotarySignResponse`, acknowledgment venue, and render-summary schemas.
+10. Added focused renderer, direct-route conflict, and notary sign integration coverage.
+
+Phase 4 pre-implementation audit findings:
 
 1. CA and OH source templates already contain the required acknowledgment formats, or jurisdiction-specific placeholders for them.
 2. Review/member document generation intentionally omits notarial acknowledgment blocks so members do not see or sign a notary-only certificate before the live session.
-3. The current finalization path does not reuse those deferred formats. It appends a generic `DARCi Notarial Acknowledgment` page from `buildAcknowledgmentContent`.
+3. Before Phase 4, the finalization path did not reuse those deferred formats. It appended a generic `DARCi Notarial Acknowledgment` page from `buildAcknowledgmentContent`.
 4. `jurisdiction_rules.acknowledgment_template` stores renderer IDs such as `us_ca_acknowledgment_v1` and `us_oh_acknowledgment_v1`, not full certificate wording.
-5. Phase 4 should keep the generation-layer omission in place and render the exact acknowledgment only inside finalization at the notary append step.
+5. The completed Phase 4 implementation keeps the generation-layer omission in place and renders the exact acknowledgment only inside finalization at the notary append step.
 6. CA and OH both need first-class renderers; neither jurisdiction should fall through to the current generic page.
 
 Renderer map for implementation:
@@ -490,6 +503,19 @@ Acceptance criteria:
 
 ### Phase 5: Final Package Transparency And Recovery
 
+Status: completed on 2026-06-10.
+
+Completed implementation:
+
+1. Kept `POST /notary/requests/{id}/submit` as the final closeout endpoint after meeting completion, acknowledgment append, same-place pass, and identity verification.
+2. Added explicit final package response fields for document status, request status, watermarked state, hash-recorded state, ledger-anchored state, verification readiness, and retry recovery action.
+3. Changed failed ledger anchor attempts on notary submit into a visible `409 ledger_anchor_failed` response that includes the final version, hash record, failed ledger attempt, provider error message, and retry action without marking the request completed.
+4. Extended the shared document workspace summary with watermark/hash/anchor booleans, hash, ledger transaction ID, anchored time, latest anchor attempt, and finalization history.
+5. Updated the notary request workspace to show `Watermarked`, `Hash recorded`, `Ledger anchored`, and `Verification ready`, plus hash, ledger transaction, anchor time, verification link, failed-anchor recovery copy, and recent finalization history.
+6. Updated the member request workspace with the same final package visibility so members do not need backend logs to know the closeout state.
+7. Updated OpenAPI for the mounted notary submit endpoint, `NotarySubmitRequest`, `NotarySubmitResponse`, final package status summary, ledger error details, and enriched finalization summaries.
+8. Added integration coverage for successful closeout milestones and failed-anchor recovery semantics.
+
 Backend:
 
 1. Keep `submitRequest` as the final anchoring endpoint.
@@ -507,7 +533,7 @@ Tests:
 
 1. Integration test successful final package returns final version, hash, ledger status, and completion statuses.
 2. Integration test failed ledger provider returns visible failure and does not mark request completed.
-3. Web test renders final anchored state for member and notary.
+3. Targeted web lint covers the member and notary final package panels; adjacent request/notary web utility tests remain green. A React page render harness is not currently installed in `apps/web`.
 
 Acceptance criteria:
 

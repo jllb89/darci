@@ -3,7 +3,10 @@ import {
   getLatestNotarizationCodeForRequest,
   getLatestNotarizationRequestForDocument,
 } from "./documentService";
-import { listFinalizationStatusHistory } from "./documentFinalizationService";
+import {
+  getVerificationSnapshotForDocument,
+  listFinalizationStatusHistory,
+} from "./documentFinalizationService";
 import { getVisibleDocumentIdn } from "./documentVisibilityService";
 import { listWorkflowStatusHistory } from "./illuminotarizationWorkflowService";
 
@@ -24,6 +27,27 @@ export type DocumentWorkspaceSummary = {
     latestStatusAt: string | null;
     isAnchored: boolean;
     isVerificationChecked: boolean;
+    isWatermarked: boolean;
+    isHashRecorded: boolean;
+    hash: string | null;
+    ledgerTxId: string | null;
+    anchoredAt: string | null;
+    anchorAttempt: {
+      id: string;
+      status: string;
+      attemptNumber: number;
+      requestedAt: string;
+      completedAt: string | null;
+      failedAt: string | null;
+      errorMessage: string | null;
+    } | null;
+    history: Array<{
+      id: string;
+      status: string;
+      changeSource: string;
+      changeReason: string | null;
+      createdAt: string;
+    }>;
   };
   verification: {
     status: "unavailable" | "pending_finalization" | "ready";
@@ -49,6 +73,13 @@ const buildDefaultSummary = (visibleIdn: string | null): DocumentWorkspaceSummar
     latestStatusAt: null,
     isAnchored: false,
     isVerificationChecked: false,
+    isWatermarked: false,
+    isHashRecorded: false,
+    hash: null,
+    ledgerTxId: null,
+    anchoredAt: null,
+    anchorAttempt: null,
+    history: [],
   },
   verification: {
     status: visibleIdn ? "pending_finalization" : "unavailable",
@@ -72,14 +103,17 @@ export const buildDocumentWorkspaceSummary = async (input: {
   const latestCode = request
     ? await getLatestNotarizationCodeForRequest(request.id)
     : null;
-  const [workflowStatusHistory, finalizationStatusHistory] = await Promise.all([
+  const [workflowStatusHistory, finalizationStatusHistory, verificationSnapshot] = await Promise.all([
     request?.workflow_id ? listWorkflowStatusHistory(request.workflow_id) : Promise.resolve([]),
     listFinalizationStatusHistory(input.document.id),
+    getVerificationSnapshotForDocument(input.document as DocumentRecord),
   ]);
 
   const latestWorkflowStatus = workflowStatusHistory.at(-1) ?? null;
   const latestFinalizationStatus = finalizationStatusHistory.at(-1) ?? null;
   const isAnchored = finalizationStatusHistory.some((entry) => entry.status === "ledger_anchored");
+  const isWatermarked = finalizationStatusHistory.some((entry) => entry.status === "watermark_applied");
+  const isHashRecorded = finalizationStatusHistory.some((entry) => entry.status === "hash_recorded");
   const isVerificationChecked = finalizationStatusHistory.some(
     (entry) => entry.status === "verification_checked",
   );
@@ -101,6 +135,29 @@ export const buildDocumentWorkspaceSummary = async (input: {
     latestStatusAt: latestFinalizationStatus?.created_at ?? null,
     isAnchored,
     isVerificationChecked,
+    isWatermarked,
+    isHashRecorded,
+    hash: verificationSnapshot.hashRecord?.hash ?? null,
+    ledgerTxId: verificationSnapshot.ledgerEntry?.ledger_tx_id ?? null,
+    anchoredAt: verificationSnapshot.ledgerEntry?.anchored_at ?? null,
+    anchorAttempt: verificationSnapshot.ledgerAnchorAttempt
+      ? {
+          id: verificationSnapshot.ledgerAnchorAttempt.id,
+          status: verificationSnapshot.ledgerAnchorAttempt.status,
+          attemptNumber: verificationSnapshot.ledgerAnchorAttempt.attempt_number,
+          requestedAt: verificationSnapshot.ledgerAnchorAttempt.requested_at,
+          completedAt: verificationSnapshot.ledgerAnchorAttempt.completed_at,
+          failedAt: verificationSnapshot.ledgerAnchorAttempt.failed_at,
+          errorMessage: verificationSnapshot.ledgerAnchorAttempt.error_message,
+        }
+      : null,
+    history: finalizationStatusHistory.map((entry) => ({
+      id: entry.id,
+      status: entry.status,
+      changeSource: entry.change_source,
+      changeReason: entry.change_reason,
+      createdAt: entry.created_at,
+    })),
   };
 
   summary.verification = {

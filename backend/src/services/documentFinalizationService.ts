@@ -9,11 +9,17 @@ import {
 import type { PDFFont, PDFPage } from "pdf-lib";
 import { createClient } from "@supabase/supabase-js";
 import {
+  type DocumentGenerationRunRecord,
+  type DocumentOutputSignerRecord,
+  type DocumentPartyRecord,
   type DocumentRecord,
   type DocumentVersionRecord,
   getActiveNotarizationRequest,
+  getDocumentGenerationRunById,
   getDocumentById,
   getUserIdBySupabaseId,
+  listDocumentOutputSigners,
+  listDocumentParties,
   listDocumentVersions,
   updateDocument,
   updateNotarizationRequest,
@@ -22,6 +28,7 @@ import { hashDocument } from "./hashingService";
 import { transitionIlluminotarizationWorkflowStatus } from "./illuminotarizationWorkflowService";
 import { anchorToLedger } from "./ledgerService";
 import { getMeetingByRequestId } from "./meetingService";
+import type { NotaryProfileRecord } from "./notaryProfileService";
 import { downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -166,6 +173,66 @@ type JurisdictionFinalizationConfig = {
   watermarkTextTemplate: string;
 };
 
+export type AcknowledgmentVenueInput = {
+  state: string;
+  county: string;
+  city?: string | null | undefined;
+  addressLine1?: string | null | undefined;
+  locationLabel?: string | null | undefined;
+  completedAt?: string | null | undefined;
+};
+
+export type AcknowledgmentNotaryProfileInput = Pick<
+  NotaryProfileRecord,
+  | "jurisdiction"
+  | "serviceAreaKind"
+  | "serviceAreaName"
+  | "commissionNumber"
+  | "commissionExpiresAt"
+  | "signatureDataUrl"
+  | "sealDataUrl"
+> & {
+  notaryName: string;
+};
+
+type AcknowledgmentDocumentFamily = "poa_general" | "trust_rrr" | "trust_certificate";
+
+type AcknowledgmentRenderInput = {
+  document: DocumentRecord;
+  config: JurisdictionFinalizationConfig;
+  venue: AcknowledgmentVenueInput;
+  notaryProfile: AcknowledgmentNotaryProfileInput;
+  documentFamily: AcknowledgmentDocumentFamily;
+  acknowledgerNames: string[];
+  meetingId?: string | null | undefined;
+  identityMethodSummary?: string | null | undefined;
+};
+
+type AcknowledgmentRenderResult = {
+  content: string;
+  rendererKey: "us_ca_acknowledgment_v1" | "us_oh_acknowledgment_v1";
+  rendererVersion: string;
+  documentFamily: AcknowledgmentDocumentFamily;
+  venue: {
+    state: string;
+    county: string;
+    city: string | null;
+    addressLine1: string | null;
+    locationLabel: string | null;
+    completedAt: string;
+    formattedVenue: string;
+  };
+  acknowledgerNames: string[];
+  notaryFacts: {
+    notaryName: string;
+    jurisdiction: string | null;
+    serviceAreaKind: string | null;
+    serviceAreaName: string | null;
+    commissionNumber: string | null;
+    commissionExpiresAt: string | null;
+  };
+};
+
 type AuthorizedFinalizationContext = {
   actorUserId: string | null;
   document: DocumentRecord;
@@ -299,6 +366,20 @@ const WATERMARK_ROTATION_DEGREES = 32;
 const WATERMARK_MIN_FONT_SIZE = 26;
 const WATERMARK_MAX_FONT_SIZE = 54;
 const WATERMARK_OPACITY = 0.18;
+const ACKNOWLEDGMENT_ASSET_MAX_WIDTH = 132;
+const ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT = 42;
+const ACKNOWLEDGMENT_SEAL_MAX_HEIGHT = 76;
+
+const supportedAcknowledgmentFamilies = new Set<AcknowledgmentDocumentFamily>([
+  "poa_general",
+  "trust_rrr",
+  "trust_certificate",
+]);
+
+const stateNameByJurisdiction: Record<string, string> = {
+  "US-CA": "California",
+  "US-OH": "Ohio",
+};
 
 const ensureFinalIdn = (idn: string | null) => {
   if (typeof idn !== "string" || !FINAL_IDN_PATTERN.test(idn.trim())) {
@@ -966,22 +1047,342 @@ const resolveAuthorizedFinalizationContext = async (input: {
   } satisfies AuthorizedFinalizationContext;
 };
 
-const buildAcknowledgmentContent = (input: {
+const asTrimmedString = (value: unknown) => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const normalizeAcknowledgmentFamily = (
+  value: string | null | undefined,
+): AcknowledgmentDocumentFamily | null => {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (supportedAcknowledgmentFamilies.has(normalized as AcknowledgmentDocumentFamily)) {
+    return normalized as AcknowledgmentDocumentFamily;
+  }
+
+  if (normalized.includes("poa") || normalized.includes("ddpoa")) {
+    return "poa_general";
+  }
+  if (normalized.includes("trust_certificate") || normalized.includes("certificate")) {
+    return "trust_certificate";
+  }
+  if (
+    normalized.includes("trust_rrr") ||
+    normalized.includes("registration") ||
+    normalized.includes("amendment")
+  ) {
+    return "trust_rrr";
+  }
+
+  return null;
+};
+
+const resolveFamilyFromOutputBundle = (document: DocumentRecord) => {
+  for (const output of document.output_bundle ?? []) {
+    const candidates = [
+      output.documentKey,
+      output.document_key,
+      output.outputKey,
+      output.output_key,
+      output.templateKey,
+      output.template_key,
+      output.label,
+    ];
+    for (const candidate of candidates) {
+      const family = normalizeAcknowledgmentFamily(asTrimmedString(candidate));
+      if (family) {
+        return family;
+      }
+    }
+  }
+
+  return null;
+};
+
+const resolveAcknowledgmentFamily = async (input: {
   document: DocumentRecord;
-  rule: JurisdictionRuleRecord | null;
-  config: JurisdictionFinalizationConfig;
+  sourceVersion: DocumentVersionRecord;
 }) => {
-  const lines = [
-    "DARCi Notarial Acknowledgment",
-    `Document ID: ${input.document.id}`,
-    input.document.idn ? `IDN: ${input.document.idn}` : null,
-    `Jurisdiction: ${input.document.jurisdiction ?? "UNSPECIFIED"}`,
-    `Template: ${input.config.acknowledgmentTemplateId}`,
-    input.rule?.venue_required ? "Venue confirmation required." : null,
-    input.rule?.consent_required ? "Signer consent required." : null,
+  let generationRun: DocumentGenerationRunRecord | null = null;
+  if (input.sourceVersion.generation_run_id) {
+    generationRun = await getDocumentGenerationRunById({
+      documentId: input.document.id,
+      runId: input.sourceVersion.generation_run_id,
+    });
+  }
+
+  const candidates = [
+    generationRun?.document_key,
+    generationRun?.output_key,
+    generationRun?.template_key,
+    input.document.document_type,
+    input.document.product_flow_mode,
+    ...(input.document.selected_families ?? []),
   ];
 
-  return lines.filter((line): line is string => Boolean(line)).join("\n");
+  for (const candidate of candidates) {
+    const family = normalizeAcknowledgmentFamily(candidate);
+    if (family) {
+      return { family, generationRun };
+    }
+  }
+
+  const bundleFamily = resolveFamilyFromOutputBundle(input.document);
+  if (bundleFamily) {
+    return { family: bundleFamily, generationRun };
+  }
+
+  throw new DocumentFinalizationConflictError(
+    "Unable to resolve the acknowledgment document family for this finalization",
+  );
+};
+
+const uniqueNonEmptyStrings = (values: string[]) => {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    const normalized = value.trim().replace(/\s+/g, " ");
+    if (normalized.length === 0 || seen.has(normalized.toLowerCase())) {
+      continue;
+    }
+    seen.add(normalized.toLowerCase());
+    unique.push(normalized);
+  }
+
+  return unique;
+};
+
+const getFallbackAcknowledgersFromParties = (
+  parties: DocumentPartyRecord[],
+  family: AcknowledgmentDocumentFamily,
+) => {
+  const rolesByFamily: Record<AcknowledgmentDocumentFamily, string[]> = {
+    poa_general: ["principal"],
+    trust_rrr: ["grantor"],
+    trust_certificate: ["trustee"],
+  };
+  const roles = new Set(rolesByFamily[family]);
+  return uniqueNonEmptyStrings(
+    parties
+      .filter((party) => roles.has(party.party_role))
+      .sort((left, right) => left.sort_order - right.sort_order)
+      .map((party) => party.full_name),
+  );
+};
+
+const resolveAcknowledgers = async (input: {
+  documentId: string;
+  family: AcknowledgmentDocumentFamily;
+  generationRunId?: string | null;
+}) => {
+  const signerQueries = [
+    listDocumentOutputSigners({
+      documentId: input.documentId,
+      ...(input.generationRunId ? { generationRunId: input.generationRunId } : {}),
+    }),
+    input.generationRunId
+      ? listDocumentOutputSigners({ documentId: input.documentId })
+      : Promise.resolve([] as DocumentOutputSignerRecord[]),
+  ];
+  const [primarySigners, fallbackSigners] = await Promise.all(signerQueries);
+  const signerNames = uniqueNonEmptyStrings(
+    [...(primarySigners ?? []), ...(fallbackSigners ?? [])]
+      .filter(
+        (signer) =>
+          signer.document_key === input.family && signer.obligation_type === "acknowledger",
+      )
+      .sort((left, right) => left.sort_order - right.sort_order)
+      .map((signer) => signer.party_name),
+  );
+
+  if (signerNames.length > 0) {
+    return signerNames;
+  }
+
+  const parties = await listDocumentParties(input.documentId);
+  const partyNames = getFallbackAcknowledgersFromParties(parties, input.family);
+  if (partyNames.length > 0) {
+    return partyNames;
+  }
+
+  throw new DocumentFinalizationConflictError(
+    "Unable to resolve signer names for the acknowledgment certificate",
+  );
+};
+
+const resolveRendererKey = (config: JurisdictionFinalizationConfig) => {
+  const rendererKey = config.acknowledgmentTemplateId.trim();
+  if (rendererKey === "us_ca_acknowledgment_v1" || rendererKey === "us_oh_acknowledgment_v1") {
+    return rendererKey;
+  }
+
+  throw new DocumentFinalizationConflictError(
+    `Unsupported acknowledgment renderer ${rendererKey || "<missing>"}`,
+  );
+};
+
+const formatDisplayDate = (value: string | null | undefined) => {
+  const parsed = value ? new Date(value) : new Date();
+  const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+};
+
+const getDateParts = (value: string | null | undefined) => {
+  const parsed = value ? new Date(value) : new Date();
+  const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return {
+    day: new Intl.DateTimeFormat("en-US", { day: "numeric", timeZone: "UTC" }).format(date),
+    month: new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(date),
+    year: new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "UTC" }).format(date),
+  };
+};
+
+const normalizeVenue = (venue: AcknowledgmentVenueInput, jurisdiction: string | null) => {
+  const state = venue.state.trim() || stateNameByJurisdiction[jurisdiction ?? ""] || "";
+  const county = venue.county.trim();
+  const city = venue.city?.trim() || null;
+  const addressLine1 = venue.addressLine1?.trim() || null;
+  const locationLabel = venue.locationLabel?.trim() || null;
+  const completedAt = venue.completedAt?.trim() || new Date().toISOString();
+  const formattedVenue = [
+    locationLabel,
+    addressLine1,
+    city,
+    county ? `${county} County` : null,
+    state,
+  ]
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .join(", ");
+
+  if (!county || !state || !formattedVenue) {
+    throw new DocumentFinalizationConflictError(
+      "Acknowledgment venue requires state and county before append",
+    );
+  }
+
+  return {
+    state,
+    county,
+    city,
+    addressLine1,
+    locationLabel,
+    completedAt,
+    formattedVenue,
+  };
+};
+
+const buildCaliforniaAcknowledgmentContent = (input: {
+  document: DocumentRecord;
+  venue: ReturnType<typeof normalizeVenue>;
+  notaryProfile: AcknowledgmentNotaryProfileInput;
+  acknowledgerNames: string[];
+  identityMethodSummary?: string | null | undefined;
+}) => {
+  const dateParts = getDateParts(input.venue.completedAt);
+  const acknowledgers = input.acknowledgerNames.join(", ");
+  return [
+    "Notarial Acknowledgement",
+    `Document ID: ${input.document.id}`,
+    input.document.idn ? `IDN: ${input.document.idn}` : null,
+    `Notarial venue: ${input.venue.formattedVenue}`,
+    input.identityMethodSummary ? `Identity method: ${input.identityMethodSummary}` : null,
+    "",
+    "A notary public or other officer completing this certificate verifies only the identity of the individual who signed the document to which this certificate is attached, and not the truthfulness, accuracy, or validity of that document.",
+    "",
+    "State of California",
+    `County of ${input.venue.county}`,
+    "",
+    `On this ${dateParts.day} day of ${dateParts.month} ${dateParts.year}, before me, ${input.notaryProfile.notaryName}, a notary public, personally appeared ${acknowledgers}, who proved to me on the basis of satisfactory evidence to be the person(s) whose name(s) is/are subscribed to the within instrument and acknowledged to me that he/she/they executed the same in his/her/their authorized capacity(ies), and that by his/her/their signature(s) on the instrument the person(s), or the entity upon behalf of which the person(s) acted, executed the instrument.`,
+    "",
+    "I certify under penalty of perjury under the laws of the State of California that the foregoing paragraph is true and correct.",
+    "",
+    "Witness my hand and official seal.",
+    "",
+    `Commission number: ${input.notaryProfile.commissionNumber ?? "Not provided"}`,
+    `Commission expires: ${input.notaryProfile.commissionExpiresAt ?? "Not provided"}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+};
+
+const buildOhioAcknowledgmentContent = (input: {
+  document: DocumentRecord;
+  venue: ReturnType<typeof normalizeVenue>;
+  notaryProfile: AcknowledgmentNotaryProfileInput;
+  acknowledgerNames: string[];
+  identityMethodSummary?: string | null | undefined;
+}) => {
+  const acknowledgers = input.acknowledgerNames.join(", ");
+  return [
+    "ACKNOWLEDGMENT CERTIFICATE",
+    `Document ID: ${input.document.id}`,
+    input.document.idn ? `IDN: ${input.document.idn}` : null,
+    `Notarial venue: ${input.venue.formattedVenue}`,
+    input.identityMethodSummary ? `Identity method: ${input.identityMethodSummary}` : null,
+    "",
+    `Signed: ${acknowledgers}`,
+    "",
+    "State of Ohio",
+    `County of ${input.venue.county}`,
+    "",
+    `The foregoing instrument was acknowledged before me on this ${formatDisplayDate(input.venue.completedAt)} by ${acknowledgers}.`,
+    "",
+    "(Notary Seal)",
+    `Signature of Notary Public - State of Ohio: ${input.notaryProfile.notaryName}`,
+    `Commission number: ${input.notaryProfile.commissionNumber ?? "Not provided"}`,
+    `My commission expires: ${input.notaryProfile.commissionExpiresAt ?? "Not provided"}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+};
+
+export const renderAcknowledgmentContent = (
+  input: AcknowledgmentRenderInput,
+): AcknowledgmentRenderResult => {
+  const rendererKey = resolveRendererKey(input.config);
+  const venue = normalizeVenue(input.venue, input.document.jurisdiction);
+  const content =
+    rendererKey === "us_ca_acknowledgment_v1"
+      ? buildCaliforniaAcknowledgmentContent({
+          document: input.document,
+          venue,
+          notaryProfile: input.notaryProfile,
+          acknowledgerNames: input.acknowledgerNames,
+          identityMethodSummary: input.identityMethodSummary,
+        })
+      : buildOhioAcknowledgmentContent({
+          document: input.document,
+          venue,
+          notaryProfile: input.notaryProfile,
+          acknowledgerNames: input.acknowledgerNames,
+          identityMethodSummary: input.identityMethodSummary,
+        });
+
+  return {
+    content,
+    rendererKey,
+    rendererVersion: input.config.acknowledgmentTemplateVersion,
+    documentFamily: input.documentFamily,
+    venue,
+    acknowledgerNames: input.acknowledgerNames,
+    notaryFacts: {
+      notaryName: input.notaryProfile.notaryName,
+      jurisdiction: input.notaryProfile.jurisdiction,
+      serviceAreaKind: input.notaryProfile.serviceAreaKind,
+      serviceAreaName: input.notaryProfile.serviceAreaName,
+      commissionNumber: input.notaryProfile.commissionNumber,
+      commissionExpiresAt: input.notaryProfile.commissionExpiresAt,
+    },
+  };
 };
 
 export const renderWatermarkTextTemplate = (template: string, idn: string) => {
@@ -1067,11 +1468,62 @@ const wrapPdfText = (input: {
   return wrappedLines;
 };
 
+const decodeImageDataUrl = (dataUrl: string | null | undefined) => {
+  if (!dataUrl) {
+    return null;
+  }
+
+  const match = dataUrl.match(/^data:(image\/(?:png|jpe?g));base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const mimeType = match[1];
+  const base64Payload = match[2];
+  if (!mimeType || !base64Payload) {
+    return null;
+  }
+
+  return {
+    mimeType: mimeType.toLowerCase(),
+    bytes: Buffer.from(base64Payload.replace(/\s+/g, ""), "base64"),
+  };
+};
+
+const embedImageDataUrl = async (
+  pdf: PdfLibDocument,
+  dataUrl: string | null | undefined,
+) => {
+  const decoded = decodeImageDataUrl(dataUrl);
+  if (!decoded) {
+    return null;
+  }
+
+  return decoded.mimeType === "image/png"
+    ? pdf.embedPng(decoded.bytes)
+    : pdf.embedJpg(decoded.bytes);
+};
+
+const fitImageDimensions = (input: {
+  width: number;
+  height: number;
+  maxWidth: number;
+  maxHeight: number;
+}) => {
+  const ratio = Math.min(input.maxWidth / input.width, input.maxHeight / input.height, 1);
+  return {
+    width: input.width * ratio,
+    height: input.height * ratio,
+  };
+};
+
 const drawAcknowledgmentBody = async (input: {
   pdf: PdfLibDocument;
   page: PDFPage;
   bodyText: string;
   pageSize: [number, number];
+  signatureImageDataUrl?: string | null | undefined;
+  sealImageDataUrl?: string | null | undefined;
 }) => {
   const titleFont = await input.pdf.embedFont(StandardFonts.HelveticaBold);
   const bodyFont = await input.pdf.embedFont(StandardFonts.Helvetica);
@@ -1150,6 +1602,57 @@ const drawAcknowledgmentBody = async (input: {
     });
     currentY -= ACKNOWLEDGMENT_BODY_SIZE + ACKNOWLEDGMENT_LINE_GAP;
   }
+
+  const [signatureImage, sealImage] = await Promise.all([
+    embedImageDataUrl(input.pdf, input.signatureImageDataUrl),
+    embedImageDataUrl(input.pdf, input.sealImageDataUrl),
+  ]);
+
+  if (signatureImage || sealImage) {
+    if (currentY <= ACKNOWLEDGMENT_PAGE_MARGIN + ACKNOWLEDGMENT_SEAL_MAX_HEIGHT + 20) {
+      createContinuationPage();
+    }
+
+    currentY -= 12;
+    currentPage.drawText("Notary signature and seal", {
+      x: ACKNOWLEDGMENT_PAGE_MARGIN,
+      y: currentY,
+      size: ACKNOWLEDGMENT_META_SIZE,
+      font: titleFont,
+      color: rgb(0.24, 0.24, 0.24),
+    });
+    currentY -= ACKNOWLEDGMENT_META_SIZE + 8;
+
+    if (signatureImage) {
+      const dimensions = fitImageDimensions({
+        width: signatureImage.width,
+        height: signatureImage.height,
+        maxWidth: ACKNOWLEDGMENT_ASSET_MAX_WIDTH,
+        maxHeight: ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT,
+      });
+      currentPage.drawImage(signatureImage, {
+        x: ACKNOWLEDGMENT_PAGE_MARGIN,
+        y: currentY - dimensions.height,
+        width: dimensions.width,
+        height: dimensions.height,
+      });
+    }
+
+    if (sealImage) {
+      const dimensions = fitImageDimensions({
+        width: sealImage.width,
+        height: sealImage.height,
+        maxWidth: ACKNOWLEDGMENT_ASSET_MAX_WIDTH,
+        maxHeight: ACKNOWLEDGMENT_SEAL_MAX_HEIGHT,
+      });
+      currentPage.drawImage(sealImage, {
+        x: input.pageSize[0] - ACKNOWLEDGMENT_PAGE_MARGIN - dimensions.width,
+        y: currentY - dimensions.height,
+        width: dimensions.width,
+        height: dimensions.height,
+      });
+    }
+  }
 };
 
 const drawWatermarkOnPage = async (input: {
@@ -1197,6 +1700,8 @@ const drawWatermarkOnPage = async (input: {
 export const appendAcknowledgmentPageToPdf = async (input: {
   sourcePdfBytes: Buffer;
   acknowledgmentContent: string;
+  signatureImageDataUrl?: string | null | undefined;
+  sealImageDataUrl?: string | null | undefined;
 }) => {
   const pdf = await PdfLibDocument.load(input.sourcePdfBytes);
   const pages = pdf.getPages();
@@ -1211,6 +1716,8 @@ export const appendAcknowledgmentPageToPdf = async (input: {
     page: acknowledgmentPage,
     bodyText: input.acknowledgmentContent,
     pageSize,
+    signatureImageDataUrl: input.signatureImageDataUrl,
+    sealImageDataUrl: input.sealImageDataUrl,
   });
 
   return Buffer.from(await pdf.save());
@@ -1388,6 +1895,10 @@ export const appendAcknowledgmentPage = async (input: {
   documentId: string;
   actorSupabaseId?: string | undefined;
   actorRole?: string | null;
+  venue: AcknowledgmentVenueInput;
+  notaryProfile: AcknowledgmentNotaryProfileInput;
+  meetingId?: string | null | undefined;
+  identityMethodSummary?: string | null | undefined;
 }) => {
   const context = await resolveAuthorizedFinalizationContext(input);
   const latestWatermark = await getLatestDocumentExecutionRun({
@@ -1422,20 +1933,54 @@ export const appendAcknowledgmentPage = async (input: {
     );
   }
 
+  const profileJurisdiction = input.notaryProfile.jurisdiction?.trim() ?? "";
+  if (!profileJurisdiction || profileJurisdiction !== context.document.jurisdiction) {
+    throw new DocumentFinalizationConflictError(
+      "Assigned illuminotary profile jurisdiction must match the document jurisdiction",
+    );
+  }
+
+  if (
+    !input.notaryProfile.notaryName.trim() ||
+    !input.notaryProfile.serviceAreaName?.trim() ||
+    !input.notaryProfile.commissionNumber?.trim() ||
+    !input.notaryProfile.commissionExpiresAt?.trim() ||
+    !input.notaryProfile.signatureDataUrl ||
+    !input.notaryProfile.sealDataUrl
+  ) {
+    throw new DocumentFinalizationConflictError(
+      "Assigned illuminotary profile must include jurisdiction, service area, commission details, signature, and seal before acknowledgment append",
+    );
+  }
+
   const rule = await getJurisdictionRule(context.document.jurisdiction);
   const finalizationConfig = resolveJurisdictionFinalizationConfig({
     jurisdiction: context.document.jurisdiction,
     rule,
   });
-  const acknowledgmentContent = buildAcknowledgmentContent({
+  const { family: documentFamily, generationRun } = await resolveAcknowledgmentFamily({
     document: context.document,
-    rule,
+    sourceVersion,
+  });
+  const acknowledgerNames = await resolveAcknowledgers({
+    documentId: context.document.id,
+    family: documentFamily,
+    generationRunId: generationRun?.id ?? sourceVersion.generation_run_id,
+  });
+  const acknowledgmentRender = renderAcknowledgmentContent({
+    document: context.document,
     config: finalizationConfig,
+    venue: input.venue,
+    notaryProfile: input.notaryProfile,
+    documentFamily,
+    acknowledgerNames,
+    meetingId: input.meetingId,
+    identityMethodSummary: input.identityMethodSummary,
   });
   const acknowledgmentPage = await createAcknowledgmentPageRecord({
     documentId: context.document.id,
     jurisdiction: context.document.jurisdiction,
-    content: acknowledgmentContent,
+    content: acknowledgmentRender.content,
   });
 
   let sourceContent: Buffer;
@@ -1455,7 +2000,9 @@ export const appendAcknowledgmentPage = async (input: {
   try {
     transformedContent = await appendAcknowledgmentPageToPdf({
       sourcePdfBytes: sourceContent,
-      acknowledgmentContent,
+      acknowledgmentContent: acknowledgmentRender.content,
+      signatureImageDataUrl: input.notaryProfile.signatureDataUrl,
+      sealImageDataUrl: input.notaryProfile.sealDataUrl,
     });
   } catch (error) {
     throw new DocumentFinalizationConflictError(
@@ -1495,6 +2042,20 @@ export const appendAcknowledgmentPage = async (input: {
       acknowledgmentPageId: acknowledgmentPage.id,
       sourceVersionId: sourceVersion.id,
       outputVersionId: version.id,
+      acknowledgmentRender: {
+        rendererKey: acknowledgmentRender.rendererKey,
+        rendererVersion: acknowledgmentRender.rendererVersion,
+        documentFamily: acknowledgmentRender.documentFamily,
+        venue: acknowledgmentRender.venue,
+        acknowledgerNames: acknowledgmentRender.acknowledgerNames,
+        notaryFacts: acknowledgmentRender.notaryFacts,
+        meetingId: input.meetingId ?? null,
+        identityMethodSummary: input.identityMethodSummary ?? null,
+        assets: {
+          signatureEmbedded: Boolean(input.notaryProfile.signatureDataUrl),
+          sealEmbedded: Boolean(input.notaryProfile.sealDataUrl),
+        },
+      },
     },
   });
 
@@ -1509,6 +2070,10 @@ export const appendAcknowledgmentPage = async (input: {
       acknowledgmentPageId: acknowledgmentPage.id,
       sourceVersionId: sourceVersion.id,
       outputVersionId: version.id,
+      rendererKey: acknowledgmentRender.rendererKey,
+      documentFamily: acknowledgmentRender.documentFamily,
+      venue: acknowledgmentRender.venue,
+      acknowledgerNames: acknowledgmentRender.acknowledgerNames,
     },
   });
 

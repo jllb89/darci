@@ -16,6 +16,8 @@ import {
   queueNotaryRequestClaimedNotification,
 } from "../services/notificationService";
 import { runDueNotificationJobs } from "../services/notificationOutboxService";
+import { getNotaryProfileByUserId } from "../services/notaryProfileService";
+import { getUserIdentityContextByUserId } from "../services/userRoleService";
 import {
   createNotarizationCode,
   getDocumentById,
@@ -230,7 +232,21 @@ const meetingArtifactSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 }).passthrough();
 
+const notaryVenueSchema = z.object({
+  state: z.string().trim().min(2).max(80),
+  county: z.string().trim().min(1).max(120),
+  city: z.string().trim().max(120).optional(),
+  addressLine1: z.string().trim().max(255).optional(),
+  locationLabel: z.string().trim().max(255).optional(),
+  completedAt: z.string().datetime().optional(),
+});
+
 const notarySignSchema = z.object({
+  venue: notaryVenueSchema,
+  acknowledgment: z.object({
+    signerAppeared: z.literal(true),
+    signerAcknowledged: z.literal(true),
+  }),
   notarialFields: z.record(z.string(), z.unknown()).optional(),
   sealLabel: z.string().trim().max(255).optional(),
   signatureLabel: z.string().trim().max(255).optional(),
@@ -307,6 +323,22 @@ const mapFinalizationVersionSummary = (version: {
   isFinal: version.is_final ?? false,
   createdAt: version.created_at,
 });
+
+const buildFinalPackageStatusSummary = (input: {
+  ledgerStatus: string;
+  hashCompletedAt: string | null;
+  anchoredAt: string | null;
+}) => {
+  const ledgerAnchored = input.ledgerStatus === "anchored";
+
+  return {
+    watermarked: true,
+    hashRecorded: Boolean(input.hashCompletedAt),
+    ledgerAnchored,
+    verificationReady: ledgerAnchored,
+    recoveryAction: ledgerAnchored ? null : "retry_final_package_submission",
+  };
+};
 
 const buildAuditActorContext = (req: Request) => {
   const actorContext: {
@@ -406,6 +438,29 @@ const resolveActorUserId = async (req: Request) => {
   }
 
   return getOrCreateUserId(req.user.id, req.user.email, req.user.role, req.user.phone);
+};
+
+const buildUserDisplayName = (identity: Awaited<ReturnType<typeof getUserIdentityContextByUserId>>) => {
+  if (!identity) {
+    return "Illuminotary";
+  }
+
+  const name = [identity.firstName, identity.lastName]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
+  return name || identity.email || "Illuminotary";
+};
+
+const buildIdentityMethodSummary = (event: IdentityVerificationEventRecord) => {
+  return [
+    event.verification_method,
+    event.document_type,
+    event.issuing_jurisdiction,
+  ]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join("; ");
 };
 
 const isRequestReadyForReviewDecision = (status: string | null) => {
@@ -3202,18 +3257,44 @@ export const signRequest = async (req: Request, res: Response) => {
   }
 
   try {
-    const { meeting } = await ensureNotaryCompletionReady({ requestId: request.id });
+    const { meeting, verifiedIdentity } = await ensureNotaryCompletionReady({ requestId: request.id });
     const participants = await syncDefaultMeetingParticipants({
       meeting,
       ownerUserId: document.owner_id,
       assignedNotaryUserId: request.assigned_notary_id,
     });
     const notaryParticipant = participants.find((participant) => participant.participant_role === "notary");
+    const [notaryProfile, notaryIdentity] = await Promise.all([
+      getNotaryProfileByUserId(request.assigned_notary_id),
+      getUserIdentityContextByUserId(request.assigned_notary_id),
+    ]);
+
+    if (!notaryProfile) {
+      throw new DocumentFinalizationConflictError(
+        "Assigned illuminotary profile must be completed before acknowledgment append",
+      );
+    }
+
+    const notaryName = buildUserDisplayName(notaryIdentity);
     const result = await appendAcknowledgmentPageToDocument({
       documentId: document.id,
       actorSupabaseId: req.user?.id,
       actorRole: req.user?.role ?? null,
+      venue: parsed.data.venue,
+      meetingId: meeting.id,
+      identityMethodSummary: buildIdentityMethodSummary(verifiedIdentity),
+      notaryProfile: {
+        jurisdiction: notaryProfile.jurisdiction,
+        serviceAreaKind: notaryProfile.serviceAreaKind,
+        serviceAreaName: notaryProfile.serviceAreaName,
+        commissionNumber: notaryProfile.commissionNumber,
+        commissionExpiresAt: notaryProfile.commissionExpiresAt,
+        signatureDataUrl: notaryProfile.signatureDataUrl,
+        sealDataUrl: notaryProfile.sealDataUrl,
+        notaryName,
+      },
     });
+    const acknowledgmentRender = result.execution.metadata.acknowledgmentRender ?? null;
     const artifact = await createMeetingArtifact({
       meetingId: meeting.id,
       meetingParticipantId: notaryParticipant?.id ?? null,
@@ -3223,6 +3304,9 @@ export const signRequest = async (req: Request, res: Response) => {
       metadata: {
         requestId: request.id,
         acknowledgmentPageId: result.acknowledgmentPage.id,
+        acknowledgmentRender,
+        venue: parsed.data.venue,
+        acknowledgment: parsed.data.acknowledgment,
         notarialFields: parsed.data.notarialFields ?? {},
         sealLabel: parsed.data.sealLabel?.trim() ?? null,
         signatureLabel: parsed.data.signatureLabel?.trim() ?? null,
@@ -3242,6 +3326,7 @@ export const signRequest = async (req: Request, res: Response) => {
         acknowledgment_page_id: result.acknowledgmentPage.id,
         document_version_id: result.version.id,
         seal_artifact_id: artifact.id,
+        acknowledgment_render: acknowledgmentRender,
       },
     });
 
@@ -3253,6 +3338,7 @@ export const signRequest = async (req: Request, res: Response) => {
         id: result.acknowledgmentPage.id,
         jurisdiction: result.acknowledgmentPage.jurisdiction,
         content: result.acknowledgmentPage.content,
+        renderSummary: acknowledgmentRender,
         createdAt: result.acknowledgmentPage.created_at,
       },
       execution: mapFinalizationExecutionSummary(result.execution),
@@ -3318,6 +3404,11 @@ export const submitRequest = async (req: Request, res: Response) => {
       actorRole: req.user?.role ?? null,
     });
     const ledgerStatus = result.ledgerAnchorAttempt?.status ?? "anchored";
+    const finalPackageStatus = buildFinalPackageStatusSummary({
+      ledgerStatus,
+      hashCompletedAt: result.hashRecord.completed_at,
+      anchoredAt: result.ledgerEntry.anchored_at,
+    });
 
     await recordAuditEvent({
       ...buildAuditActorContext(req),
@@ -3335,10 +3426,12 @@ export const submitRequest = async (req: Request, res: Response) => {
       },
     });
 
-    return res.status(200).json({
+    const responseBody = {
       status: "ok",
       documentId: result.document.id,
+      documentStatus: result.document.status,
       requestId: result.request.id,
+      requestStatus: result.request.status,
       execution: mapFinalizationExecutionSummary(result.execution),
       version: mapFinalizationVersionSummary(result.version),
       hashRecord: {
@@ -3353,8 +3446,22 @@ export const submitRequest = async (req: Request, res: Response) => {
         ledgerTxId: result.ledgerEntry.ledger_tx_id,
         anchoredAt: result.ledgerEntry.anchored_at,
         status: ledgerStatus,
+        errorMessage: result.ledgerAnchorAttempt?.error_message ?? null,
       },
-    });
+      finalizationStatus: finalPackageStatus,
+    };
+
+    if (ledgerStatus !== "anchored") {
+      return res.status(409).json({
+        ...responseBody,
+        status: "ledger_anchor_failed",
+        error: "ledger_anchor_failed",
+        message:
+          "Ledger anchoring failed. The final package was watermarked and hashed, but verification is not ready. Retry final package submission after resolving the ledger provider issue.",
+      });
+    }
+
+    return res.status(200).json(responseBody);
   } catch (error) {
     return sendDocumentFinalizationError(res, error);
   }

@@ -150,7 +150,6 @@ import {
 } from "../services/notaryProfileService";
 import { normalizeJurisdiction } from "../services/jurisdictionUtils";
 import {
-  appendAcknowledgmentPage as appendAcknowledgmentPageToDocument,
   DocumentFinalizationConflictError,
   DocumentFinalizationForbiddenError,
   DocumentFinalizationNotFoundError,
@@ -8009,66 +8008,11 @@ export const appendAcknowledgment = async (req: Request, res: Response) => {
     });
   }
 
-  try {
-    const result = await appendAcknowledgmentPageToDocument({
-      documentId: req.params.id.trim(),
-      actorSupabaseId: req.user?.id,
-      actorRole: req.user?.role ?? null,
-    });
-
-    await recordAuditEvent({
-      ...buildAuditActorContext(req),
-      entityType: "acknowledgment_page",
-      entityId: result.acknowledgmentPage.id,
-      action: "system.ack_template_selected",
-      metadata: {
-        request_id: result.request.id,
-        document_id: result.document.id,
-        jurisdiction: result.acknowledgmentPage.jurisdiction,
-        template_id: result.execution.template_id,
-        template_version: result.execution.template_version,
-      },
-    });
-    await recordAuditEvent({
-      ...buildAuditActorContext(req),
-      entityType: "acknowledgment_page",
-      entityId: result.acknowledgmentPage.id,
-      action: "system.ack_page_generated",
-      metadata: {
-        request_id: result.request.id,
-        document_id: result.document.id,
-        acknowledgment_page_id: result.acknowledgmentPage.id,
-      },
-    });
-    await recordAuditEvent({
-      ...buildAuditActorContext(req),
-      entityType: "document_version",
-      entityId: result.version.id,
-      action: "system.ack_page_appended",
-      metadata: {
-        request_id: result.request.id,
-        document_id: result.document.id,
-        document_version_id: result.version.id,
-        execution_run_id: result.execution.id,
-      },
-    });
-
-    return res.status(200).json({
-      status: "ok",
-      documentId: result.document.id,
-      requestId: result.request.id,
-      acknowledgmentPage: {
-        id: result.acknowledgmentPage.id,
-        jurisdiction: result.acknowledgmentPage.jurisdiction,
-        content: result.acknowledgmentPage.content,
-        createdAt: result.acknowledgmentPage.created_at,
-      },
-      execution: mapDocumentFinalizationExecutionSummary(result.execution),
-      version: mapDocumentVersionSummary(result.version),
-    });
-  } catch (error) {
-    return sendDocumentFinalizationError(res, error);
-  }
+  return res.status(409).json({
+    error: "conflict",
+    message:
+      "Acknowledgment append now requires live in-person session venue, identity, notary profile, seal, and signature data. Use POST /notary/requests/{id}/sign.",
+  });
 };
 
 export const watermarkDocument = async (req: Request, res: Response) => {

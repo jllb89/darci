@@ -58,67 +58,19 @@ beforeEach(() => {
 });
 
 describe("Phase 6 document finalization endpoints", () => {
-  it("records acknowledgment execution details", async () => {
-    mocks.appendAcknowledgmentPageMock.mockResolvedValue({
-      document: {
-        id: "doc-1",
-      },
-      request: {
-        id: "req-1",
-      },
-      acknowledgmentPage: {
-        id: "ack-1",
-        jurisdiction: "US-OH",
-        content: "DARCi Notarial Acknowledgment",
-        created_at: "2026-04-20T16:00:00.000Z",
-      },
-      execution: {
-        id: "exec-ack-1",
-        execution_kind: "acknowledgment_append",
-        status: "completed",
-        source_document_version_id: "ver-1",
-        output_document_version_id: "ver-2",
-        template_id: "darci_acknowledgment_v1",
-        template_version: "2026.04.20.v1",
-        watermark_text: null,
-        completed_at: "2026-04-20T16:00:05.000Z",
-      },
-      version: {
-        id: "ver-2",
-        version: 2,
-        storage_path: "owner-1/doc-1/finalization/acknowledgment/file.pdf",
-        file_name: "document-acknowledged-v2.pdf",
-        mime_type: "application/pdf",
-        size_bytes: 12345,
-        is_final: false,
-        created_at: "2026-04-20T16:00:05.000Z",
-      },
-    });
-
+  it("rejects direct acknowledgment append without live-session structured inputs", async () => {
     const response = await request(app)
       .post("/documents/doc-1/append-acknowledgment")
       .set("Authorization", `Bearer ${notaryToken()}`);
 
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      status: "ok",
-      documentId: "doc-1",
-      requestId: "req-1",
-      acknowledgmentPage: {
-        id: "ack-1",
-        jurisdiction: "US-OH",
-      },
-      execution: {
-        id: "exec-ack-1",
-        kind: "acknowledgment_append",
-        status: "completed",
-      },
-      version: {
-        id: "ver-2",
-        version: 2,
-      },
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: "conflict",
+      message:
+        "Acknowledgment append now requires live in-person session venue, identity, notary profile, seal, and signature data. Use POST /notary/requests/{id}/sign.",
     });
-    expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(3);
+    expect(mocks.appendAcknowledgmentPageMock).not.toHaveBeenCalled();
+    expect(mocks.recordAuditEventMock).not.toHaveBeenCalled();
   });
 
   it("returns conflict details when watermark preconditions fail", async () => {

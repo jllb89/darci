@@ -3989,10 +3989,7 @@ paths:
   /documents/{id}/append-acknowledgment:
     post:
       summary: Append acknowledgment
-      x-audit-events:
-        - system.ack_template_selected
-        - system.ack_page_generated
-        - system.ack_page_appended
+      description: Deprecated compatibility route. Structured acknowledgment append must be performed through the live notary session sign endpoint so venue, identity, profile, seal, and signature data are present before finalization.
       x-roles:
         - notary
         - admin
@@ -4004,12 +4001,6 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DocumentAcknowledgmentResponse"
         "401":
           description: Unauthorized
           content:
@@ -4388,7 +4379,7 @@ paths:
   /notary/requests/{id}/sign:
     post:
       summary: Notary sign
-      description: Compatibility placeholder. Direct signing is not mounted on this route; the live closeout path continues through meeting execution and document finalization.
+      description: Appends the jurisdiction-specific acknowledgment certificate after the in-person session evidence is complete. The backend loads signer names and the assigned notary profile server-side, then renders the CA/OH acknowledgment with venue, seal, and signature.
       x-roles:
         - notary
         - admin
@@ -4399,9 +4390,21 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotarySignRequest"
       responses:
-        "501":
-          description: Not implemented
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotarySignResponse"
+        "400":
+          description: Validation error
           content:
             application/json:
               schema:
@@ -4412,27 +4415,61 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /notary/requests/{id}/submit:
     post:
       summary: Submit notarized document
-      description: Compatibility placeholder. The mounted closeout path uses document watermark and verification finalization rather than this route.
+      description: Completes final package closeout after the in-person session by applying the final watermark, recording the SHA-256 hash, anchoring the hash to the ledger provider, and exposing recovery details if anchoring fails.
       x-roles:
         - notary
         - admin
         - service_role
+      x-audit-events:
+        - notary.final_package_submitted
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotarySubmitRequest"
       responses:
-        "501":
-          description: Not implemented
+        "200":
+          description: Final package anchored and verification is ready
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/NotarySubmitResponse"
+        "409":
+          description: Final package closeout failed or is missing a prerequisite; `ledger_anchor_failed` responses include the watermarked version, hash, failed anchor attempt, and retry action.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/NotarySubmitResponse"
+                  - $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Unauthorized
           content:
@@ -5309,6 +5346,28 @@ components:
           type: boolean
         isVerificationChecked:
           type: boolean
+        isWatermarked:
+          type: boolean
+        isHashRecorded:
+          type: boolean
+        hash:
+          type: string
+          nullable: true
+        ledgerTxId:
+          type: string
+          nullable: true
+        anchoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        anchorAttempt:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/VerificationWorkspaceAnchorAttempt"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotaryFinalizationHistoryEntry"
     DocumentWorkspaceVerificationSummary:
       type: object
       properties:
@@ -5435,6 +5494,10 @@ components:
         isAnchored:
           type: boolean
         isVerificationChecked:
+          type: boolean
+        isWatermarked:
+          type: boolean
+        isHashRecorded:
           type: boolean
         verificationStatus:
           type: string
@@ -6017,9 +6080,100 @@ components:
         content:
           type: string
           nullable: true
+        renderSummary:
+          $ref: "#/components/schemas/AcknowledgmentRenderSummary"
         createdAt:
           type: string
           format: date-time
+    AcknowledgmentVenue:
+      type: object
+      required:
+        - state
+        - county
+      properties:
+        state:
+          type: string
+          minLength: 2
+          maxLength: 80
+        county:
+          type: string
+          minLength: 1
+          maxLength: 120
+        city:
+          type: string
+          nullable: true
+          maxLength: 120
+        addressLine1:
+          type: string
+          nullable: true
+          maxLength: 255
+        locationLabel:
+          type: string
+          nullable: true
+          maxLength: 255
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+    AcknowledgmentRenderSummary:
+      type: object
+      nullable: true
+      properties:
+        rendererKey:
+          type: string
+          enum:
+            - us_ca_acknowledgment_v1
+            - us_oh_acknowledgment_v1
+        rendererVersion:
+          type: string
+          nullable: true
+        documentFamily:
+          type: string
+          enum:
+            - poa_general
+            - trust_rrr
+            - trust_certificate
+        venue:
+          type: object
+          properties:
+            state:
+              type: string
+            county:
+              type: string
+            city:
+              type: string
+              nullable: true
+            addressLine1:
+              type: string
+              nullable: true
+            locationLabel:
+              type: string
+              nullable: true
+            completedAt:
+              type: string
+              format: date-time
+            formattedVenue:
+              type: string
+        acknowledgerNames:
+          type: array
+          items:
+            type: string
+        notaryFacts:
+          type: object
+          additionalProperties: true
+        meetingId:
+          type: string
+          nullable: true
+        identityMethodSummary:
+          type: string
+          nullable: true
+        assets:
+          type: object
+          properties:
+            signatureEmbedded:
+              type: boolean
+            sealEmbedded:
+              type: boolean
     DocumentFinalizationExecution:
       type: object
       properties:
@@ -6091,6 +6245,9 @@ components:
             - pending
             - anchored
             - failed
+        errorMessage:
+          type: string
+          nullable: true
     DocumentAcknowledgmentResponse:
       type: object
       properties:
@@ -6106,6 +6263,117 @@ components:
           $ref: "#/components/schemas/DocumentFinalizationExecution"
         version:
           $ref: "#/components/schemas/DocumentVersion"
+    NotarySignRequest:
+      type: object
+      required:
+        - venue
+        - acknowledgment
+      properties:
+        venue:
+          $ref: "#/components/schemas/AcknowledgmentVenue"
+        acknowledgment:
+          type: object
+          required:
+            - signerAppeared
+            - signerAcknowledged
+          properties:
+            signerAppeared:
+              type: boolean
+              enum:
+                - true
+            signerAcknowledged:
+              type: boolean
+              enum:
+                - true
+        notarialFields:
+          type: object
+          additionalProperties: true
+        sealLabel:
+          type: string
+          nullable: true
+          maxLength: 255
+        signatureLabel:
+          type: string
+          nullable: true
+          maxLength: 255
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+    NotarySignResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        documentId:
+          type: string
+        requestId:
+          type: string
+        acknowledgmentPage:
+          $ref: "#/components/schemas/AcknowledgmentPage"
+        execution:
+          $ref: "#/components/schemas/DocumentFinalizationExecution"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
+        sealArtifact:
+          $ref: "#/components/schemas/MeetingArtifact"
+    NotarySubmitRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+    FinalPackageStatusSummary:
+      type: object
+      properties:
+        watermarked:
+          type: boolean
+        hashRecorded:
+          type: boolean
+        ledgerAnchored:
+          type: boolean
+        verificationReady:
+          type: boolean
+        recoveryAction:
+          type: string
+          nullable: true
+          enum:
+            - retry_final_package_submission
+    NotarySubmitResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - ledger_anchor_failed
+        error:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        documentId:
+          type: string
+        documentStatus:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+        requestStatus:
+          type: string
+          nullable: true
+        execution:
+          $ref: "#/components/schemas/DocumentFinalizationExecution"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
+        hashRecord:
+          $ref: "#/components/schemas/DocumentHashRecord"
+        ledger:
+          $ref: "#/components/schemas/DocumentLedgerAnchor"
+        finalizationStatus:
+          $ref: "#/components/schemas/FinalPackageStatusSummary"
     DocumentWatermarkResponse:
       type: object
       properties:

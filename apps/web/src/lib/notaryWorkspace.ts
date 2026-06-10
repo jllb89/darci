@@ -35,6 +35,27 @@ export type NotaryQueueRequestSummary = {
         latestStatusAt: string | null;
         isAnchored: boolean;
         isVerificationChecked: boolean;
+        isWatermarked: boolean;
+        isHashRecorded: boolean;
+        hash: string | null;
+        ledgerTxId: string | null;
+        anchoredAt: string | null;
+        anchorAttempt: {
+          id: string;
+          status: string;
+          attemptNumber: number;
+          requestedAt: string;
+          completedAt: string | null;
+          failedAt: string | null;
+          errorMessage: string | null;
+        } | null;
+        history: Array<{
+          id: string;
+          status: string;
+          changeSource: string;
+          changeReason: string | null;
+          createdAt: string;
+        }>;
       };
       verification: {
         status: string;
@@ -83,6 +104,8 @@ export type NotaryQueueRequestSummary = {
     latestStatusAt: string | null;
     isAnchored: boolean;
     isVerificationChecked: boolean;
+    isWatermarked: boolean;
+    isHashRecorded: boolean;
     verificationStatus: string | null;
     anchoredAt: string | null;
     lastCheckedAt: string | null;
