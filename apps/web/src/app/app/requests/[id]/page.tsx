@@ -5,6 +5,12 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import {
+  buildRealtimeEqualsFilter,
+  requestRealtimeBroadcastEvent,
+  useRequestRealtimeInvalidation,
+  type RequestRealtimeTarget,
+} from "@/lib/requestRealtime";
+import {
   canRecordMemberSessionCheckIn,
   getRequestSessionParticipant,
   hasRequestSessionParticipantCheckedIn,
@@ -234,7 +240,7 @@ const readApiErrorMessage = async (response: Response, fallback: string) => {
 export default function RequestWorkspacePage() {
   const params = useParams<{ id: string }>();
   const requestId = typeof params?.id === "string" ? params.id : "";
-  const { accessToken } = useStoredAuth();
+  const { accessToken, refreshToken } = useStoredAuth();
   const [payload, setPayload] = useState<RequestDetailPayload | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload["timeline"]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -285,6 +291,33 @@ export default function RequestWorkspacePage() {
     void loadRequest();
   }, [loadRequest]);
 
+  const realtimeTargets: RequestRealtimeTarget[] = [
+    { table: "notarization_requests", filter: buildRealtimeEqualsFilter("id", requestId) },
+    { table: "meetings", filter: buildRealtimeEqualsFilter("request_id", requestId) },
+    { table: "workflow_status_history", filter: buildRealtimeEqualsFilter("workflow_id", payload?.request.workflowId) },
+    { table: "meeting_participants", filter: buildRealtimeEqualsFilter("meeting_id", payload?.meeting?.meetingId) },
+    { table: "meeting_checkins", filter: buildRealtimeEqualsFilter("meeting_id", payload?.meeting?.meetingId) },
+    { table: "geolocation_samples", filter: buildRealtimeEqualsFilter("meeting_id", payload?.meeting?.meetingId) },
+    { table: "proximity_evaluations", filter: buildRealtimeEqualsFilter("meeting_id", payload?.meeting?.meetingId) },
+    { table: "identity_verification_events", filter: buildRealtimeEqualsFilter("meeting_id", payload?.meeting?.meetingId) },
+    { table: "meeting_artifacts", filter: buildRealtimeEqualsFilter("meeting_id", payload?.meeting?.meetingId) },
+    { table: "document_versions", filter: buildRealtimeEqualsFilter("document_id", payload?.document.id) },
+    { table: "finalization_status_history", filter: buildRealtimeEqualsFilter("document_id", payload?.document.id) },
+    { table: "document_hash_records", filter: buildRealtimeEqualsFilter("document_id", payload?.document.id) },
+  ];
+
+  const realtimeState = useRequestRealtimeInvalidation({
+    enabled: Boolean(accessToken && requestId),
+    accessToken,
+    refreshToken,
+    channelName: `request:${requestId}`,
+    targets: realtimeTargets,
+    broadcastTargets: [{ event: requestRealtimeBroadcastEvent, private: true }],
+    tableChangeTargetsEnabled: false,
+    onInvalidate: loadRequest,
+    pollIntervalMs: 30_000,
+  });
+
   const handleMemberCheckIn = async () => {
     if (!accessToken || !requestId) {
       setErrorMessage("Sign in again to check in for the in-person session.");
@@ -333,11 +366,12 @@ export default function RequestWorkspacePage() {
   };
 
   const detail = payload?.request;
-  const liveMeeting = payload?.meeting?.status === "in_progress" ? payload.meeting : null;
-  const memberParticipant = getRequestSessionParticipant(liveMeeting, "member");
-  const notaryParticipant = getRequestSessionParticipant(liveMeeting, "notary");
-  const hasMemberCheckIn = hasRequestSessionParticipantCheckedIn(liveMeeting, "member");
-  const hasNotaryCheckIn = hasRequestSessionParticipantCheckedIn(liveMeeting, "notary");
+  const sessionMeeting = payload?.meeting ?? null;
+  const liveMeeting = sessionMeeting?.status === "in_progress" ? sessionMeeting : null;
+  const memberParticipant = getRequestSessionParticipant(sessionMeeting, "member");
+  const notaryParticipant = getRequestSessionParticipant(sessionMeeting, "notary");
+  const hasMemberCheckIn = hasRequestSessionParticipantCheckedIn(sessionMeeting, "member");
+  const hasNotaryCheckIn = hasRequestSessionParticipantCheckedIn(sessionMeeting, "notary");
   const isInitialMemberCheckIn = shouldShowMemberSessionCheckIn(liveMeeting);
   const canCheckIn = canRecordMemberSessionCheckIn(liveMeeting);
   const finalization = payload?.document.summary.finalization ?? null;
@@ -351,6 +385,11 @@ export default function RequestWorkspacePage() {
   const hasLedgerFailure = Boolean(finalization?.anchorAttempt?.status === "failed" || finalization?.latestStatus === "failed");
   const isVerificationReady = Boolean(finalization?.isAnchored && verification?.verifyPath);
   const recentFinalizationHistory = finalization?.history.slice(-4).reverse() ?? [];
+  const isSessionStarted = Boolean(
+    sessionMeeting?.status === "in_progress" || sessionMeeting?.status === "completed" || hasNotaryCheckIn,
+  );
+  const isSamePlaceConfirmed = sessionMeeting?.samePlaceStatus === "passed";
+  const showRealtimeFallbackNotice = realtimeState.status === "degraded" && realtimeState.isPollingFallbackActive;
 
   return (
     <div className="space-y-6">
@@ -376,16 +415,22 @@ export default function RequestWorkspacePage() {
         </div>
       ) : null}
 
+      {showRealtimeFallbackNotice ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Live updates are reconnecting. This page is refreshing automatically.
+        </div>
+      ) : null}
+
       {!isLoading && payload ? (
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <div className="space-y-4">
-            {liveMeeting ? (
+            {sessionMeeting ? (
               <div className="rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="text-sm font-medium text-Color-Scheme-1-Text">In-person session</div>
                     <div className="mt-1 text-sm text-Color-Neutral">
-                      Same place: {liveMeeting.samePlaceStatus ?? "pending"}
+                      Status: {formatStatusLabel(sessionMeeting.status)} · Same place: {formatStatusLabel(sessionMeeting.samePlaceStatus)}
                     </div>
                   </div>
                   {canCheckIn ? (
@@ -398,6 +443,13 @@ export default function RequestWorkspacePage() {
                       {isCheckingIn ? "Checking in" : isInitialMemberCheckIn ? "Check in" : "Refresh check-in"}
                     </button>
                   ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-2">
+                  <FinalizationStep done={isSessionStarted} label="Illuminotary started" />
+                  <FinalizationStep done={hasMemberCheckIn} label="Location shared" />
+                  <FinalizationStep done={isSamePlaceConfirmed} label="Same-place confirmed" />
+                  <FinalizationStep done={isVerificationReady} label="Final package ready" />
                 </div>
 
                 <div className="mt-4 grid gap-2 text-sm text-Color-Neutral md:grid-cols-2">

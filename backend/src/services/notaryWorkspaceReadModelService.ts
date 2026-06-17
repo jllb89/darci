@@ -290,6 +290,7 @@ export type NotaryRequestContext = {
       sizeBytes: number | null;
       capturedAt: string | null;
       retentionUntil: string | null;
+      metadata: Record<string, unknown>;
     }>;
   };
   finalization: NotaryQueueRequestSummary["finalization"] & {
@@ -339,6 +340,69 @@ export class NotaryWorkspaceReadModelServiceError extends Error {
   }
 }
 
+const readModelFallback = async <T>(input: {
+  operation: string;
+  fallback: T;
+  details: Record<string, unknown>;
+  run: () => Promise<T>;
+}) => {
+  try {
+    return await input.run();
+  } catch (error) {
+    console.warn("Notary workspace read model enrichment fallback used", {
+      operation: input.operation,
+      ...input.details,
+      error: error instanceof Error ? error.message : error,
+    });
+    return input.fallback;
+  }
+};
+
+const safelyGetWorkflowById = (input: { workflowId: string; requestId: string }) => {
+  return readModelFallback<IlluminotarizationWorkflowRecord | null>({
+    operation: "workflow_lookup",
+    fallback: null,
+    details: {
+      requestId: input.requestId,
+      workflowId: input.workflowId,
+    },
+    run: () => getIlluminotarizationWorkflowById(input.workflowId),
+  });
+};
+
+const safelyGetWorkflowByLegacyRequestId = (requestId: string) => {
+  return readModelFallback<IlluminotarizationWorkflowRecord | null>({
+    operation: "workflow_legacy_lookup",
+    fallback: null,
+    details: { requestId },
+    run: () => getIlluminotarizationWorkflowByLegacyRequestId(requestId),
+  });
+};
+
+const safelyListWorkflowStatusHistory = (input: { workflowId: string; requestId: string }) => {
+  return readModelFallback<IlluminotarizationWorkflowStatusHistoryRecord[]>({
+    operation: "workflow_status_history",
+    fallback: [],
+    details: {
+      requestId: input.requestId,
+      workflowId: input.workflowId,
+    },
+    run: () => listWorkflowStatusHistory(input.workflowId),
+  });
+};
+
+const safelyListFinalizationStatusHistory = (input: { documentId: string; requestId: string }) => {
+  return readModelFallback<FinalizationStatusHistoryRecord[]>({
+    operation: "finalization_status_history",
+    fallback: [],
+    details: {
+      requestId: input.requestId,
+      documentId: input.documentId,
+    },
+    run: () => listFinalizationStatusHistory(input.documentId),
+  });
+};
+
 const isPrivilegedRole = (role: RequestRole) => role === "admin" || role === "service_role";
 
 const requireViewerUserId = (input: {
@@ -355,13 +419,16 @@ const requireViewerUserId = (input: {
 
 const resolveWorkflowForRequest = async (request: NotarizationRequestRecord) => {
   if (request.workflow_id) {
-    const workflow = await getIlluminotarizationWorkflowById(request.workflow_id);
+    const workflow = await safelyGetWorkflowById({
+      workflowId: request.workflow_id,
+      requestId: request.id,
+    });
     if (workflow) {
       return workflow;
     }
   }
 
-  return getIlluminotarizationWorkflowByLegacyRequestId(request.id);
+  return safelyGetWorkflowByLegacyRequestId(request.id);
 };
 
 const getLatestWorkflowStatusEntry = (
@@ -611,20 +678,22 @@ const isPdfDocumentVersion = (version: DocumentVersionRecord) => {
   return Boolean(version.storage_path && (mimeType === "application/pdf" || fileName.endsWith(".pdf")));
 };
 
-const isSignedOrFinalDocumentVersion = (version: DocumentVersionRecord) => {
+const isReviewableDocumentVersion = (version: DocumentVersionRecord) => {
   const fileName = version.file_name?.trim().toLowerCase() ?? "";
   const storagePath = version.storage_path?.trim().toLowerCase() ?? "";
 
   return Boolean(
     version.is_final ||
       fileName.endsWith("-signed.pdf") ||
-      storagePath.endsWith("-signed.pdf"),
+      storagePath.endsWith("-signed.pdf") ||
+      /-acknowledged-v\d+\.pdf$/.test(fileName) ||
+      /-acknowledged-v\d+\.pdf$/.test(storagePath),
   );
 };
 
 const buildReviewDocuments = async (versions: DocumentVersionRecord[]) => {
   const pdfVersions = versions
-    .filter((version) => isPdfDocumentVersion(version) && isSignedOrFinalDocumentVersion(version))
+    .filter((version) => isPdfDocumentVersion(version) && isReviewableDocumentVersion(version))
     .sort((left, right) => right.version - left.version);
   const latestByOutput = new Map<string, DocumentVersionRecord>();
 
@@ -775,6 +844,7 @@ const mapMeetingArtifact = (artifact: MeetingArtifactRecord) => {
     sizeBytes: artifact.size_bytes,
     capturedAt: artifact.captured_at,
     retentionUntil: artifact.retention_until,
+    metadata: artifact.metadata,
   };
 };
 
@@ -901,7 +971,12 @@ const buildBaseQueueSummary = async (input: {
   workflow: IlluminotarizationWorkflowRecord | null;
 }) => {
   const [workflowStatusHistory, documentSummary, latestCodeDelivery, meeting, owner] = await Promise.all([
-    input.workflow ? listWorkflowStatusHistory(input.workflow.id) : Promise.resolve([]),
+    input.workflow
+      ? safelyListWorkflowStatusHistory({
+          workflowId: input.workflow.id,
+          requestId: input.request.id,
+        })
+      : Promise.resolve([]),
     buildDocumentWorkspaceSummary({ document: input.document, viewerRole: input.role }),
     getLatestCodeDeliveryForRequest(input.request.id),
     getMeetingByRequestId(input.request.id),
@@ -1160,7 +1235,10 @@ export const getNotaryRequestContext = async (input: {
         resource.workflow?.selected_notary_user_id ??
         resource.request.assigned_notary_id,
     ),
-    listFinalizationStatusHistory(resource.document.id),
+    safelyListFinalizationStatusHistory({
+      documentId: resource.document.id,
+      requestId: resource.request.id,
+    }),
     base.meetingRecord ? listMeetingParticipants(base.meetingRecord.id) : Promise.resolve([]),
   ]);
   const reviewDocuments = await buildReviewDocuments(versions);

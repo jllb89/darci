@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   queueNotaryApprovalReceivedNotificationMock: vi.fn(),
   queueNotaryChangesRequestedNotificationMock: vi.fn(),
+  queueNotaryRequestRejectedNotificationMock: vi.fn(),
   runDueNotificationJobsMock: vi.fn(),
 }));
 
@@ -60,6 +61,8 @@ vi.mock("../../src/services/notificationService", async (importOriginal) => {
       mocks.queueNotaryApprovalReceivedNotificationMock,
     queueNotaryChangesRequestedNotification:
       mocks.queueNotaryChangesRequestedNotificationMock,
+    queueNotaryRequestRejectedNotification:
+      mocks.queueNotaryRequestRejectedNotificationMock,
   };
 });
 
@@ -98,6 +101,7 @@ describe("POST /notary/requests/:id/review-decision", () => {
     mocks.recordAuditEventMock.mockReset();
     mocks.queueNotaryApprovalReceivedNotificationMock.mockReset();
     mocks.queueNotaryChangesRequestedNotificationMock.mockReset();
+    mocks.queueNotaryRequestRejectedNotificationMock.mockReset();
     mocks.runDueNotificationJobsMock.mockReset();
   });
 
@@ -356,6 +360,136 @@ describe("POST /notary/requests/:id/review-decision", () => {
       }),
     );
     expect(mocks.updateNotarizationRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("records a rejected decision and returns the request to pending notary selection", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "11111111-1111-1111-1111-111111111111",
+      supabaseUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      email: "notary@example.com",
+      role: "notary",
+      status: "active",
+      firstName: "Nora",
+      lastName: "Tary",
+      availableRoles: ["notary"],
+      roleAssignments: [],
+    });
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-4",
+      document_id: "doc-4",
+      workflow_id: "workflow-4",
+      assigned_notary_id: "11111111-1111-1111-1111-111111111111",
+      status: "in_review",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      created_at: "2026-04-20T10:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      id: "workflow-4",
+      owner_user_id: "owner-4",
+      created_by_user_id: "owner-4",
+      primary_document_id: "doc-4",
+      workflow_kind: "single_document",
+      status: "in_review",
+      selected_notary_user_id: "11111111-1111-1111-1111-111111111111",
+      assigned_notary_user_id: "11111111-1111-1111-1111-111111111111",
+      current_legacy_request_id: "req-4",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      last_code_generated_at: null,
+      review_started_at: "2026-04-20T10:05:00.000Z",
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-20T10:00:00.000Z",
+      updated_at: "2026-04-20T10:05:00.000Z",
+    });
+    mocks.createIlluminotaryReviewDecisionRecordMock.mockResolvedValue({
+      id: "decision-4",
+      workflow_id: "workflow-4",
+      legacy_request_id: "req-4",
+      decided_by_user_id: "11111111-1111-1111-1111-111111111111",
+      decision: "rejected",
+      summary: "Please reselect a different notary",
+      decision_notes: null,
+      decided_at: "2026-04-20T10:14:00.000Z",
+      metadata: {},
+      created_at: "2026-04-20T10:14:00.000Z",
+      updated_at: "2026-04-20T10:14:00.000Z",
+    });
+    mocks.updateNotarizationRequestMock.mockResolvedValue({
+      id: "req-4",
+      document_id: "doc-4",
+      workflow_id: "workflow-4",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      created_at: "2026-04-20T10:00:00.000Z",
+    });
+    mocks.transitionIlluminotarizationWorkflowStatusMock.mockResolvedValue({
+      id: "workflow-4",
+      owner_user_id: "owner-4",
+      created_by_user_id: "owner-4",
+      primary_document_id: "doc-4",
+      workflow_kind: "single_document",
+      status: "submitted",
+      selected_notary_user_id: null,
+      assigned_notary_user_id: null,
+      current_legacy_request_id: "req-4",
+      submitted_at: "2026-04-20T10:00:00.000Z",
+      last_code_generated_at: null,
+      review_started_at: "2026-04-20T10:05:00.000Z",
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-20T10:00:00.000Z",
+      updated_at: "2026-04-20T10:14:00.000Z",
+    });
+    mocks.queueNotaryRequestRejectedNotificationMock.mockResolvedValue({
+      jobId: "job-reject-1",
+      deliveryCount: 1,
+      existing: false,
+    });
+
+    const token = signToken({
+      sub: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      app_metadata: { role: "notary" },
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-4/review-decision")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        decision: "rejected",
+        summary: "Please reselect a different notary",
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.request.status).toBe("pending");
+    expect(response.body.workflow.status).toBe("submitted");
+    expect(mocks.updateNotarizationRequestMock).toHaveBeenCalledWith("req-4", {
+      assigned_notary_id: null,
+      status: "pending",
+    });
+    expect(mocks.transitionIlluminotarizationWorkflowStatusMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nextStatus: "submitted",
+        workflowUpdates: expect.objectContaining({
+          assignedNotaryUserId: null,
+          selectedNotaryUserId: null,
+        }),
+      }),
+    );
+    expect(mocks.queueNotaryRequestRejectedNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-4",
+        notaryUserId: "11111111-1111-1111-1111-111111111111",
+        summary: "Please reselect a different notary",
+      }),
+    );
+    expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationJobIds: ["job-reject-1"],
+      }),
+    );
   });
 
   it("rejects a notary decision from a different assigned notary", async () => {

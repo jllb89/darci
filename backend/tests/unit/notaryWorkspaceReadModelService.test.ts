@@ -465,6 +465,108 @@ describe("notaryWorkspaceReadModelService", () => {
     });
   });
 
+  it("lists assigned notary queue requests when workflow lookup temporarily fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.listNotarizationRequestsMock.mockResolvedValue([
+      {
+        id: "req-1",
+        document_id: "doc-1",
+        workflow_id: "wf-1",
+        assigned_notary_id: "notary-db-1",
+        status: "in_review",
+        submitted_at: "2026-04-22T10:00:00.000Z",
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
+    ]);
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "completed",
+      document_type: "power_of_attorney",
+      jurisdiction: "US-CA",
+      product_flow_mode: "poa_only",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+
+    try {
+      const queue = await listNotaryQueue({
+        role: "notary",
+        viewerUserId: "notary-db-1",
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(queue.counts.total).toBe(1);
+      expect(queue.requests[0]?.request.id).toBe("req-1");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Notary workspace read model enrichment fallback used",
+        expect.objectContaining({ operation: "workflow_lookup" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("lists notary queue requests when workflow history temporarily fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.listNotarizationRequestsMock.mockResolvedValue([
+      {
+        id: "req-1",
+        document_id: "doc-1",
+        workflow_id: "wf-1",
+        assigned_notary_id: "notary-db-1",
+        status: "in_review",
+        submitted_at: "2026-04-22T10:00:00.000Z",
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
+    ]);
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "completed",
+      document_type: "power_of_attorney",
+      jurisdiction: "US-CA",
+      product_flow_mode: "poa_only",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.listWorkflowStatusHistoryMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+
+    try {
+      const queue = await listNotaryQueue({
+        role: "notary",
+        viewerUserId: "notary-db-1",
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(queue.counts.total).toBe(1);
+      expect(queue.requests[0]?.request.queueStatus).toBe("approved");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Notary workspace read model enrichment fallback used",
+        expect.objectContaining({ operation: "workflow_status_history" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("gets the notary request context with evidence and finalization state", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",
@@ -559,6 +661,55 @@ describe("notaryWorkspaceReadModelService", () => {
         canOpenVerification: true,
       },
     });
+  });
+
+  it("gets notary request context when finalization history temporarily fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: "notary-db-1",
+      status: "in_review",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "completed",
+      document_type: "power_of_attorney",
+      jurisdiction: "US-CA",
+      product_flow_mode: "poa_only",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.listDocumentVersionsMock.mockResolvedValue([]);
+    mocks.listFinalizationStatusHistoryMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+
+    try {
+      const context = await getNotaryRequestContext({
+        requestId: "req-1",
+        role: "notary",
+        viewerUserId: "notary-db-1",
+      });
+
+      expect(context?.request.id).toBe("req-1");
+      expect(context?.finalization.history).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Notary workspace read model enrichment fallback used",
+        expect.objectContaining({ operation: "finalization_status_history" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("lists selected-notary requests for the selected notary before assignment", async () => {
@@ -917,6 +1068,19 @@ describe("notaryWorkspaceReadModelService", () => {
         created_by: null,
         created_at: "2026-04-22T09:40:00.000Z",
       },
+      {
+        id: "ver-acknowledged-1",
+        document_id: "doc-1",
+        version: 3,
+        storage_path: "documents/doc-1-signed-acknowledged-v3.pdf",
+        file_name: "doc-1-signed-acknowledged-v3.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1678,
+        is_final: false,
+        generation_run_id: "run-1",
+        created_by: null,
+        created_at: "2026-04-22T09:50:00.000Z",
+      },
     ]);
 
     const context = await getNotaryRequestContext({
@@ -926,12 +1090,12 @@ describe("notaryWorkspaceReadModelService", () => {
     });
 
     expect(context).not.toBeNull();
-    expect(context?.document.versions).toHaveLength(2);
+    expect(context?.document.versions).toHaveLength(3);
     expect(context?.document.reviewDocuments).toMatchObject([
       {
-        id: "ver-signed-1",
-        versionId: "ver-signed-1",
-        fileName: "doc-1-signed.pdf",
+        id: "ver-acknowledged-1",
+        versionId: "ver-acknowledged-1",
+        fileName: "doc-1-signed-acknowledged-v3.pdf",
         mimeType: "application/pdf",
         isFinal: false,
       },

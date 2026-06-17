@@ -509,6 +509,271 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /users/me/notary-application:
+    get:
+      summary: Get my notary application
+      description: Returns the authenticated member's notary application, when one has been submitted.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryApplicationResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Submit my notary application
+      description: Submits a member request to become a notary. Commission number and current commission expiration are required before approval can create an active notary profile.
+      x-roles:
+        - member
+        - admin
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotaryApplicationSubmitRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryApplicationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/me/notary-profile:
+    get:
+      summary: Get my notary profile
+      description: Returns the authenticated user's editable notary profile, when one exists.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryProfileResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update my notary profile
+      description: Updates the authenticated notary profile used for matching, assignment, and final acknowledgment sealing. Commission number and current commission expiration are required.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotaryProfileUpdateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryProfileResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notary-applications:
+    get:
+      summary: List notary applications
+      description: Lists notary application requests for admin review.
+      x-roles:
+        - admin
+        - service_role
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminNotaryApplicationsResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notary-applications/{id}/approve:
+    post:
+      summary: Approve notary application
+      description: Approves a notary application, grants the notary role, and creates or updates the applicant's notary profile from the application details.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminNotaryApplicationDecisionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminNotaryApplicationDecisionResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/notary-applications/{id}/reject:
+    post:
+      summary: Reject notary application
+      description: Rejects a pending notary application and records an optional review note.
+      x-roles:
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminNotaryApplicationDecisionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotaryApplicationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /dashboard/member:
     get:
       summary: Member dashboard
@@ -4376,6 +4641,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /notary/requests/{id}/session/advance:
+    post:
+      summary: Advance notary session
+      description: Inspects durable meeting, evidence, acknowledgment, and finalization state, then performs the next safe in-person session transition. Each call advances at most one step: same-place evaluation, acknowledgment sealing, meeting completion, or final package submission.
+      x-roles:
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotarySessionAdvanceRequest"
+      responses:
+        "200":
+          description: Session advanced or already complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotarySessionAdvanceResponse"
+        "201":
+          description: Meeting evidence or completion step created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotarySessionAdvanceResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session cannot advance until the returned next action is resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotarySessionAdvanceResponse"
   /notary/requests/{id}/sign:
     post:
       summary: Notary sign
@@ -6266,7 +6594,6 @@ components:
     NotarySignRequest:
       type: object
       required:
-        - venue
         - acknowledgment
       properties:
         venue:
@@ -6315,6 +6642,8 @@ components:
           $ref: "#/components/schemas/DocumentFinalizationExecution"
         version:
           $ref: "#/components/schemas/DocumentVersion"
+        venueCapture:
+          $ref: "#/components/schemas/MeetingArtifact"
         sealArtifact:
           $ref: "#/components/schemas/MeetingArtifact"
     NotarySubmitRequest:
@@ -6324,6 +6653,127 @@ components:
           type: string
           nullable: true
           maxLength: 2000
+    NotarySessionAdvanceRequest:
+      type: object
+      properties:
+        evaluatedAt:
+          type: string
+          format: date-time
+        advancedAt:
+          type: string
+          format: date-time
+        thresholdMeters:
+          type: number
+        venue:
+          $ref: "#/components/schemas/AcknowledgmentVenue"
+        acknowledgment:
+          type: object
+          required:
+            - signerAppeared
+            - signerAcknowledged
+          properties:
+            signerAppeared:
+              type: boolean
+              enum:
+                - true
+            signerAcknowledged:
+              type: boolean
+              enum:
+                - true
+        notarialFields:
+          type: object
+          additionalProperties: true
+        sealLabel:
+          type: string
+          nullable: true
+          maxLength: 255
+        signatureLabel:
+          type: string
+          nullable: true
+          maxLength: 255
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+    NotarySessionAdvanceResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - advanced
+            - blocked
+            - complete
+            - ledger_anchor_failed
+        error:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        advancedStep:
+          type: string
+          nullable: true
+          enum:
+            - same_place_evaluated
+            - acknowledgment_sealed
+            - meeting_completed
+            - final_package_submitted
+            - none
+        advancedSteps:
+          type: array
+          description: Ordered transitions completed by this advance call when the orchestrator safely chains mechanical steps.
+          items:
+            type: string
+            enum:
+              - same_place_evaluated
+              - acknowledgment_sealed
+              - meeting_completed
+              - final_package_submitted
+        nextAction:
+          type: string
+          nullable: true
+          enum:
+            - start_session
+            - refresh_location
+            - seal_acknowledgment
+            - complete_meeting
+            - submit_final_package
+            - retry_final_package_submission
+        meeting:
+          $ref: "#/components/schemas/Meeting"
+        participant:
+          $ref: "#/components/schemas/MeetingParticipant"
+        checkin:
+          $ref: "#/components/schemas/MeetingCheckin"
+        evaluation:
+          $ref: "#/components/schemas/MeetingProximityEvaluation"
+        acknowledgmentPage:
+          $ref: "#/components/schemas/AcknowledgmentPage"
+        execution:
+          $ref: "#/components/schemas/DocumentFinalizationExecution"
+        version:
+          $ref: "#/components/schemas/DocumentVersion"
+        venueCapture:
+          $ref: "#/components/schemas/MeetingArtifact"
+        sealArtifact:
+          $ref: "#/components/schemas/MeetingArtifact"
+        documentId:
+          type: string
+        documentStatus:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+        requestStatus:
+          type: string
+          nullable: true
+        hashRecord:
+          $ref: "#/components/schemas/DocumentHashRecord"
+        ledger:
+          $ref: "#/components/schemas/DocumentLedgerAnchor"
+        finalizationStatus:
+          $ref: "#/components/schemas/FinalPackageStatusSummary"
     FinalPackageStatusSummary:
       type: object
       properties:
@@ -8332,6 +8782,8 @@ components:
           $ref: "#/components/schemas/MeetingParticipant"
         checkin:
           $ref: "#/components/schemas/MeetingCheckin"
+        autoProximityEvaluation:
+          $ref: "#/components/schemas/MeetingProximityEvaluation"
     MeetingConfirmRequest:
       type: object
       required:
@@ -8447,6 +8899,8 @@ components:
           type: array
           items:
             type: string
+        venue:
+          $ref: "#/components/schemas/AcknowledgmentVenue"
         verifiedAt:
           type: string
           format: date-time
@@ -8513,6 +8967,8 @@ components:
           $ref: "#/components/schemas/MeetingCheckin"
         identityVerification:
           $ref: "#/components/schemas/MeetingIdentityVerification"
+        venueCapture:
+          $ref: "#/components/schemas/MeetingArtifact"
     MeetingProximityEvaluationRequest:
       type: object
       properties:
@@ -8592,6 +9048,7 @@ components:
             - identity_selfie
             - consent_capture
             - location_photo
+            - venue_capture
             - verification_summary
             - seal_preview
             - meeting_note
@@ -8652,6 +9109,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
     MeetingArtifactResponse:
       type: object
       properties:
@@ -8905,6 +9365,213 @@ components:
           format: email
         phone:
           type: string
+    NotaryServiceAreaKind:
+      type: string
+      enum:
+        - county
+        - parish
+        - borough
+        - district
+        - city
+        - metro
+        - region
+        - state
+        - other
+    NotaryApplicationStatus:
+      type: string
+      enum:
+        - pending
+        - approved
+        - rejected
+    NotaryApplicationSubmitRequest:
+      type: object
+      required:
+        - jurisdiction
+        - serviceAreaKind
+        - serviceAreaName
+        - commissionNumber
+        - commissionExpiresAt
+      properties:
+        jurisdiction:
+          type: string
+          minLength: 1
+          maxLength: 120
+        serviceAreaKind:
+          $ref: "#/components/schemas/NotaryServiceAreaKind"
+        serviceAreaName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        commissionNumber:
+          type: string
+          minLength: 1
+          maxLength: 120
+        commissionExpiresAt:
+          type: string
+          format: date-time
+          description: Current notary commission expiration. Expired commissions cannot be approved or assigned documents.
+        signatureDataUrl:
+          type: string
+          nullable: true
+          maxLength: 1000000
+          pattern: '^data:image/(?:png|jpe?g);base64,[A-Za-z0-9+/=\s]+$'
+          description: PNG or JPEG data URL for the notary signature image used in acknowledgment PDF stamping.
+        sealDataUrl:
+          type: string
+          nullable: true
+          maxLength: 1000000
+          pattern: '^data:image/(?:png|jpe?g);base64,[A-Za-z0-9+/=\s]+$'
+          description: PNG or JPEG data URL for the notary seal image used in acknowledgment PDF stamping.
+    NotaryProfileUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/NotaryApplicationSubmitRequest"
+    NotaryApplication:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        jurisdiction:
+          type: string
+        serviceAreaKind:
+          $ref: "#/components/schemas/NotaryServiceAreaKind"
+        serviceAreaName:
+          type: string
+        commissionNumber:
+          type: string
+          nullable: true
+        commissionExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        signatureDataUrl:
+          type: string
+          nullable: true
+        sealDataUrl:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/NotaryApplicationStatus"
+        reviewNotes:
+          type: string
+          nullable: true
+        reviewedByUserId:
+          type: string
+          nullable: true
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NotaryProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        serviceAreaKind:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotaryServiceAreaKind"
+        serviceAreaName:
+          type: string
+          nullable: true
+        commissionNumber:
+          type: string
+          nullable: true
+        commissionExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        sealStoragePath:
+          type: string
+          nullable: true
+        signatureDataUrl:
+          type: string
+          nullable: true
+        sealDataUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NotaryApplicationResponse:
+      type: object
+      properties:
+        application:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotaryApplication"
+    NotaryProfileResponse:
+      type: object
+      properties:
+        profile:
+          allOf:
+            - nullable: true
+            - $ref: "#/components/schemas/NotaryProfile"
+    NotaryApplicationUserSummary:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+        supabaseUserId:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+    AdminNotaryApplicationRow:
+      allOf:
+        - $ref: "#/components/schemas/NotaryApplication"
+        - type: object
+          properties:
+            user:
+              allOf:
+                - nullable: true
+                - $ref: "#/components/schemas/NotaryApplicationUserSummary"
+    AdminNotaryApplicationsResponse:
+      type: object
+      properties:
+        applications:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminNotaryApplicationRow"
+    AdminNotaryApplicationDecisionRequest:
+      type: object
+      properties:
+        reviewNotes:
+          type: string
+          nullable: true
+          maxLength: 1000
+    AdminNotaryApplicationDecisionResponse:
+      type: object
+      properties:
+        application:
+          $ref: "#/components/schemas/NotaryApplication"
+        profile:
+          $ref: "#/components/schemas/NotaryProfile"
     AdminUserRoleUpsertRequest:
       type: object
       required:

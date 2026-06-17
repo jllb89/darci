@@ -896,3 +896,23 @@ export const createIlluminotaryReviewDecisionRecord = async (input: {
 
   return data as IlluminotaryReviewDecisionRecord;
 };
+
+export const getLatestRejectedIlluminotaryReviewDecisionForWorkflow = async (
+  workflowId: string,
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("illuminotary_review_decisions")
+    .select(reviewDecisionSelectColumns)
+    .eq("workflow_id", workflowId)
+    .eq("decision", "rejected")
+    .order("decided_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data as IlluminotaryReviewDecisionRecord | null) ?? null;
+};

@@ -218,7 +218,13 @@ export type NotaryRequestContext = {
       notarySample: EvidenceGeolocationSample | null;
       metadata: Record<string, unknown>;
     }>;
-    artifacts: Array<{ id: string; artifactKind: string; status: string; capturedAt: string | null }>;
+    artifacts: Array<{
+      id: string;
+      artifactKind: string;
+      status: string;
+      capturedAt: string | null;
+      metadata: Record<string, unknown>;
+    }>;
   };
   finalization: NotaryQueueRequestSummary["finalization"] & {
     hash: string | null;

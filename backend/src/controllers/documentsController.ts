@@ -76,6 +76,8 @@ import {
   createIlluminotarizationWorkflow,
   createIlluminotarizationWorkflowDocument,
   createIlluminotarizationWorkflowStatusHistoryEntry,
+  getLatestRejectedIlluminotaryReviewDecisionForWorkflow,
+  getIlluminotarizationWorkflowById,
   listWorkflowStatusHistory,
   transitionIlluminotarizationWorkflowStatus,
   upsertIlluminotarizationWorkflowAssignment,
@@ -144,7 +146,7 @@ import {
 import {
   getNotaryProfileByUserId,
   hasActiveNotaryRole,
-  isNotaryCommissionExpired,
+  isNotaryCommissionCurrent,
   listAvailableNotariesByJurisdiction,
   NotaryProfileServiceError,
 } from "../services/notaryProfileService";
@@ -1349,7 +1351,15 @@ const validateSelectedNotaryForDocument = async (input: {
     };
   }
 
-  if (isNotaryCommissionExpired(selectedNotaryProfile.commissionExpiresAt)) {
+  if (!selectedNotaryProfile.commissionExpiresAt?.trim()) {
+    return {
+      ok: false as const,
+      path: "selectedNotaryUserId",
+      message: "Selected notary commission expiration is required",
+    };
+  }
+
+  if (!isNotaryCommissionCurrent(selectedNotaryProfile.commissionExpiresAt)) {
     return {
       ok: false as const,
       path: "selectedNotaryUserId",
@@ -2036,6 +2046,47 @@ const shouldUseInlineReviewGenerationFallback = () => {
     process.env.NODE_ENV !== "production" &&
     process.env.NODE_ENV !== "test"
   );
+};
+
+const isNotarizationRequestInProgress = async (
+  request: Awaited<ReturnType<typeof getActiveNotarizationRequest>>,
+) => {
+  if (!request) {
+    return false;
+  }
+
+  if (request.status === "in_review" || Boolean(request.assigned_notary_id)) {
+    return true;
+  }
+
+  if (request.status !== "pending") {
+    return true;
+  }
+
+  if (!request.workflow_id) {
+    return true;
+  }
+
+  const workflow = await getIlluminotarizationWorkflowById(request.workflow_id);
+  if (!workflow) {
+    return true;
+  }
+
+  return Boolean(workflow.selected_notary_user_id || workflow.assigned_notary_user_id);
+};
+
+const getLastRejectedNotaryUserIdForRequest = async (
+  request: Awaited<ReturnType<typeof getActiveNotarizationRequest>>,
+) => {
+  if (!request?.workflow_id) {
+    return null;
+  }
+
+  const latestRejectedDecision = await getLatestRejectedIlluminotaryReviewDecisionForWorkflow(
+    request.workflow_id,
+  );
+
+  return latestRejectedDecision?.decided_by_user_id ?? null;
 };
 
 const processQueuedGenerationRunsInline = async (input: {
@@ -7487,6 +7538,14 @@ export const listDocumentAvailableNotaries = async (req: Request, res: Response)
       }),
     ]);
 
+    const [hasInProgressRequest, lastRejectedNotaryUserId] = await Promise.all([
+      isNotarizationRequestInProgress(activeRequest),
+      getLastRejectedNotaryUserIdForRequest(activeRequest),
+    ]);
+    const filteredNotaries = lastRejectedNotaryUserId
+      ? notaries.filter((notary) => notary.userId !== lastRejectedNotaryUserId)
+      : notaries;
+
     return res.status(200).json({
       document: {
         id: document.id,
@@ -7496,12 +7555,14 @@ export const listDocumentAvailableNotaries = async (req: Request, res: Response)
         productFlowMode: document.product_flow_mode,
       },
       notarization: {
-        activeRequestId: activeRequest?.id ?? null,
-        activeRequestStatus: activeRequest?.status ?? null,
-        assignedNotaryUserId: activeRequest?.assigned_notary_id ?? null,
-        submittedAt: activeRequest?.submitted_at ?? null,
+        activeRequestId: hasInProgressRequest ? activeRequest?.id ?? null : null,
+        activeRequestStatus: hasInProgressRequest ? activeRequest?.status ?? null : null,
+        assignedNotaryUserId: hasInProgressRequest
+          ? activeRequest?.assigned_notary_id ?? null
+          : null,
+        submittedAt: hasInProgressRequest ? activeRequest?.submitted_at ?? null : null,
       },
-      notaries,
+      notaries: filteredNotaries,
     });
   } catch (error) {
     if (error instanceof NotaryProfileServiceError) {
@@ -7576,6 +7637,17 @@ export const submitNotarization = async (req: Request, res: Response) => {
     });
   }
 
+  const existing = await getActiveNotarizationRequest(documentId);
+  const lastRejectedNotaryUserId = await getLastRejectedNotaryUserIdForRequest(existing);
+
+  if (selectedNotaryUserId && lastRejectedNotaryUserId === selectedNotaryUserId) {
+    return sendSimpleValidationErrorResponse(
+      res,
+      "selectedNotaryUserId",
+      "Selected notary previously rejected this request. Choose a different notary.",
+    );
+  }
+
   if (selectedNotaryUserId) {
     const selectedNotaryValidation = await validateSelectedNotaryForDocument({
       document,
@@ -7637,8 +7709,8 @@ export const submitNotarization = async (req: Request, res: Response) => {
     }
   }
 
-  const existing = await getActiveNotarizationRequest(documentId);
-  if (existing) {
+  const hasInProgressRequest = await isNotarizationRequestInProgress(existing);
+  if (hasInProgressRequest) {
     return res.status(409).json({
       error: "conflict",
       message: "Notarization request already exists",

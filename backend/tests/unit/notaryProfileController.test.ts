@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   approveNotaryApplicationMock: vi.fn(),
   rejectNotaryApplicationMock: vi.fn(),
+  submitNotaryApplicationMock: vi.fn(),
+  upsertMyNotaryProfileMock: vi.fn(),
   queueApprovedNotificationMock: vi.fn(),
   queueRejectedNotificationMock: vi.fn(),
   runDueNotificationJobsMock: vi.fn(),
@@ -15,8 +17,8 @@ vi.mock("../../src/services/notaryProfileService", () => ({
   listMyNotaryApplication: vi.fn(),
   listNotaryApplications: vi.fn(),
   rejectNotaryApplication: mocks.rejectNotaryApplicationMock,
-  submitNotaryApplication: vi.fn(),
-  upsertMyNotaryProfile: vi.fn(),
+  submitNotaryApplication: mocks.submitNotaryApplicationMock,
+  upsertMyNotaryProfile: mocks.upsertMyNotaryProfileMock,
 }));
 
 vi.mock("../../src/services/notificationService", () => ({
@@ -32,6 +34,8 @@ vi.mock("../../src/services/notificationOutboxService", () => ({
 import {
   approveNotaryApplicationAdminHandler,
   rejectNotaryApplicationAdminHandler,
+  submitMyNotaryApplication,
+  updateMyNotaryProfileHandler,
 } from "../../src/controllers/notaryProfileController";
 
 const buildResponse = () => {
@@ -59,6 +63,8 @@ const application = {
   jurisdiction: "US-OH",
   serviceAreaKind: "county" as const,
   serviceAreaName: "Franklin",
+  commissionNumber: "OH-12345",
+  commissionExpiresAt: "2028-01-01T00:00:00.000Z",
   signatureDataUrl: null,
   sealDataUrl: null,
   status: "approved" as const,
@@ -84,8 +90,8 @@ const profile = {
   jurisdiction: "US-OH",
   serviceAreaKind: "county" as const,
   serviceAreaName: "Franklin",
-  commissionNumber: null,
-  commissionExpiresAt: null,
+  commissionNumber: "OH-12345",
+  commissionExpiresAt: "2028-01-01T00:00:00.000Z",
   sealStoragePath: null,
   signatureDataUrl: null,
   sealDataUrl: null,
@@ -93,10 +99,22 @@ const profile = {
   updatedAt: "2026-06-01T20:00:00.000Z",
 };
 
+const validProfilePayload = {
+  jurisdiction: "US-OH",
+  serviceAreaKind: "county",
+  serviceAreaName: "Franklin",
+  commissionNumber: "OH-12345",
+  commissionExpiresAt: "2028-01-01T00:00:00.000Z",
+  signatureDataUrl: "data:image/png;base64,AAAA",
+  sealDataUrl: "data:image/png;base64,AAAA",
+};
+
 describe("notaryProfileController admin application decisions", () => {
   beforeEach(() => {
     mocks.approveNotaryApplicationMock.mockReset();
     mocks.rejectNotaryApplicationMock.mockReset();
+    mocks.submitNotaryApplicationMock.mockReset();
+    mocks.upsertMyNotaryProfileMock.mockReset();
     mocks.queueApprovedNotificationMock.mockReset();
     mocks.queueRejectedNotificationMock.mockReset();
     mocks.runDueNotificationJobsMock.mockReset();
@@ -134,6 +152,36 @@ describe("notaryProfileController admin application decisions", () => {
       notificationJobIds: ["approval-job-1"],
     });
     expect(response.status).toHaveBeenCalledWith(200);
+  });
+
+  it("rejects unsupported notary application image payloads", async () => {
+    const response = buildResponse();
+
+    await submitMyNotaryApplication(
+      buildRequest({
+        ...validProfilePayload,
+        signatureDataUrl: "data:image/webp;base64,AAAA",
+      }),
+      response,
+    );
+
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(mocks.submitNotaryApplicationMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported notary profile image payloads", async () => {
+    const response = buildResponse();
+
+    await updateMyNotaryProfileHandler(
+      buildRequest({
+        ...validProfilePayload,
+        sealDataUrl: "data:image/webp;base64,AAAA",
+      }),
+      response,
+    );
+
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(mocks.upsertMyNotaryProfileMock).not.toHaveBeenCalled();
   });
 
   it("processes the rejected notification job immediately", async () => {

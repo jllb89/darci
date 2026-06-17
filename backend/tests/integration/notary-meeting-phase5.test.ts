@@ -612,6 +612,204 @@ describe("Phase 5 meeting runtime slice", () => {
     expect(mocks.recordAuditEventMock).not.toHaveBeenCalled();
   });
 
+  it("auto-records same-place proximity when member arrival completes a fresh sample pair", async () => {
+    setupProximityScenario();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "owner-4",
+      supabaseUserId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      email: "member@example.com",
+      role: "member",
+      status: "active",
+      firstName: "Mina",
+      lastName: "Member",
+      availableRoles: ["member"],
+      roleAssignments: [],
+    });
+    const participants = proximityParticipants.map((participant) =>
+      participant.participant_role === "member"
+        ? { ...participant, status: "expected", arrived_at: null }
+        : participant,
+    );
+    mocks.listMeetingParticipantsMock.mockResolvedValue(participants);
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      ...proximityParticipants[0],
+      status: "checked_in",
+      arrived_at: "2026-05-27T15:05:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-member-auto",
+      meeting_id: "meeting-4",
+      meeting_participant_id: "participant-member-4",
+      recorded_by_user_id: "owner-4",
+      checkin_kind: "arrival",
+      status: "recorded",
+      recorded_at: "2026-05-27T15:05:00.000Z",
+      notes: null,
+      metadata: {},
+      created_at: "2026-05-27T15:05:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+    mocks.createGeolocationSampleMock.mockResolvedValue(
+      buildProximitySample({
+        id: "geo-member-auto",
+        captured_at: "2026-05-27T15:05:00.000Z",
+        created_at: "2026-05-27T15:05:00.000Z",
+      }),
+    );
+    mocks.listMeetingGeolocationSamplesMock.mockResolvedValueOnce([
+      buildProximitySample({
+        id: "geo-notary-auto",
+        meeting_participant_id: "participant-notary-4",
+        meeting_checkin_id: "checkin-notary-4",
+        captured_by_user_id: "notary-4",
+        capture_stage: "meeting_start",
+        latitude: 41.49931,
+        longitude: -81.69441,
+        captured_at: "2026-05-27T15:04:30.000Z",
+        created_at: "2026-05-27T15:04:30.000Z",
+      }),
+    ]);
+    mocks.createProximityEvaluationMock.mockImplementation(async (input) => ({
+      id: "proximity-auto-pass",
+      meeting_id: input.meetingId,
+      evaluated_by_user_id: input.evaluatedByUserId,
+      member_sample_id: input.memberSampleId,
+      notary_sample_id: input.notarySampleId,
+      evaluation_kind: "same_place",
+      status: input.status,
+      threshold_meters: input.thresholdMeters,
+      observed_distance_meters: input.observedDistanceMeters,
+      evaluated_at: input.evaluatedAt,
+      notes: input.notes,
+      metadata: input.metadata,
+      created_at: input.evaluatedAt,
+      updated_at: input.evaluatedAt,
+    }));
+    mocks.updateMeetingMock.mockResolvedValue({
+      id: "meeting-4",
+      request_id: "req-4",
+      workflow_id: "workflow-4",
+      scheduled_at: "2026-05-27T15:00:00.000Z",
+      timezone: null,
+      location: null,
+      status: "in_progress",
+      same_place_required: true,
+      same_place_status: "passed",
+      evidence_retention_until: null,
+      metadata: { lastProximityEvaluationStatus: "passed" },
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-4/meeting/check-in")
+      .set(
+        "Authorization",
+        `Bearer ${signToken({ sub: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", app_metadata: { role: "member" } })}`,
+      )
+      .send({
+        participantRole: "member",
+        checkinKind: "arrival",
+        recordedAt: "2026-05-27T15:05:00.000Z",
+        geolocation: {
+          latitude: 41.4993,
+          longitude: -81.6944,
+          accuracyMeters: 9,
+        },
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.meeting.samePlaceStatus).toBe("passed");
+    expect(response.body.autoProximityEvaluation.status).toBe("passed");
+    expect(mocks.createProximityEvaluationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        evaluatedByUserId: null,
+        memberSampleId: "geo-member-auto",
+        notarySampleId: "geo-notary-auto",
+        metadata: expect.objectContaining({
+          trigger: "automatic_checkin",
+          policy: expect.objectContaining({ policyVersion: "same_place_v1" }),
+        }),
+      }),
+    );
+    expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
+      "meeting-4",
+      expect.objectContaining({ same_place_status: "passed" }),
+    );
+  });
+
+  it("keeps member geolocation check-in successful when the notary sample is not ready", async () => {
+    setupProximityScenario();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "owner-4",
+      supabaseUserId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      email: "member@example.com",
+      role: "member",
+      status: "active",
+      firstName: "Mina",
+      lastName: "Member",
+      availableRoles: ["member"],
+      roleAssignments: [],
+    });
+    const participants = proximityParticipants.map((participant) =>
+      participant.participant_role === "member"
+        ? { ...participant, status: "expected", arrived_at: null }
+        : participant,
+    );
+    mocks.listMeetingParticipantsMock.mockResolvedValue(participants);
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      ...proximityParticipants[0],
+      status: "checked_in",
+      arrived_at: "2026-05-27T15:05:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-member-auto-missing",
+      meeting_id: "meeting-4",
+      meeting_participant_id: "participant-member-4",
+      recorded_by_user_id: "owner-4",
+      checkin_kind: "arrival",
+      status: "recorded",
+      recorded_at: "2026-05-27T15:05:00.000Z",
+      notes: null,
+      metadata: {},
+      created_at: "2026-05-27T15:05:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    });
+    mocks.createGeolocationSampleMock.mockResolvedValue(
+      buildProximitySample({
+        id: "geo-member-auto-missing",
+        captured_at: "2026-05-27T15:05:00.000Z",
+        created_at: "2026-05-27T15:05:00.000Z",
+      }),
+    );
+    mocks.listMeetingGeolocationSamplesMock.mockResolvedValueOnce([]);
+
+    const response = await request(app)
+      .post("/notary/requests/req-4/meeting/check-in")
+      .set(
+        "Authorization",
+        `Bearer ${signToken({ sub: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", app_metadata: { role: "member" } })}`,
+      )
+      .send({
+        participantRole: "member",
+        checkinKind: "arrival",
+        recordedAt: "2026-05-27T15:05:00.000Z",
+        geolocation: {
+          latitude: 41.4993,
+          longitude: -81.6944,
+          accuracyMeters: 9,
+        },
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.meeting.samePlaceStatus).toBe("pending");
+    expect(response.body.autoProximityEvaluation).toBeUndefined();
+    expect(mocks.createProximityEvaluationMock).not.toHaveBeenCalled();
+    expect(mocks.updateMeetingMock).not.toHaveBeenCalled();
+  });
+
   it("rejects notary-created member geolocation check-ins", async () => {
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
       id: "notary-2",

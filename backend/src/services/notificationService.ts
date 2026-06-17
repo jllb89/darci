@@ -250,6 +250,33 @@ const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate
     source_reference: "runtime:notary_approval_received_email",
     metadata: { seed_source: "runtime_notary_contact_exchange_fallback" },
   },
+  notary_request_rejected_email: {
+    template_key: "notary_request_rejected_email",
+    template_version: "2026.06.17.v1",
+    locale: "en-US",
+    channel: "email",
+    template_kind: "status_update",
+    audience_scope: "client",
+    trigger_event: "notary.request_rejected",
+    invite_kind: null,
+    subject_template: "Select a new illuminotary for {{documentName}}",
+    body_template: [
+      "<p>Hi {{firstName}},</p>",
+      "<p>{{illuminotaryName}} cannot continue your request for <strong>{{documentName}}</strong>.</p>",
+      "<p>Please choose another illuminotary to keep notarization moving.</p>",
+      "<a href=\"{{nextStepUrl}}\" style=\"display:block;padding:14px 0;background:#0aff4a;color:#191919;text-align:center;text-decoration:none;font-size:14px;font-weight:600;margin:8px 0 24px;\">Select an illuminotary</a>",
+      "<p style=\"margin:0;color:#7f7f7f;font-size:12px;\">— Your DARCi Team</p>",
+    ].join("\n"),
+    body_format: "html",
+    variables_schema: {
+      required: ["firstName", "illuminotaryName", "documentName", "nextStepUrl"],
+      optional: ["rejectionSummary", "dashboardUrl"],
+      scope: [11],
+    },
+    is_active: true,
+    source_reference: "runtime:notary_request_rejected_email",
+    metadata: { seed_source: "runtime_notary_request_rejected_fallback" },
+  },
   in_person_session_started_email: {
     template_key: "in_person_session_started_email",
     template_version: "2026.06.09.v1",
@@ -1572,6 +1599,58 @@ export const queueNotaryChangesRequestedNotification = async (input: {
     });
   } catch (error) {
     logNotificationFailure("notary_changes_requested_email", error, {
+      documentId: input.documentId,
+      requestId: input.requestId,
+      notaryUserId: input.notaryUserId,
+    });
+    return null;
+  }
+};
+
+export const queueNotaryRequestRejectedNotification = async (input: {
+  documentId: string;
+  requestId: string;
+  notaryUserId: string;
+  summary?: string | null | undefined;
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    const owner = await getUserById(document.owner_id);
+    const notary = await getUserById(input.notaryUserId);
+    if (!owner) {
+      return null;
+    }
+
+    const dashboardUrl = buildDocumentDetailsUrl(document.id);
+    return await queueTemplatedNotification({
+      templateKey: "notary_request_rejected_email",
+      jobKind: "status_update",
+      documentId: document.id,
+      notarizationRequestId: input.requestId,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(owner),
+        illuminotaryName: notary ? toDisplayName(notary) : "Your illuminotary",
+        rejectionSummary:
+          input.summary?.trim() || "Please select another illuminotary to continue this request.",
+        nextStepUrl: dashboardUrl,
+        dashboardUrl,
+        documentName: getDocumentLabel(document),
+      },
+      recipients: [buildOwnerRecipient(owner)],
+      metadata: {
+        requestId: input.requestId,
+        notaryUserId: input.notaryUserId,
+        summary: input.summary?.trim() || null,
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("notary_request_rejected_email", error, {
       documentId: input.documentId,
       requestId: input.requestId,
       notaryUserId: input.notaryUserId,

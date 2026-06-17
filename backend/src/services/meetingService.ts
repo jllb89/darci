@@ -89,6 +89,7 @@ export type MeetingArtifactKind =
   | "identity_selfie"
   | "consent_capture"
   | "location_photo"
+  | "venue_capture"
   | "verification_summary"
   | "seal_preview"
   | "meeting_note"

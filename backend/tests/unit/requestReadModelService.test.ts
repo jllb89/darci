@@ -521,4 +521,112 @@ describe("requestReadModelService", () => {
       },
     ]);
   });
+
+  it("builds shared request detail when workflow enrichment temporarily fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: "notary-db-1",
+      status: "pending",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "power_of_attorney",
+      jurisdiction: "US-CA",
+      product_flow_mode: "poa_only",
+      selected_families: [],
+      output_bundle: [],
+      created_at: "2026-04-22T09:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+    mocks.listWorkflowStatusHistoryMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+
+    try {
+      const detail = await getSharedRequestDetail({
+        requestId: "req-1",
+        role: "notary",
+        viewerUserId: "notary-db-1",
+      });
+
+      expect(detail).toMatchObject({
+        request: {
+          id: "req-1",
+          workflowId: "wf-1",
+        },
+        workflow: {
+          id: "wf-1",
+          latestStatus: "pending",
+          assignedNotaryUserId: "notary-db-1",
+        },
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Request read model enrichment fallback used",
+        expect.objectContaining({ operation: "workflow_lookup" }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Request read model enrichment fallback used",
+        expect.objectContaining({ operation: "workflow_status_history" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("builds shared request timeline when history enrichment temporarily fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: "notary-db-1",
+      status: "pending",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      status: "pending_notary",
+      created_at: "2026-04-22T09:00:00.000Z",
+      intake_submitted_at: null,
+    });
+    mocks.listFinalizationStatusHistoryMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+    mocks.listWorkflowStatusHistoryMock.mockRejectedValue(new Error("TypeError: fetch failed"));
+
+    try {
+      const timeline = await getSharedRequestTimeline({
+        requestId: "req-1",
+        role: "member",
+        viewerUserId: "member-db-1",
+      });
+
+      expect(timeline).toEqual([
+        {
+          action: "Document created",
+          timestamp: "2026-04-22T09:00:00.000Z",
+        },
+        {
+          action: "Notarization submitted",
+          timestamp: "2026-04-22T10:00:00.000Z",
+        },
+      ]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Request read model enrichment fallback used",
+        expect.objectContaining({ operation: "finalization_status_history" }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Request read model enrichment fallback used",
+        expect.objectContaining({ operation: "workflow_status_history" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

@@ -30,22 +30,36 @@ const serviceAreaKindSchema = z.enum([
   "other",
 ]);
 
+const notaryAssetDataUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_000_000)
+  .refine(
+    (value) => /^data:image\/(?:png|jpe?g);base64,[a-z0-9+/=\s]+$/i.test(value),
+    "Signature and seal images must be PNG or JPEG data URLs",
+  )
+  .optional()
+  .nullable();
+
 const notaryApplicationSchema = z.object({
   jurisdiction: z.string().trim().min(1).max(120),
   serviceAreaKind: serviceAreaKindSchema,
   serviceAreaName: z.string().trim().min(1).max(120),
-  signatureDataUrl: z.string().trim().min(1).max(1_000_000).optional().nullable(),
-  sealDataUrl: z.string().trim().min(1).max(1_000_000).optional().nullable(),
+  commissionNumber: z.string().trim().min(1).max(120),
+  commissionExpiresAt: z.string().datetime(),
+  signatureDataUrl: notaryAssetDataUrlSchema,
+  sealDataUrl: notaryAssetDataUrlSchema,
 });
 
 const notaryProfileSchema = z.object({
   jurisdiction: z.string().trim().min(1).max(120),
   serviceAreaKind: serviceAreaKindSchema,
   serviceAreaName: z.string().trim().min(1).max(120),
-  commissionNumber: z.string().trim().max(120).optional().nullable(),
-  commissionExpiresAt: z.string().datetime().optional().nullable(),
-  signatureDataUrl: z.string().trim().min(1).max(1_000_000).optional().nullable(),
-  sealDataUrl: z.string().trim().min(1).max(1_000_000).optional().nullable(),
+  commissionNumber: z.string().trim().min(1).max(120),
+  commissionExpiresAt: z.string().datetime(),
+  signatureDataUrl: notaryAssetDataUrlSchema,
+  sealDataUrl: notaryAssetDataUrlSchema,
 });
 
 const applicationReviewSchema = z.object({
@@ -148,6 +162,8 @@ const mapNotaryApplication = (application: Awaited<ReturnType<typeof listMyNotar
     jurisdiction: application.jurisdiction,
     serviceAreaKind: application.serviceAreaKind,
     serviceAreaName: application.serviceAreaName,
+    commissionNumber: application.commissionNumber,
+    commissionExpiresAt: application.commissionExpiresAt,
     signatureDataUrl: application.signatureDataUrl,
     sealDataUrl: application.sealDataUrl,
     status: application.status,
@@ -190,6 +206,8 @@ export const submitMyNotaryApplication = async (req: Request, res: Response) => 
       jurisdiction: parsed.data.jurisdiction,
       serviceAreaKind: parsed.data.serviceAreaKind,
       serviceAreaName: parsed.data.serviceAreaName,
+      commissionNumber: parsed.data.commissionNumber,
+      commissionExpiresAt: parsed.data.commissionExpiresAt,
       signatureDataUrl: parsed.data.signatureDataUrl ?? null,
       sealDataUrl: parsed.data.sealDataUrl ?? null,
     });
@@ -241,8 +259,8 @@ export const updateMyNotaryProfileHandler = async (req: Request, res: Response) 
       jurisdiction: parsed.data.jurisdiction,
       serviceAreaKind: parsed.data.serviceAreaKind,
       serviceAreaName: parsed.data.serviceAreaName,
-      commissionNumber: parsed.data.commissionNumber ?? null,
-      commissionExpiresAt: parsed.data.commissionExpiresAt ?? null,
+      commissionNumber: parsed.data.commissionNumber,
+      commissionExpiresAt: parsed.data.commissionExpiresAt,
       signatureDataUrl: parsed.data.signatureDataUrl ?? null,
       sealDataUrl: parsed.data.sealDataUrl ?? null,
     });
@@ -260,6 +278,8 @@ const mapAdminApplicationRow = (row: Awaited<ReturnType<typeof listNotaryApplica
   jurisdiction: row.application.jurisdiction,
   serviceAreaKind: row.application.serviceAreaKind,
   serviceAreaName: row.application.serviceAreaName,
+  commissionNumber: row.application.commissionNumber,
+  commissionExpiresAt: row.application.commissionExpiresAt,
   signatureDataUrl: row.application.signatureDataUrl,
   sealDataUrl: row.application.sealDataUrl,
   reviewNotes: row.application.reviewNotes,

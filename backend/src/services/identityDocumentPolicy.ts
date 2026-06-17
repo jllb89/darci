@@ -123,11 +123,11 @@ export const validateIdentityDocument = (
     };
   }
 
-  if (maskedIdentifier && (!/^[A-Z0-9*X\-\s]{4,64}$/.test(maskedIdentifier) || !/[X*]/.test(maskedIdentifier))) {
+  if (maskedIdentifier && !/^[A-Z0-9\-\s]{4,64}$/.test(maskedIdentifier)) {
     return {
       ok: false,
       field: "maskedIdentifier",
-      message: "Masked identifier must hide most digits with X or *",
+      message: "Document number must be 4 to 64 letters, numbers, spaces, or hyphens",
     };
   }
 

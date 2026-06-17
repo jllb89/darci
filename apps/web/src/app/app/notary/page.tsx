@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useStoredAuth } from "@/lib/auth";
 import {
+  requestRealtimeBroadcastEvent,
+  useRequestRealtimeInvalidation,
+  type RequestRealtimeTarget,
+} from "@/lib/requestRealtime";
+import {
   fetchWithTokenRefresh,
+  formatDateTime,
   formatStatusLabel,
   notaryApiBaseUrl,
   readApiErrorMessage,
@@ -75,10 +81,13 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
   const queueStatus = resolveQueueStatus(request);
   const rowStatus = formatStatusLabel(queueStatus);
   const showSelectedBadge = isSelectedNotaryRequest(request);
+  const meetingStatus = request.meeting?.status ? formatStatusLabel(request.meeting.status) : "No meeting";
+  const finalizationStatus = formatStatusLabel(request.finalization.latestStatus);
+  const nextAction = request.nextAction ? formatStatusLabel(request.nextAction) : null;
 
   return (
     <Link
-      className="grid gap-3 px-3 py-4 text-sm transition hover:bg-Color-Neutral-Lightest sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.55fr)]"
+      className="grid gap-3 px-3 py-4 text-sm transition hover:bg-Color-Neutral-Lightest lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.5fr)_minmax(12rem,0.7fr)]"
       href={`/app/notary/requests/${encodeURIComponent(request.request.id)}`}
     >
       <div className="min-w-0">
@@ -93,16 +102,26 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
             </span>
           ) : null}
         </div>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-Color-Neutral">
+          <span>{meetingStatus}</span>
+          <span>{finalizationStatus}</span>
+          {nextAction ? <span>{nextAction}</span> : null}
+        </div>
       </div>
-      <div className="min-w-0 sm:text-right">
+      <div className="min-w-0 lg:text-right">
         <div className="truncate font-mono font-medium text-Color-Scheme-1-Text">{request.document.idn ?? "Pending"}</div>
+        <div className="mt-1 text-xs text-Color-Neutral">{formatStatusLabel(request.document.documentType)}</div>
+      </div>
+      <div className="min-w-0 lg:text-right">
+        <div className="truncate text-xs text-Color-Neutral">Submitted {formatDateTime(request.request.submittedAt)}</div>
+        <div className="mt-1 truncate text-xs text-Color-Neutral">Anchored {formatDateTime(request.finalization.anchoredAt)}</div>
       </div>
     </Link>
   );
 }
 
 export default function NotaryHomePage() {
-  const { accessToken } = useStoredAuth();
+  const { accessToken, refreshToken } = useStoredAuth();
   const [queue, setQueue] = useState<NotaryQueueResponse>(emptyQueue);
   const [activeTab, setActiveTab] = useState<QueueTab>("review");
   const [isLoading, setIsLoading] = useState(false);
@@ -137,8 +156,32 @@ export default function NotaryHomePage() {
     void loadQueue();
   }, [loadQueue]);
 
+  const realtimeTargets: RequestRealtimeTarget[] = [
+    { table: "notarization_requests" },
+    { table: "illuminotarization_workflows" },
+    { table: "workflow_status_history" },
+    { table: "meetings" },
+    { table: "meeting_participants" },
+    { table: "finalization_status_history" },
+    { table: "document_hash_records" },
+    { table: "ledger_anchor_attempts" },
+  ];
+
+  const realtimeState = useRequestRealtimeInvalidation({
+    enabled: Boolean(accessToken),
+    accessToken,
+    refreshToken,
+    channelName: "notary-queue",
+    targets: realtimeTargets,
+    broadcastTargets: [{ event: requestRealtimeBroadcastEvent, private: true }],
+    tableChangeTargetsEnabled: false,
+    onInvalidate: loadQueue,
+    pollIntervalMs: 45_000,
+  });
+
   const requestsByTab = splitRequests(queue.requests);
   const visibleRequests = requestsByTab[activeTab];
+  const showRealtimeFallbackNotice = realtimeState.status === "degraded" && realtimeState.isPollingFallbackActive;
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -160,6 +203,12 @@ export default function NotaryHomePage() {
 
       {errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div>
+      ) : null}
+
+      {showRealtimeFallbackNotice ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Live queue updates are reconnecting. Automatic refresh is on.
+        </div>
       ) : null}
 
       <section className="space-y-4 text-sm">
@@ -185,9 +234,10 @@ export default function NotaryHomePage() {
 
         {visibleRequests.length ? (
           <div className="bg-Color-White">
-            <div className="grid gap-3 px-3 py-2 text-xs uppercase tracking-wide text-Color-Neutral sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.55fr)]">
+            <div className="grid gap-3 px-3 py-2 text-xs uppercase tracking-wide text-Color-Neutral lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.5fr)_minmax(12rem,0.7fr)]">
               <div>Name</div>
-              <div className="sm:text-right">IDN</div>
+              <div className="lg:text-right">IDN</div>
+              <div className="lg:text-right">Activity</div>
             </div>
             <div className="divide-y divide-Color-Scheme-1-Border/20">
               {visibleRequests.map((request) => (

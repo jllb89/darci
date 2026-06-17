@@ -28,7 +28,7 @@ import { hashDocument } from "./hashingService";
 import { transitionIlluminotarizationWorkflowStatus } from "./illuminotarizationWorkflowService";
 import { anchorToLedger } from "./ledgerService";
 import { getMeetingByRequestId } from "./meetingService";
-import type { NotaryProfileRecord } from "./notaryProfileService";
+import { isNotaryCommissionCurrent, type NotaryProfileRecord } from "./notaryProfileService";
 import { downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -474,7 +474,7 @@ const createDerivedDocumentVersion = async (input: {
       mime_type: input.mimeType,
       size_bytes: input.sizeBytes,
       is_final: input.isFinal ?? false,
-      generation_run_id: null,
+      generation_run_id: input.sourceVersion.generation_run_id,
       created_by: input.createdBy,
     })
     .select(
@@ -1236,6 +1236,25 @@ const formatDisplayDate = (value: string | null | undefined) => {
   }).format(date);
 };
 
+const formatCommissionExpirationForCertificate = (value: string | null | undefined) => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return "Not provided";
+  }
+
+  const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? `${trimmed}T12:00:00.000Z` : trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+};
+
 const getDateParts = (value: string | null | undefined) => {
   const parsed = value ? new Date(value) : new Date();
   const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
@@ -1289,6 +1308,7 @@ const buildCaliforniaAcknowledgmentContent = (input: {
 }) => {
   const dateParts = getDateParts(input.venue.completedAt);
   const acknowledgers = input.acknowledgerNames.join(", ");
+  const commissionExpiresAt = formatCommissionExpirationForCertificate(input.notaryProfile.commissionExpiresAt);
   return [
     "Notarial Acknowledgement",
     `Document ID: ${input.document.id}`,
@@ -1308,7 +1328,7 @@ const buildCaliforniaAcknowledgmentContent = (input: {
     "Witness my hand and official seal.",
     "",
     `Commission number: ${input.notaryProfile.commissionNumber ?? "Not provided"}`,
-    `Commission expires: ${input.notaryProfile.commissionExpiresAt ?? "Not provided"}`,
+    `Commission expires: ${commissionExpiresAt}`,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -1322,6 +1342,7 @@ const buildOhioAcknowledgmentContent = (input: {
   identityMethodSummary?: string | null | undefined;
 }) => {
   const acknowledgers = input.acknowledgerNames.join(", ");
+  const commissionExpiresAt = formatCommissionExpirationForCertificate(input.notaryProfile.commissionExpiresAt);
   return [
     "ACKNOWLEDGMENT CERTIFICATE",
     `Document ID: ${input.document.id}`,
@@ -1339,7 +1360,7 @@ const buildOhioAcknowledgmentContent = (input: {
     "(Notary Seal)",
     `Signature of Notary Public - State of Ohio: ${input.notaryProfile.notaryName}`,
     `Commission number: ${input.notaryProfile.commissionNumber ?? "Not provided"}`,
-    `My commission expires: ${input.notaryProfile.commissionExpiresAt ?? "Not provided"}`,
+    `My commission expires: ${commissionExpiresAt}`,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -1468,40 +1489,55 @@ const wrapPdfText = (input: {
   return wrappedLines;
 };
 
-const decodeImageDataUrl = (dataUrl: string | null | undefined) => {
+const decodeImageDataUrl = (
+  dataUrl: string | null | undefined,
+  assetLabel: string,
+) => {
   if (!dataUrl) {
     return null;
   }
 
   const match = dataUrl.match(/^data:(image\/(?:png|jpe?g));base64,([a-z0-9+/=\s]+)$/i);
   if (!match) {
-    return null;
+    throw new DocumentFinalizationConflictError(`${assetLabel} must be a PNG or JPEG data URL`);
   }
 
   const mimeType = match[1];
   const base64Payload = match[2];
   if (!mimeType || !base64Payload) {
-    return null;
+    throw new DocumentFinalizationConflictError(`${assetLabel} is missing image data`);
+  }
+
+  const bytes = Buffer.from(base64Payload.replace(/\s+/g, ""), "base64");
+  if (bytes.byteLength === 0) {
+    throw new DocumentFinalizationConflictError(`${assetLabel} is missing image data`);
   }
 
   return {
     mimeType: mimeType.toLowerCase(),
-    bytes: Buffer.from(base64Payload.replace(/\s+/g, ""), "base64"),
+    bytes,
   };
 };
 
 const embedImageDataUrl = async (
   pdf: PdfLibDocument,
   dataUrl: string | null | undefined,
+  assetLabel: string,
 ) => {
-  const decoded = decodeImageDataUrl(dataUrl);
+  const decoded = decodeImageDataUrl(dataUrl, assetLabel);
   if (!decoded) {
     return null;
   }
 
-  return decoded.mimeType === "image/png"
-    ? pdf.embedPng(decoded.bytes)
-    : pdf.embedJpg(decoded.bytes);
+  try {
+    return decoded.mimeType === "image/png"
+      ? await pdf.embedPng(decoded.bytes)
+      : await pdf.embedJpg(decoded.bytes);
+  } catch {
+    throw new DocumentFinalizationConflictError(
+      `${assetLabel} could not be embedded as a PNG or JPEG image`,
+    );
+  }
 };
 
 const fitImageDimensions = (input: {
@@ -1604,8 +1640,8 @@ const drawAcknowledgmentBody = async (input: {
   }
 
   const [signatureImage, sealImage] = await Promise.all([
-    embedImageDataUrl(input.pdf, input.signatureImageDataUrl),
-    embedImageDataUrl(input.pdf, input.sealImageDataUrl),
+    embedImageDataUrl(input.pdf, input.signatureImageDataUrl, "Notary signature image"),
+    embedImageDataUrl(input.pdf, input.sealImageDataUrl, "Notary seal image"),
   ]);
 
   if (signatureImage || sealImage) {
@@ -1950,6 +1986,12 @@ export const appendAcknowledgmentPage = async (input: {
   ) {
     throw new DocumentFinalizationConflictError(
       "Assigned illuminotary profile must include jurisdiction, service area, commission details, signature, and seal before acknowledgment append",
+    );
+  }
+
+  if (!isNotaryCommissionCurrent(input.notaryProfile.commissionExpiresAt)) {
+    throw new DocumentFinalizationConflictError(
+      "Assigned illuminotary commission must be current before acknowledgment append",
     );
   }
 

@@ -33,6 +33,8 @@ type NotaryApplication = {
   jurisdiction: string;
   serviceAreaKind: NotaryServiceAreaKind;
   serviceAreaName: string;
+  commissionNumber: string | null;
+  commissionExpiresAt: string | null;
   signatureDataUrl: string | null;
   sealDataUrl: string | null;
   status: "pending" | "approved" | "rejected";
@@ -65,6 +67,8 @@ type AdminApplicationRow = {
   jurisdiction: string;
   serviceAreaKind: NotaryServiceAreaKind;
   serviceAreaName: string;
+  commissionNumber: string | null;
+  commissionExpiresAt: string | null;
   signatureDataUrl: string | null;
   sealDataUrl: string | null;
   reviewNotes: string | null;
@@ -87,8 +91,6 @@ type SelectOption = {
   value: string;
 };
 
-type CensusCountyRow = [string, string, string];
-
 type SavedSignature = {
   id: string;
   label: string;
@@ -97,10 +99,13 @@ type SavedSignature = {
 };
 
 const SAVED_SIGNATURES_STORAGE_KEY = "darci.notary.savedSignatures";
+const CURRENT_PROFILE_SIGNATURE_ID = "current-profile-signature";
 const DRAW_CANVAS_WIDTH = 960;
 const DRAW_CANVAS_HEIGHT = 320;
 const SIGNATURE_UPLOAD_MAX_DIMENSION = 960;
 const SEAL_UPLOAD_MAX_DIMENSION = 560;
+const ALLOWED_NOTARY_ASSET_MIME_TYPES = new Set(["image/png", "image/jpeg"]);
+const PDF_IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpe?g);base64,/i;
 
 const stateFipsByAbbreviation: Record<string, string> = {
   AL: "01",
@@ -214,12 +219,156 @@ const emptyApplicationForm = {
   jurisdiction: "",
   serviceAreaKind: "county" as NotaryServiceAreaKind,
   serviceAreaName: "",
+  commissionNumber: "",
+  commissionExpiresAt: "",
   signatureDataUrl: null as string | null,
   sealDataUrl: null as string | null,
 };
 
 const formatPersonName = (firstName: string | null, lastName: string | null) => {
   return [firstName, lastName].filter(Boolean).join(" ").trim() || "Profile";
+};
+
+const toLocalDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseCalendarDateValue = (value: string | null | undefined) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatCalendarDateKey = (date: Date) => {
+  return toLocalDateInputValue(date);
+};
+
+const getCalendarMonthStart = (date: Date) => {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+const addCalendarMonths = (date: Date, amount: number) => {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+};
+
+const addCalendarYears = (date: Date, amount: number) => {
+  return new Date(date.getFullYear() + amount, date.getMonth(), 1);
+};
+
+const getCalendarDecadeStart = (year: number) => Math.floor(year / 10) * 10;
+
+const getCalendarCenturyStart = (year: number) => Math.floor(year / 100) * 100;
+
+const getCalendarDecadeOptions = (year: number) => {
+  const centuryStart = getCalendarCenturyStart(year);
+  return Array.from({ length: 12 }, (_, index) => centuryStart - 10 + index * 10);
+};
+
+const getCalendarYearOptions = (year: number) => {
+  const decadeStart = getCalendarDecadeStart(year);
+  return Array.from({ length: 12 }, (_, index) => decadeStart - 1 + index);
+};
+
+const calendarMonthOptions = Array.from({ length: 12 }, (_, index) => {
+  const sampleDate = new Date(2026, index, 1);
+  return {
+    index,
+    shortLabel: sampleDate.toLocaleDateString(undefined, { month: "short" }),
+    longLabel: sampleDate.toLocaleDateString(undefined, { month: "long" }),
+  };
+});
+
+type CalendarView = "days" | "decades" | "years" | "months";
+
+const getCalendarPreviousLabel = (view: CalendarView) => {
+  if (view === "decades") {
+    return "Previous century";
+  }
+
+  if (view === "years") {
+    return "Previous decade";
+  }
+
+  if (view === "months") {
+    return "Previous year";
+  }
+
+  return "Previous month";
+};
+
+const getCalendarNextLabel = (view: CalendarView) => {
+  if (view === "decades") {
+    return "Next century";
+  }
+
+  if (view === "years") {
+    return "Next decade";
+  }
+
+  if (view === "months") {
+    return "Next year";
+  }
+
+  return "Next month";
+};
+
+const getCalendarDays = (visibleMonth: Date) => {
+  const firstOfMonth = getCalendarMonthStart(visibleMonth);
+  const firstVisibleDate = new Date(firstOfMonth);
+  firstVisibleDate.setDate(firstOfMonth.getDate() - firstOfMonth.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(firstVisibleDate);
+    date.setDate(firstVisibleDate.getDate() + index);
+    return date;
+  });
+};
+
+const formatCalendarDateLabel = (value: string, placeholder: string) => {
+  const parsed = parseCalendarDateValue(value);
+  if (!parsed) {
+    return placeholder;
+  }
+
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const toDateInputValue = (value: string | null | undefined) => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? "" : toLocalDateInputValue(parsed);
+};
+
+const toCommissionExpirationPayload = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed}T23:59:59.999Z` : "";
+};
+
+const isDateInputBeforeToday = (value: string) => {
+  const trimmed = value.trim();
+  return Boolean(trimmed) && trimmed < toLocalDateInputValue(new Date());
+};
+
+const formatCommissionExpiration = (value: string | null | undefined) => {
+  return toDateInputValue(value) || "Missing";
 };
 
 const normalizeJurisdictionValue = (value: string) => {
@@ -298,13 +447,14 @@ const inferServiceAreaKind = (serviceAreaLabel: string): NotaryServiceAreaKind =
   return "county";
 };
 
-const toDataUrlFromFile = (file: File, options?: { maxDimension?: number; quality?: number }) => {
+const isAllowedNotaryAssetFile = (file: File) => {
+  return ALLOWED_NOTARY_ASSET_MIME_TYPES.has(file.type.toLowerCase());
+};
+
+const renderImageSourceToPngDataUrl = (source: string, options?: { maxDimension?: number }) => {
   return new Promise<string>((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-
       const maxDimension = options?.maxDimension ?? SIGNATURE_UPLOAD_MAX_DIMENSION;
       const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
       const width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -321,14 +471,40 @@ const toDataUrlFromFile = (file: File, options?: { maxDimension?: number; qualit
       canvas.height = height;
       context.clearRect(0, 0, width, height);
       context.drawImage(image, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/webp", options?.quality ?? 0.82));
+      resolve(canvas.toDataURL("image/png"));
     };
     image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
       reject(new Error("Failed to read image file"));
     };
-    image.src = objectUrl;
+    image.src = source;
   });
+};
+
+const toDataUrlFromFile = (file: File, options?: { maxDimension?: number }) => {
+  const objectUrl = URL.createObjectURL(file);
+  return renderImageSourceToPngDataUrl(objectUrl, options).finally(() => {
+    URL.revokeObjectURL(objectUrl);
+  });
+};
+
+const normalizeNotaryAssetDataUrl = async (
+  dataUrl: string | null,
+  options?: { maxDimension?: number },
+) => {
+  const trimmed = dataUrl?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+
+  if (PDF_IMAGE_DATA_URL_PATTERN.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (!trimmed.startsWith("data:image/")) {
+    throw new Error("Signature and seal images must be PNG or JPG files.");
+  }
+
+  return renderImageSourceToPngDataUrl(trimmed, options);
 };
 
 const loadSavedSignatures = (): SavedSignature[] => {
@@ -355,6 +531,15 @@ const loadSavedSignatures = (): SavedSignature[] => {
   }
 };
 
+const getInitialSelectedSavedSignatureId = (value: string | null) => {
+  const currentValue = value?.trim() ?? "";
+  if (!currentValue) {
+    return null;
+  }
+
+  return loadSavedSignatures().find((item) => item.dataUrl === currentValue)?.id ?? CURRENT_PROFILE_SIGNATURE_ID;
+};
+
 const saveSignatureToLibrary = (dataUrl: string) => {
   if (typeof window === "undefined") {
     return;
@@ -371,6 +556,372 @@ const saveSignatureToLibrary = (dataUrl: string) => {
   const deduped = [nextItem, ...current.filter((item) => item.dataUrl !== dataUrl)].slice(0, 10);
   localStorage.setItem(SAVED_SIGNATURES_STORAGE_KEY, JSON.stringify(deduped));
 };
+
+const removeSignatureFromLibrary = (signatureId: string) => {
+  if (typeof window === "undefined") {
+    return [] as SavedSignature[];
+  }
+
+  const nextSignatures = loadSavedSignatures().filter((item) => item.id !== signatureId);
+  localStorage.setItem(SAVED_SIGNATURES_STORAGE_KEY, JSON.stringify(nextSignatures));
+  return nextSignatures;
+};
+
+function SettingsDatePicker({
+  value,
+  onChange,
+  disabled,
+  min,
+  className,
+  placeholder = "Select date",
+  ariaLabel = "Select date",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  min?: string;
+  className: string;
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const selectedDate = parseCalendarDateValue(value);
+  const minDate = parseCalendarDateValue(min);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [calendarView, setCalendarView] = useState<CalendarView>("days");
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    getCalendarMonthStart(selectedDate ?? minDate ?? new Date()),
+  );
+  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
+
+  const updatePopoverPosition = useCallback(() => {
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) {
+      return;
+    }
+
+    const popoverWidth = 288;
+    const leftBoundary = 16;
+    const rightBoundary = window.innerWidth - popoverWidth - leftBoundary;
+    setPopoverPosition({
+      left: Math.max(leftBoundary, Math.min(triggerRect.left, rightBoundary)),
+      top: triggerRect.bottom + 8,
+    });
+  }, []);
+
+  useEffect(() => {
+    const nextSelectedDate = parseCalendarDateValue(value);
+    if (nextSelectedDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- keep the calendar month aligned to the selected field date.
+      setVisibleMonth(getCalendarMonthStart(nextSelectedDate));
+    }
+  }, [value]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- measure trigger position after the calendar opens.
+    updatePopoverPosition();
+    window.addEventListener("resize", updatePopoverPosition);
+    window.addEventListener("scroll", updatePopoverPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePopoverPosition);
+      window.removeEventListener("scroll", updatePopoverPosition, true);
+    };
+  }, [isOpen, updatePopoverPosition]);
+
+  const selectedKey = selectedDate ? formatCalendarDateKey(selectedDate) : null;
+  const minKey = minDate ? formatCalendarDateKey(minDate) : null;
+  const currentMonth = visibleMonth.getMonth();
+  const currentYear = visibleMonth.getFullYear();
+  const currentDecadeStart = getCalendarDecadeStart(currentYear);
+  const currentCenturyStart = getCalendarCenturyStart(currentYear);
+  const decadeOptions = useMemo(() => getCalendarDecadeOptions(currentYear), [currentYear]);
+  const yearOptions = useMemo(() => getCalendarYearOptions(currentYear), [currentYear]);
+  const monthName = visibleMonth.toLocaleDateString(undefined, { month: "long" });
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+  const calendarPopover =
+    isOpen && popoverPosition && portalTarget
+      ? createPortal(
+          <div
+            className="fixed z-[120] w-72 rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-4 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
+            style={{ left: popoverPosition.left, top: popoverPosition.top }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White transition-colors hover:bg-Color-Neutral-Lightest/70"
+                aria-label={getCalendarPreviousLabel(calendarView)}
+                onClick={() => {
+                  if (calendarView === "decades") {
+                    setVisibleMonth((current) => addCalendarYears(current, -100));
+                    return;
+                  }
+
+                  if (calendarView === "years") {
+                    setVisibleMonth((current) => addCalendarYears(current, -10));
+                    return;
+                  }
+
+                  if (calendarView === "months") {
+                    setVisibleMonth((current) => addCalendarYears(current, -1));
+                    return;
+                  }
+
+                  setVisibleMonth((current) => addCalendarMonths(current, -1));
+                }}
+              >
+                <span aria-hidden="true" className="h-2 w-2 rotate-[135deg] border-b border-r border-Color-Neutral-Darkest" />
+              </button>
+              {calendarView === "days" ? (
+                <div className="flex items-center gap-1 text-sm font-medium text-Color-Scheme-1-Text">
+                  <button
+                    type="button"
+                    className="rounded-md px-1.5 py-1 transition-colors hover:bg-Color-White"
+                    onClick={() => setCalendarView("months")}
+                  >
+                    {monthName}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md px-1.5 py-1 transition-colors hover:bg-Color-White"
+                    aria-label={`Select year, current year ${currentYear}`}
+                    onClick={() => setCalendarView("decades")}
+                  >
+                    {currentYear}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {calendarView === "decades" ? (
+                    <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                      {currentCenturyStart - 10}-{currentCenturyStart + 109}
+                    </div>
+                  ) : null}
+                  {calendarView === "years" ? (
+                    <button
+                      type="button"
+                      className="rounded-md px-1.5 py-1 text-sm font-medium text-Color-Scheme-1-Text transition-colors hover:bg-Color-White"
+                      onClick={() => setCalendarView("decades")}
+                    >
+                      {currentDecadeStart}-{currentDecadeStart + 9}
+                    </button>
+                  ) : null}
+                  {calendarView === "months" ? (
+                    <button
+                      type="button"
+                      className="rounded-md px-1.5 py-1 text-sm font-medium text-Color-Scheme-1-Text transition-colors hover:bg-Color-White"
+                      onClick={() => setCalendarView("years")}
+                    >
+                      {currentYear}
+                    </button>
+                  ) : null}
+                </>
+              )}
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White transition-colors hover:bg-Color-Neutral-Lightest/70"
+                aria-label={getCalendarNextLabel(calendarView)}
+                onClick={() => {
+                  if (calendarView === "decades") {
+                    setVisibleMonth((current) => addCalendarYears(current, 100));
+                    return;
+                  }
+
+                  if (calendarView === "years") {
+                    setVisibleMonth((current) => addCalendarYears(current, 10));
+                    return;
+                  }
+
+                  if (calendarView === "months") {
+                    setVisibleMonth((current) => addCalendarYears(current, 1));
+                    return;
+                  }
+
+                  setVisibleMonth((current) => addCalendarMonths(current, 1));
+                }}
+              >
+                <span aria-hidden="true" className="h-2 w-2 -rotate-45 border-b border-r border-Color-Neutral-Darkest" />
+              </button>
+            </div>
+
+            {calendarView === "decades" ? (
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {decadeOptions.map((decadeStart) => {
+                  const isCurrentDecade = decadeStart === currentDecadeStart;
+
+                  return (
+                    <button
+                      key={decadeStart}
+                      type="button"
+                      className={`h-10 rounded-md border text-xs transition-colors ${
+                        isCurrentDecade
+                          ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                          : "border-transparent bg-Color-White/70 text-Color-Scheme-1-Text hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                      }`}
+                      onClick={() => {
+                        setVisibleMonth(new Date(decadeStart, currentMonth, 1));
+                        setCalendarView("years");
+                      }}
+                    >
+                      {decadeStart}-{decadeStart + 9}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {calendarView === "years" ? (
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {yearOptions.map((year) => {
+                  const isSelectedYear = selectedDate?.getFullYear() === year;
+                  const isMuted = year < currentDecadeStart || year > currentDecadeStart + 9;
+
+                  return (
+                    <button
+                      key={year}
+                      type="button"
+                      className={`h-10 rounded-md border text-xs transition-colors ${
+                        isSelectedYear
+                          ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                          : "border-transparent bg-Color-White/70 hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                      } ${isMuted ? "text-Color-Neutral" : "text-Color-Scheme-1-Text"}`}
+                      onClick={() => {
+                        setVisibleMonth(new Date(year, currentMonth, 1));
+                        setCalendarView("months");
+                      }}
+                    >
+                      {year}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {calendarView === "months" ? (
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {calendarMonthOptions.map((month) => {
+                  const isSelectedMonth = selectedDate?.getFullYear() === currentYear && selectedDate.getMonth() === month.index;
+                  const isCurrentVisibleMonth = currentMonth === month.index;
+
+                  return (
+                    <button
+                      key={month.index}
+                      type="button"
+                      className={`h-10 rounded-md border text-xs transition-colors ${
+                        isSelectedMonth || isCurrentVisibleMonth
+                          ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                          : "border-transparent bg-Color-White/70 text-Color-Scheme-1-Text hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                      }`}
+                      aria-label={`Show ${month.longLabel} ${currentYear}`}
+                      onClick={() => {
+                        setVisibleMonth(new Date(currentYear, month.index, 1));
+                        setCalendarView("days");
+                      }}
+                    >
+                      {month.shortLabel}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {calendarView === "days" ? (
+              <>
+                <div className="mt-4 grid grid-cols-7 gap-1.5 text-center text-[11px] uppercase text-Color-Neutral">
+                  {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+                    <div key={day}>{day}</div>
+                  ))}
+                </div>
+                <div className="mt-2 grid grid-cols-7 gap-1.5">
+                  {days.map((day) => {
+                    const dayKey = formatCalendarDateKey(day);
+                    const isSelected = dayKey === selectedKey;
+                    const isMuted = day.getMonth() !== currentMonth;
+                    const isBeforeMin = Boolean(minKey && dayKey < minKey);
+
+                    return (
+                      <button
+                        key={dayKey}
+                        type="button"
+                        disabled={isBeforeMin}
+                        className={`h-8 rounded-md border text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                          isSelected
+                            ? "border-Color-Neutral-Darkest bg-Color-Neutral-Darkest text-Color-White"
+                            : "border-transparent bg-Color-White/70 hover:border-Color-Scheme-1-Border/60 hover:bg-Color-White"
+                        } ${isMuted ? "text-Color-Neutral" : "text-Color-Scheme-1-Text"}`}
+                        onClick={() => {
+                          if (isBeforeMin) {
+                            return;
+                          }
+
+                          onChange(dayKey);
+                          setIsOpen(false);
+                          setCalendarView("days");
+                          triggerRef.current?.blur();
+                        }}
+                      >
+                        {day.getDate()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
+
+            {value ? (
+              <button
+                type="button"
+                className="mt-4 w-full rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-2 py-2 text-xs text-Color-Neutral-Darkest transition-colors hover:bg-Color-Neutral-Lightest/70"
+                onClick={() => {
+                  onChange("");
+                  setIsOpen(false);
+                  setCalendarView("days");
+                  triggerRef.current?.blur();
+                }}
+              >
+                Clear date
+              </button>
+            ) : null}
+          </div>,
+          portalTarget,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        className={`${className} flex items-center justify-between gap-3 text-left disabled:cursor-not-allowed disabled:opacity-50`}
+        aria-label={ariaLabel}
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (disabled) {
+            return;
+          }
+
+          if (!isOpen) {
+            updatePopoverPosition();
+            setCalendarView("days");
+          }
+          setIsOpen(!isOpen);
+        }}
+      >
+        <span className={value ? undefined : "text-Color-Neutral"}>
+          {formatCalendarDateLabel(value, placeholder)}
+        </span>
+        <span aria-hidden="true" className="h-1.5 w-1.5 rotate-45 border-b border-r border-Color-Neutral" />
+      </button>
+      {calendarPopover}
+    </>
+  );
+}
 
 function SelectField({
   label,
@@ -499,12 +1050,14 @@ function SignatureCaptureField({
   onChange: (nextValue: string | null) => void;
   disabled?: boolean;
 }) {
-  const [mode, setMode] = useState<"draw" | "upload" | "saved">("draw");
+  const [mode, setMode] = useState<"draw" | "upload" | "saved">(() => value ? "saved" : "draw");
   const [isUsingDrawnSignature, setIsUsingDrawnSignature] = useState(false);
   const [savedSignatures, setSavedSignatures] = useState<SavedSignature[]>(() =>
     loadSavedSignatures(),
   );
-  const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
+  const [selectedSavedId, setSelectedSavedId] = useState<string | null>(() =>
+    getInitialSelectedSavedSignatureId(value),
+  );
   const [isDraggingUpload, setIsDraggingUpload] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
@@ -619,7 +1172,7 @@ function SignatureCaptureField({
       return;
     }
 
-    const dataUrl = canvas.toDataURL("image/webp", 0.82);
+    const dataUrl = canvas.toDataURL("image/png");
     onChange(dataUrl);
     saveSignatureToLibrary(dataUrl);
     setSavedSignatures(loadSavedSignatures());
@@ -631,13 +1184,12 @@ function SignatureCaptureField({
       return;
     }
 
-    if (!file.type.startsWith("image/")) {
+    if (!isAllowedNotaryAssetFile(file)) {
       return;
     }
 
     const dataUrl = await toDataUrlFromFile(file, {
       maxDimension: SIGNATURE_UPLOAD_MAX_DIMENSION,
-      quality: 0.82,
     });
     onChange(dataUrl);
     saveSignatureToLibrary(dataUrl);
@@ -658,9 +1210,43 @@ function SignatureCaptureField({
     void applyUploadFile(file);
   }, [applyUploadFile]);
 
+  const savedSignatureOptions = useMemo(() => {
+    const currentValue = value?.trim() ?? "";
+    if (!currentValue || savedSignatures.some((item) => item.dataUrl === currentValue)) {
+      return savedSignatures;
+    }
+
+    return [
+      {
+        id: CURRENT_PROFILE_SIGNATURE_ID,
+        label: "Current profile signature",
+        dataUrl: currentValue,
+        createdAt: "",
+      },
+      ...savedSignatures,
+    ];
+  }, [savedSignatures, value]);
+
   const selectedSaved = useMemo(() => {
-    return savedSignatures.find((item) => item.id === selectedSavedId) ?? null;
-  }, [savedSignatures, selectedSavedId]);
+    return savedSignatureOptions.find((item) => item.id === selectedSavedId) ?? null;
+  }, [savedSignatureOptions, selectedSavedId]);
+
+  const deleteSavedSignature = useCallback((signature: SavedSignature) => {
+    if (signature.id === CURRENT_PROFILE_SIGNATURE_ID) {
+      if (value === signature.dataUrl) {
+        onChange(null);
+      }
+      setSelectedSavedId(null);
+      return;
+    }
+
+    const nextSavedSignatures = removeSignatureFromLibrary(signature.id);
+    setSavedSignatures(nextSavedSignatures);
+    setSelectedSavedId((currentId) => currentId === signature.id ? null : currentId);
+    if (value === signature.dataUrl) {
+      onChange(null);
+    }
+  }, [onChange, value]);
 
   return (
     <div className="space-y-3 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
@@ -743,31 +1329,65 @@ function SignatureCaptureField({
           }`}
         >
           <div className="font-medium text-Color-Scheme-1-Text">Drag & drop signature image or click to upload</div>
-          <div className="mt-1 text-xs text-Color-Neutral">PNG, JPG, or WEBP</div>
-          <input type="file" accept="image/*" className="hidden" onChange={onUploadInputChange} />
+          <div className="mt-1 text-xs text-Color-Neutral">PNG or JPG</div>
+          <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={onUploadInputChange} />
         </label>
       ) : null}
 
       {mode === "saved" ? (
         <div className="space-y-3">
-          {savedSignatures.length === 0 ? (
+          {savedSignatureOptions.length === 0 ? (
             <div className="rounded-md bg-white p-3 text-xs text-Color-Neutral">No saved signatures yet.</div>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
-              {savedSignatures.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setSelectedSavedId(item.id)}
-                  className={`rounded-lg border p-2 text-left ${
-                    selectedSavedId === item.id ? "border-Green" : "border-Color-Scheme-1-Border/30"
-                  }`}
-                >
-                  <div className="mb-2 text-xs text-Color-Neutral">{item.label}</div>
-                  <img src={item.dataUrl} alt={item.label} className="h-14 w-full rounded bg-white object-contain" />
-                </button>
-              ))}
+              {savedSignatureOptions.map((item) => {
+                const isSelected = selectedSavedId === item.id;
+                const isCurrentProfileSignature = item.id === CURRENT_PROFILE_SIGNATURE_ID;
+                const deleteLabel = isCurrentProfileSignature
+                  ? "Clear current profile signature"
+                  : "Delete saved signature";
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`relative overflow-hidden rounded-lg border bg-white transition-colors ${
+                      isSelected ? "border-Green" : "border-Color-Scheme-1-Border/30"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setSelectedSavedId(item.id)}
+                      className="block w-full p-2 pr-11 text-left disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <div className="mb-2 text-xs text-Color-Neutral">{item.label}</div>
+                      <img src={item.dataUrl} alt={item.label} className="h-14 w-full rounded bg-white object-contain" />
+                    </button>
+                    <button
+                      aria-label={deleteLabel}
+                      className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-Color-Scheme-1-Border/70 bg-white/95 text-Color-Neutral shadow-[0_8px_18px_rgba(0,0,0,0.08)] transition-[background-color,border-color,color,transform,opacity] duration-200 ease-out hover:-translate-y-0.5 hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={disabled}
+                      onClick={() => deleteSavedSignature(item)}
+                      title={deleteLabel}
+                      type="button"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M9.25 5.75h5.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                        <path d="M10.25 5.75 10.9 4.5h2.2l.65 1.25" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+                        <path d="M6.75 8h10.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                        <path d="m8.25 8 .55 10.25h6.4L15.75 8" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+                        <path d="M10.75 11v4.25" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                        <path d="M13.25 11v4.25" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
           <button
@@ -811,13 +1431,12 @@ function SealDropzoneField({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const onFile = useCallback(async (file: File | null) => {
-    if (!file || disabled || !file.type.startsWith("image/")) {
+    if (!file || disabled || !isAllowedNotaryAssetFile(file)) {
       return;
     }
 
     const dataUrl = await toDataUrlFromFile(file, {
       maxDimension: SEAL_UPLOAD_MAX_DIMENSION,
-      quality: 0.82,
     });
     onChange(dataUrl);
   }, [disabled, onChange]);
@@ -873,13 +1492,13 @@ function SealDropzoneField({
         ) : (
           <>
             <div className="font-medium text-Color-Scheme-1-Text">Drag & drop your seal image</div>
-            <div className="mt-1 text-xs text-Color-Neutral">or click to choose a file</div>
+            <div className="mt-1 text-xs text-Color-Neutral">PNG or JPG</div>
           </>
         )}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept="image/png,image/jpeg"
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0] ?? null;
@@ -967,6 +1586,8 @@ export default function SettingsPage() {
               jurisdiction: formSource.jurisdiction,
               serviceAreaKind: formSource.serviceAreaKind,
               serviceAreaName: formSource.serviceAreaName,
+              commissionNumber: formSource.commissionNumber ?? "",
+              commissionExpiresAt: toDateInputValue(formSource.commissionExpiresAt),
               signatureDataUrl: formSource.signatureDataUrl,
               sealDataUrl: formSource.sealDataUrl,
             }
@@ -1103,7 +1724,7 @@ export default function SettingsPage() {
       return;
     }
 
-    const isProfileUpdate = application?.status === "approved";
+    const isProfileUpdate = Boolean(notaryProfile) || application?.status === "approved";
     if (application && !isProfileUpdate) {
       setErrorMessage("A notary application has already been submitted for this account.");
       return;
@@ -1114,11 +1735,41 @@ export default function SettingsPage() {
       return;
     }
 
+    if (!applicationForm.commissionNumber.trim() || !applicationForm.commissionExpiresAt.trim()) {
+      setErrorMessage("Enter your commission number and expiration date.");
+      return;
+    }
+
+    if (isDateInputBeforeToday(applicationForm.commissionExpiresAt)) {
+      setErrorMessage("Commission expiration must be today or later.");
+      return;
+    }
+
     setIsSavingApplication(true);
     setMessage(null);
     setErrorMessage(null);
 
     try {
+      const [signatureDataUrl, sealDataUrl] = await Promise.all([
+        normalizeNotaryAssetDataUrl(applicationForm.signatureDataUrl, {
+          maxDimension: SIGNATURE_UPLOAD_MAX_DIMENSION,
+        }),
+        normalizeNotaryAssetDataUrl(applicationForm.sealDataUrl, {
+          maxDimension: SEAL_UPLOAD_MAX_DIMENSION,
+        }),
+      ]);
+
+      if (
+        signatureDataUrl !== applicationForm.signatureDataUrl ||
+        sealDataUrl !== applicationForm.sealDataUrl
+      ) {
+        setApplicationForm((current) => ({
+          ...current,
+          signatureDataUrl,
+          sealDataUrl,
+        }));
+      }
+
       const response = await fetchWithTokenRefresh(`${notaryApiBaseUrl}/users/me/${isProfileUpdate ? "notary-profile" : "notary-application"}`, accessToken, {
         method: isProfileUpdate ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -1126,8 +1777,10 @@ export default function SettingsPage() {
           jurisdiction: applicationForm.jurisdiction.trim(),
           serviceAreaKind: applicationForm.serviceAreaKind,
           serviceAreaName: applicationForm.serviceAreaName.trim(),
-          signatureDataUrl: applicationForm.signatureDataUrl,
-          sealDataUrl: applicationForm.sealDataUrl,
+          commissionNumber: applicationForm.commissionNumber.trim(),
+          commissionExpiresAt: toCommissionExpirationPayload(applicationForm.commissionExpiresAt),
+          signatureDataUrl,
+          sealDataUrl,
         }),
       });
 
@@ -1200,7 +1853,7 @@ export default function SettingsPage() {
     [adminApplications],
   );
   const hasSubmittedApplication = Boolean(application);
-  const canEditApprovedProfile = application?.status === "approved";
+  const canEditApprovedProfile = Boolean(notaryProfile) || application?.status === "approved";
   const isProfileFormLocked = Boolean(application && !canEditApprovedProfile);
   const applicationStatusLabel = application
     ? application.status.charAt(0).toUpperCase() + application.status.slice(1)
@@ -1306,7 +1959,34 @@ export default function SettingsPage() {
               Service area options are loaded from the US Census county dataset for the selected state.
             </div>
 
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-medium text-Color-Neutral-Darkest">
+                <span>Commission number</span>
+                <input
+                  className="h-10 rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-3 text-sm text-Color-Scheme-1-Text outline-none transition-colors focus-visible:border-Color-Scheme-1-Text disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isProfileFormLocked || isSavingApplication || isLoading}
+                  maxLength={120}
+                  onChange={(event) => setApplicationForm((current) => ({ ...current, commissionNumber: event.target.value }))}
+                  placeholder="State commission number"
+                  value={applicationForm.commissionNumber}
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-xs font-medium text-Color-Neutral-Darkest">
+                <span>Commission expiration</span>
+                <SettingsDatePicker
+                  className="h-10 rounded-md border border-Color-Scheme-1-Border/50 bg-Color-White px-3 text-sm text-Color-Scheme-1-Text outline-none transition-colors focus-visible:border-Color-Scheme-1-Text disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isProfileFormLocked || isSavingApplication || isLoading}
+                  min={toLocalDateInputValue(new Date())}
+                  onChange={(value) => setApplicationForm((current) => ({ ...current, commissionExpiresAt: value }))}
+                  placeholder="Select expiration date"
+                  value={applicationForm.commissionExpiresAt}
+                />
+              </label>
+            </div>
+
             <SignatureCaptureField
+              key={notaryProfile?.updatedAt ?? application?.updatedAt ?? "new-notary-signature"}
               value={applicationForm.signatureDataUrl}
               onChange={(nextValue) => setApplicationForm((current) => ({ ...current, signatureDataUrl: nextValue }))}
               disabled={isProfileFormLocked || isSavingApplication || isLoading}
@@ -1364,23 +2044,28 @@ export default function SettingsPage() {
 
           {pendingApplications.length ? (
             <div className="overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
-              <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)] gap-3 bg-Color-Neutral-Lightest px-4 py-3 text-xs uppercase tracking-wide text-Color-Neutral">
+              <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,0.75fr)] gap-3 bg-Color-Neutral-Lightest px-4 py-3 text-xs uppercase tracking-wide text-Color-Neutral">
                 <div>Member</div>
                 <div>Jurisdiction</div>
                 <div>Service area</div>
+                <div>Commission</div>
                 <div className="text-right">Actions</div>
               </div>
               <div className="divide-y divide-Color-Scheme-1-Border/15">
                 {pendingApplications.map((row) => {
                   const fullName = formatPersonName(row.user?.firstName ?? null, row.user?.lastName ?? null);
                   return (
-                    <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)] gap-3 px-4 py-4 text-sm" key={row.id}>
+                    <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,0.75fr)] gap-3 px-4 py-4 text-sm" key={row.id}>
                       <div className="min-w-0">
                         <div className="font-medium text-Color-Scheme-1-Text">{fullName}</div>
                         <div className="text-xs text-Color-Neutral">{row.user?.email ?? row.user?.phone ?? "No contact on file"}</div>
                       </div>
                       <div className="text-Color-Neutral-Darkest">{row.jurisdiction}</div>
                       <div className="text-Color-Neutral-Darkest">{row.serviceAreaKind} · {row.serviceAreaName}</div>
+                      <div className="text-Color-Neutral-Darkest">
+                        <div>{row.commissionNumber?.trim() || "Missing"}</div>
+                        <div className="text-xs text-Color-Neutral">Expires {formatCommissionExpiration(row.commissionExpiresAt)}</div>
+                      </div>
                       <div className="flex items-center justify-end gap-2">
                         <button
                           className="rounded-lg bg-Green px-3 py-2 text-xs font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"

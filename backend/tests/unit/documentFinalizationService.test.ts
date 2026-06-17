@@ -21,6 +21,9 @@ const createSamplePdf = async () => {
   return Buffer.from(await pdf.save());
 };
 
+const onePixelPngDataUrl =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
 const baseRenderInput = {
   document: {
     id: "doc-1",
@@ -41,7 +44,7 @@ const baseRenderInput = {
     serviceAreaKind: "county",
     serviceAreaName: "Franklin County",
     commissionNumber: "OH-12345",
-    commissionExpiresAt: "2028-04-22",
+    commissionExpiresAt: "2028-04-22T23:59:59.999Z",
     signatureDataUrl: "data:image/png;base64,aGVsbG8=",
     sealDataUrl: "data:image/png;base64,aGVsbG8=",
   },
@@ -70,6 +73,39 @@ describe("documentFinalizationService", () => {
     expect(transformedPdf.getPageCount()).toBe(sourcePdf.getPageCount() + 1);
     expect(transformedPdf.getPage(1).getWidth()).toBe(sourcePdf.getPage(0).getWidth());
     expect(transformedPdf.getPage(1).getHeight()).toBe(sourcePdf.getPage(0).getHeight());
+  });
+
+  it("embeds provided notary signature and seal images on the acknowledgment page", async () => {
+    const sourcePdfBytes = await createSamplePdf();
+    const textOnlyPdfBytes = await appendAcknowledgmentPageToPdf({
+      sourcePdfBytes,
+      acknowledgmentContent: "DARCi Notarial Acknowledgment\nDocument ID: doc-1",
+    });
+
+    const stampedPdfBytes = await appendAcknowledgmentPageToPdf({
+      sourcePdfBytes,
+      acknowledgmentContent: "DARCi Notarial Acknowledgment\nDocument ID: doc-1",
+      signatureImageDataUrl: onePixelPngDataUrl,
+      sealImageDataUrl: onePixelPngDataUrl,
+    });
+
+    const stampedPdf = await PdfLibDocument.load(stampedPdfBytes);
+
+    expect(stampedPdf.getPageCount()).toBe(2);
+    expect(stampedPdfBytes.byteLength).toBeGreaterThan(textOnlyPdfBytes.byteLength);
+  });
+
+  it("rejects unsupported notary signature image formats instead of silently skipping them", async () => {
+    const sourcePdfBytes = await createSamplePdf();
+
+    await expect(
+      appendAcknowledgmentPageToPdf({
+        sourcePdfBytes,
+        acknowledgmentContent: "DARCi Notarial Acknowledgment\nDocument ID: doc-1",
+        signatureImageDataUrl: "data:image/webp;base64,AAAA",
+        sealImageDataUrl: onePixelPngDataUrl,
+      }),
+    ).rejects.toThrow("Notary signature image must be a PNG or JPEG data URL");
   });
 
   it("renders California acknowledgment content without internal boilerplate", () => {
@@ -105,6 +141,9 @@ describe("documentFinalizationService", () => {
     expect(rendered.content).toContain("County of Los Angeles");
     expect(rendered.content).toContain("Taylor Trustee, Riley Trustee");
     expect(rendered.content).toContain("I certify under penalty of perjury under the laws of the State of California");
+    expect(rendered.content).toContain("Commission number: CA-12345");
+    expect(rendered.content).toContain("Commission expires: April 22, 2028");
+    expect(rendered.content).not.toContain("2028-04-22T23:59:59.999Z");
     expect(rendered.content).not.toContain("Template:");
     expect(rendered.content).not.toContain("Signer consent required.");
     expect(rendered.content).not.toContain("Venue confirmation required.");
@@ -129,7 +168,9 @@ describe("documentFinalizationService", () => {
     expect(rendered.content).toContain("State of Ohio");
     expect(rendered.content).toContain("County of Franklin");
     expect(rendered.content).toContain("The foregoing instrument was acknowledged before me on this April 22, 2026 by Pat Principal.");
-    expect(rendered.content).toContain("My commission expires: 2028-04-22");
+    expect(rendered.content).toContain("Commission number: OH-12345");
+    expect(rendered.content).toContain("My commission expires: April 22, 2028");
+    expect(rendered.content).not.toContain("2028-04-22T23:59:59.999Z");
     expect(rendered.venue.formattedVenue).toContain("Franklin County");
     expect(rendered.content).not.toContain("Template:");
     expect(rendered.content).not.toContain("Signer consent required.");

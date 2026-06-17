@@ -47,6 +47,60 @@ export class RequestReadModelServiceError extends Error {
   }
 }
 
+const readModelFallback = async <T>(input: {
+  operation: string;
+  fallback: T;
+  details: Record<string, unknown>;
+  run: () => Promise<T>;
+}) => {
+  try {
+    return await input.run();
+  } catch (error) {
+    console.warn("Request read model enrichment fallback used", {
+      operation: input.operation,
+      ...input.details,
+      error: error instanceof Error ? error.message : error,
+    });
+    return input.fallback;
+  }
+};
+
+const safelyGetWorkflowById = (input: { workflowId: string; requestId: string }) => {
+  return readModelFallback<IlluminotarizationWorkflowRecord | null>({
+    operation: "workflow_lookup",
+    fallback: null,
+    details: {
+      requestId: input.requestId,
+      workflowId: input.workflowId,
+    },
+    run: () => getIlluminotarizationWorkflowById(input.workflowId),
+  });
+};
+
+const safelyListWorkflowStatusHistory = (input: { workflowId: string; requestId: string }) => {
+  return readModelFallback<IlluminotarizationWorkflowStatusHistoryRecord[]>({
+    operation: "workflow_status_history",
+    fallback: [],
+    details: {
+      requestId: input.requestId,
+      workflowId: input.workflowId,
+    },
+    run: () => listWorkflowStatusHistory(input.workflowId),
+  });
+};
+
+const safelyListFinalizationStatusHistory = (input: { documentId: string; requestId: string }) => {
+  return readModelFallback({
+    operation: "finalization_status_history",
+    fallback: [],
+    details: {
+      requestId: input.requestId,
+      documentId: input.documentId,
+    },
+    run: () => listFinalizationStatusHistory(input.documentId),
+  });
+};
+
 type SharedRequestResponse = {
   id: string;
   documentId: string;
@@ -628,13 +682,21 @@ export const getSharedRequestDetail = async (input: {
       viewerRole: input.role,
     }),
     resource.request.workflow_id
-      ? getIlluminotarizationWorkflowById(resource.request.workflow_id)
+      ? safelyGetWorkflowById({
+          workflowId: resource.request.workflow_id,
+          requestId: resource.request.id,
+        })
       : Promise.resolve(null),
     getLatestCodeDeliveryForRequest(resource.request.id),
   ]);
   const [participants, workflowStatusHistory] = await Promise.all([
     meeting ? listMeetingParticipants(meeting.id) : Promise.resolve([]),
-    resource.request.workflow_id ? listWorkflowStatusHistory(resource.request.workflow_id) : Promise.resolve([]),
+    resource.request.workflow_id
+      ? safelyListWorkflowStatusHistory({
+          workflowId: resource.request.workflow_id,
+          requestId: resource.request.id,
+        })
+      : Promise.resolve([]),
   ]);
   const workflowStatus =
     getLatestWorkflowStatusEntry(workflowStatusHistory)?.next_status ??
@@ -706,10 +768,16 @@ export const getSharedRequestTimeline = async (input: {
 
   const [systemValues, finalizationStatusHistory] = await Promise.all([
     listDocumentSystemValues(resource.document.id),
-    listFinalizationStatusHistory(resource.document.id),
+    safelyListFinalizationStatusHistory({
+      documentId: resource.document.id,
+      requestId: resource.request.id,
+    }),
   ]);
   const workflowStatusHistory = resource.request.workflow_id
-    ? await listWorkflowStatusHistory(resource.request.workflow_id)
+    ? await safelyListWorkflowStatusHistory({
+        workflowId: resource.request.workflow_id,
+        requestId: resource.request.id,
+      })
     : [];
 
   return buildDocumentTimeline({

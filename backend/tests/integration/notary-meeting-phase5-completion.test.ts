@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createIdentityVerificationEventMock: vi.fn(),
   createProximityEvaluationMock: vi.fn(),
   createMeetingArtifactMock: vi.fn(),
+  listMeetingArtifactsMock: vi.fn(),
   listIdentityVerificationEventsMock: vi.fn(),
   listMeetingGeolocationSamplesMock: vi.fn(),
   getGeolocationSampleByIdMock: vi.fn(),
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   appendAcknowledgmentPageMock: vi.fn(),
   watermarkWithNoticeMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
+  broadcastRequestRealtimeInvalidationMock: vi.fn(),
   queueMeetingScheduledConfirmationNotificationMock: vi.fn(),
   getNotaryProfileByUserIdMock: vi.fn(),
 }));
@@ -78,6 +80,7 @@ vi.mock("../../src/services/meetingService", async (importOriginal) => {
     createIdentityVerificationEvent: mocks.createIdentityVerificationEventMock,
     createProximityEvaluation: mocks.createProximityEvaluationMock,
     createMeetingArtifact: mocks.createMeetingArtifactMock,
+    listMeetingArtifacts: mocks.listMeetingArtifactsMock,
     listIdentityVerificationEvents: mocks.listIdentityVerificationEventsMock,
     listMeetingGeolocationSamples: mocks.listMeetingGeolocationSamplesMock,
     getGeolocationSampleById: mocks.getGeolocationSampleByIdMock,
@@ -98,6 +101,14 @@ vi.mock("../../src/services/documentFinalizationService", async (importOriginal)
 vi.mock("../../src/services/auditService", () => ({
   recordAuditEvent: mocks.recordAuditEventMock,
 }));
+
+vi.mock("../../src/services/realtimeBroadcastService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/realtimeBroadcastService")>();
+  return {
+    ...actual,
+    broadcastRequestRealtimeInvalidation: mocks.broadcastRequestRealtimeInvalidationMock,
+  };
+});
 
 vi.mock("../../src/services/notificationService", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/services/notificationService")>();
@@ -281,6 +292,137 @@ const buildVerifiedIdentityEvent = () => ({
   updated_at: "2026-04-22T15:05:00.000Z",
 });
 
+const buildVenueCaptureArtifact = (overrides: Record<string, unknown> = {}) => ({
+  id: "artifact-venue-1",
+  meeting_id: "meeting-1",
+  meeting_participant_id: "participant-notary",
+  meeting_checkin_id: "checkin-identity-1",
+  identity_verification_event_id: "identity-1",
+  uploaded_by_user_id: "notary-1",
+  artifact_kind: "venue_capture",
+  status: "active",
+  storage_bucket: null,
+  storage_path: null,
+  mime_type: null,
+  size_bytes: null,
+  captured_at: "2026-04-22T15:20:00.000Z",
+  retention_until: null,
+  redacted_at: null,
+  metadata: {
+    venue: {
+      state: "OH",
+      county: "Franklin",
+      city: "Columbus",
+      addressLine1: "123 Session Way",
+      locationLabel: "DARCi HQ",
+      completedAt: "2026-04-22T15:20:00.000Z",
+    },
+  },
+  created_at: "2026-04-22T15:20:00.000Z",
+  updated_at: "2026-04-22T15:20:00.000Z",
+  ...overrides,
+});
+
+const buildSealPreviewArtifact = (overrides: Record<string, unknown> = {}) => ({
+  id: "artifact-seal-1",
+  meeting_id: "meeting-1",
+  meeting_participant_id: "participant-notary",
+  meeting_checkin_id: null,
+  identity_verification_event_id: null,
+  uploaded_by_user_id: "notary-1",
+  artifact_kind: "seal_preview",
+  status: "active",
+  storage_bucket: null,
+  storage_path: null,
+  mime_type: null,
+  size_bytes: null,
+  captured_at: "2026-04-22T15:21:00.000Z",
+  retention_until: null,
+  redacted_at: null,
+  metadata: {},
+  created_at: "2026-04-22T15:21:00.000Z",
+  updated_at: "2026-04-22T15:21:00.000Z",
+  ...overrides,
+});
+
+const buildWatermarkResult = (overrides: Record<string, unknown> = {}) => ({
+  document: { ...baseDocument, status: "completed" },
+  request: { ...baseRequest, status: "completed" },
+  execution: buildFinalizationExecution({
+    id: "execution-watermark-1",
+    execution_kind: "watermark_notice",
+    output_document_version_id: "version-final-1",
+    watermark_text: "DARCi verified",
+  }),
+  version: buildFinalizationVersion(),
+  hashRecord: {
+    id: "hash-1",
+    document_id: "doc-1",
+    document_version_id: "version-final-1",
+    algorithm: "sha256",
+    hash: "hash-final",
+    status: "recorded",
+    completed_at: "2026-04-22T15:35:00.000Z",
+    metadata: {},
+    created_at: "2026-04-22T15:35:00.000Z",
+    updated_at: "2026-04-22T15:35:00.000Z",
+  },
+  ledgerEntry: {
+    id: "ledger-1",
+    document_id: "doc-1",
+    document_version_id: "version-final-1",
+    hash_record_id: "hash-1",
+    ledger_tx_id: "tx-1",
+    anchored_at: "2026-04-22T15:36:00.000Z",
+    metadata: {},
+    created_at: "2026-04-22T15:36:00.000Z",
+    updated_at: "2026-04-22T15:36:00.000Z",
+  },
+  ledgerAnchorAttempt: {
+    id: "anchor-attempt-1",
+    ledger_entry_id: "ledger-1",
+    status: "anchored",
+    attempt_number: 1,
+    requested_at: "2026-04-22T15:35:00.000Z",
+    completed_at: "2026-04-22T15:36:00.000Z",
+    failed_at: null,
+    error_message: null,
+    metadata: {},
+    created_at: "2026-04-22T15:35:00.000Z",
+    updated_at: "2026-04-22T15:36:00.000Z",
+  },
+  ...overrides,
+});
+
+const buildLedgerFailureWatermarkResult = () => buildWatermarkResult({
+  document: { ...baseDocument, status: "pending_notary" },
+  request: { ...baseRequest, status: "in_review" },
+  ledgerEntry: {
+    id: "ledger-1",
+    document_id: "doc-1",
+    document_version_id: "version-final-1",
+    hash_record_id: "hash-1",
+    ledger_tx_id: null,
+    anchored_at: null,
+    metadata: {},
+    created_at: "2026-04-22T15:36:00.000Z",
+    updated_at: "2026-04-22T15:36:00.000Z",
+  },
+  ledgerAnchorAttempt: {
+    id: "anchor-attempt-1",
+    ledger_entry_id: "ledger-1",
+    status: "failed",
+    attempt_number: 1,
+    requested_at: "2026-04-22T15:35:00.000Z",
+    completed_at: null,
+    failed_at: "2026-04-22T15:36:00.000Z",
+    error_message: "Ledger provider unavailable",
+    metadata: {},
+    created_at: "2026-04-22T15:35:00.000Z",
+    updated_at: "2026-04-22T15:36:00.000Z",
+  },
+});
+
 const seedMeetingContext = (input: {
   role?: "member" | "notary";
   actorUserId?: string;
@@ -356,6 +498,10 @@ describe("Phase 5 meeting runtime completion", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.broadcastRequestRealtimeInvalidationMock.mockResolvedValue({
+      status: "sent",
+      channels: ["request:req-1", "notary-queue"],
+    });
   });
 
   it("confirms a meeting and queues the meeting notification", async () => {
@@ -589,6 +735,33 @@ describe("Phase 5 meeting runtime completion", () => {
       created_at: "2026-04-22T15:05:00.000Z",
       updated_at: "2026-04-22T15:05:00.000Z",
     });
+    mocks.createMeetingArtifactMock.mockResolvedValue({
+      id: "artifact-venue-1",
+      meeting_id: "meeting-1",
+      meeting_participant_id: "participant-notary",
+      meeting_checkin_id: "checkin-identity-1",
+      identity_verification_event_id: "identity-1",
+      uploaded_by_user_id: "notary-1",
+      artifact_kind: "venue_capture",
+      status: "active",
+      storage_bucket: null,
+      storage_path: null,
+      mime_type: null,
+      size_bytes: null,
+      captured_at: "2026-04-22T15:05:00.000Z",
+      retention_until: null,
+      redacted_at: null,
+      metadata: {
+        venue: {
+          state: "OH",
+          county: "Franklin",
+          city: "Columbus",
+          completedAt: "2026-04-22T15:05:00.000Z",
+        },
+      },
+      created_at: "2026-04-22T15:05:00.000Z",
+      updated_at: "2026-04-22T15:05:00.000Z",
+    });
 
     const response = await request(app)
       .post("/notary/requests/req-1/meeting/identity-verification")
@@ -601,13 +774,31 @@ describe("Phase 5 meeting runtime completion", () => {
         documentNumberTail: "1234",
         issuingJurisdiction: "US",
         documentExpirationDate: "2031-04-22",
+        venue: {
+          state: "OH",
+          county: "Franklin",
+          city: "Columbus",
+          completedAt: "2026-04-22T15:05:00.000Z",
+        },
         verifiedAt: "2026-04-22T15:05:00.000Z",
         notes: "Passport verified",
       });
 
     expect(response.status).toBe(201);
     expect(response.body.identityVerification.status).toBe("verified");
+    expect(response.body.venueCapture.artifactKind).toBe("venue_capture");
     expect(response.body.checkin.checkinKind).toBe("identity");
+    expect(mocks.createMeetingArtifactMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactKind: "venue_capture",
+        meetingParticipantId: "participant-notary",
+        meetingCheckinId: "checkin-identity-1",
+        identityVerificationEventId: "identity-1",
+        metadata: expect.objectContaining({
+          venue: expect.objectContaining({ state: "OH", county: "Franklin" }),
+        }),
+      }),
+    );
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "notary.identity_verified" }),
     );
@@ -700,6 +891,88 @@ describe("Phase 5 meeting runtime completion", () => {
     expect(response.status).toBe(201);
     expect(response.body.evaluation.status).toBe("passed");
     expect(response.body.meeting.samePlaceStatus).toBe("passed");
+  });
+
+  it("advances a session by recording same-place proximity when fresh samples exist", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: { same_place_status: "pending" },
+      participants: buildParticipants({
+        member: { status: "checked_in" },
+        notary: { status: "checked_in" },
+      }),
+    });
+    mocks.listMeetingGeolocationSamplesMock
+      .mockResolvedValueOnce([
+        {
+          id: "geo-member-1",
+          meeting_id: "meeting-1",
+          meeting_participant_id: "participant-member",
+          meeting_checkin_id: "checkin-member-1",
+          captured_by_user_id: "owner-1",
+          sample_kind: "device_gps",
+          capture_stage: "checkin",
+          latitude: 41.4993,
+          longitude: -81.6944,
+          accuracy_meters: 8,
+          altitude_meters: null,
+          captured_at: "2026-04-22T15:00:00.000Z",
+          expires_at: null,
+          metadata: {},
+          created_at: "2026-04-22T15:00:00.000Z",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "geo-notary-1",
+          meeting_id: "meeting-1",
+          meeting_participant_id: "participant-notary",
+          meeting_checkin_id: "checkin-notary-1",
+          captured_by_user_id: "notary-1",
+          sample_kind: "device_gps",
+          capture_stage: "checkin",
+          latitude: 41.49935,
+          longitude: -81.69435,
+          accuracy_meters: 7,
+          altitude_meters: null,
+          captured_at: "2026-04-22T15:00:10.000Z",
+          expires_at: null,
+          metadata: {},
+          created_at: "2026-04-22T15:00:10.000Z",
+        },
+      ]);
+    mocks.createProximityEvaluationMock.mockResolvedValue({
+      id: "prox-advance-1",
+      meeting_id: "meeting-1",
+      evaluated_by_user_id: "notary-1",
+      member_sample_id: "geo-member-1",
+      notary_sample_id: "geo-notary-1",
+      evaluation_kind: "same_place",
+      status: "passed",
+      threshold_meters: 100,
+      observed_distance_meters: 6.9,
+      evaluated_at: "2026-04-22T15:01:00.000Z",
+      notes: "Session advancement evaluated same-place evidence.",
+      metadata: {},
+      created_at: "2026-04-22T15:01:00.000Z",
+      updated_at: "2026-04-22T15:01:00.000Z",
+    });
+    mocks.updateMeetingMock.mockResolvedValue(
+      buildMeeting({ same_place_status: "passed" }),
+    );
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/session/advance")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({
+        thresholdMeters: 100,
+        evaluatedAt: "2026-04-22T15:01:00.000Z",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.advancedStep).toBe("same_place_evaluated");
+    expect(response.body.nextAction).toBe("seal_acknowledgment");
+    expect(response.body.evaluation.status).toBe("passed");
   });
 
   it("creates a meeting artifact linked to an identity verification event", async () => {
@@ -801,6 +1074,37 @@ describe("Phase 5 meeting runtime completion", () => {
       }),
     });
     mocks.listIdentityVerificationEventsMock.mockResolvedValue([buildVerifiedIdentityEvent()]);
+    mocks.listMeetingArtifactsMock.mockResolvedValue([
+      {
+        id: "artifact-venue-1",
+        meeting_id: "meeting-1",
+        meeting_participant_id: "participant-notary",
+        meeting_checkin_id: "checkin-identity-1",
+        identity_verification_event_id: "identity-1",
+        uploaded_by_user_id: "notary-1",
+        artifact_kind: "venue_capture",
+        status: "active",
+        storage_bucket: null,
+        storage_path: null,
+        mime_type: null,
+        size_bytes: null,
+        captured_at: "2026-04-22T15:20:00.000Z",
+        retention_until: null,
+        redacted_at: null,
+        metadata: {
+          venue: {
+            state: "OH",
+            county: "Franklin",
+            city: "Columbus",
+            addressLine1: "123 Session Way",
+            locationLabel: "DARCi HQ",
+            completedAt: "2026-04-22T15:20:00.000Z",
+          },
+        },
+        created_at: "2026-04-22T15:20:00.000Z",
+        updated_at: "2026-04-22T15:20:00.000Z",
+      },
+    ]);
     mocks.appendAcknowledgmentPageMock.mockResolvedValue({
       document: baseDocument,
       request: baseRequest,
@@ -845,14 +1149,6 @@ describe("Phase 5 meeting runtime completion", () => {
       .post("/notary/requests/req-1/sign")
       .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
       .send({
-        venue: {
-          state: "OH",
-          county: "Franklin",
-          city: "Columbus",
-          addressLine1: "123 Session Way",
-          locationLabel: "DARCi HQ",
-          completedAt: "2026-04-22T15:20:00.000Z",
-        },
         acknowledgment: {
           signerAppeared: true,
           signerAcknowledged: true,
@@ -864,6 +1160,7 @@ describe("Phase 5 meeting runtime completion", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.acknowledgmentPage.id).toBe("ack-page-1");
+    expect(response.body.venueCapture.artifactKind).toBe("venue_capture");
     expect(response.body.sealArtifact.artifactKind).toBe("seal_preview");
     expect(mocks.appendAcknowledgmentPageMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -875,6 +1172,7 @@ describe("Phase 5 meeting runtime completion", () => {
           notaryName: "Nora Tary",
           jurisdiction: "US-OH",
           commissionNumber: "OH-12345",
+          commissionExpiresAt: "2028-04-22",
         }),
       }),
     );
@@ -883,10 +1181,237 @@ describe("Phase 5 meeting runtime completion", () => {
         meetingId: "meeting-1",
         meetingParticipantId: "participant-notary",
         artifactKind: "seal_preview",
+        metadata: expect.objectContaining({ venueCaptureArtifactId: "artifact-venue-1" }),
       }),
     );
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "notary.notarial_acknowledgment_signed" }),
+    );
+  });
+
+  it("advances a ready session by sealing the acknowledgment", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: {
+        status: "in_progress",
+        same_place_status: "passed",
+      },
+      participants: buildParticipants({
+        member: { status: "checked_in" },
+        notary: { status: "checked_in" },
+      }),
+    });
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([buildVerifiedIdentityEvent()]);
+    mocks.listMeetingArtifactsMock.mockResolvedValue([buildVenueCaptureArtifact()]);
+    mocks.appendAcknowledgmentPageMock.mockResolvedValue({
+      document: baseDocument,
+      request: baseRequest,
+      acknowledgmentPage: {
+        id: "ack-page-1",
+        document_id: "doc-1",
+        jurisdiction: "US-OH",
+        content: "Acknowledgment content",
+        metadata: {},
+        created_at: "2026-04-22T15:20:00.000Z",
+      },
+      execution: buildFinalizationExecution(),
+      version: buildFinalizationVersion({
+        id: "version-ack-1",
+        version: 2,
+        is_final: false,
+        finalization_stage: "acknowledgment_appended",
+      }),
+    });
+    mocks.createMeetingArtifactMock.mockResolvedValue(buildSealPreviewArtifact());
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/session/advance")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({
+        acknowledgment: {
+          signerAppeared: true,
+          signerAcknowledged: true,
+        },
+        sealLabel: "DARCi illuminotary seal",
+        signatureLabel: "Nora Tary",
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.advancedStep).toBe("acknowledgment_sealed");
+    expect(response.body.nextAction).toBe("complete_meeting");
+    expect(response.body.sealArtifact.artifactKind).toBe("seal_preview");
+    expect(mocks.appendAcknowledgmentPageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ meetingId: "meeting-1" }),
+    );
+  });
+
+  it("advances a sealed in-progress session by completing the meeting", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: {
+        status: "in_progress",
+        same_place_status: "passed",
+      },
+      participants: buildParticipants({
+        member: { status: "checked_in" },
+        notary: { status: "checked_in" },
+      }),
+    });
+    mocks.listMeetingArtifactsMock.mockResolvedValue([buildSealPreviewArtifact()]);
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([]);
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      ...buildParticipants({ notary: { status: "completed" } })[1],
+      status: "completed",
+      arrived_at: "2026-04-22T15:00:00.000Z",
+      departed_at: "2026-04-22T15:25:00.000Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-meeting-end-1",
+      meeting_id: "meeting-1",
+      meeting_participant_id: "participant-notary",
+      recorded_by_user_id: "notary-1",
+      checkin_kind: "meeting_end",
+      status: "recorded",
+      recorded_at: "2026-04-22T15:25:00.000Z",
+      notes: "In-person session completed by session advancement.",
+      metadata: {},
+      created_at: "2026-04-22T15:25:00.000Z",
+      updated_at: "2026-04-22T15:25:00.000Z",
+    });
+    mocks.updateMeetingMock.mockResolvedValue(
+      buildMeeting({ status: "completed", same_place_status: "passed" }),
+    );
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/session/advance")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({ advancedAt: "2026-04-22T15:25:00.000Z" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.advancedStep).toBe("meeting_completed");
+    expect(response.body.nextAction).toBe("submit_final_package");
+    expect(response.body.meeting.status).toBe("completed");
+    expect(mocks.createMeetingCheckinMock).toHaveBeenCalledWith(
+      expect.objectContaining({ checkinKind: "meeting_end" }),
+    );
+    expect(mocks.watermarkWithNoticeMock).not.toHaveBeenCalled();
+  });
+
+  it("auto-submits the final package after completing a sealed ready session", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: {
+        status: "in_progress",
+        same_place_status: "passed",
+      },
+      participants: buildParticipants({
+        member: { status: "checked_in" },
+        notary: { status: "checked_in" },
+      }),
+    });
+    mocks.listMeetingArtifactsMock.mockResolvedValue([buildSealPreviewArtifact()]);
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([buildVerifiedIdentityEvent()]);
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      ...buildParticipants({ notary: { status: "completed" } })[1],
+      status: "completed",
+      arrived_at: "2026-04-22T15:00:00.000Z",
+      departed_at: "2026-04-22T15:25:00.000Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-meeting-end-1",
+      meeting_id: "meeting-1",
+      meeting_participant_id: "participant-notary",
+      recorded_by_user_id: "notary-1",
+      checkin_kind: "meeting_end",
+      status: "recorded",
+      recorded_at: "2026-04-22T15:25:00.000Z",
+      notes: "In-person session completed by session advancement.",
+      metadata: {},
+      created_at: "2026-04-22T15:25:00.000Z",
+      updated_at: "2026-04-22T15:25:00.000Z",
+    });
+    mocks.updateMeetingMock.mockResolvedValue(
+      buildMeeting({ status: "completed", same_place_status: "passed" }),
+    );
+    mocks.watermarkWithNoticeMock.mockResolvedValue(buildWatermarkResult());
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/session/advance")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({ advancedAt: "2026-04-22T15:25:00.000Z" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.advancedStep).toBe("final_package_submitted");
+    expect(response.body.advancedSteps).toEqual(["meeting_completed", "final_package_submitted"]);
+    expect(response.body.nextAction).toBeNull();
+    expect(response.body.meeting.status).toBe("completed");
+    expect(response.body.finalizationStatus.verificationReady).toBe(true);
+    expect(mocks.watermarkWithNoticeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ documentId: "doc-1", actorSupabaseId: "notary-sub" }),
+    );
+    expect(mocks.broadcastRequestRealtimeInvalidationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", reason: "meeting_completed" }),
+    );
+    expect(mocks.broadcastRequestRealtimeInvalidationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", reason: "final_package_submitted" }),
+    );
+  });
+
+  it("keeps the completed meeting and returns retry when chained final package anchoring fails", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: {
+        status: "in_progress",
+        same_place_status: "passed",
+      },
+      participants: buildParticipants({
+        member: { status: "checked_in" },
+        notary: { status: "checked_in" },
+      }),
+    });
+    mocks.listMeetingArtifactsMock.mockResolvedValue([buildSealPreviewArtifact()]);
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([buildVerifiedIdentityEvent()]);
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      ...buildParticipants({ notary: { status: "completed" } })[1],
+      status: "completed",
+      arrived_at: "2026-04-22T15:00:00.000Z",
+      departed_at: "2026-04-22T15:25:00.000Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-meeting-end-1",
+      meeting_id: "meeting-1",
+      meeting_participant_id: "participant-notary",
+      recorded_by_user_id: "notary-1",
+      checkin_kind: "meeting_end",
+      status: "recorded",
+      recorded_at: "2026-04-22T15:25:00.000Z",
+      notes: "In-person session completed by session advancement.",
+      metadata: {},
+      created_at: "2026-04-22T15:25:00.000Z",
+      updated_at: "2026-04-22T15:25:00.000Z",
+    });
+    mocks.updateMeetingMock.mockResolvedValue(
+      buildMeeting({ status: "completed", same_place_status: "passed" }),
+    );
+    mocks.watermarkWithNoticeMock.mockResolvedValue(buildLedgerFailureWatermarkResult());
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/session/advance")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({ advancedAt: "2026-04-22T15:25:00.000Z" });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe("ledger_anchor_failed");
+    expect(response.body.advancedStep).toBe("final_package_submitted");
+    expect(response.body.advancedSteps).toEqual(["meeting_completed", "final_package_submitted"]);
+    expect(response.body.nextAction).toBe("retry_final_package_submission");
+    expect(response.body.meeting.status).toBe("completed");
+    expect(response.body.finalizationStatus.recoveryAction).toBe("retry_final_package_submission");
+    expect(mocks.broadcastRequestRealtimeInvalidationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", reason: "meeting_completed" }),
+    );
+    expect(mocks.broadcastRequestRealtimeInvalidationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", reason: "final_package_submitted" }),
     );
   });
 
@@ -974,6 +1499,82 @@ describe("Phase 5 meeting runtime completion", () => {
     );
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "notary.final_package_submitted" }),
+    );
+  });
+
+  it("advances a completed sealed session by submitting the final package", async () => {
+    seedMeetingContext({
+      role: "notary",
+      meeting: {
+        status: "completed",
+        same_place_status: "passed",
+      },
+      participants: buildParticipants({
+        member: { status: "completed" },
+        notary: { status: "completed" },
+      }),
+    });
+    mocks.listMeetingArtifactsMock.mockResolvedValue([buildSealPreviewArtifact()]);
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([buildVerifiedIdentityEvent()]);
+    mocks.watermarkWithNoticeMock.mockResolvedValue({
+      document: { ...baseDocument, status: "completed" },
+      request: { ...baseRequest, status: "completed" },
+      execution: buildFinalizationExecution({
+        id: "execution-watermark-1",
+        execution_kind: "watermark_notice",
+        output_document_version_id: "version-final-1",
+        watermark_text: "DARCi verified",
+      }),
+      version: buildFinalizationVersion(),
+      hashRecord: {
+        id: "hash-1",
+        document_id: "doc-1",
+        document_version_id: "version-final-1",
+        algorithm: "sha256",
+        hash: "hash-final",
+        status: "recorded",
+        completed_at: "2026-04-22T15:35:00.000Z",
+        metadata: {},
+        created_at: "2026-04-22T15:35:00.000Z",
+        updated_at: "2026-04-22T15:35:00.000Z",
+      },
+      ledgerEntry: {
+        id: "ledger-1",
+        document_id: "doc-1",
+        document_version_id: "version-final-1",
+        hash_record_id: "hash-1",
+        ledger_tx_id: "tx-1",
+        anchored_at: "2026-04-22T15:36:00.000Z",
+        metadata: {},
+        created_at: "2026-04-22T15:36:00.000Z",
+        updated_at: "2026-04-22T15:36:00.000Z",
+      },
+      ledgerAnchorAttempt: {
+        id: "anchor-attempt-1",
+        ledger_entry_id: "ledger-1",
+        status: "anchored",
+        attempt_number: 1,
+        requested_at: "2026-04-22T15:35:00.000Z",
+        completed_at: "2026-04-22T15:36:00.000Z",
+        failed_at: null,
+        error_message: null,
+        metadata: {},
+        created_at: "2026-04-22T15:35:00.000Z",
+        updated_at: "2026-04-22T15:36:00.000Z",
+      },
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/session/advance")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({ notes: "Final package ready" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.advancedStep).toBe("final_package_submitted");
+    expect(response.body.nextAction).toBeNull();
+    expect(response.body.finalizationStatus.verificationReady).toBe(true);
+    expect(mocks.watermarkWithNoticeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ documentId: "doc-1", actorSupabaseId: "notary-sub" }),
     );
   });
 

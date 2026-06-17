@@ -57,6 +57,8 @@ export type NotaryApplicationRecord = {
   jurisdiction: string;
   serviceAreaKind: NotaryServiceAreaKind;
   serviceAreaName: string;
+  commissionNumber: string | null;
+  commissionExpiresAt: string | null;
   signatureDataUrl: string | null;
   sealDataUrl: string | null;
   status: NotaryApplicationStatus;
@@ -79,7 +81,21 @@ export class NotaryProfileServiceError extends Error {
 const notaryProfileSelect =
   "id, user_id, jurisdiction, service_area_kind, service_area_name, commission_number, commission_expires_at, seal_storage_path, signature_data_url, seal_data_url, created_at, updated_at";
 const notaryApplicationSelect =
-  "id, user_id, jurisdiction, service_area_kind, service_area_name, signature_data_url, seal_data_url, status, review_notes, reviewed_by_user_id, reviewed_at, created_at, updated_at";
+  "id, user_id, jurisdiction, service_area_kind, service_area_name, commission_number, commission_expires_at, signature_data_url, seal_data_url, status, review_notes, reviewed_by_user_id, reviewed_at, created_at, updated_at";
+const notaryAssetDataUrlPattern = /^data:image\/(?:png|jpe?g);base64,[a-z0-9+/=\s]+$/i;
+
+const requireSupportedNotaryAssetDataUrl = (value: string | null | undefined, label: string) => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!notaryAssetDataUrlPattern.test(trimmed)) {
+    throw new NotaryProfileServiceError(400, `${label} must be a PNG or JPEG data URL.`);
+  }
+
+  return trimmed;
+};
 
 const toNotaryProfileRecord = (row: Record<string, unknown> | null | undefined): NotaryProfileRecord | null => {
   if (!row) {
@@ -109,6 +125,8 @@ const toNotaryApplicationRecord = (row: Record<string, unknown>): NotaryApplicat
     jurisdiction: String(row.jurisdiction),
     serviceAreaKind: String(row.service_area_kind) as NotaryServiceAreaKind,
     serviceAreaName: String(row.service_area_name),
+    commissionNumber: row.commission_number == null ? null : String(row.commission_number),
+    commissionExpiresAt: row.commission_expires_at == null ? null : String(row.commission_expires_at),
     signatureDataUrl: row.signature_data_url == null ? null : String(row.signature_data_url),
     sealDataUrl: row.seal_data_url == null ? null : String(row.seal_data_url),
     status: String(row.status) as NotaryApplicationStatus,
@@ -154,8 +172,49 @@ export const isNotaryCommissionExpired = (
     return false;
   }
 
-  const parsed = new Date(commissionExpiresAt);
-  return !Number.isNaN(parsed.getTime()) && parsed.getTime() < now.getTime();
+  const expirationTime = getCommissionExpirationTime(commissionExpiresAt);
+  return expirationTime != null && expirationTime < now.getTime();
+};
+
+const getCommissionExpirationTime = (commissionExpiresAt: string | null | undefined) => {
+  const trimmed = commissionExpiresAt?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+
+  const dateOnlyMatch = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
+  const parsed = new Date(dateOnlyMatch ? `${trimmed}T23:59:59.999Z` : trimmed);
+  const time = parsed.getTime();
+  return Number.isNaN(time) ? null : time;
+};
+
+export const isNotaryCommissionCurrent = (
+  commissionExpiresAt: string | null | undefined,
+  now = new Date(),
+) => {
+  const expirationTime = getCommissionExpirationTime(commissionExpiresAt);
+  return expirationTime != null && expirationTime >= now.getTime();
+};
+
+const requireCurrentCommissionDetails = (input: {
+  commissionNumber?: string | null;
+  commissionExpiresAt?: string | null;
+}) => {
+  const commissionNumber = input.commissionNumber?.trim() ?? "";
+  const commissionExpiresAt = input.commissionExpiresAt?.trim() ?? "";
+
+  if (!commissionNumber || !commissionExpiresAt) {
+    throw new NotaryProfileServiceError(400, "Notary commission number and expiration are required.");
+  }
+
+  if (!isNotaryCommissionCurrent(commissionExpiresAt)) {
+    throw new NotaryProfileServiceError(400, "Notary commission expiration must be current.");
+  }
+
+  return {
+    commissionNumber,
+    commissionExpiresAt,
+  };
 };
 
 const ensureNotaryDbReady = () => {
@@ -218,6 +277,8 @@ export const submitNotaryApplication = async (input: {
   jurisdiction: string;
   serviceAreaKind: NotaryServiceAreaKind;
   serviceAreaName: string;
+  commissionNumber: string;
+  commissionExpiresAt: string;
   signatureDataUrl?: string | null;
   sealDataUrl?: string | null;
 }) => {
@@ -227,6 +288,13 @@ export const submitNotaryApplication = async (input: {
   if (!identity) {
     throw new NotaryProfileServiceError(404, "User not found");
   }
+
+  const commissionDetails = requireCurrentCommissionDetails(input);
+  const signatureDataUrl = requireSupportedNotaryAssetDataUrl(
+    input.signatureDataUrl,
+    "Notary signature image",
+  );
+  const sealDataUrl = requireSupportedNotaryAssetDataUrl(input.sealDataUrl, "Notary seal image");
 
   const existingApplication = await getNotaryApplicationByUserId(identity.id);
   if (existingApplication) {
@@ -240,8 +308,10 @@ export const submitNotaryApplication = async (input: {
       jurisdiction: input.jurisdiction.trim(),
       service_area_kind: input.serviceAreaKind,
       service_area_name: input.serviceAreaName.trim(),
-      signature_data_url: input.signatureDataUrl ?? null,
-      seal_data_url: input.sealDataUrl ?? null,
+      commission_number: commissionDetails.commissionNumber,
+      commission_expires_at: commissionDetails.commissionExpiresAt,
+      signature_data_url: signatureDataUrl,
+      seal_data_url: sealDataUrl,
       status: "pending",
       review_notes: null,
       reviewed_by_user_id: null,
@@ -366,7 +436,7 @@ export const listAvailableNotariesByJurisdiction = async (input: {
       continue;
     }
 
-    if (isNotaryCommissionExpired(profile.commissionExpiresAt, input.now)) {
+    if (!isNotaryCommissionCurrent(profile.commissionExpiresAt, input.now)) {
       continue;
     }
 
@@ -393,8 +463,8 @@ export const upsertMyNotaryProfile = async (input: {
   jurisdiction: string;
   serviceAreaKind: NotaryServiceAreaKind;
   serviceAreaName: string;
-  commissionNumber?: string | null;
-  commissionExpiresAt?: string | null;
+  commissionNumber: string;
+  commissionExpiresAt: string;
   signatureDataUrl?: string | null;
   sealDataUrl?: string | null;
 }) => {
@@ -405,6 +475,13 @@ export const upsertMyNotaryProfile = async (input: {
     throw new NotaryProfileServiceError(404, "User not found");
   }
 
+  const commissionDetails = requireCurrentCommissionDetails(input);
+  const signatureDataUrl = requireSupportedNotaryAssetDataUrl(
+    input.signatureDataUrl,
+    "Notary signature image",
+  );
+  const sealDataUrl = requireSupportedNotaryAssetDataUrl(input.sealDataUrl, "Notary seal image");
+
   const { data, error } = await supabaseAdmin
     .from("notary_profiles")
     .upsert({
@@ -412,12 +489,12 @@ export const upsertMyNotaryProfile = async (input: {
       jurisdiction: input.jurisdiction.trim(),
       service_area_kind: input.serviceAreaKind,
       service_area_name: input.serviceAreaName.trim(),
-      commission_number: input.commissionNumber?.trim() || null,
-      commission_expires_at: input.commissionExpiresAt || null,
-      signature_data_url: input.signatureDataUrl ?? null,
-      seal_data_url: input.sealDataUrl ?? null,
+      commission_number: commissionDetails.commissionNumber,
+      commission_expires_at: commissionDetails.commissionExpiresAt,
+      signature_data_url: signatureDataUrl,
+      seal_data_url: sealDataUrl,
       updated_at: new Date().toISOString(),
-    })
+    }, { onConflict: "user_id" })
     .select(notaryProfileSelect)
     .single();
 
@@ -450,6 +527,8 @@ export const approveNotaryApplication = async (input: {
   if (!application) {
     throw new NotaryProfileServiceError(404, "Notary application not found");
   }
+
+  const commissionDetails = requireCurrentCommissionDetails(application);
 
   const reviewerIdentity = await getUserIdentityContextByUserId(application.userId);
   if (!reviewerIdentity) {
@@ -492,6 +571,8 @@ export const approveNotaryApplication = async (input: {
     jurisdiction: application.jurisdiction,
     serviceAreaKind: application.serviceAreaKind,
     serviceAreaName: application.serviceAreaName,
+    commissionNumber: commissionDetails.commissionNumber,
+    commissionExpiresAt: commissionDetails.commissionExpiresAt,
     signatureDataUrl: application.signatureDataUrl,
     sealDataUrl: application.sealDataUrl,
   });

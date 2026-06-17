@@ -15,13 +15,13 @@ export const identityDocumentOptions = [
     value: "passport",
     label: "Passport",
     jurisdictionLabel: "Issuing country",
-    identifierLabel: "Passport tail",
+    identifierLabel: "Passport number",
   },
   {
     value: "passport_card",
     label: "Passport card",
     jurisdictionLabel: "Issuing country",
-    identifierLabel: "Passport card tail",
+    identifierLabel: "Passport card number",
   },
   {
     value: "military_id",
@@ -45,7 +45,7 @@ export const identityDocumentOptions = [
     value: "foreign_passport",
     label: "Foreign passport",
     jurisdictionLabel: "Issuing country",
-    identifierLabel: "Passport tail",
+    identifierLabel: "Passport number",
   },
 ] as const;
 
@@ -99,8 +99,8 @@ export const validateIdentityDocumentForm = (state: IdentityDocumentFormState) =
     errors.documentNumberTail = "Document number tail must be 2 to 4 letters or numbers.";
   }
 
-  if (maskedIdentifier && (!/^[A-Za-z0-9*Xx\-\s]{4,64}$/.test(maskedIdentifier) || !/[Xx*]/.test(maskedIdentifier))) {
-    errors.maskedIdentifier = "Masked identifier must hide most digits with X or *.";
+  if (maskedIdentifier && !/^[A-Za-z0-9\-\s]{4,64}$/.test(maskedIdentifier)) {
+    errors.maskedIdentifier = "Document number must be 4 to 64 letters, numbers, spaces, or hyphens.";
   }
 
   if (!tail && !maskedIdentifier) {

@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   enqueueWebhookMock: vi.fn(),
   createIlluminotarizationWorkflowMock: vi.fn(),
+  getIlluminotarizationWorkflowByIdMock: vi.fn(),
+  getLatestRejectedIlluminotaryReviewDecisionForWorkflowMock: vi.fn(),
   createIlluminotarizationWorkflowDocumentMock: vi.fn(),
   createIlluminotarizationWorkflowStatusHistoryEntryMock: vi.fn(),
   transitionIlluminotarizationWorkflowStatusMock: vi.fn(),
@@ -56,6 +58,9 @@ vi.mock("../../src/services/illuminotarizationWorkflowService", async () => {
   return {
     ...actual,
     createIlluminotarizationWorkflow: mocks.createIlluminotarizationWorkflowMock,
+    getIlluminotarizationWorkflowById: mocks.getIlluminotarizationWorkflowByIdMock,
+    getLatestRejectedIlluminotaryReviewDecisionForWorkflow:
+      mocks.getLatestRejectedIlluminotaryReviewDecisionForWorkflowMock,
     createIlluminotarizationWorkflowDocument: mocks.createIlluminotarizationWorkflowDocumentMock,
     createIlluminotarizationWorkflowStatusHistoryEntry:
       mocks.createIlluminotarizationWorkflowStatusHistoryEntryMock,
@@ -230,6 +235,8 @@ describe("submit notarization", () => {
     mocks.recordAuditEventMock.mockReset();
     mocks.enqueueWebhookMock.mockReset();
     mocks.createIlluminotarizationWorkflowMock.mockReset();
+    mocks.getIlluminotarizationWorkflowByIdMock.mockReset();
+    mocks.getLatestRejectedIlluminotaryReviewDecisionForWorkflowMock.mockReset();
     mocks.createIlluminotarizationWorkflowDocumentMock.mockReset();
     mocks.createIlluminotarizationWorkflowStatusHistoryEntryMock.mockReset();
     mocks.transitionIlluminotarizationWorkflowStatusMock.mockReset();
@@ -264,6 +271,11 @@ describe("submit notarization", () => {
     ]);
     mocks.upsertDocumentSystemValuesMock.mockResolvedValue(null);
     mocks.createIlluminotarizationWorkflowMock.mockResolvedValue(workflowRecord);
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      ...workflowRecord,
+      selected_notary_user_id: "notary-1",
+    });
+    mocks.getLatestRejectedIlluminotaryReviewDecisionForWorkflowMock.mockResolvedValue(null);
     mocks.createIlluminotarizationWorkflowDocumentMock.mockResolvedValue(null);
     mocks.createIlluminotarizationWorkflowStatusHistoryEntryMock.mockResolvedValue(null);
     mocks.transitionIlluminotarizationWorkflowStatusMock.mockResolvedValue({
@@ -504,10 +516,15 @@ describe("submit notarization", () => {
     mocks.getActiveNotarizationRequestMock.mockResolvedValue({
       id: "req-1",
       document_id: "doc-1",
+      workflow_id: "workflow-1",
       assigned_notary_id: null,
       status: "pending",
       submitted_at: "2026-03-05T00:00:10.000Z",
       created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      ...workflowRecord,
+      selected_notary_user_id: "notary-1",
     });
 
     const token = signToken({
@@ -523,6 +540,121 @@ describe("submit notarization", () => {
     );
 
     expect(response.status).toBe(409);
+  });
+
+  it("allows resubmission when prior pending request has no selected or assigned notary", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "notarize_document",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.getUserIdentityContextByUserIdMock.mockResolvedValue(buildActiveNotaryIdentity());
+    mocks.getNotaryProfileByUserIdMock.mockResolvedValue(buildNotaryProfile());
+    mocks.getActiveNotarizationRequestMock.mockResolvedValue({
+      id: "req-old-1",
+      document_id: "doc-1",
+      workflow_id: "workflow-old-1",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-03-05T00:00:10.000Z",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      ...workflowRecord,
+      id: "workflow-old-1",
+      selected_notary_user_id: null,
+      assigned_notary_user_id: null,
+    });
+    mocks.createNotarizationRequestMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-03-05T00:00:10.000Z",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.createNotarizationCodeMock.mockResolvedValue({
+      id: "code-1",
+      request_id: "req-1",
+      code: "NTR-1234",
+      status: "active",
+      expires_at: "2026-03-05T00:30:00.000Z",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/submit-notarization",
+      token,
+      { selectedNotaryUserId: "notary-1" },
+      "allows resubmission after rejected reset"
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.createNotarizationRequestMock).toHaveBeenCalled();
+  });
+
+  it("rejects selecting the same notary that previously rejected the request", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "notarize_document",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.getActiveNotarizationRequestMock.mockResolvedValue({
+      id: "req-old-2",
+      document_id: "doc-1",
+      workflow_id: "workflow-old-2",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-03-05T00:00:10.000Z",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.getLatestRejectedIlluminotaryReviewDecisionForWorkflowMock.mockResolvedValue({
+      id: "decision-1",
+      workflow_id: "workflow-old-2",
+      legacy_request_id: "req-old-2",
+      decided_by_user_id: "notary-1",
+      decision: "rejected",
+      summary: "Cannot proceed",
+      decision_notes: null,
+      decided_at: "2026-03-05T00:05:00.000Z",
+      metadata: {},
+      created_at: "2026-03-05T00:05:00.000Z",
+    });
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/submit-notarization",
+      token,
+      { selectedNotaryUserId: "notary-1" },
+      "rejects same notary after rejection"
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe(
+      "Selected notary previously rejected this request. Choose a different notary.",
+    );
+    expect(mocks.createNotarizationRequestMock).not.toHaveBeenCalled();
   });
 
   it("rejects pending signature submissions without document notarization signature skip", async () => {
@@ -907,6 +1039,40 @@ describe("submit notarization", () => {
     expect(mocks.createNotarizationRequestMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a selected notary without a commission expiration", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "notarize_document",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.getUserIdentityContextByUserIdMock.mockResolvedValue(buildActiveNotaryIdentity());
+    mocks.getNotaryProfileByUserIdMock.mockResolvedValue(buildNotaryProfile({
+      commissionExpiresAt: null,
+    }));
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/submit-notarization",
+      token,
+      { selectedNotaryUserId: "notary-1" },
+      "rejects selected notary without commission expiration"
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Selected notary commission expiration is required");
+    expect(mocks.createNotarizationRequestMock).not.toHaveBeenCalled();
+  });
+
   it("lists available notaries for the document jurisdiction", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
@@ -951,6 +1117,135 @@ describe("submit notarization", () => {
       jurisdiction: "OH",
       excludeUserId: "owner-1",
     });
+  });
+
+  it("does not expose an active request when pending request has no selected or assigned notary", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "OH",
+      product_flow_mode: "notarize_document",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.getActiveNotarizationRequestMock.mockResolvedValue({
+      id: "req-reset-1",
+      document_id: "doc-1",
+      workflow_id: "workflow-reset-1",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-03-05T00:00:10.000Z",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      ...workflowRecord,
+      id: "workflow-reset-1",
+      selected_notary_user_id: null,
+      assigned_notary_user_id: null,
+    });
+    mocks.listAvailableNotariesByJurisdictionMock.mockResolvedValue([
+      {
+        userId: "notary-1",
+        displayName: "Nora Tary",
+        jurisdiction: "US-OH",
+        serviceAreaKind: "county",
+        serviceAreaName: "Franklin County",
+        commissionExpiresAt: "2027-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/available-notaries",
+      token,
+      "available notaries hides reset request"
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.notarization.activeRequestId).toBeNull();
+    expect(response.body.notarization.activeRequestStatus).toBeNull();
+  });
+
+  it("filters previously rejecting notary from available notaries", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "OH",
+      product_flow_mode: "notarize_document",
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.getActiveNotarizationRequestMock.mockResolvedValue({
+      id: "req-reset-2",
+      document_id: "doc-1",
+      workflow_id: "workflow-reset-2",
+      assigned_notary_id: null,
+      status: "pending",
+      submitted_at: "2026-03-05T00:00:10.000Z",
+      created_at: "2026-03-05T00:00:10.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      ...workflowRecord,
+      id: "workflow-reset-2",
+      selected_notary_user_id: null,
+      assigned_notary_user_id: null,
+    });
+    mocks.getLatestRejectedIlluminotaryReviewDecisionForWorkflowMock.mockResolvedValue({
+      id: "decision-2",
+      workflow_id: "workflow-reset-2",
+      legacy_request_id: "req-reset-2",
+      decided_by_user_id: "notary-1",
+      decision: "rejected",
+      summary: "Cannot proceed",
+      decision_notes: null,
+      decided_at: "2026-03-05T00:06:00.000Z",
+      metadata: {},
+      created_at: "2026-03-05T00:06:00.000Z",
+    });
+    mocks.listAvailableNotariesByJurisdictionMock.mockResolvedValue([
+      {
+        userId: "notary-1",
+        displayName: "Nora Tary",
+        jurisdiction: "US-OH",
+        serviceAreaKind: "county",
+        serviceAreaName: "Franklin County",
+        commissionExpiresAt: "2027-01-01T00:00:00.000Z",
+      },
+      {
+        userId: "notary-2",
+        displayName: "Noah Public",
+        jurisdiction: "US-OH",
+        serviceAreaKind: "county",
+        serviceAreaName: "Franklin County",
+        commissionExpiresAt: "2027-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "user-1",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await getWithLog(
+      "/documents/doc-1/available-notaries",
+      token,
+      "filters previously rejecting notary"
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.notaries).toEqual([
+      expect.objectContaining({ userId: "notary-2" }),
+    ]);
   });
 
   it("returns 404 when listing available notaries for a missing document", async () => {

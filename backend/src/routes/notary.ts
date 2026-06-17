@@ -1,10 +1,13 @@
 import { Router } from "express";
 import {
+  advanceNotarySession,
   cancelMeeting,
   confirmMeeting,
   createMeetingArtifactRecord,
+  listIdentityDocumentSchema,
   proposeMeeting,
   recordIdentityVerification,
+  recordVenueCapture,
   regenerateCode,
   recordMeetingCheckin,
   recordMeetingNoShow,
@@ -30,6 +33,12 @@ router.get(
   "/requests",
   requireRole(["notary", "admin", "service_role"]),
   listNotaryRequests
+);
+
+router.get(
+  "/identity-document-types",
+  requireRole(["notary", "admin", "service_role"]),
+  listIdentityDocumentSchema,
 );
 
 router.post(
@@ -103,6 +112,11 @@ router.post(
   recordIdentityVerification
 );
 router.post(
+  "/requests/:id/meeting/venue-capture",
+  requireRole(["notary", "admin", "service_role"]),
+  recordVenueCapture
+);
+router.post(
   "/requests/:id/meeting/proximity-evaluation",
   requireRole(["notary", "admin", "service_role"]),
   recordProximityEvaluation
@@ -111,6 +125,11 @@ router.post(
   "/requests/:id/meeting/artifacts",
   requireRole(["member", "notary", "admin", "service_role"]),
   createMeetingArtifactRecord
+);
+router.post(
+  "/requests/:id/session/advance",
+  requireRole(["notary", "admin", "service_role"]),
+  advanceNotarySession
 );
 router.post(
   "/requests/:id/sign",
