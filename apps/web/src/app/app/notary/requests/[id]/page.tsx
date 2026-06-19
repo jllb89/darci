@@ -491,22 +491,16 @@ function NotaryDatePicker({
   }, []);
 
   useEffect(() => {
-    const nextSelectedDate = parseCalendarDateValue(value);
-    if (nextSelectedDate) {
-      setVisibleMonth(getCalendarMonthStart(nextSelectedDate));
-    }
-  }, [value]);
-
-  useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    updatePopoverPosition();
+    const animationFrameId = window.requestAnimationFrame(updatePopoverPosition);
     window.addEventListener("resize", updatePopoverPosition);
     window.addEventListener("scroll", updatePopoverPosition, true);
 
     return () => {
+      window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", updatePopoverPosition);
       window.removeEventListener("scroll", updatePopoverPosition, true);
     };
@@ -771,7 +765,7 @@ function IdentityTypeSelectControl({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null);
   const selectedOption = options.find((option) => option.value === value);
   const filteredOptions = useMemo(() => {
     if (!searchable) {
@@ -794,7 +788,7 @@ function IdentityTypeSelectControl({
 
     const width = Math.max(rect.width, 300);
     const left = Math.max(16, Math.min(rect.left, window.innerWidth - width - 16));
-    setPosition({ left, top: rect.bottom + 8 });
+    setPosition({ left, top: rect.bottom + 8, width });
   }, []);
 
   useEffect(() => {
@@ -802,20 +796,15 @@ function IdentityTypeSelectControl({
       return;
     }
 
-    updatePosition();
+    const animationFrameId = window.requestAnimationFrame(updatePosition);
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
+      window.cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [disabled, isOpen, updatePosition]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setSearchTerm("");
-    }
-  }, [isOpen]);
 
   const portalTarget = typeof document === "undefined" ? null : document.body;
 
@@ -826,7 +815,14 @@ function IdentityTypeSelectControl({
         type="button"
         className="w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-left text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)] transition hover:bg-Color-White disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled}
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => {
+          setIsOpen((current) => {
+            if (current) {
+              setSearchTerm("");
+            }
+            return !current;
+          });
+        }}
       >
         <span className="flex items-center justify-between gap-3">
           <span>{selectedOption?.label ?? placeholder}</span>
@@ -837,7 +833,7 @@ function IdentityTypeSelectControl({
         ? createPortal(
             <div
               className="fixed z-[120] max-h-72 overflow-y-auto rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-2 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
-              style={{ left: position.left, top: position.top, width: Math.max(triggerRef.current?.offsetWidth ?? 300, 300) }}
+              style={{ left: position.left, top: position.top, width: position.width }}
             >
               {searchable ? (
                 <input
@@ -864,6 +860,7 @@ function IdentityTypeSelectControl({
                     }`}
                     onClick={() => {
                       onChange(option.value);
+                      setSearchTerm("");
                       setIsOpen(false);
                     }}
                   >
@@ -1832,7 +1829,7 @@ export default function NotaryRequestWorkspacePage() {
           typeof payload.formattedAddress === "string" ? payload.formattedAddress : null,
         );
         setVenuePrefillCoords({ lat: sample.latitude, lng: sample.longitude });
-      } catch (error) {
+      } catch {
         if (!isDisposed) {
           setVenuePrefillStatus("Could not prefill automatically. Enter venue manually.");
         }
@@ -2901,7 +2898,7 @@ export default function NotaryRequestWorkspacePage() {
               {operatorPanelStep === "identity" ? (
                 <div className="space-y-3 rounded-lg bg-Color-White p-3 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
                   <div className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-xs leading-5 text-Color-Neutral">
-                    Verify the member's identity document exactly as presented. Required fields must be complete before recording identity.
+                    Verify the member&apos;s identity document exactly as presented. Required fields must be complete before recording identity.
                   </div>
                   <input
                     className="w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"

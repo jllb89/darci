@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getLatestNotarizationRequestForDocumentMock: vi.fn(),
   getLatestNotarizationCodeForRequestMock: vi.fn(),
+  getVerificationSnapshotForDocumentMock: vi.fn(),
   listFinalizationStatusHistoryMock: vi.fn(),
   listWorkflowStatusHistoryMock: vi.fn(),
 }));
@@ -28,6 +29,7 @@ vi.mock("../../src/services/documentFinalizationService", async () => {
 
   return {
     ...actual,
+    getVerificationSnapshotForDocument: mocks.getVerificationSnapshotForDocumentMock,
     listFinalizationStatusHistory: mocks.listFinalizationStatusHistoryMock,
   };
 });
@@ -52,10 +54,17 @@ describe("documentWorkspaceReadModelService", () => {
   beforeEach(() => {
     mocks.getLatestNotarizationRequestForDocumentMock.mockReset();
     mocks.getLatestNotarizationCodeForRequestMock.mockReset();
+    mocks.getVerificationSnapshotForDocumentMock.mockReset();
     mocks.listFinalizationStatusHistoryMock.mockReset();
     mocks.listWorkflowStatusHistoryMock.mockReset();
     mocks.getLatestNotarizationRequestForDocumentMock.mockResolvedValue(null);
     mocks.getLatestNotarizationCodeForRequestMock.mockResolvedValue(null);
+    mocks.getVerificationSnapshotForDocumentMock.mockImplementation(async (document) => ({
+      document,
+      hashRecord: null,
+      ledgerEntry: null,
+      ledgerAnchorAttempt: null,
+    }));
     mocks.listFinalizationStatusHistoryMock.mockResolvedValue([]);
     mocks.listWorkflowStatusHistoryMock.mockResolvedValue([]);
   });
@@ -136,6 +145,21 @@ describe("documentWorkspaceReadModelService", () => {
         latestStatusAt: "2026-04-20T12:30:00.000Z",
         isAnchored: true,
         isVerificationChecked: false,
+        isWatermarked: false,
+        isHashRecorded: false,
+        hash: null,
+        ledgerTxId: null,
+        anchoredAt: null,
+        anchorAttempt: null,
+        history: [
+          {
+            id: "fin-1",
+            status: "ledger_anchored",
+            changeSource: "system",
+            changeReason: null,
+            createdAt: "2026-04-20T12:30:00.000Z",
+          },
+        ],
       },
       verification: {
         status: "ready",
@@ -186,6 +210,13 @@ describe("documentWorkspaceReadModelService", () => {
         latestStatusAt: null,
         isAnchored: false,
         isVerificationChecked: false,
+        isWatermarked: false,
+        isHashRecorded: false,
+        hash: null,
+        ledgerTxId: null,
+        anchoredAt: null,
+        anchorAttempt: null,
+        history: [],
       },
       verification: {
         status: "pending_finalization",

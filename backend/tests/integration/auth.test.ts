@@ -64,7 +64,13 @@ describe("auth middleware", () => {
 
     const response = await request(app)
       .post("/notary/requests/req-1/sign")
-      .set("Authorization", `Bearer ${token}`);
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        acknowledgment: {
+          signerAppeared: true,
+          signerAcknowledged: true,
+        },
+      });
 
     expect(response.status).toBe(404);
     expect(response.body.error).toBe("not_found");
