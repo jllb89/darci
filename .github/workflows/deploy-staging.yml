@@ -58,7 +58,7 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Load web public Supabase config
+      - name: Load web public config
         run: |
           secret_json="$(aws secretsmanager get-secret-value --secret-id /darci/staging/app --query SecretString --output text)"
           node - "$secret_json" >> "$GITHUB_ENV" <<'NODE'
@@ -67,9 +67,14 @@ jobs:
           const supabaseAnonKey = secret.NEXT_PUBLIC_SUPABASE_ANON_KEY || secret.SUPABASE_ANON_KEY || "";
           const sentryDsn = secret.NEXT_PUBLIC_SENTRY_DSN || secret.SENTRY_DSN || "";
           const sentryTracesSampleRate = secret.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE || secret.SENTRY_TRACES_SAMPLE_RATE || "0.05";
+          const mapsApiKey = secret.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+          const mapsLibraries = secret.NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES || "places";
+          const mapsAutocompleteEnabled = secret.NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED || "true";
+          const mapsServerApiKey = secret.GOOGLE_MAPS_SERVER_API_KEY || "";
+          const mapsServerGeocodeEnabled = secret.GOOGLE_MAPS_GEOCODE_USE_SERVER || "true";
 
-          if (!supabaseUrl || !supabaseAnonKey || !sentryDsn) {
-            console.error("/darci/staging/app must contain NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SENTRY_DSN for the web build.");
+          if (!supabaseUrl || !supabaseAnonKey || !sentryDsn || !mapsApiKey || !mapsServerApiKey) {
+            console.error("/darci/staging/app must contain NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SENTRY_DSN, NEXT_PUBLIC_GOOGLE_MAPS_API_KEY, and GOOGLE_MAPS_SERVER_API_KEY.");
             process.exit(1);
           }
 
@@ -79,6 +84,10 @@ jobs:
           console.log("STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging");
           console.log(`STAGING_NEXT_PUBLIC_SENTRY_RELEASE=${process.env.GITHUB_SHA || ""}`);
           console.log(`STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${sentryTracesSampleRate}`);
+          console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${mapsApiKey}`);
+          console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES=${mapsLibraries}`);
+          console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED=${mapsAutocompleteEnabled}`);
+          console.log(`STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER=${mapsServerGeocodeEnabled}`);
           NODE
 
       - name: Log in to Amazon ECR
@@ -124,6 +133,9 @@ jobs:
             --build-arg NEXT_PUBLIC_SENTRY_ENVIRONMENT="$STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT" \
             --build-arg NEXT_PUBLIC_SENTRY_RELEASE="$STAGING_NEXT_PUBLIC_SENTRY_RELEASE" \
             --build-arg NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE="$STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE" \
+            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY" \
+            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES="$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES" \
+            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED="$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED" \
             -t "$ECR_REGISTRY/darci-web:staging-latest" \
             -t "$ECR_REGISTRY/darci-web:$IMAGE_TAG" \
             --push \
@@ -171,6 +183,7 @@ jobs:
             AUTH_OTP_FROM_ADDRESS: process.env.STAGING_AUTH_OTP_FROM_ADDRESS,
             RESEND_FAILURE_MODE: "strict",
             AUTH_EMAIL_SEND_COOLDOWN_SECONDS: "60",
+            GOOGLE_MAPS_GEOCODE_USE_SERVER: process.env.STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER || "true",
           };
 
           for (const container of nextDefinition.containerDefinitions) {
@@ -185,6 +198,14 @@ jobs:
             }
             container.environment = Array.from(envByName.values()).sort((left, right) => left.name.localeCompare(right.name));
             container.secrets = (container.secrets ?? []).filter((entry) => !Object.prototype.hasOwnProperty.call(authEnv, entry.name));
+
+            if (!container.secrets.some((entry) => entry.name === "GOOGLE_MAPS_SERVER_API_KEY")) {
+              const secretArn = `arn:aws:secretsmanager:${process.env.AWS_REGION}:${process.env.AWS_ACCOUNT_ID}:secret:/darci/staging/app`;
+              container.secrets.push({
+                name: "GOOGLE_MAPS_SERVER_API_KEY",
+                valueFrom: `${secretArn}:GOOGLE_MAPS_SERVER_API_KEY::`,
+              });
+            }
           }
 
           process.stdout.write(`${JSON.stringify(nextDefinition, null, 2)}\n`);

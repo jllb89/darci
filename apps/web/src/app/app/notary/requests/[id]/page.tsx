@@ -1064,6 +1064,111 @@ type VenueCapture = {
   completedAt?: string;
 };
 
+type VenueFieldKey = "state" | "county" | "city" | "addressLine1" | "locationLabel";
+
+type GoogleAddressComponent = {
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+};
+
+type VenueAddressValues = Partial<Record<VenueFieldKey, string>>;
+
+type VenuePrefillSource = "gps_reverse_geocode" | "google_place_select" | "manual";
+
+const normalizeCountyLabel = (value: string) => value.replace(/\s+County$/i, "").trim();
+
+const findAddressComponent = (
+  components: GoogleAddressComponent[],
+  type: string,
+) => components.find((component) => Array.isArray(component.types) && component.types.includes(type));
+
+const mapVenueFromAddressComponents = (
+  components: GoogleAddressComponent[],
+  formattedAddress?: string | null,
+  placeName?: string | null,
+): VenueAddressValues => {
+  const stateComponent = findAddressComponent(components, "administrative_area_level_1");
+  const countyComponent = findAddressComponent(components, "administrative_area_level_2");
+  const localityComponent =
+    findAddressComponent(components, "locality") ??
+    findAddressComponent(components, "postal_town") ??
+    findAddressComponent(components, "sublocality_level_1") ??
+    findAddressComponent(components, "administrative_area_level_3");
+  const streetNumberComponent = findAddressComponent(components, "street_number");
+  const routeComponent = findAddressComponent(components, "route");
+
+  const streetNumber = streetNumberComponent?.long_name?.trim() ?? "";
+  const route = routeComponent?.long_name?.trim() ?? "";
+  const addressLine1 = `${streetNumber} ${route}`.trim() || formattedAddress?.split(",")[0]?.trim() || "";
+  const county = countyComponent?.long_name?.trim() ? normalizeCountyLabel(countyComponent.long_name) : "";
+
+  return {
+    state: stateComponent?.long_name?.trim() || stateComponent?.short_name?.trim() || "",
+    county,
+    city: localityComponent?.long_name?.trim() || "",
+    addressLine1,
+    locationLabel: (placeName ?? "").trim(),
+  };
+};
+
+const loadGoogleMapsScript = async (apiKey: string) => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const runtimeWindow = window as Window & {
+    __darciGoogleMapsLoadPromise?: Promise<boolean>;
+    google?: {
+      maps?: {
+        places?: {
+          Autocomplete?: new (
+            input: HTMLInputElement,
+            options: Record<string, unknown>,
+          ) => {
+            addListener: (eventName: string, callback: () => void) => void;
+            getPlace: () => {
+              address_components?: GoogleAddressComponent[];
+              formatted_address?: string;
+              name?: string;
+            };
+          };
+        };
+      };
+    };
+  };
+
+  if (runtimeWindow.google?.maps?.places?.Autocomplete) {
+    return true;
+  }
+
+  if (runtimeWindow.__darciGoogleMapsLoadPromise) {
+    return runtimeWindow.__darciGoogleMapsLoadPromise;
+  }
+
+  runtimeWindow.__darciGoogleMapsLoadPromise = new Promise<boolean>((resolve) => {
+    const scriptId = "darci-google-maps-script";
+    const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(true), { once: true });
+      existingScript.addEventListener("error", () => resolve(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = scriptId;
+    script.async = true;
+    script.defer = true;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places`;
+    script.addEventListener("load", () => resolve(true), { once: true });
+    script.addEventListener("error", () => resolve(false), { once: true });
+    document.head.appendChild(script);
+  });
+
+  const result = await runtimeWindow.__darciGoogleMapsLoadPromise;
+  return result;
+};
+
 const readVenueText = (value: unknown) => {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 };
@@ -1246,6 +1351,19 @@ export default function NotaryRequestWorkspacePage() {
   const [venueCity, setVenueCity] = useState("");
   const [venueAddressLine1, setVenueAddressLine1] = useState("");
   const [venueLocationLabel, setVenueLocationLabel] = useState("");
+  const [venueFieldTouched, setVenueFieldTouched] = useState<Record<VenueFieldKey, boolean>>({
+    state: false,
+    county: false,
+    city: false,
+    addressLine1: false,
+    locationLabel: false,
+  });
+  const [venuePrefillStatus, setVenuePrefillStatus] = useState<string | null>(null);
+  const [venuePrefillSource, setVenuePrefillSource] = useState<VenuePrefillSource>("manual");
+  const [venuePrefillPlaceId, setVenuePrefillPlaceId] = useState<string | null>(null);
+  const [venuePrefillFormattedAddress, setVenuePrefillFormattedAddress] = useState<string | null>(null);
+  const [venuePrefillCoords, setVenuePrefillCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [isVenuePrefilling, setIsVenuePrefilling] = useState(false);
   const [notarialNotes, setNotarialNotes] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notaryProfile, setNotaryProfile] = useState<NotaryProfileSummary | null>(null);
@@ -1256,6 +1374,9 @@ export default function NotaryRequestWorkspacePage() {
   const lastAutoNotarySampleRefreshRef = useRef<string | null>(null);
   const lastAutoProximityEvaluationRef = useRef<string | null>(null);
   const samePlaceFallbackRefreshInFlightRef = useRef(false);
+  const venueAddressInputRef = useRef<HTMLInputElement | null>(null);
+  const venueAutocompleteRef = useRef<{ getPlace: () => { address_components?: GoogleAddressComponent[]; formatted_address?: string; name?: string; place_id?: string } } | null>(null);
+  const venuePrefillGeocodeKeyRef = useRef<string | null>(null);
 
   const handleIdentityDocumentTypeChange = useCallback((nextType: IdentityDocumentType) => {
     setIdentityDocumentType(nextType);
@@ -1266,6 +1387,65 @@ export default function NotaryRequestWorkspacePage() {
     setIdentityDocumentNumberTail("");
     setIdentityMaskedIdentifier("");
   }, []);
+
+  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? "";
+  const isGoogleAutocompleteEnabled =
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED !== "false" &&
+    googleMapsApiKey.length > 0;
+
+  const updateVenueField = useCallback((fieldKey: VenueFieldKey, nextValue: string) => {
+    setVenueFieldTouched((current) => ({ ...current, [fieldKey]: true }));
+    setVenuePrefillSource("manual");
+    setVenuePrefillPlaceId(null);
+    setVenuePrefillFormattedAddress(null);
+    setVenuePrefillCoords(null);
+    if (fieldKey === "state") {
+      setVenueState(nextValue);
+    } else if (fieldKey === "county") {
+      setVenueCounty(nextValue);
+    } else if (fieldKey === "city") {
+      setVenueCity(nextValue);
+    } else if (fieldKey === "addressLine1") {
+      setVenueAddressLine1(nextValue);
+    } else if (fieldKey === "locationLabel") {
+      setVenueLocationLabel(nextValue);
+    }
+  }, []);
+
+  const applyVenueValues = useCallback((input: VenueAddressValues, options: {
+    sourceMessage: string;
+    overwriteFilled: boolean;
+    skipTouched: boolean;
+  }) => {
+    const applyValue = (
+      fieldKey: VenueFieldKey,
+      value: string | undefined,
+      currentValue: string,
+      setValue: (nextValue: string) => void,
+    ) => {
+      const nextValue = (value ?? "").trim();
+      if (!nextValue) {
+        return;
+      }
+
+      if (options.skipTouched && venueFieldTouched[fieldKey]) {
+        return;
+      }
+
+      if (!options.overwriteFilled && currentValue.trim().length > 0) {
+        return;
+      }
+
+      setValue(nextValue);
+    };
+
+    applyValue("state", input.state, venueState, setVenueState);
+    applyValue("county", input.county, venueCounty, setVenueCounty);
+    applyValue("city", input.city, venueCity, setVenueCity);
+    applyValue("addressLine1", input.addressLine1, venueAddressLine1, setVenueAddressLine1);
+    applyValue("locationLabel", input.locationLabel, venueLocationLabel, setVenueLocationLabel);
+    setVenuePrefillStatus(options.sourceMessage);
+  }, [venueAddressLine1, venueCity, venueCounty, venueFieldTouched, venueLocationLabel, venueState]);
 
   const loadNotaryProfile = useCallback(async () => {
     if (!accessToken) {
@@ -1491,6 +1671,184 @@ export default function NotaryRequestWorkspacePage() {
     setVenueAddressLine1((current) => current.trim() || (venue.addressLine1 ?? ""));
     setVenueLocationLabel((current) => current.trim() || (venue.locationLabel ?? ""));
   }, [context]);
+
+  useEffect(() => {
+    if (!isGoogleAutocompleteEnabled || !venueAddressInputRef.current || venueAutocompleteRef.current) {
+      return;
+    }
+
+    let isDisposed = false;
+
+    const attachAutocomplete = async () => {
+      const loaded = await loadGoogleMapsScript(googleMapsApiKey);
+      if (!loaded || isDisposed || !venueAddressInputRef.current) {
+        if (!loaded) {
+          setVenuePrefillStatus("Google address lookup is unavailable. Enter venue manually.");
+        }
+        return;
+      }
+
+      const runtimeGoogle = (window as Window & {
+        google?: {
+          maps?: {
+            places?: {
+              Autocomplete?: new (
+                input: HTMLInputElement,
+                options: Record<string, unknown>,
+              ) => {
+                addListener: (eventName: string, callback: () => void) => void;
+                getPlace: () => {
+                  address_components?: GoogleAddressComponent[];
+                  formatted_address?: string;
+                  name?: string;
+                  place_id?: string;
+                };
+              };
+            };
+          };
+        };
+      }).google;
+      const AutocompleteCtor = runtimeGoogle?.maps?.places?.Autocomplete;
+      if (!AutocompleteCtor) {
+        setVenuePrefillStatus("Google address lookup is unavailable. Enter venue manually.");
+        return;
+      }
+
+      const autocomplete = new AutocompleteCtor(venueAddressInputRef.current, {
+        fields: ["address_components", "formatted_address", "name", "place_id"],
+        types: ["address"],
+      });
+
+      autocomplete.addListener("place_changed", () => {
+        const place = autocomplete.getPlace();
+        const components = Array.isArray(place.address_components)
+          ? place.address_components
+          : [];
+        const mapped = mapVenueFromAddressComponents(
+          components,
+          place.formatted_address,
+          place.name,
+        );
+        applyVenueValues(mapped, {
+          sourceMessage: "Address applied from selected place.",
+          overwriteFilled: true,
+          skipTouched: true,
+        });
+        setVenuePrefillSource("google_place_select");
+        setVenuePrefillPlaceId(place.place_id ?? null);
+        setVenuePrefillFormattedAddress(place.formatted_address ?? null);
+        setVenuePrefillCoords(null);
+      });
+
+      venueAutocompleteRef.current = autocomplete;
+    };
+
+    void attachAutocomplete();
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [applyVenueValues, googleMapsApiKey, isGoogleAutocompleteEnabled]);
+
+  useEffect(() => {
+    if (!context?.meeting || !requestId || !accessToken) {
+      return;
+    }
+
+    const participantId = context.meeting.participants.find(
+      (participant) => participant.participantRole === "notary",
+    )?.id;
+    if (!participantId) {
+      return;
+    }
+
+    const sample = context.evidence.geolocationSamples
+      .filter((item) => item.meetingParticipantId === participantId)
+      .sort((left, right) => new Date(right.capturedAt).getTime() - new Date(left.capturedAt).getTime())[0];
+
+    if (!sample) {
+      setVenuePrefillStatus("Current location unavailable. Enter venue manually.");
+      return;
+    }
+
+    const geocodeKey = `${sample.latitude.toFixed(5)}:${sample.longitude.toFixed(5)}`;
+    if (venuePrefillGeocodeKeyRef.current === geocodeKey) {
+      return;
+    }
+    venuePrefillGeocodeKeyRef.current = geocodeKey;
+
+    let isDisposed = false;
+
+    const prefillFromGeocode = async () => {
+      setIsVenuePrefilling(true);
+      setVenuePrefillStatus("Prefilling venue from current location...");
+      try {
+        const response = await fetchWithTokenRefresh(
+          `${notaryApiBaseUrl}/notary/requests/${encodeURIComponent(requestId)}/meeting/reverse-geocode`,
+          accessToken,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              latitude: sample.latitude,
+              longitude: sample.longitude,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response, "Geocode request failed"));
+        }
+
+        const payload = (await response.json()) as {
+          venue?: {
+            state?: string;
+            county?: string;
+            city?: string;
+            addressLine1?: string;
+            locationLabel?: string;
+          };
+          formattedAddress?: string;
+        };
+
+        if (!payload.venue) {
+          throw new Error("No geocode result");
+        }
+
+        if (isDisposed) {
+          return;
+        }
+
+        applyVenueValues(payload.venue, {
+          sourceMessage: "Prefilled from current location.",
+          overwriteFilled: false,
+          skipTouched: true,
+        });
+        setVenuePrefillSource("gps_reverse_geocode");
+        setVenuePrefillPlaceId(null);
+        setVenuePrefillFormattedAddress(
+          typeof payload.formattedAddress === "string" ? payload.formattedAddress : null,
+        );
+        setVenuePrefillCoords({ lat: sample.latitude, lng: sample.longitude });
+      } catch (error) {
+        if (!isDisposed) {
+          setVenuePrefillStatus("Could not prefill automatically. Enter venue manually.");
+        }
+      } finally {
+        if (!isDisposed) {
+          setIsVenuePrefilling(false);
+        }
+      }
+    };
+
+    void prefillFromGeocode();
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [applyVenueValues, context, accessToken, requestId]);
 
   const submitDecision = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1840,6 +2198,12 @@ export default function NotaryRequestWorkspacePage() {
       {
         participantRole: "notary",
         venue,
+        prefillMetadata: {
+          prefillSource: venuePrefillSource,
+          ...(venuePrefillPlaceId ? { placeId: venuePrefillPlaceId } : {}),
+          ...(venuePrefillFormattedAddress ? { formattedAddress: venuePrefillFormattedAddress } : {}),
+          ...(venuePrefillCoords ? { prefillLat: venuePrefillCoords.lat, prefillLng: venuePrefillCoords.lng } : {}),
+        },
       },
       "Unable to record acknowledgment venue.",
       "Venue captured.",
@@ -2651,16 +3015,26 @@ export default function NotaryRequestWorkspacePage() {
               {operatorPanelStep === "venue" ? (
                 <div className="space-y-3 rounded-lg bg-Color-White p-3 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
                   <div className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Acknowledgment venue</div>
+                  {isVenuePrefilling ? (
+                    <div className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-xs leading-5 text-Color-Neutral">
+                      Prefilling venue from current location...
+                    </div>
+                  ) : null}
+                  {venuePrefillStatus && !isVenuePrefilling ? (
+                    <div className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-xs leading-5 text-Color-Neutral">
+                      {venuePrefillStatus}
+                    </div>
+                  ) : null}
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                     <input
                       className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                      onChange={(event) => setVenueState(event.target.value)}
+                      onChange={(event) => updateVenueField("state", event.target.value)}
                       placeholder="State"
                       value={venueState}
                     />
                     <input
                       className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                      onChange={(event) => setVenueCounty(event.target.value)}
+                      onChange={(event) => updateVenueField("county", event.target.value)}
                       placeholder="County"
                       value={venueCounty}
                     />
@@ -2668,20 +3042,21 @@ export default function NotaryRequestWorkspacePage() {
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                     <input
                       className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                      onChange={(event) => setVenueCity(event.target.value)}
+                      onChange={(event) => updateVenueField("city", event.target.value)}
                       placeholder="City"
                       value={venueCity}
                     />
                     <input
+                      ref={venueAddressInputRef}
                       className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                      onChange={(event) => setVenueAddressLine1(event.target.value)}
+                      onChange={(event) => updateVenueField("addressLine1", event.target.value)}
                       placeholder="Address or place"
                       value={venueAddressLine1}
                     />
                   </div>
                   <input
                     className="w-full rounded-lg bg-Color-Neutral-Lightest px-3 py-2 text-sm outline-none shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]"
-                    onChange={(event) => setVenueLocationLabel(event.target.value)}
+                    onChange={(event) => updateVenueField("locationLabel", event.target.value)}
                     placeholder="Location label"
                     value={venueLocationLabel}
                   />

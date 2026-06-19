@@ -12,6 +12,7 @@ import {
   recordMeetingCheckin,
   recordMeetingNoShow,
   recordProximityEvaluation,
+  reverseGeocodeLocation,
   rescheduleMeeting,
   resendCode,
   reviewRequestDecision,
@@ -115,6 +116,11 @@ router.post(
   "/requests/:id/meeting/venue-capture",
   requireRole(["notary", "admin", "service_role"]),
   recordVenueCapture
+);
+router.post(
+  "/requests/:id/meeting/reverse-geocode",
+  requireRole(["notary", "admin", "service_role"]),
+  reverseGeocodeLocation
 );
 router.post(
   "/requests/:id/meeting/proximity-evaluation",

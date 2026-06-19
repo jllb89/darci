@@ -225,6 +225,18 @@ const venueCaptureSchema = z.object({
   venue: notaryVenueSchema,
   capturedAt: z.string().datetime().optional(),
   notes: z.string().trim().max(2000).optional(),
+  prefillMetadata: z.object({
+    prefillSource: z.enum(["gps_reverse_geocode", "google_place_select", "manual"]),
+    placeId: z.string().trim().min(1).max(255).optional(),
+    formattedAddress: z.string().trim().min(1).max(500).optional(),
+    prefillLat: z.number().min(-90).max(90).optional(),
+    prefillLng: z.number().min(-180).max(180).optional(),
+  }).optional(),
+}).passthrough();
+
+const reverseGeocodeSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
 }).passthrough();
 
 const proximityEvaluationSchema = z.object({
@@ -677,7 +689,12 @@ const createVenueCaptureArtifact = async (input: {
   requestId: string;
   venue: NotaryVenueInput;
   capturedAt: string;
-  source: "identity_verification" | "sign_request" | "manual_capture";
+  source:
+    | "identity_verification"
+    | "sign_request"
+    | "manual_capture"
+    | "gps_reverse_geocode"
+    | "google_place_select";
   notes?: string | null | undefined;
   extraMetadata?: Record<string, unknown> | undefined;
 }) => {
@@ -3663,6 +3680,13 @@ export const recordVenueCapture = async (req: Request, res: Response) => {
   }
 
   const capturedAt = parsed.data.capturedAt ?? parsed.data.venue.completedAt ?? new Date().toISOString();
+  const prefillSource = parsed.data.prefillMetadata?.prefillSource ?? "manual";
+  const captureSource =
+    prefillSource === "gps_reverse_geocode"
+      ? "gps_reverse_geocode"
+      : prefillSource === "google_place_select"
+        ? "google_place_select"
+        : "manual_capture";
   const venueCapture = await createVenueCaptureArtifact({
     meeting,
     meetingParticipantId: participant.id,
@@ -3670,8 +3694,23 @@ export const recordVenueCapture = async (req: Request, res: Response) => {
     requestId: request.id,
     venue: parsed.data.venue,
     capturedAt,
-    source: "manual_capture",
+    source: captureSource,
     notes: parsed.data.notes?.trim() ?? null,
+    extraMetadata: parsed.data.prefillMetadata
+      ? {
+          prefillSource: parsed.data.prefillMetadata.prefillSource,
+          placeId: parsed.data.prefillMetadata.placeId?.trim() || null,
+          formattedAddress: parsed.data.prefillMetadata.formattedAddress?.trim() || null,
+          prefillLat:
+            typeof parsed.data.prefillMetadata.prefillLat === "number"
+              ? parsed.data.prefillMetadata.prefillLat
+              : null,
+          prefillLng:
+            typeof parsed.data.prefillMetadata.prefillLng === "number"
+              ? parsed.data.prefillMetadata.prefillLng
+              : null,
+        }
+      : undefined,
   });
 
   await recordAuditEvent({
@@ -3686,6 +3725,7 @@ export const recordVenueCapture = async (req: Request, res: Response) => {
       meeting_id: meeting.id,
       venue_capture_artifact_id: venueCapture.id,
       participant_role: participant.participant_role,
+      prefill_source: prefillSource,
     },
   });
 
@@ -3699,6 +3739,151 @@ export const recordVenueCapture = async (req: Request, res: Response) => {
     meeting: buildMeetingResponse(meeting, participants),
     venueCapture: buildMeetingArtifactResponse(venueCapture),
   });
+};
+
+export const reverseGeocodeLocation = async (req: Request, res: Response) => {
+  const parsed = reverseGeocodeSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  const requestId = resolveRequestIdParam(req);
+  if (!requestId) {
+    return res.status(400).json({
+      error: "validation_error",
+      message: "Missing notarization request id",
+    });
+  }
+
+  const { request, document, actorUserId } = await resolveMeetingActorContext(req, requestId);
+  if (!request || !document) {
+    return res.status(404).json({
+      error: "not_found",
+      message: "Notarization request not found",
+    });
+  }
+
+  if (!request.assigned_notary_id) {
+    return res.status(409).json({
+      error: "conflict",
+      message: "Request must be assigned to an illuminotary before reverse geocoding",
+    });
+  }
+
+  if (
+    !ensureMeetingActorAuthorized({
+      role: req.user?.role,
+      actorUserId,
+      ownerUserId: document.owner_id,
+      assignedNotaryUserId: request.assigned_notary_id,
+    })
+  ) {
+    return res.status(403).json({
+      error: "forbidden",
+      message: "Reverse geocoding is not allowed for this request",
+    });
+  }
+
+  const googleMapsServerKey = process.env.GOOGLE_MAPS_SERVER_API_KEY?.trim();
+  const geocodeServerEnabled = process.env.GOOGLE_MAPS_GEOCODE_USE_SERVER?.trim() === "true";
+  if (!geocodeServerEnabled) {
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Geocoding service is disabled",
+    });
+  }
+
+  if (!googleMapsServerKey) {
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Geocoding service is not configured",
+    });
+  }
+
+  try {
+    const geocodeUrl = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+    geocodeUrl.searchParams.set("latlng", `${parsed.data.latitude},${parsed.data.longitude}`);
+    geocodeUrl.searchParams.set("key", googleMapsServerKey);
+
+    const response = await fetch(geocodeUrl.toString(), { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("Geocode request failed");
+    }
+
+    const payload = (await response.json()) as {
+      status?: string;
+      results?: Array<{
+        address_components?: Array<{
+          long_name?: string;
+          short_name?: string;
+          types?: string[];
+        }>;
+        formatted_address?: string;
+      }>;
+    };
+
+    if (payload.status === "ZERO_RESULTS") {
+      return res.status(400).json({
+        error: "invalid_request",
+        message: "No geocoding results for the provided location",
+      });
+    }
+
+    if (payload.status && payload.status !== "OK") {
+      return res.status(503).json({
+        error: "service_unavailable",
+        message: "Geocoding service is temporarily unavailable",
+      });
+    }
+
+    if (!Array.isArray(payload.results) || payload.results.length === 0) {
+      return res.status(400).json({
+        error: "invalid_request",
+        message: "No geocoding results for the provided location",
+      });
+    }
+
+    const firstResult = payload.results[0];
+    const components = Array.isArray(firstResult?.address_components) ? firstResult.address_components : [];
+
+    const findComponent = (type: string) =>
+      components.find((c) => Array.isArray(c.types) && c.types.includes(type));
+
+    const stateComponent = findComponent("administrative_area_level_1");
+    const countyComponent = findComponent("administrative_area_level_2");
+    const localityComponent =
+      findComponent("locality") ??
+      findComponent("postal_town") ??
+      findComponent("sublocality_level_1") ??
+      findComponent("administrative_area_level_3");
+    const streetNumberComponent = findComponent("street_number");
+    const routeComponent = findComponent("route");
+
+    const normalizeCounty = (value: string) => value.replace(/\s+County$/i, "").trim();
+
+    const venue = {
+      state: stateComponent?.long_name?.trim() || stateComponent?.short_name?.trim() || "",
+      county: countyComponent?.long_name?.trim()
+        ? normalizeCounty(countyComponent.long_name)
+        : "",
+      city: localityComponent?.long_name?.trim() || "",
+      addressLine1:
+        `${(streetNumberComponent?.long_name?.trim() || "")} ${(routeComponent?.long_name?.trim() || "")}`.trim() ||
+        firstResult?.formatted_address?.split(",")[0]?.trim() ||
+        "",
+    };
+
+    return res.status(200).json({
+      venue,
+      formattedAddress: firstResult?.formatted_address,
+    });
+  } catch (error) {
+    console.error("Reverse geocode error:", error);
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Geocoding service is temporarily unavailable",
+    });
+  }
 };
 
 export const recordProximityEvaluation = async (req: Request, res: Response) => {
