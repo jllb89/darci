@@ -1164,7 +1164,12 @@ function SignatureCaptureField({
 
     isDrawingRef.current = false;
     lastPointRef.current = null;
-  }, []);
+
+    if (canvas && hasInkRef.current) {
+      onChange(canvas.toDataURL("image/png"));
+      setIsUsingDrawnSignature(false);
+    }
+  }, [onChange]);
 
   const saveDrawnSignature = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1357,7 +1362,11 @@ function SignatureCaptureField({
                     <button
                       type="button"
                       disabled={disabled}
-                      onClick={() => setSelectedSavedId(item.id)}
+                      onClick={() => {
+                        setSelectedSavedId(item.id);
+                        onChange(item.dataUrl);
+                        setIsUsingDrawnSignature(false);
+                      }}
                       className="block w-full p-2 pr-11 text-left disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <div className="mb-2 text-xs text-Color-Neutral">{item.label}</div>
@@ -1718,30 +1727,40 @@ export default function SettingsPage() {
     void loadServiceAreas(applicationForm.jurisdiction);
   }, [applicationForm.jurisdiction, loadServiceAreas]);
 
+  const showSaveError = (nextMessage: string) => {
+    setErrorMessage(nextMessage);
+    showToast({
+      tone: "error",
+      message: nextMessage,
+      durationMs: 6000,
+    });
+  };
+
   const submitApplication = async () => {
+    const isProfileUpdate = Boolean(notaryProfile) || application?.status === "approved";
+
     if (!accessToken) {
-      setErrorMessage("Sign in again to submit your notary request.");
+      showSaveError(isProfileUpdate ? "Sign in again to save your notary profile." : "Sign in again to submit your notary request.");
       return;
     }
 
-    const isProfileUpdate = Boolean(notaryProfile) || application?.status === "approved";
     if (application && !isProfileUpdate) {
-      setErrorMessage("A notary application has already been submitted for this account.");
+      showSaveError("A notary application has already been submitted for this account.");
       return;
     }
 
     if (!applicationForm.jurisdiction.trim() || !applicationForm.serviceAreaName.trim()) {
-      setErrorMessage("Choose your jurisdiction and service area.");
+      showSaveError("Choose your jurisdiction and service area.");
       return;
     }
 
     if (!applicationForm.commissionNumber.trim() || !applicationForm.commissionExpiresAt.trim()) {
-      setErrorMessage("Enter your commission number and expiration date.");
+      showSaveError("Enter your commission number and expiration date.");
       return;
     }
 
     if (isDateInputBeforeToday(applicationForm.commissionExpiresAt)) {
-      setErrorMessage("Commission expiration must be today or later.");
+      showSaveError("Commission expiration must be today or later.");
       return;
     }
 
@@ -1807,7 +1826,7 @@ export default function SettingsPage() {
       });
       router.push("/app");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to save notary application.");
+      showSaveError(error instanceof Error ? error.message : "Unable to save notary application.");
     } finally {
       setIsSavingApplication(false);
     }

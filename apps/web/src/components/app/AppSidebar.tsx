@@ -413,7 +413,7 @@ export default function AppSidebar({
   return (
     <motion.aside
       animate={{ width: isCollapsed ? 52 : 240 }}
-      className="hidden h-screen flex-shrink-0 flex-col overflow-visible border-r border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest md:flex"
+      className="relative z-[1000] hidden h-screen flex-shrink-0 flex-col overflow-visible border-r border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest md:flex"
       initial={false}
       transition={{ type: "spring", stiffness: 430, damping: 42, mass: 0.85 }}
     >
@@ -547,7 +547,7 @@ export default function AppSidebar({
                       {isVerificationLookupOpen ? (
                         <div
                           id="sidebar-verification-lookup"
-                          className="absolute left-[calc(100%+0.75rem)] top-1/2 z-[70] w-80 -translate-y-1/2 rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-4 shadow-[0_22px_54px_rgba(0,0,0,0.16)]"
+                          className="absolute left-[calc(100%+0.75rem)] top-1/2 z-[1000] w-80 -translate-y-1/2 rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-4 shadow-[0_22px_54px_rgba(0,0,0,0.16)]"
                         >
                           <form
                             className="space-y-3"
