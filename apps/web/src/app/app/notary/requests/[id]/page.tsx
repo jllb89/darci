@@ -1332,7 +1332,6 @@ export default function NotaryRequestWorkspacePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [identitySubjectName, setIdentitySubjectName] = useState("");
   const [identityDocumentType, setIdentityDocumentType] = useState<IdentityDocumentType>(defaultIdentityDocumentType);
   const [identityDocumentTypeOptions, setIdentityDocumentTypeOptions] = useState<IdentityDocumentTypeOption[]>([]);
@@ -1368,6 +1367,7 @@ export default function NotaryRequestWorkspacePage() {
   const [samePlaceAutomationMessage, setSamePlaceAutomationMessage] = useState("Waiting for live location signals.");
   const previewDocumentSourceRef = useRef<{ id: string; downloadUrl: string | null } | null>(null);
   const hasShownRealtimeFallbackToastRef = useRef(false);
+  const hasShownFinalPackageAnchoredToastRef = useRef(false);
   const lastAutoNotarySampleRefreshRef = useRef<string | null>(null);
   const lastAutoProximityEvaluationRef = useRef<string | null>(null);
   const samePlaceFallbackRefreshInFlightRef = useRef(false);
@@ -1851,7 +1851,7 @@ export default function NotaryRequestWorkspacePage() {
     event.preventDefault();
 
     if (!accessToken || !context) {
-      setErrorMessage("Sign in again to record a review decision.");
+      showToast({ tone: "error", message: "Sign in again to record a review decision." });
       return;
     }
 
@@ -1898,7 +1898,7 @@ export default function NotaryRequestWorkspacePage() {
         throw new Error(await readApiErrorMessage(response, "Unable to record review decision."));
       }
 
-      setSuccessMessage(decisionSuccessMessage[nextDecision]);
+      showToast({ tone: "success", message: decisionSuccessMessage[nextDecision] });
       addFeatureBreadcrumb({
         feature: "notary_workspace",
         action: "review_decision.completed",
@@ -1929,7 +1929,10 @@ export default function NotaryRequestWorkspacePage() {
           },
         },
       });
-      setErrorMessage(error instanceof Error ? error.message : "Unable to record review decision.");
+      showToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to record review decision.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -1937,7 +1940,7 @@ export default function NotaryRequestWorkspacePage() {
 
   const startInPersonSession = async () => {
     if (!accessToken || !context) {
-      setErrorMessage("Sign in again to start the in-person session.");
+      showToast({ tone: "error", message: "Sign in again to start the in-person session." });
       return;
     }
 
@@ -1973,7 +1976,7 @@ export default function NotaryRequestWorkspacePage() {
         throw new Error(await readApiErrorMessage(response, "Unable to start the in-person session."));
       }
 
-      setSuccessMessage(null);
+      showToast({ tone: "success", message: "In-person session started." });
       addFeatureBreadcrumb({
         feature: "notary_workspace",
         action: "meeting.start_completed",
@@ -1999,7 +2002,10 @@ export default function NotaryRequestWorkspacePage() {
           notary_request_id: context.request.id,
         },
       });
-      setErrorMessage(error instanceof Error ? error.message : "Unable to start the in-person session.");
+      showToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to start the in-person session.",
+      });
     } finally {
       setIsStartingSession(false);
     }
@@ -2013,13 +2019,12 @@ export default function NotaryRequestWorkspacePage() {
     success: string | null,
   ) => {
     if (!accessToken || !context) {
-      setErrorMessage("Sign in again to continue this notary request.");
+      showToast({ tone: "error", message: "Sign in again to continue this notary request." });
       return false;
     }
 
     setActiveAction(actionKey);
     setErrorMessage(null);
-    setSuccessMessage(null);
     let requestIdHeader: string | null = null;
     addFeatureBreadcrumb({
       feature: "notary_workspace",
@@ -2046,7 +2051,7 @@ export default function NotaryRequestWorkspacePage() {
       }
 
       if (success) {
-        setSuccessMessage(success);
+        showToast({ tone: "success", message: success });
       }
       addFeatureBreadcrumb({
         feature: "notary_workspace",
@@ -2081,7 +2086,10 @@ export default function NotaryRequestWorkspacePage() {
           },
         },
       });
-      setErrorMessage(error instanceof Error ? error.message : fallbackMessage);
+      showToast({
+        tone: "error",
+        message: error instanceof Error ? error.message : fallbackMessage,
+      });
       if (actionKey === "submit" || actionKey === "advance-session") {
         await loadContext();
       }
@@ -2089,7 +2097,7 @@ export default function NotaryRequestWorkspacePage() {
     } finally {
       setActiveAction(null);
     }
-  }, [accessToken, context, loadContext]);
+  }, [accessToken, context, loadContext, showToast]);
 
   const recordProximity = useCallback(async ({ automatic = false }: { automatic?: boolean } = {}) => {
     return postRequestAction(
@@ -2115,7 +2123,7 @@ export default function NotaryRequestWorkspacePage() {
         setSamePlaceAutomationState("blocked");
         setSamePlaceAutomationMessage(message);
       } else {
-        setErrorMessage(message);
+        showToast({ tone: "error", message });
       }
       return false;
     }
@@ -2138,11 +2146,11 @@ export default function NotaryRequestWorkspacePage() {
       "Unable to refresh illuminotary location.",
       automatic ? null : "Illuminotary location refreshed.",
     );
-  }, [postRequestAction]);
+  }, [postRequestAction, showToast]);
 
   const recordIdentity = async () => {
     if (!identityValidation.isValid) {
-      setErrorMessage(identityValidation.firstError ?? "Complete identity verification details.");
+      showToast({ tone: "error", message: identityValidation.firstError ?? "Complete identity verification details." });
       return;
     }
 
@@ -2185,7 +2193,7 @@ export default function NotaryRequestWorkspacePage() {
     };
 
     if (!venue.state || !venue.county) {
-      setErrorMessage("State and county are required to capture venue.");
+      showToast({ tone: "error", message: "State and county are required to capture venue." });
       return;
     }
 
@@ -2354,7 +2362,6 @@ export default function NotaryRequestWorkspacePage() {
   const isVerificationReady = Boolean(
     context?.capabilities.canOpenVerification || (context?.finalization.publicVerifyPath && isAnchored),
   );
-  const recentFinalizationHistory = context?.finalization.history.slice(-4).reverse() ?? [];
   const hasRunningAction = activeAction !== null;
   const canStartSession = Boolean(context?.capabilities.canManageMeeting && !isSessionInProgress && !isMeetingCompleted);
   const hasProfileJurisdiction = Boolean(notaryProfile?.jurisdiction?.trim());
@@ -2372,9 +2379,7 @@ export default function NotaryRequestWorkspacePage() {
     hasProfileSignature &&
     hasProfileSeal;
   const latestVenueCapture = getLatestVenueCapture(context);
-  const hasAcknowledgmentVenue = Boolean(
-    (venueState.trim() && venueCounty.trim()) || latestVenueCapture,
-  );
+  const hasAcknowledgmentVenue = Boolean(latestVenueCapture);
   const missingProfileFields = [
     !hasProfileJurisdiction ? "jurisdiction" : null,
     !hasProfileServiceArea ? "service area" : null,
@@ -2477,8 +2482,6 @@ export default function NotaryRequestWorkspacePage() {
       operatorPanelStep === "same-place" &&
       !hasPassedProximity,
   );
-  const pageNotificationMessage = errorMessage ?? successMessage;
-  const pageNotificationPrefix = errorMessage ? "Action failed" : "Update";
   const fallbackIdentityOption = getIdentityDocumentOption(identityDocumentType);
   const effectiveIdentityDocumentOptions =
     identityDocumentTypeOptions.length > 0
@@ -2590,6 +2593,24 @@ export default function NotaryRequestWorkspacePage() {
       durationMs: 6000,
     });
   }, [showRealtimeFallbackNotice, showToast]);
+
+  useEffect(() => {
+    if (!isAnchored) {
+      hasShownFinalPackageAnchoredToastRef.current = false;
+      return;
+    }
+
+    if (hasShownFinalPackageAnchoredToastRef.current) {
+      return;
+    }
+
+    hasShownFinalPackageAnchoredToastRef.current = true;
+    showToast({
+      tone: "success",
+      message: "Final package is anchored. Verification is ready for the member record.",
+      durationMs: 7000,
+    });
+  }, [isAnchored, showToast]);
 
   useEffect(() => {
     if (!context?.meeting || !isSessionInProgress) {
@@ -2728,9 +2749,9 @@ export default function NotaryRequestWorkspacePage() {
         ) : null}
       </div>
 
-      {pageNotificationMessage ? (
+      {errorMessage ? (
         <div className="border-t-4 border-black bg-black px-4 py-3 text-sm text-white shadow-[0_8px_20px_rgba(0,0,0,0.18)]">
-          <span className="font-medium">{pageNotificationPrefix}:</span> {pageNotificationMessage}
+          <span className="font-medium">Action failed:</span> {errorMessage}
         </div>
       ) : null}
 
@@ -3057,7 +3078,7 @@ export default function NotaryRequestWorkspacePage() {
                     placeholder="Location label"
                     value={venueLocationLabel}
                   />
-                  {!hasAcknowledgmentVenue ? (
+                  {!isVenueStepValid ? (
                     <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
                       State and county are required to capture venue.
                     </div>
@@ -3146,11 +3167,7 @@ export default function NotaryRequestWorkspacePage() {
                   >
                     Submit final notarized package
                   </ActionButton>
-                ) : (
-                  <div className="rounded-lg bg-emerald-50 px-3 py-3 text-sm leading-6 text-emerald-800">
-                    Final package is anchored. Verification is ready for the member record.
-                  </div>
-                )}
+                ) : null}
                 {context?.finalization ? (
                   <div className="rounded-lg bg-Color-White px-3 py-3 text-xs leading-5 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -3182,15 +3199,6 @@ export default function NotaryRequestWorkspacePage() {
                     {hasLedgerFailure ? (
                       <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">
                         Ledger anchoring failed{context.finalization.anchorAttempt?.errorMessage ? `: ${context.finalization.anchorAttempt.errorMessage}` : "."} Retry final package submission after the ledger provider is available.
-                      </div>
-                    ) : null}
-                    {recentFinalizationHistory.length > 0 ? (
-                      <div className="mt-3 space-y-2">
-                        {recentFinalizationHistory.map((event) => (
-                          <div key={event.id} className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2">
-                            {formatStatusLabel(event.status)} · {formatDateTime(event.createdAt)}
-                          </div>
-                        ))}
                       </div>
                     ) : null}
                   </div>

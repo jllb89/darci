@@ -12,7 +12,6 @@ import {
 } from "@/lib/requestRealtime";
 import {
   canRecordMemberSessionCheckIn,
-  getRequestSessionParticipant,
   hasRequestSessionParticipantCheckedIn,
   shouldShowMemberSessionCheckIn,
 } from "../requestSession";
@@ -20,6 +19,7 @@ import {
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:4000";
+const previewPanelHeightClass = "h-[72vh] min-h-[560px]";
 
 type RequestDetailPayload = {
   request: {
@@ -40,6 +40,17 @@ type RequestDetailPayload = {
     status: string | null;
     documentType: string | null;
     jurisdiction: string | null;
+    reviewDocuments: Array<{
+      id: string;
+      versionId: string;
+      label: string;
+      fileName: string | null;
+      mimeType: string | null;
+      sizeBytes: number | null;
+      isFinal: boolean;
+      downloadUrl: string | null;
+      createdAt: string;
+    }>;
     summary: {
       verification: {
         status: string;
@@ -113,6 +124,26 @@ type RequestDetailPayload = {
       arrivedAt: string | null;
       departedAt: string | null;
     }>;
+    identityVerifications: Array<{
+      id: string;
+      participantRole: string;
+      verificationMethod: string;
+      status: string;
+      verifiedAt: string | null;
+    }>;
+    proximityEvaluations: Array<{
+      id: string;
+      evaluationKind: string;
+      status: string;
+      observedDistanceMeters: number | null;
+      evaluatedAt: string;
+    }>;
+    artifacts: Array<{
+      id: string;
+      artifactKind: string;
+      status: string;
+      capturedAt: string | null;
+    }>;
   } | null;
   warnings: Array<{
     code: string;
@@ -128,17 +159,6 @@ type BrowserGeolocationSample = {
   accuracyMeters?: number;
   altitudeMeters?: number;
   sampleKind: "device_gps";
-};
-
-type TimelinePayload = {
-  timeline: Array<{
-    id?: string;
-    event?: string;
-    label?: string;
-    message?: string;
-    timestamp?: string;
-    createdAt?: string;
-  }>;
 };
 
 const fetchWithTokenRefresh = async (
@@ -198,11 +218,122 @@ const formatStatusLabel = (value: string | null | undefined) => {
     .join(" ");
 };
 
-function FinalizationStep({ done, label }: { done: boolean; label: string }) {
+const formatProductLabel = (documentType: string | null | undefined) => {
+  const label = formatStatusLabel(documentType);
+  return label === "-" ? "Document" : label;
+};
+
+const formatCompactReviewDocumentLabel = (
+  document: { fileName: string | null; label: string; isFinal: boolean },
+  index: number,
+  documentType: string | null | undefined,
+) => {
+  const text = `${document.fileName ?? ""} ${document.label} ${documentType ?? ""}`.toLowerCase();
+
+  if (text.includes("registration")) {
+    return "Trust registration";
+  }
+
+  if (text.includes("certification")) {
+    return "Trust certification";
+  }
+
+  if (text.includes("amendment")) {
+    return "Trust amendment";
+  }
+
+  const trustmakerMatch = text.match(/trust\s*maker\s*(\d+)/) ?? text.match(/trustmaker[-_\s]*(\d+)/);
+  if (trustmakerMatch?.[1]) {
+    return `POA trustmaker ${trustmakerMatch[1]}`;
+  }
+
+  if (text.includes("trustmaker") || text.includes("trust maker") || text.includes("trust")) {
+    return `POA trustmaker ${index + 1}`;
+  }
+
+  if (text.includes("power") || text.includes("attorney") || text.includes("poa") || text.includes("ddpoa")) {
+    return "POA";
+  }
+
+  return formatProductLabel(documentType);
+};
+
+const isAcknowledgedReviewDocument = (document: { fileName: string | null; label: string }) => {
+  const text = `${document.fileName ?? ""} ${document.label}`.toLowerCase();
+  return text.includes("acknowledged");
+};
+
+const getReviewDocumentStatusLabel = (document: { fileName: string | null; label: string; isFinal: boolean }) => {
+  if (document.isFinal) {
+    return "Final package";
+  }
+
+  if (isAcknowledgedReviewDocument(document)) {
+    return "Acknowledgment appended";
+  }
+
+  return "Ready";
+};
+
+function CompletionStep({ done, label }: { done: boolean; label: string }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg bg-Color-White px-3 py-2 text-xs shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
       <span className="text-Color-Neutral-Darkest">{label}</span>
       <span className={done ? "font-medium text-emerald-700" : "text-Color-Neutral"}>{done ? "Done" : "Pending"}</span>
+    </div>
+  );
+}
+
+function SessionTimeline({ steps }: { steps: Array<{ description: string; done: boolean; label: string }> }) {
+  const firstPendingIndex = steps.findIndex((step) => !step.done);
+  const currentIndex = firstPendingIndex === -1 ? steps.length - 1 : firstPendingIndex;
+  const currentStep = steps[currentIndex] ?? steps[0];
+  const previousStep = currentIndex > 0 ? steps[currentIndex - 1] ?? null : null;
+  const nextStep = steps.slice(currentIndex + 1, currentIndex + 2)[0] ?? null;
+  const completedCount = steps.filter((step) => step.done).length;
+  const progressPercent = steps.length > 0 ? Math.round((completedCount / steps.length) * 100) : 0;
+  const isComplete = completedCount === steps.length;
+
+  if (!currentStep) {
+    return null;
+  }
+
+  return (
+    <div className="w-full rounded-2xl border border-white/10 bg-black py-3 text-xs text-white">
+      <div className="space-y-2 px-4">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-white">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0">
+              {!isComplete ? <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-Green opacity-30" /> : null}
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-Green" />
+            </span>
+            {currentStep.label}
+          </span>
+          <span className="min-w-0 truncate text-[11px] leading-4 text-white">{currentStep.description}</span>
+          <span className="ml-auto text-[11px] font-medium text-white/70">
+            {completedCount}/{steps.length}
+          </span>
+        </div>
+        <div className="mb-3 mt-6 h-1.5 overflow-hidden rounded-full bg-white/10">
+          <div className="h-full rounded-full bg-Green transition-all duration-700 ease-out" style={{ width: `${progressPercent}%` }} />
+        </div>
+        <div className="flex items-start justify-between gap-4">
+          {previousStep ? (
+            <div className="shrink-0 rounded-full bg-white/5 px-3 pb-0.5 pt-1.5 text-left text-[10px] leading-4 text-white/72">
+              <div className="font-medium text-white">Previous: {previousStep.label}</div>
+              <div className="text-white/58">{previousStep.description}</div>
+            </div>
+          ) : (
+            <div />
+          )}
+          {nextStep ? (
+            <div className="shrink-0 rounded-full bg-white/5 px-3 pb-0.5 pt-1.5 text-right text-[10px] leading-4 text-white/72">
+              <div className="font-medium text-white">Next: {nextStep.label}</div>
+              <div className="text-white/58">{nextStep.description}</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -242,46 +373,34 @@ export default function RequestWorkspacePage() {
   const requestId = typeof params?.id === "string" ? params.id : "";
   const { accessToken, refreshToken } = useStoredAuth();
   const [payload, setPayload] = useState<RequestDetailPayload | null>(null);
-  const [timeline, setTimeline] = useState<TimelinePayload["timeline"]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadRequest = useCallback(async () => {
     if (!accessToken || !requestId) {
       setPayload(null);
-      setTimeline([]);
       return;
     }
 
     setIsLoading(true);
     try {
-      const [detailResponse, timelineResponse] = await Promise.all([
-        fetchWithTokenRefresh(`${apiBaseUrl}/requests/${encodeURIComponent(requestId)}`, accessToken, {
-          cache: "no-store",
-        }),
-        fetchWithTokenRefresh(
-          `${apiBaseUrl}/requests/${encodeURIComponent(requestId)}/timeline`,
-          accessToken,
-          { cache: "no-store" },
-        ),
-      ]);
-
+      const detailResponse = await fetchWithTokenRefresh(`${apiBaseUrl}/requests/${encodeURIComponent(requestId)}`, accessToken, {
+        cache: "no-store",
+      });
       const detailPayload = (await detailResponse.json().catch(() => null)) as RequestDetailPayload | null;
-      const timelinePayload = (await timelineResponse.json().catch(() => null)) as TimelinePayload | null;
 
       if (!detailResponse.ok || !detailPayload?.request) {
         throw new Error("Failed to load request.");
       }
 
       setPayload(detailPayload);
-      setTimeline(Array.isArray(timelinePayload?.timeline) ? timelinePayload.timeline : []);
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to load request.");
       setPayload(null);
-      setTimeline([]);
     } finally {
       setIsLoading(false);
     }
@@ -313,7 +432,6 @@ export default function RequestWorkspacePage() {
     channelName: `request:${requestId}`,
     targets: realtimeTargets,
     broadcastTargets: [{ event: requestRealtimeBroadcastEvent, private: true }],
-    tableChangeTargetsEnabled: false,
     onInvalidate: loadRequest,
     pollIntervalMs: 30_000,
   });
@@ -365,41 +483,94 @@ export default function RequestWorkspacePage() {
     }
   };
 
-  const detail = payload?.request;
+  const detail = payload?.request ?? null;
   const sessionMeeting = payload?.meeting ?? null;
   const liveMeeting = sessionMeeting?.status === "in_progress" ? sessionMeeting : null;
-  const memberParticipant = getRequestSessionParticipant(sessionMeeting, "member");
-  const notaryParticipant = getRequestSessionParticipant(sessionMeeting, "notary");
   const hasMemberCheckIn = hasRequestSessionParticipantCheckedIn(sessionMeeting, "member");
   const hasNotaryCheckIn = hasRequestSessionParticipantCheckedIn(sessionMeeting, "notary");
   const isInitialMemberCheckIn = shouldShowMemberSessionCheckIn(liveMeeting);
   const canCheckIn = canRecordMemberSessionCheckIn(liveMeeting);
   const finalization = payload?.document.summary.finalization ?? null;
   const verification = payload?.document.summary.verification ?? null;
+  const reviewDocuments = payload?.document.reviewDocuments ?? [];
+  const downloadableDocuments = reviewDocuments.filter((document) => Boolean(document.downloadUrl));
+  const finalPackageDocument = downloadableDocuments.find((document) => document.isFinal) ?? downloadableDocuments.at(-1) ?? null;
+  const selectedDocument =
+    reviewDocuments.find((document) => document.id === selectedDocumentId) ??
+    reviewDocuments.at(-1) ??
+    null;
+  const selectedDocumentIndex = selectedDocument
+    ? reviewDocuments.findIndex((document) => document.id === selectedDocument.id)
+    : -1;
+  const selectedDocumentLabel = selectedDocument
+    ? formatCompactReviewDocumentLabel(
+        selectedDocument,
+        Math.max(selectedDocumentIndex, 0),
+        payload?.document.documentType,
+      )
+    : formatProductLabel(payload?.document.documentType);
+  const latestPassedProximity =
+    sessionMeeting?.proximityEvaluations
+      .filter((evaluation) => evaluation.evaluationKind === "same_place" && evaluation.status === "passed")
+      .at(-1) ?? null;
+  const latestIdentityVerification =
+    sessionMeeting?.identityVerifications
+      .filter((event) => event.status === "verified" && (event.participantRole === "member" || event.participantRole === "signer"))
+      .at(-1) ?? null;
+  const latestVenueCapture =
+    sessionMeeting?.artifacts
+      .filter((artifact) => artifact.artifactKind === "venue_capture" && artifact.status === "active")
+      .at(-1) ?? null;
+  const latestAcknowledgmentDocument = reviewDocuments.filter(isAcknowledgedReviewDocument).at(-1) ?? null;
+  const hasAcknowledgment = Boolean(
+    latestAcknowledgmentDocument || finalization?.history.some((event) => event.status === "acknowledgment_appended"),
+  );
+  const isMeetingCompleted = sessionMeeting?.status === "completed";
+  const isSessionStarted = Boolean(
+    sessionMeeting?.status === "in_progress" || isMeetingCompleted || hasNotaryCheckIn,
+  );
+  const isSamePlaceConfirmed = Boolean(sessionMeeting?.samePlaceStatus === "passed" || latestPassedProximity);
+  const hasVerifiedIdentity = Boolean(latestIdentityVerification);
+  const hasVenueCapture = Boolean(latestVenueCapture);
   const hasFinalWatermark = Boolean(
     finalization?.isWatermarked || finalization?.history.some((event) => event.status === "watermark_applied"),
   );
   const hasHashRecorded = Boolean(
     finalization?.isHashRecorded || finalization?.hash || finalization?.history.some((event) => event.status === "hash_recorded"),
   );
+  const isAnchored = Boolean(finalization?.isAnchored);
+  const isVerificationReady = Boolean(isAnchored && verification?.verifyPath);
   const hasLedgerFailure = Boolean(finalization?.anchorAttempt?.status === "failed" || finalization?.latestStatus === "failed");
-  const isVerificationReady = Boolean(finalization?.isAnchored && verification?.verifyPath);
-  const recentFinalizationHistory = finalization?.history.slice(-4).reverse() ?? [];
-  const isSessionStarted = Boolean(
-    sessionMeeting?.status === "in_progress" || sessionMeeting?.status === "completed" || hasNotaryCheckIn,
-  );
-  const isSamePlaceConfirmed = sessionMeeting?.samePlaceStatus === "passed";
+  const notaryName = payload?.notary?.displayName?.trim() || "Your Illuminotary";
+  const statusLabel = formatStatusLabel(sessionMeeting?.status ?? detail?.status ?? payload?.workflow?.latestStatus ?? null);
+  const finalPackageStatusLabel = formatStatusLabel(finalization?.latestStatus ?? (isVerificationReady ? "ready" : "pending"));
+  const sessionTimelineSteps = [
+    { description: "Your Illuminotary opened the live session.", done: isSessionStarted, label: "Session started" },
+    { description: "Your live location has been shared.", done: hasMemberCheckIn, label: "Location shared" },
+    { description: "Both live locations are together.", done: isSamePlaceConfirmed, label: "Same-place confirmed" },
+    { description: "Your identity has been verified.", done: hasVerifiedIdentity, label: "Identity verified" },
+    { description: "The venue details are recorded.", done: hasVenueCapture, label: "Venue recorded" },
+    { description: "The notarial acknowledgment is on the document.", done: hasAcknowledgment, label: "Acknowledgment appended" },
+    { description: "The in-person session is closed.", done: isMeetingCompleted, label: "Session completed" },
+    { description: "The final package is verification-ready.", done: isVerificationReady, label: "Verification ready" },
+  ];
   const showRealtimeFallbackNotice = realtimeState.status === "degraded" && realtimeState.isPollingFallbackActive;
+  const isInitialLoading = isLoading && !payload;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="text-2xl font-medium">{detail?.id ?? "Request"}</div>
-          <div className="text-sm text-Color-Neutral">Document {detail?.documentId ?? "-"}</div>
+          <Link className="text-sm text-Color-Neutral transition hover:text-Color-Scheme-1-Text" href="/app/requests">
+            Back to requests
+          </Link>
+          <h1 className="mt-3 text-2xl font-medium text-Color-Scheme-1-Text">In-person session</h1>
+          <div className="mt-1 text-sm text-Color-Neutral">
+            {notaryName} · {selectedDocumentLabel}
+          </div>
         </div>
-        <span className="w-fit rounded-full border border-Color-Scheme-1-Border/40 px-3 py-1 text-xs text-Color-Neutral">
-          {detail?.status ?? "-"}
+        <span className="w-fit rounded-full border border-Color-Scheme-1-Border/40 px-3 py-1 text-xs font-medium text-Color-Neutral-Darkest">
+          {statusLabel}
         </span>
       </div>
 
@@ -421,160 +592,124 @@ export default function RequestWorkspacePage() {
         </div>
       ) : null}
 
-      {!isLoading && payload ? (
-        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-          <div className="space-y-4">
-            {sessionMeeting ? (
-              <div className="rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-Color-Scheme-1-Text">In-person session</div>
-                    <div className="mt-1 text-sm text-Color-Neutral">
-                      Status: {formatStatusLabel(sessionMeeting.status)} · Same place: {formatStatusLabel(sessionMeeting.samePlaceStatus)}
-                    </div>
-                  </div>
-                  {canCheckIn ? (
+      {isInitialLoading ? (
+        <div className="rounded-lg border border-Color-Scheme-1-Border/40 bg-Color-Neutral-Lightest px-4 py-8 text-center text-sm text-Color-Neutral">
+          Loading session.
+        </div>
+      ) : null}
+
+      {!isInitialLoading && payload ? (
+        <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.52fr)]">
+          <section className="space-y-4">
+            {selectedDocument?.downloadUrl ? (
+              <object
+                key={`${selectedDocument.id}:${selectedDocument.downloadUrl}`}
+                className={`${previewPanelHeightClass} w-full rounded-[20px] bg-[#f3f6f8] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
+                data={selectedDocument.downloadUrl}
+                type="application/pdf"
+              >
+                <div className={`flex ${previewPanelHeightClass} items-center justify-center px-6 text-center text-sm leading-6 text-Color-Neutral`}>
+                  <a
+                    className="rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
+                    href={selectedDocument.downloadUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Open PDF in a new tab
+                  </a>
+                </div>
+              </object>
+            ) : (
+              <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]`}>
+                The document preview will appear here as the session document is prepared.
+              </div>
+            )}
+
+            {reviewDocuments.length > 1 ? (
+              <div className="flex flex-wrap gap-2 sm:justify-end">
+                {reviewDocuments.map((document, index) => {
+                  const isSelected = selectedDocument?.id === document.id;
+                  return (
                     <button
-                      className="rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={isCheckingIn}
-                      onClick={() => void handleMemberCheckIn()}
+                      className={`min-w-24 rounded-md px-3 py-2 text-left text-xs transition ${
+                        isSelected
+                          ? "bg-Color-Neutral-Lightest shadow-[inset_0_0_0_1px_rgba(0,0,0,0.18)]"
+                          : "bg-Color-White shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] hover:bg-Color-Neutral-Lightest"
+                      }`}
+                      key={document.id}
+                      onClick={() => setSelectedDocumentId(document.id)}
                       type="button"
                     >
-                      {isCheckingIn ? "Checking in" : isInitialMemberCheckIn ? "Check in" : "Refresh check-in"}
+                      <div className="font-medium text-Color-Scheme-1-Text">
+                        {formatCompactReviewDocumentLabel(document, index, payload.document.documentType)}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-Color-Neutral">{getReviewDocumentStatusLabel(document)}</div>
                     </button>
-                  ) : null}
-                </div>
-
-                <div className="mt-4 grid gap-2">
-                  <FinalizationStep done={isSessionStarted} label="Illuminotary started" />
-                  <FinalizationStep done={hasMemberCheckIn} label="Location shared" />
-                  <FinalizationStep done={isSamePlaceConfirmed} label="Same-place confirmed" />
-                  <FinalizationStep done={isVerificationReady} label="Final package ready" />
-                </div>
-
-                <div className="mt-4 grid gap-2 text-sm text-Color-Neutral md:grid-cols-2">
-                  <div className="rounded-lg bg-Color-White px-3 py-2 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
-                    <div className="font-medium text-Color-Scheme-1-Text">Illuminotary</div>
-                    <div className="mt-1">{hasNotaryCheckIn ? "Checked in" : "Pending"}</div>
-                    <div className="mt-1 text-xs">{formatDateTime(notaryParticipant?.arrivedAt ?? null)}</div>
-                  </div>
-                  <div className="rounded-lg bg-Color-White px-3 py-2 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
-                    <div className="font-medium text-Color-Scheme-1-Text">Member</div>
-                    <div className="mt-1">{hasMemberCheckIn ? "Checked in" : "Pending"}</div>
-                    <div className="mt-1 text-xs">{formatDateTime(memberParticipant?.arrivedAt ?? null)}</div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             ) : null}
-
-            <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-              <div className="text-sm font-medium">Request summary</div>
-              <div className="mt-4 grid gap-3 text-sm text-Color-Neutral md:grid-cols-2">
-                <div>Owner: {payload.owner?.displayName ?? "-"}</div>
-                <div>Notary: {payload.notary?.displayName ?? "-"}</div>
-                <div>Submitted: {formatDateTime(payload.request.submittedAt)}</div>
-                <div>Meeting: {payload.request.meetingStatus ?? "-"}</div>
-                <div>Scheduled: {formatDateTime(payload.request.meetingScheduledAt)}</div>
-                <div>Workflow: {payload.workflow?.latestStatus ?? "-"}</div>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-              <div className="text-sm font-medium">Timeline</div>
-              <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-                {timeline.map((item, index) => (
-                  <div key={`${item.id ?? index}-${item.timestamp ?? item.createdAt ?? ""}`}>
-                    {item.message ?? item.label ?? item.event ?? "Event"} • {formatDateTime(item.timestamp ?? item.createdAt ?? null)}
-                  </div>
-                ))}
-                {timeline.length === 0 ? <div>No timeline entries yet.</div> : null}
-              </div>
-            </div>
-
-            {payload.warnings.length > 0 ? (
-              <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-                <div className="text-sm font-medium">Warnings</div>
-                <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-                  {payload.warnings.map((warning) => (
-                    <div key={warning.code}>{warning.message}</div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
+          </section>
 
           <div className="space-y-4">
-            {finalization ? (
-              <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-sm font-medium">Final package</div>
-                  <div className={hasLedgerFailure ? "text-xs font-medium text-red-700" : "text-xs text-Color-Neutral"}>
-                    {formatStatusLabel(finalization.latestStatus)}
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-2">
-                  <FinalizationStep done={hasFinalWatermark} label="Watermarked" />
-                  <FinalizationStep done={hasHashRecorded} label="Hash recorded" />
-                  <FinalizationStep done={finalization.isAnchored} label="Ledger anchored" />
-                  <FinalizationStep done={isVerificationReady} label="Verification ready" />
-                </div>
-                <div className="mt-4 space-y-2 break-words text-sm text-Color-Neutral">
-                  <div>Hash: {finalization.hash ?? "-"}</div>
-                  <div>Ledger TX: {finalization.ledgerTxId ?? "-"}</div>
-                  <div>Anchored: {formatDateTime(finalization.anchoredAt)}</div>
-                </div>
-                {verification?.verifyPath ? (
-                  <Link
-                    className="mt-4 block rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm hover:bg-Color-Neutral-Lightest"
-                    href={verification.verifyPath}
-                  >
-                    Open public verification
-                  </Link>
-                ) : null}
-                {hasLedgerFailure ? (
-                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    Ledger anchoring failed{finalization.anchorAttempt?.errorMessage ? `: ${finalization.anchorAttempt.errorMessage}` : "."} Your Illuminotary can retry final package submission.
-                  </div>
-                ) : null}
-                {recentFinalizationHistory.length > 0 ? (
-                  <div className="mt-4 space-y-2 text-xs text-Color-Neutral">
-                    {recentFinalizationHistory.map((event) => (
-                      <div key={event.id} className="rounded-lg bg-Color-Neutral-Lightest px-3 py-2">
-                        {formatStatusLabel(event.status)} • {formatDateTime(event.createdAt)}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
+            <SessionTimeline steps={sessionTimelineSteps} />
+
+            {canCheckIn ? (
+              <button
+                className="w-full rounded-lg bg-Green px-5 py-3 text-sm font-medium text-Color-Neutral-Darkest transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isCheckingIn}
+                onClick={() => void handleMemberCheckIn()}
+                type="button"
+              >
+                {isCheckingIn ? "Checking in" : isInitialMemberCheckIn ? "Share location" : "Refresh location"}
+              </button>
             ) : null}
 
-            <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-              <div className="text-sm font-medium">Code delivery</div>
-              <div className="mt-4 space-y-2 text-sm text-Color-Neutral">
-                <div>Status: {payload.latestCodeDelivery?.status ?? "-"}</div>
-                <div>Delivered: {formatDateTime(payload.latestCodeDelivery?.deliveredAt ?? null)}</div>
-                <div>Expires: {formatDateTime(payload.latestCodeDelivery?.expiresAt ?? null)}</div>
+            <section className="rounded-lg bg-Color-White px-3 py-3 text-xs leading-5 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div className="font-medium text-Color-Scheme-1-Text">Final package status</div>
+                <div className={hasLedgerFailure ? "font-medium text-red-700" : "text-Color-Neutral"}>{finalPackageStatusLabel}</div>
               </div>
-            </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <CompletionStep done={hasFinalWatermark} label="Watermarked" />
+                <CompletionStep done={hasHashRecorded} label="Hash recorded" />
+                <CompletionStep done={isAnchored} label="Ledger anchored" />
+                <CompletionStep done={isVerificationReady} label="Verification ready" />
+              </div>
+              <div className="mt-3 grid gap-1 break-words">
+                <div>Hash: {finalization?.hash ?? "-"}</div>
+                <div>Ledger TX: {finalization?.ledgerTxId ?? "-"}</div>
+                <div>Anchored: {formatDateTime(finalization?.anchoredAt ?? null)}</div>
+                <div>Last checked: {formatDateTime(finalization?.latestStatusAt ?? null)}</div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {finalPackageDocument?.downloadUrl ? (
+                  <a
+                    className="inline-flex rounded-lg bg-Color-Scheme-1-Text px-3 py-2 text-xs font-medium text-Color-White hover:brightness-110"
+                    download={finalPackageDocument.fileName ?? undefined}
+                    href={finalPackageDocument.downloadUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Download package
+                  </a>
+                ) : null}
+              {verification?.verifyPath ? (
+                <Link
+                    className="inline-flex rounded-lg border border-Color-Scheme-1-Border/40 px-3 py-2 text-xs font-medium text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
+                  href={verification.verifyPath}
+                >
+                  Open public verification
+                </Link>
+              ) : null}
+              </div>
 
-            <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
-              <div className="text-sm font-medium">Next action</div>
-              <div className="mt-4 text-sm text-Color-Neutral">{payload.nextAction ?? "No action required."}</div>
-            </div>
-
-            <Link
-              className="block rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm hover:bg-Color-Neutral-Lightest"
-              href={`/app/documents/${payload.document.id}`}
-            >
-              Open document
-            </Link>
-
-            <Link
-              className="block rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm hover:bg-Color-Neutral-Lightest"
-              href="/app/requests"
-            >
-              Back to requests
-            </Link>
+              {hasLedgerFailure ? (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+                  Final verification is being retried. The document preview will keep updating here.
+                </div>
+              ) : null}
+            </section>
           </div>
         </div>
       ) : null}

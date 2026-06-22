@@ -5,9 +5,11 @@ const mocks = vi.hoisted(() => ({
   listNotarizationRequestsMock: vi.fn(),
   getNotarizationRequestByIdMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
+  listDocumentVersionsMock: vi.fn(),
   buildDocumentWorkspaceSummaryMock: vi.fn(),
   getWorkspaceIdentitySummaryByUserIdMock: vi.fn(),
   listDocumentSystemValuesMock: vi.fn(),
+  createDocumentDownloadUrlMock: vi.fn(),
   listFinalizationStatusHistoryMock: vi.fn(),
   getIlluminotarizationWorkflowByIdMock: vi.fn(),
   getLatestCodeDeliveryForRequestMock: vi.fn(),
@@ -15,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   getMeetingByRequestIdMock: vi.fn(),
   listMeetingsByRequestIdsMock: vi.fn(),
   listMeetingParticipantsMock: vi.fn(),
+  listIdentityVerificationEventsMock: vi.fn(),
+  listProximityEvaluationsMock: vi.fn(),
+  listMeetingArtifactsMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", async () => {
@@ -28,7 +33,19 @@ vi.mock("../../src/services/documentService", async () => {
     listNotarizationRequests: mocks.listNotarizationRequestsMock,
     getNotarizationRequestById: mocks.getNotarizationRequestByIdMock,
     getDocumentById: mocks.getDocumentByIdMock,
+    listDocumentVersions: mocks.listDocumentVersionsMock,
     listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
+  };
+});
+
+vi.mock("../../src/services/storageService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/services/storageService")>(
+    "../../src/services/storageService",
+  );
+
+  return {
+    ...actual,
+    createDocumentDownloadUrl: mocks.createDocumentDownloadUrlMock,
   };
 });
 
@@ -91,6 +108,9 @@ vi.mock("../../src/services/meetingService", async () => {
     getMeetingByRequestId: mocks.getMeetingByRequestIdMock,
     listMeetingsByRequestIds: mocks.listMeetingsByRequestIdsMock,
     listMeetingParticipants: mocks.listMeetingParticipantsMock,
+    listIdentityVerificationEvents: mocks.listIdentityVerificationEventsMock,
+    listProximityEvaluations: mocks.listProximityEvaluationsMock,
+    listMeetingArtifacts: mocks.listMeetingArtifactsMock,
   };
 });
 
@@ -107,9 +127,11 @@ describe("requestReadModelService", () => {
     mocks.listNotarizationRequestsMock.mockReset();
     mocks.getNotarizationRequestByIdMock.mockReset();
     mocks.getDocumentByIdMock.mockReset();
+    mocks.listDocumentVersionsMock.mockReset();
     mocks.buildDocumentWorkspaceSummaryMock.mockReset();
     mocks.getWorkspaceIdentitySummaryByUserIdMock.mockReset();
     mocks.listDocumentSystemValuesMock.mockReset();
+    mocks.createDocumentDownloadUrlMock.mockReset();
     mocks.listFinalizationStatusHistoryMock.mockReset();
     mocks.getIlluminotarizationWorkflowByIdMock.mockReset();
     mocks.getLatestCodeDeliveryForRequestMock.mockReset();
@@ -117,10 +139,15 @@ describe("requestReadModelService", () => {
     mocks.getMeetingByRequestIdMock.mockReset();
     mocks.listMeetingsByRequestIdsMock.mockReset();
     mocks.listMeetingParticipantsMock.mockReset();
+    mocks.listIdentityVerificationEventsMock.mockReset();
+    mocks.listProximityEvaluationsMock.mockReset();
+    mocks.listMeetingArtifactsMock.mockReset();
     mocks.listDocumentsMock.mockResolvedValue([]);
     mocks.listNotarizationRequestsMock.mockResolvedValue([]);
     mocks.getNotarizationRequestByIdMock.mockResolvedValue(null);
     mocks.getDocumentByIdMock.mockResolvedValue(null);
+    mocks.listDocumentVersionsMock.mockResolvedValue([]);
+    mocks.createDocumentDownloadUrlMock.mockResolvedValue({ signedUrl: "https://signed.example/document.pdf" });
     mocks.buildDocumentWorkspaceSummaryMock.mockResolvedValue({
       workflow: {
         requestId: null,
@@ -177,6 +204,9 @@ describe("requestReadModelService", () => {
     mocks.getMeetingByRequestIdMock.mockResolvedValue(null);
     mocks.listMeetingsByRequestIdsMock.mockResolvedValue([]);
     mocks.listMeetingParticipantsMock.mockResolvedValue([]);
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([]);
+    mocks.listProximityEvaluationsMock.mockResolvedValue([]);
+    mocks.listMeetingArtifactsMock.mockResolvedValue([]);
   });
 
   it("lists member-owned shared requests with meeting summaries", async () => {
@@ -395,6 +425,89 @@ describe("requestReadModelService", () => {
         updated_at: "2026-04-22T10:10:00.000Z",
       },
     ]);
+    mocks.listIdentityVerificationEventsMock.mockResolvedValue([
+      {
+        id: "identity-1",
+        meeting_id: "meeting-1",
+        meeting_participant_id: "participant-1",
+        verification_method: "in_person_document",
+        status: "verified",
+        subject_name_snapshot: "Member User",
+        document_type: "driver_license",
+        document_last4: "1234",
+        issuing_jurisdiction: "US-CA",
+        verified_at: "2026-04-22T14:12:00.000Z",
+        notes: null,
+        metadata: {},
+        created_at: "2026-04-22T14:12:00.000Z",
+        updated_at: "2026-04-22T14:12:00.000Z",
+      },
+    ]);
+    mocks.listProximityEvaluationsMock.mockResolvedValue([
+      {
+        id: "proximity-1",
+        meeting_id: "meeting-1",
+        evaluation_kind: "same_place",
+        status: "passed",
+        member_sample_id: "geo-member-1",
+        notary_sample_id: "geo-notary-1",
+        threshold_meters: 50,
+        observed_distance_meters: 8.2,
+        evaluated_at: "2026-04-22T14:08:00.000Z",
+        notes: null,
+        metadata: {},
+        created_at: "2026-04-22T14:08:00.000Z",
+        updated_at: "2026-04-22T14:08:00.000Z",
+      },
+    ]);
+    mocks.listMeetingArtifactsMock.mockResolvedValue([
+      {
+        id: "artifact-1",
+        meeting_id: "meeting-1",
+        meeting_participant_id: "participant-1",
+        meeting_checkin_id: null,
+        identity_verification_event_id: "identity-1",
+        artifact_kind: "venue_capture",
+        status: "active",
+        storage_bucket: null,
+        storage_path: null,
+        mime_type: "application/json",
+        size_bytes: null,
+        captured_at: "2026-04-22T14:15:00.000Z",
+        retention_until: null,
+        metadata: {},
+        created_at: "2026-04-22T14:15:00.000Z",
+        updated_at: "2026-04-22T14:15:00.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "version-1",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "documents/doc-1/generated-v1.pdf",
+        file_name: "generated-v1.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 12345,
+        is_final: false,
+        generation_run_id: "generation-1",
+        created_by: "member-db-1",
+        created_at: "2026-04-22T09:35:00.000Z",
+      },
+      {
+        id: "version-2",
+        document_id: "doc-1",
+        version: 2,
+        storage_path: "documents/doc-1/generated-signed.pdf",
+        file_name: "generated-signed.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 23456,
+        is_final: false,
+        generation_run_id: "generation-1",
+        created_by: "notary-db-1",
+        created_at: "2026-04-22T10:20:00.000Z",
+      },
+    ]);
 
     const detail = await getSharedRequestDetail({
       requestId: "req-1",
@@ -418,6 +531,13 @@ describe("requestReadModelService", () => {
         productFlowMode: "poa_only",
         selectedFamilies: ["poa", "idn"],
         outputBundle: [{ outputKey: "poa", outputLabel: "POA" }],
+        reviewDocuments: [
+          {
+            id: "version-2",
+            label: "generated-signed.pdf",
+            downloadUrl: "https://signed.example/document.pdf",
+          },
+        ],
         summary: {
           verification: {
             status: "pending_finalization",
@@ -432,6 +552,29 @@ describe("requestReadModelService", () => {
         latestStatusAt: "2026-04-22T10:05:00.000Z",
         selectedNotaryUserId: "notary-db-1",
         assignedNotaryUserId: "notary-db-1",
+      },
+      meeting: {
+        meetingId: "meeting-1",
+        identityVerifications: [
+          {
+            id: "identity-1",
+            participantRole: "member",
+            status: "verified",
+          },
+        ],
+        proximityEvaluations: [
+          {
+            id: "proximity-1",
+            status: "passed",
+          },
+        ],
+        artifacts: [
+          {
+            id: "artifact-1",
+            artifactKind: "venue_capture",
+            status: "active",
+          },
+        ],
       },
       latestCodeDelivery: {
         id: "delivery-1",

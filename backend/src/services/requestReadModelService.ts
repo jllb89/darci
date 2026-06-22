@@ -3,7 +3,9 @@ import {
   getNotarizationRequestById,
   listDocuments as listDocumentsFromDb,
   listDocumentSystemValues,
+  listDocumentVersions,
   listNotarizationRequests,
+  type DocumentVersionRecord,
   type DocumentRecord,
   type NotarizationRequestRecord,
 } from "./documentService";
@@ -25,17 +27,24 @@ import {
 } from "./illuminotarizationWorkflowService";
 import {
   getMeetingByRequestId,
+  listIdentityVerificationEvents,
+  listMeetingArtifacts,
   listMeetingParticipants,
   listMeetingsByRequestIds,
+  listProximityEvaluations,
+  type IdentityVerificationEventRecord,
+  type MeetingArtifactRecord,
   type MeetingParticipantRecord,
   type MeetingRecord,
   type MeetingStatus,
+  type ProximityEvaluationRecord,
 } from "./meetingService";
 import type { RequestRole } from "./userRoleService";
 import {
   getWorkspaceIdentitySummaryByUserId,
   type WorkspaceIdentitySummary,
 } from "./workspaceIdentitySummaryService";
+import { createDocumentDownloadUrl } from "./storageService";
 
 export class RequestReadModelServiceError extends Error {
   constructor(
@@ -125,6 +134,29 @@ type SharedMeetingParticipantResponse = {
   departedAt: string | null;
 };
 
+type SharedIdentityVerificationResponse = {
+  id: string;
+  participantRole: string;
+  verificationMethod: string;
+  status: string;
+  verifiedAt: string | null;
+};
+
+type SharedProximityEvaluationResponse = {
+  id: string;
+  evaluationKind: string;
+  status: string;
+  observedDistanceMeters: number | null;
+  evaluatedAt: string;
+};
+
+type SharedMeetingArtifactResponse = {
+  id: string;
+  artifactKind: string;
+  status: string;
+  capturedAt: string | null;
+};
+
 type SharedMeetingResponse = {
   meetingId: string;
   requestId: string;
@@ -137,6 +169,9 @@ type SharedMeetingResponse = {
   samePlaceStatus: string | null;
   proposedSlots: string[];
   participants: SharedMeetingParticipantResponse[];
+  identityVerifications: SharedIdentityVerificationResponse[];
+  proximityEvaluations: SharedProximityEvaluationResponse[];
+  artifacts: SharedMeetingArtifactResponse[];
 };
 
 type SharedRequestDocumentResponse = {
@@ -146,6 +181,17 @@ type SharedRequestDocumentResponse = {
   documentType: string | null;
   jurisdiction: string | null;
   createdAt: string;
+  reviewDocuments: Array<{
+    id: string;
+    versionId: string;
+    label: string;
+    fileName: string | null;
+    mimeType: string | null;
+    sizeBytes: number | null;
+    isFinal: boolean;
+    downloadUrl: string | null;
+    createdAt: string;
+  }>;
   productFlowMode?: string;
   selectedFamilies?: string[];
   outputBundle?: Array<Record<string, unknown>>;
@@ -245,10 +291,14 @@ const mapSharedRequestResponse = (
 const mapSharedMeetingResponse = (
   meeting: MeetingRecord,
   participants: MeetingParticipantRecord[],
+  identityVerifications: IdentityVerificationEventRecord[],
+  proximityEvaluations: ProximityEvaluationRecord[],
+  artifacts: MeetingArtifactRecord[],
 ): SharedMeetingResponse => {
   const proposedSlots = Array.isArray(meeting.metadata.proposedSlots)
     ? meeting.metadata.proposedSlots.filter((value): value is string => typeof value === "string")
     : [];
+  const participantsById = new Map(participants.map((participant) => [participant.id, participant]));
 
   return {
     meetingId: meeting.id,
@@ -271,12 +321,105 @@ const mapSharedMeetingResponse = (
       arrivedAt: participant.arrived_at,
       departedAt: participant.departed_at,
     })),
+    identityVerifications: identityVerifications.map((event) => ({
+      id: event.id,
+      participantRole: participantsById.get(event.meeting_participant_id)?.participant_role ?? "observer",
+      verificationMethod: event.verification_method,
+      status: event.status,
+      verifiedAt: event.verified_at,
+    })),
+    proximityEvaluations: proximityEvaluations.map((evaluation) => ({
+      id: evaluation.id,
+      evaluationKind: evaluation.evaluation_kind,
+      status: evaluation.status,
+      observedDistanceMeters: evaluation.observed_distance_meters,
+      evaluatedAt: evaluation.evaluated_at,
+    })),
+    artifacts: artifacts.map((artifact) => ({
+      id: artifact.id,
+      artifactKind: artifact.artifact_kind,
+      status: artifact.status,
+      capturedAt: artifact.captured_at,
+    })),
   };
+};
+
+const buildReviewDocumentLabel = (version: DocumentVersionRecord, index: number) => {
+  return version.file_name?.trim() || `Document ${index + 1}`;
+};
+
+const isPdfDocumentVersion = (version: DocumentVersionRecord) => {
+  const mimeType = version.mime_type?.trim().toLowerCase() ?? "";
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+
+  return Boolean(version.storage_path && (mimeType === "application/pdf" || fileName.endsWith(".pdf")));
+};
+
+const isReviewableDocumentVersion = (version: DocumentVersionRecord) => {
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+  const storagePath = version.storage_path?.trim().toLowerCase() ?? "";
+
+  return Boolean(
+    version.is_final ||
+      fileName.endsWith("-signed.pdf") ||
+      storagePath.endsWith("-signed.pdf") ||
+      /-acknowledged-v\d+\.pdf$/.test(fileName) ||
+      /-acknowledged-v\d+\.pdf$/.test(storagePath),
+  );
+};
+
+const buildReviewDocuments = async (
+  versions: DocumentVersionRecord[],
+): Promise<SharedRequestDocumentResponse["reviewDocuments"]> => {
+  const pdfVersions = versions
+    .filter((version) => isPdfDocumentVersion(version) && isReviewableDocumentVersion(version))
+    .sort((left, right) => right.version - left.version);
+  const latestByOutput = new Map<string, DocumentVersionRecord>();
+
+  for (const version of pdfVersions) {
+    const key = version.generation_run_id ?? version.file_name ?? version.id;
+    if (!latestByOutput.has(key)) {
+      latestByOutput.set(key, version);
+    }
+  }
+
+  const reviewVersions = Array.from(latestByOutput.values()).sort((left, right) => {
+    const leftTime = Date.parse(left.created_at);
+    const rightTime = Date.parse(right.created_at);
+    return leftTime - rightTime;
+  });
+
+  return Promise.all(
+    reviewVersions.map(async (version, index) => {
+      let downloadUrl: string | null = null;
+
+      if (version.storage_path) {
+        try {
+          downloadUrl = (await createDocumentDownloadUrl(version.storage_path)).signedUrl;
+        } catch {
+          downloadUrl = null;
+        }
+      }
+
+      return {
+        id: version.id,
+        versionId: version.id,
+        label: buildReviewDocumentLabel(version, index),
+        fileName: version.file_name,
+        mimeType: version.mime_type,
+        sizeBytes: version.size_bytes,
+        isFinal: Boolean(version.is_final),
+        downloadUrl,
+        createdAt: version.created_at,
+      };
+    }),
+  );
 };
 
 const mapRequestDocumentResponse = (input: {
   document: DocumentRecord;
   viewerRole: RequestRole;
+  reviewDocuments: SharedRequestDocumentResponse["reviewDocuments"];
   summary: DocumentWorkspaceSummary;
 }): SharedRequestDocumentResponse => {
   const response: SharedRequestDocumentResponse = {
@@ -290,6 +433,7 @@ const mapRequestDocumentResponse = (input: {
     documentType: input.document.document_type,
     jurisdiction: input.document.jurisdiction,
     createdAt: input.document.created_at,
+    reviewDocuments: input.reviewDocuments,
     summary: input.summary,
   };
 
@@ -675,11 +819,20 @@ export const getSharedRequestDetail = async (input: {
     return null as SharedRequestDetailResponse | null;
   }
 
-  const [meeting, documentSummary, workflow, latestCodeDelivery] = await Promise.all([
+  const [meeting, documentSummary, reviewDocuments, workflow, latestCodeDelivery] = await Promise.all([
     getMeetingByRequestId(resource.request.id),
     buildDocumentWorkspaceSummary({
       document: resource.document,
       viewerRole: input.role,
+    }),
+    readModelFallback({
+      operation: "document_review_documents",
+      fallback: [] as SharedRequestDocumentResponse["reviewDocuments"],
+      details: {
+        requestId: resource.request.id,
+        documentId: resource.document.id,
+      },
+      run: async () => buildReviewDocuments(await listDocumentVersions(resource.document.id)),
     }),
     resource.request.workflow_id
       ? safelyGetWorkflowById({
@@ -689,8 +842,41 @@ export const getSharedRequestDetail = async (input: {
       : Promise.resolve(null),
     getLatestCodeDeliveryForRequest(resource.request.id),
   ]);
-  const [participants, workflowStatusHistory] = await Promise.all([
+  const [participants, identityVerifications, proximityEvaluations, artifacts, workflowStatusHistory] = await Promise.all([
     meeting ? listMeetingParticipants(meeting.id) : Promise.resolve([]),
+    meeting
+      ? readModelFallback({
+          operation: "meeting_identity_verifications",
+          fallback: [] as IdentityVerificationEventRecord[],
+          details: {
+            requestId: resource.request.id,
+            meetingId: meeting.id,
+          },
+          run: () => listIdentityVerificationEvents(meeting.id),
+        })
+      : Promise.resolve([] as IdentityVerificationEventRecord[]),
+    meeting
+      ? readModelFallback({
+          operation: "meeting_proximity_evaluations",
+          fallback: [] as ProximityEvaluationRecord[],
+          details: {
+            requestId: resource.request.id,
+            meetingId: meeting.id,
+          },
+          run: () => listProximityEvaluations(meeting.id),
+        })
+      : Promise.resolve([] as ProximityEvaluationRecord[]),
+    meeting
+      ? readModelFallback({
+          operation: "meeting_artifacts",
+          fallback: [] as MeetingArtifactRecord[],
+          details: {
+            requestId: resource.request.id,
+            meetingId: meeting.id,
+          },
+          run: () => listMeetingArtifacts(meeting.id),
+        })
+      : Promise.resolve([] as MeetingArtifactRecord[]),
     resource.request.workflow_id
       ? safelyListWorkflowStatusHistory({
           workflowId: resource.request.workflow_id,
@@ -732,6 +918,7 @@ export const getSharedRequestDetail = async (input: {
     document: mapRequestDocumentResponse({
       document: resource.document,
       viewerRole: input.role,
+      reviewDocuments,
       summary: documentSummary,
     }),
     workflow: mapWorkflowResponse({
@@ -742,7 +929,15 @@ export const getSharedRequestDetail = async (input: {
     latestCodeDelivery: mapLatestCodeDeliveryResponse(latestCodeDelivery),
     owner,
     notary,
-    meeting: meeting ? mapSharedMeetingResponse(meeting, participants) : null,
+    meeting: meeting
+      ? mapSharedMeetingResponse(
+          meeting,
+          participants,
+          identityVerifications,
+          proximityEvaluations,
+          artifacts,
+        )
+      : null,
     capabilities,
     warnings,
     nextAction: buildNextAction({
