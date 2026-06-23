@@ -1,5 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
-
 import AdvantageSection from "@/components/AdvantageSection";
 import Navbar from "@/components/Navbar";
 import PricingSection from "@/components/PricingSection";

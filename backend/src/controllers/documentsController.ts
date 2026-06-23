@@ -1981,7 +1981,20 @@ const mapSavedSignatureResponse = async (
 };
 
 const isSavedSignatureRemovedFromReuse = (signature: SignatureRecord) => {
-  return typeof signature.metadata.savedSignatureDeletedAt === "string";
+  return typeof signature.metadata?.savedSignatureDeletedAt === "string";
+};
+
+const isSignatureCreatedFromSavedSignature = (signature: SignatureRecord) => {
+  const savedSignatureId = signature.metadata?.savedSignatureId;
+
+  return typeof savedSignatureId === "string" && savedSignatureId.trim().length > 0;
+};
+
+const isReusableSavedSignature = (signature: SignatureRecord) => {
+  return (
+    !isSavedSignatureRemovedFromReuse(signature) &&
+    !isSignatureCreatedFromSavedSignature(signature)
+  );
 };
 
 const mapBlockingRequirementResponse = (
@@ -6569,7 +6582,7 @@ export const listSavedSignatures = async (req: Request, res: Response) => {
     return res.status(200).json({
       savedSignatures: await Promise.all(
         savedSignatures
-          .filter((signature) => !isSavedSignatureRemovedFromReuse(signature))
+          .filter((signature) => isReusableSavedSignature(signature))
           .map((signature) => mapSavedSignatureResponse(signature)),
       ),
     });
@@ -6614,7 +6627,7 @@ export const deleteSavedSignature = async (req: Request, res: Response) => {
       !savedSignature ||
       savedSignature.signer_id !== signingAccess.signerUserId ||
       savedSignature.status !== "captured" ||
-      isSavedSignatureRemovedFromReuse(savedSignature)
+      !isReusableSavedSignature(savedSignature)
     ) {
       return res.status(404).json({
         error: "not_found",
@@ -7145,7 +7158,7 @@ export const captureSignature = async (req: Request, res: Response) => {
       !savedSignature ||
       savedSignature.signer_id !== signingAccess.signerUserId ||
       savedSignature.status !== "captured" ||
-      isSavedSignatureRemovedFromReuse(savedSignature)
+      !isReusableSavedSignature(savedSignature)
     ) {
       return res.status(404).json({
         error: "not_found",

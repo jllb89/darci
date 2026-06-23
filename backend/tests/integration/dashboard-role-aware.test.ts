@@ -152,7 +152,7 @@ describe("GET /dashboard", () => {
     expect(response.body.role).toBe("member");
     expect(mocks.buildRoleAwareDashboardMock).toHaveBeenCalledWith({
       supabaseUserId: "member-1",
-      email: null,
+      email: "member@example.com",
       role: "member",
     });
   });
@@ -180,7 +180,7 @@ describe("GET /dashboard", () => {
     expect(response.body.role).toBe("pro");
     expect(mocks.buildRoleAwareDashboardMock).toHaveBeenCalledWith({
       supabaseUserId: "pro-1",
-      email: null,
+      email: "pro@example.com",
       role: "pro",
     });
   });

@@ -576,6 +576,7 @@ export default function DashboardPage() {
   const previousTimelineWidthRef = useRef(0);
   const hasAutoScrolledTimelineRef = useRef(false);
   const activityLoadTimeoutRef = useRef<number | null>(null);
+  const dashboardRoleReloadKeyRef = useRef<string | null>(null);
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -602,11 +603,12 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, activeRole]);
+  }, [accessToken]);
 
   useEffect(() => {
+    dashboardRoleReloadKeyRef.current = activeRole;
     void loadDashboard();
-  }, [loadDashboard]);
+  }, [activeRole, loadDashboard]);
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 type Point = { x: number; y: number };
 
@@ -84,6 +84,26 @@ export default function SignatureCanvasField({
     context.setTransform(1, 0, 0, 1, 0, 0);
     resetCanvas();
   }, [ensureCanvas, resetCanvas]);
+
+  useEffect(() => {
+    resizeCanvas();
+
+    const canvas = canvasRef.current;
+    const observer =
+      canvas && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => resizeCanvas())
+        : null;
+
+    if (canvas) {
+      observer?.observe(canvas);
+    }
+    window.addEventListener("resize", resizeCanvas);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", resizeCanvas);
+    };
+  }, [resizeCanvas]);
 
   const drawLine = useCallback((from: Point, to: Point) => {
     const canvasState = ensureCanvas();

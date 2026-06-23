@@ -128,7 +128,7 @@ function ResetPasswordContent() {
     };
 
     loadSession();
-  }, []);
+  }, [returnTo, searchParams]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
