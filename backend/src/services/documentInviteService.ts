@@ -355,6 +355,7 @@ export type SigningRequestCard = {
   firstOpenedAt: string | null;
   firstClickedAt: string | null;
   resendCount: number;
+  actionKind: "open_signing" | "claim_and_sign" | "none";
   actionHref: string | null;
   actionLabel: string;
   detail: string;
@@ -538,6 +539,11 @@ const getDefaultInviteExpiration = () => {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 };
 
+const closedInviteStatuses = new Set<DocumentInviteStatus>([
+  "declined",
+  "revoked",
+]);
+
 const terminalInviteStatuses = new Set<DocumentInviteStatus>([
   "declined",
   "revoked",
@@ -549,6 +555,15 @@ const terminalInviteStatuses = new Set<DocumentInviteStatus>([
 const actionableIncomingInviteStatuses = new Set<DocumentInviteStatus>([
   "claimed",
   "accepted",
+]);
+
+const claimableIncomingInviteStatuses = new Set<DocumentInviteStatus>([
+  "draft",
+  "queued",
+  "sent",
+  "opened",
+  "expired",
+  "failed",
 ]);
 
 const completedInviteStatuses = new Set<DocumentInviteStatus>([
@@ -1235,13 +1250,23 @@ const loadOutgoingSigningInviteRows = async (input: {
 
 const loadDocumentMapForInvites = async (invites: DocumentInviteDetail[]) => {
   const documentIds = uniqueStrings(invites.map((invite) => invite.documentId));
-  const documents = await Promise.all(documentIds.map((documentId) => getDocumentById(documentId)));
   const documentsById = new Map<string, DocumentRecord>();
 
-  for (const document of documents) {
-    if (document) {
-      documentsById.set(document.id, document);
-    }
+  if (documentIds.length === 0) {
+    return documentsById;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("documents")
+    .select("id, owner_id, idn, status, document_type, jurisdiction, product_flow_mode, selected_families, output_bundle, intake_status, intake_schema_version, intake_last_saved_at, intake_submitted_at, created_at, updated_at")
+    .in("id", documentIds);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const document of (data ?? []) as unknown as DocumentRecord[]) {
+    documentsById.set(document.id, document);
   }
 
   return documentsById;
@@ -1249,13 +1274,24 @@ const loadDocumentMapForInvites = async (invites: DocumentInviteDetail[]) => {
 
 const loadDocumentPartyMapForInvites = async (invites: DocumentInviteDetail[]) => {
   const documentIds = uniqueStrings(invites.map((invite) => invite.documentId));
-  const partyLists = await Promise.all(documentIds.map((documentId) => listDocumentParties(documentId)));
   const partiesById = new Map<string, DocumentPartyRecord>();
 
-  for (const parties of partyLists) {
-    for (const party of parties) {
-      partiesById.set(party.id, party);
-    }
+  if (documentIds.length === 0) {
+    return partiesById;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("document_parties")
+    .select("id, document_id, party_role, full_name, email, phone_country_code, phone, is_signing_party, sort_order, metadata, created_at, updated_at")
+    .in("document_id", documentIds)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const party of (data ?? []) as unknown as DocumentPartyRecord[]) {
+    partiesById.set(party.id, party);
   }
 
   return partiesById;
@@ -1263,13 +1299,23 @@ const loadDocumentPartyMapForInvites = async (invites: DocumentInviteDetail[]) =
 
 const loadUserMapForInvites = async (invites: DocumentInviteDetail[]) => {
   const userIds = uniqueStrings(invites.map((invite) => invite.createdByUserId));
-  const users = await Promise.all(userIds.map((userId) => getUserById(userId)));
   const usersById = new Map<string, UserRow>();
 
-  for (const user of users) {
-    if (user) {
-      usersById.set(user.id, user);
-    }
+  if (userIds.length === 0) {
+    return usersById;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, email, first_name, last_name")
+    .in("id", userIds);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const user of (data ?? []) as UserRow[]) {
+    usersById.set(user.id, user);
   }
 
   return usersById;
@@ -1292,25 +1338,45 @@ const formatPartyPhone = (party: DocumentPartyRecord | null) => {
 const getSigningRequestAction = (input: {
   direction: SigningRequestCardDirection;
   invite: DocumentInviteDetail;
+  document: DocumentRecord | null;
 }) => {
+  if (!input.document) {
+    return {
+      actionKind: "none",
+      actionHref: null,
+      actionLabel: "Document unavailable",
+    } as const;
+  }
+
   if (input.direction === "incoming") {
     if (actionableIncomingInviteStatuses.has(input.invite.status) || completedInviteStatuses.has(input.invite.status)) {
       return {
+        actionKind: "open_signing",
         actionHref: `/app/sign?documentId=${encodeURIComponent(input.invite.documentId)}`,
         actionLabel: completedInviteStatuses.has(input.invite.status) ? "View" : "Sign document",
-      };
+      } as const;
+    }
+
+    if (claimableIncomingInviteStatuses.has(input.invite.status)) {
+      return {
+        actionKind: "claim_and_sign",
+        actionHref: null,
+        actionLabel: "Open document",
+      } as const;
     }
 
     return {
+      actionKind: "none",
       actionHref: null,
-      actionLabel: "Open invite email",
-    };
+      actionLabel: closedInviteStatuses.has(input.invite.status) ? "Request closed" : "Request pending",
+    } as const;
   }
 
   return {
+    actionKind: "open_signing",
     actionHref: `/app/sign?documentId=${encodeURIComponent(input.invite.documentId)}`,
     actionLabel: completedInviteStatuses.has(input.invite.status) ? "View" : "Track request",
-  };
+  } as const;
 };
 
 const mapSigningRequestCard = (input: {
@@ -1332,7 +1398,7 @@ const mapSigningRequestCard = (input: {
   });
   const documentLabel = input.document ? getDocumentLabel(input.document) : "document";
   const documentTypeLabel = input.document ? resolveDocumentInviteDocumentTypeLabel(input.document) : "Document";
-  const action = getSigningRequestAction({ direction: input.direction, invite: input.invite });
+  const action = getSigningRequestAction({ direction: input.direction, invite: input.invite, document: input.document });
   const counterparty = input.direction === "incoming"
     ? senderName ?? "DARCi"
     : signerName ?? signerEmail ?? "Signer";

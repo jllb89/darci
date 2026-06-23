@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   revokeDocumentInviteMock: vi.fn(),
   validateInviteTokenMock: vi.fn(),
   claimInviteTokenMock: vi.fn(),
+  openAuthenticatedInviteMock: vi.fn(),
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
 }));
 
@@ -53,6 +54,7 @@ vi.mock("../../src/services/inviteClaimService", async () => {
     ...actual,
     validateInviteToken: mocks.validateInviteTokenMock,
     claimInviteToken: mocks.claimInviteTokenMock,
+    openAuthenticatedInvite: mocks.openAuthenticatedInviteMock,
   };
 });
 
@@ -87,6 +89,7 @@ describe("Track 5 invite routes", () => {
     mocks.revokeDocumentInviteMock.mockReset();
     mocks.validateInviteTokenMock.mockReset();
     mocks.claimInviteTokenMock.mockReset();
+    mocks.openAuthenticatedInviteMock.mockReset();
     mocks.getUserIdentityContextBySupabaseIdMock.mockReset();
     mocks.getUserIdentityContextBySupabaseIdMock.mockImplementation(
       async (supabaseUserId: string) => {
@@ -231,5 +234,39 @@ describe("Track 5 invite routes", () => {
       viewerUserId: "member-db-1",
       claimAddress: "member@example.com",
     });
+  });
+
+  it("opens authenticated inbox invites with the current viewer", async () => {
+    mocks.openAuthenticatedInviteMock.mockResolvedValue({
+      inviteId: "invite-1",
+      documentId: "doc-1",
+      signingHref: "/app/sign?documentId=doc-1",
+      status: "claimed",
+    });
+
+    const response = await request(app)
+      .post("/invites/invite-1/open")
+      .set(
+        "Authorization",
+        `Bearer ${signToken({ sub: "member-1", app_metadata: { role: "member" } })}`,
+      )
+      .send({});
+
+    expect(response.status).toBe(200);
+    expect(response.body.signingHref).toBe("/app/sign?documentId=doc-1");
+    expect(mocks.openAuthenticatedInviteMock).toHaveBeenCalledWith({
+      inviteId: "invite-1",
+      viewerUserId: "member-db-1",
+      viewerEmail: "member@example.com",
+      claimAddress: "member@example.com",
+    });
+  });
+
+  it("uses a database-allowed claim method for authenticated inbox opens", async () => {
+    const service = await import("../../src/services/inviteClaimService");
+
+    expect(
+      service.authenticatedInviteOpenClaimMethod,
+    ).toBe("existing_session");
   });
 });

@@ -10,6 +10,7 @@ import {
 import {
   claimInviteToken,
   InviteClaimServiceError,
+  openAuthenticatedInvite,
   validateInviteToken,
 } from "../services/inviteClaimService";
 import { getOrCreateUserId } from "../services/documentService";
@@ -98,6 +99,7 @@ const sendServiceError = (res: Response, error: unknown) => {
     error instanceof InviteClaimServiceError
   ) {
     const errorCodeByStatus: Record<number, string> = {
+      401: "unauthorized",
       400: "bad_request",
       403: "forbidden",
       404: "not_found",
@@ -256,6 +258,27 @@ export const claimPublicInvite = async (req: Request, res: Response) => {
       token: parsedParams.data.token,
       viewerUserId,
       claimAddress: parsedBody.data.claimAddress ?? null,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendServiceError(res, error);
+  }
+};
+
+export const openInvite = async (req: Request, res: Response) => {
+  const parsedParams = inviteIdParamsSchema.safeParse(req.params ?? {});
+  if (!parsedParams.success) {
+    return sendValidationError(res, parsedParams.error);
+  }
+
+  try {
+    const viewerUserId = await resolveViewerUserId(req);
+    const result = await openAuthenticatedInvite({
+      inviteId: parsedParams.data.id,
+      viewerUserId,
+      viewerEmail: req.user?.email ?? null,
+      claimAddress: req.user?.email ?? null,
     });
 
     return res.status(200).json(result);

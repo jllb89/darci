@@ -4,6 +4,7 @@ import {
   createInvite,
   getPublicInvite,
   listInvites,
+  openInvite,
   resendInvite,
   revokeInvite,
 } from "../controllers/inviteController";
@@ -16,6 +17,11 @@ router.post("/public/:token/claim", claimPublicInvite);
 
 router.get("/", requireRole(["member", "admin", "service_role"]), listInvites);
 router.post("/", requireRole(["member", "admin", "service_role"]), createInvite);
+router.post(
+  "/:id/open",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  openInvite,
+);
 router.post(
   "/:id/resend",
   requireRole(["member", "admin", "service_role"]),

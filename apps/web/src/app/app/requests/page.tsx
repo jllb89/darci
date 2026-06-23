@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 
 const apiBaseUrl =
@@ -32,6 +33,7 @@ type SigningRequestCard = {
   firstOpenedAt: string | null;
   firstClickedAt: string | null;
   resendCount: number;
+  actionKind?: "open_signing" | "claim_and_sign" | "none";
   actionHref: string | null;
   actionLabel: string;
   detail: string;
@@ -40,6 +42,11 @@ type SigningRequestCard = {
 type RequestsPayload = {
   incoming?: SigningRequestCard[];
   outgoing?: SigningRequestCard[];
+};
+
+type InviteOpenPayload = {
+  signingHref?: string | null;
+  message?: string | null;
 };
 
 type RequestFilters = {
@@ -391,10 +398,27 @@ const getLaneEmptyCopy = (direction: SigningRequestDirection) => {
   return "No sent signature requests yet.";
 };
 
-const terminalStatuses = new Set(["completed", "declined", "revoked", "expired", "failed"]);
+const closedStatuses = new Set(["declined", "revoked"]);
+const inactiveStatuses = new Set(["completed", "declined", "revoked"]);
 const reminderBlockedStatuses = new Set(["completed", "declined", "revoked"]);
 
-const isOpenRequest = (item: SigningRequestCard) => !terminalStatuses.has(item.status.trim().toLowerCase());
+const isOpenRequest = (item: SigningRequestCard) => !inactiveStatuses.has(item.status.trim().toLowerCase());
+
+const canClaimIncomingRequest = (item: SigningRequestCard) => {
+  return item.direction === "incoming" && !closedStatuses.has(item.status.trim().toLowerCase()) && Boolean(item.inviteId) && Boolean(item.documentId);
+};
+
+const canOpenSigningRequest = (item: SigningRequestCard) => {
+  return Boolean(item.actionHref) || item.actionKind === "claim_and_sign" || canClaimIncomingRequest(item);
+};
+
+const getRequestActionLabel = (item: SigningRequestCard) => {
+  if (canClaimIncomingRequest(item) && !item.actionHref) {
+    return "Open document";
+  }
+
+  return item.actionLabel;
+};
 
 const canSendReminderForRequest = (item: SigningRequestCard) => {
   return item.direction === "outgoing" && !reminderBlockedStatuses.has(item.status.trim().toLowerCase()) && Boolean(item.signerEmail);
@@ -439,7 +463,7 @@ const matchesRequestFilters = (item: SigningRequestCard, filters: RequestFilters
     return false;
   }
 
-  if (filters.activity === "needs_signature" && !(item.direction === "incoming" && item.actionHref && isOpenRequest(item))) {
+  if (filters.activity === "needs_signature" && !(item.direction === "incoming" && canOpenSigningRequest(item) && isOpenRequest(item))) {
     return false;
   }
 
@@ -464,20 +488,23 @@ const matchesRequestFilters = (item: SigningRequestCard, filters: RequestFilters
 
 const RequestCard = ({
   item,
+  openState,
+  onOpenRequest,
   resendState,
   onSendReminder,
 }: {
   item: SigningRequestCard;
+  openState?: "opening" | "error";
+  onOpenRequest: (item: SigningRequestCard) => void;
   resendState?: "sending" | "sent" | "error";
   onSendReminder: (item: SigningRequestCard) => void;
 }) => {
-  const router = useRouter();
-  const canOpenCard = Boolean(item.actionHref);
+  const canOpenCard = canOpenSigningRequest(item);
   const canSendReminder = canSendReminderForRequest(item);
 
   const openCard = () => {
-    if (item.actionHref) {
-      router.push(item.actionHref);
+    if (canOpenCard && openState !== "opening") {
+      onOpenRequest(item);
     }
   };
 
@@ -495,6 +522,11 @@ const RequestCard = ({
     onSendReminder(item);
   };
 
+  const handleOpenButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    openCard();
+  };
+
   return (
     <article
       className={`relative min-h-[214px] rounded-xl border border-Color-Scheme-1-Border px-5 py-5 text-left transition-[border-color,transform] duration-200 ease-out ${canOpenCard ? "cursor-pointer hover:-translate-y-0.5 hover:border-Color-Scheme-1-Text" : "bg-Color-Neutral-Lightest/60"}`}
@@ -503,6 +535,7 @@ const RequestCard = ({
       onClick={canOpenCard ? openCard : undefined}
       onKeyDown={handleCardKeyDown}
       aria-label={canOpenCard ? `Open ${formatRequestDocumentTitle(item)} ${formatReference(item.documentId, "DOC")}` : undefined}
+      aria-busy={openState === "opening" ? true : undefined}
     >
       <div className="pr-24 font-display text-sm font-medium text-Color-Scheme-1-Text">
         {formatRequestDocumentTitle(item)}
@@ -555,10 +588,22 @@ const RequestCard = ({
         ) : null}
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-Color-Scheme-1-Text">
-          <CardIcon name="arrow" />
-          <span>{canOpenCard ? "Open document" : item.actionLabel}</span>
-        </div>
+        {canOpenCard ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-Color-Scheme-1-Border/60 bg-Color-White px-3 py-1.5 text-xs font-medium text-Color-Scheme-1-Text transition-colors hover:border-Color-Scheme-1-Text disabled:cursor-wait disabled:opacity-60"
+            disabled={openState === "opening"}
+            onClick={handleOpenButtonClick}
+          >
+            <CardIcon name="arrow" />
+            <span>{openState === "opening" ? "Opening..." : getRequestActionLabel(item)}</span>
+          </button>
+        ) : (
+          <div className="inline-flex items-center gap-1.5 text-xs font-medium text-Color-Scheme-1-Text">
+            <CardIcon name="arrow" />
+            <span>{getRequestActionLabel(item)}</span>
+          </div>
+        )}
         {item.direction === "outgoing" ? (
           <button
             type="button"
@@ -576,6 +621,11 @@ const RequestCard = ({
           Reminder could not be sent.
         </div>
       ) : null}
+      {openState === "error" ? (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          Document could not be opened.
+        </div>
+      ) : null}
     </article>
   );
 };
@@ -587,6 +637,8 @@ const RequestLane = ({
   requests,
   hasActiveFilters,
   resendStates,
+  openStates,
+  onOpenRequest,
   onSendReminder,
 }: {
   title: string;
@@ -595,6 +647,8 @@ const RequestLane = ({
   requests: SigningRequestCard[];
   hasActiveFilters: boolean;
   resendStates: Record<string, "sending" | "sent" | "error">;
+  openStates: Record<string, "opening" | "error">;
+  onOpenRequest: (item: SigningRequestCard) => void;
   onSendReminder: (item: SigningRequestCard) => void;
 }) => {
   const openCount = requests.filter(isOpenRequest).length;
@@ -615,6 +669,8 @@ const RequestLane = ({
           <RequestCard
             key={item.id}
             item={item}
+            openState={openStates[item.inviteId]}
+            onOpenRequest={onOpenRequest}
             resendState={resendStates[item.inviteId]}
             onSendReminder={onSendReminder}
           />
@@ -630,12 +686,15 @@ const RequestLane = ({
 };
 
 export default function RequestsPage() {
+  const router = useRouter();
+  const { showToast } = useAppToast();
   const { accessToken } = useStoredAuth();
   const [incomingRequests, setIncomingRequests] = useState<SigningRequestCard[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<SigningRequestCard[]>([]);
   const [filters, setFilters] = useState<RequestFilters>({ query: "", status: "", role: "", activity: "" });
   const [openFilterId, setOpenFilterId] = useState<"status" | "role" | "activity" | null>(null);
   const [resendStates, setResendStates] = useState<Record<string, "sending" | "sent" | "error">>({});
+  const [openStates, setOpenStates] = useState<Record<string, "opening" | "error">>({});
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -715,7 +774,7 @@ export default function RequestsPage() {
 
   const requestStats = useMemo(() => {
     const visibleRequests = [...filteredIncomingRequests, ...filteredOutgoingRequests];
-    const needsSignature = filteredIncomingRequests.filter((item) => item.actionHref && isOpenRequest(item)).length;
+    const needsSignature = filteredIncomingRequests.filter((item) => canOpenSigningRequest(item) && isOpenRequest(item)).length;
     const waitingOnOthers = filteredOutgoingRequests.filter(isOpenRequest).length;
 
     return [
@@ -733,6 +792,44 @@ export default function RequestsPage() {
     setFilters({ query: "", status: "", role: "", activity: "" });
     setOpenFilterId(null);
   };
+
+  const openRequest = useCallback(async (item: SigningRequestCard) => {
+    if (item.actionHref) {
+      router.push(item.actionHref);
+      return;
+    }
+
+    if (item.actionKind !== "claim_and_sign" && !canClaimIncomingRequest(item)) {
+      return;
+    }
+
+    if (!accessToken) {
+      showToast({ tone: "error", message: "Sign in again to open this document." });
+      return;
+    }
+
+    setOpenStates((current) => ({ ...current, [item.inviteId]: "opening" }));
+    try {
+      const response = await fetchWithTokenRefresh(`${apiBaseUrl}/invites/${item.inviteId}/open`, accessToken, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      const payload = (await response.json().catch(() => null)) as InviteOpenPayload | null;
+
+      if (!response.ok || !payload?.signingHref) {
+        throw new Error(payload?.message || "Document could not be opened.");
+      }
+
+      router.push(payload.signingHref);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Document could not be opened.";
+      setOpenStates((current) => ({ ...current, [item.inviteId]: "error" }));
+      showToast({ tone: "error", message });
+    }
+  }, [accessToken, router, showToast]);
 
   const sendReminder = useCallback(async (item: SigningRequestCard) => {
     if (!accessToken || !canSendReminderForRequest(item)) {
@@ -863,6 +960,8 @@ export default function RequestsPage() {
           direction="incoming"
           requests={filteredIncomingRequests}
           hasActiveFilters={hasActiveFilters}
+          openStates={openStates}
+          onOpenRequest={openRequest}
           resendStates={resendStates}
           onSendReminder={sendReminder}
         />
@@ -872,6 +971,8 @@ export default function RequestsPage() {
           direction="outgoing"
           requests={filteredOutgoingRequests}
           hasActiveFilters={hasActiveFilters}
+          openStates={openStates}
+          onOpenRequest={openRequest}
           resendStates={resendStates}
           onSendReminder={sendReminder}
         />

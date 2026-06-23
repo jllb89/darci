@@ -146,6 +146,12 @@ export const requireAuth = async (
         const dbIdentityContext = await getUserIdentityContextBySupabaseId(user.id);
         if (dbIdentityContext) {
           user.dbUserId = dbIdentityContext.id;
+          if (!user.email && dbIdentityContext.email) {
+            user.email = dbIdentityContext.email;
+          }
+          if (!user.phone && dbIdentityContext.phone) {
+            user.phone = dbIdentityContext.phone;
+          }
           user.role = dbIdentityContext.role;
           user.availableRoles = dbIdentityContext.availableRoles;
           user.status = dbIdentityContext.status;

@@ -124,4 +124,46 @@ describe("resolveClaimedSignerInviteAccess", () => {
       recipientEmail: "grantor@example.com",
     });
   });
+
+  it("keeps authenticated claimed invites readable after the email invite expires", async () => {
+    supabaseMocks.state.document_access_invites = [
+      {
+        id: "invite-claimed",
+        document_id: "document-2",
+        document_output_signer_id: "signer-2",
+        document_party_id: "party-2",
+        claimed_user_id: "viewer-2",
+        status: "claimed",
+        party_role_snapshot: "trustor",
+        obligation_type_snapshot: "signer",
+        output_key_snapshot: "ddpoa",
+        document_key_snapshot: "ddpoa",
+        expires_at: "2020-01-01T00:00:00.000Z",
+        updated_at: "2026-05-06T22:49:18.748754+00:00",
+      },
+    ];
+    supabaseMocks.state.invite_recipients = [
+      {
+        invite_id: "invite-claimed",
+        channel: "email",
+        delivery_address: "trustor@example.com",
+        is_primary: true,
+        created_at: "2026-05-06T22:47:22.352+00:00",
+      },
+    ];
+
+    const access = await resolveClaimedSignerInviteAccess({
+      documentId: "document-2",
+      viewerUserId: "viewer-2",
+      viewerEmail: "trustor@example.com",
+    });
+
+    expect(access).toMatchObject({
+      inviteId: "invite-claimed",
+      documentId: "document-2",
+      documentOutputSignerId: "signer-2",
+      claimedUserId: "viewer-2",
+      recipientEmail: "trustor@example.com",
+    });
+  });
 });

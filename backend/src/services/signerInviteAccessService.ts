@@ -63,14 +63,6 @@ const normalizeEmail = (value?: string | null) => {
   return emailPattern.test(normalized) ? normalized : null;
 };
 
-const isInviteExpired = (expiresAt: string | null) => {
-  if (!expiresAt) {
-    return false;
-  }
-
-  return new Date(expiresAt).getTime() <= Date.now();
-};
-
 export const resolveClaimedSignerInviteAccess = async (input: {
   documentId: string;
   viewerUserId?: string | null | undefined;
@@ -93,8 +85,7 @@ export const resolveClaimedSignerInviteAccess = async (input: {
   }
 
   const candidateInvites = ((inviteRows ?? []) as unknown as DocumentInviteAccessRow[])
-    .filter((invite) => Boolean(invite.document_output_signer_id))
-    .filter((invite) => !isInviteExpired(invite.expires_at));
+    .filter((invite) => Boolean(invite.document_output_signer_id));
   if (candidateInvites.length === 0) {
     return null;
   }

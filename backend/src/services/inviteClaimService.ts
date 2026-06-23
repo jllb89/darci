@@ -122,6 +122,8 @@ type UserRow = {
   last_name: string | null;
 };
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 type DocumentRow = {
   id: string;
   owner_id: string;
@@ -286,6 +288,15 @@ export type InviteClaimResult = {
   claim: NonNullable<InvitePublicView["latestClaim"]>;
 };
 
+export type AuthenticatedInviteOpenResult = {
+  inviteId: string;
+  documentId: string;
+  signingHref: string;
+  status: DocumentInviteStatus;
+};
+
+export const authenticatedInviteOpenClaimMethod = "existing_session";
+
 export class InviteClaimServiceError extends Error {
   constructor(
     readonly statusCode: number,
@@ -422,6 +433,11 @@ export const isInviteTokenExpired = (expiresAt: string, now = new Date()) => {
   return new Date(expiresAt).getTime() <= now.getTime();
 };
 
+const normalizeEmail = (value?: string | null) => {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return emailPattern.test(normalized) ? normalized : null;
+};
+
 export const canClaimInviteToken = (input: {
   tokenStatus: InviteTokenStatus;
   useCount: number;
@@ -543,6 +559,32 @@ const getDocumentById = async (documentId: string) => {
   }
 
   return (data as DocumentRow | null) ?? null;
+};
+
+const userCanOpenInvite = (input: {
+  invite: DocumentInviteRow;
+  recipients: InviteRecipientRow[];
+  viewerUserId: string;
+  viewerEmail: string | null;
+}) => {
+  const claimedUserId = input.invite.claimed_user_id?.trim() ?? "";
+  if (claimedUserId && claimedUserId !== input.viewerUserId) {
+    return false;
+  }
+
+  return input.recipients.some((recipient) => {
+    const targetUserId = recipient.target_user_id?.trim() ?? "";
+    if (targetUserId && targetUserId === input.viewerUserId) {
+      return true;
+    }
+
+    const recipientEmail = normalizeEmail(recipient.delivery_address);
+    return Boolean(input.viewerEmail && recipientEmail && recipientEmail === input.viewerEmail);
+  });
+};
+
+const getSigningHref = (documentId: string) => {
+  return `/app/sign?documentId=${encodeURIComponent(documentId)}`;
 };
 
 const mapLatestClaim = (claim: InviteClaimRow | null) => {
@@ -928,4 +970,123 @@ export const claimInviteToken = async (input: {
     }),
     claim: mappedClaim,
   } satisfies InviteClaimResult;
+};
+
+export const openAuthenticatedInvite = async (input: {
+  inviteId: string;
+  viewerUserId?: string | null;
+  viewerEmail?: string | null;
+  claimAddress?: string | null;
+}) => {
+  const inviteId = input.inviteId.trim();
+  if (!inviteId) {
+    throw new InviteClaimServiceError(400, "Invite id is required");
+  }
+
+  const viewerUserId = input.viewerUserId?.trim() ?? "";
+  if (!viewerUserId) {
+    throw new InviteClaimServiceError(401, "Sign in to open this invite");
+  }
+
+  const invite = await getInviteById(inviteId);
+  if (!invite || invite.invite_kind !== "document_signing") {
+    throw new InviteClaimServiceError(404, "Invite not found");
+  }
+
+  const [recipients, document] = await Promise.all([
+    listInviteRecipients(invite.id),
+    getDocumentById(invite.document_id),
+  ]);
+
+  if (!document) {
+    throw new InviteClaimServiceError(404, "Document not found");
+  }
+
+  if (!invite.document_output_signer_id) {
+    throw new InviteClaimServiceError(404, "Document signer obligation not found");
+  }
+
+  const viewerEmail = normalizeEmail(input.viewerEmail);
+  if (!userCanOpenInvite({ invite, recipients, viewerUserId, viewerEmail })) {
+    throw new InviteClaimServiceError(404, "Invite not found");
+  }
+
+  if (["declined", "revoked"].includes(invite.status)) {
+    throw new InviteClaimServiceError(409, "Invite cannot be opened in its current state");
+  }
+
+  if (["claimed", "accepted", "completed"].includes(invite.status)) {
+    return {
+      inviteId: invite.id,
+      documentId: invite.document_id,
+      signingHref: getSigningHref(invite.document_id),
+      status: invite.status,
+    } satisfies AuthenticatedInviteOpenResult;
+  }
+
+  if (!["draft", "queued", "sent", "opened", "expired", "failed"].includes(invite.status)) {
+    throw new InviteClaimServiceError(409, "Invite is not ready to open");
+  }
+
+  const now = new Date().toISOString();
+  const primaryRecipient = recipients.find((recipient) => recipient.is_primary) ?? recipients[0] ?? null;
+  const normalizedClaimAddress = input.claimAddress?.trim() ?? "";
+  const claimAddress = normalizedClaimAddress || input.viewerEmail?.trim() || primaryRecipient?.delivery_address || null;
+  const nextInviteStatus: DocumentInviteStatus = invite.requires_acceptance ? "claimed" : "accepted";
+
+  const [claimResult, inviteUpdateResult, recipientUpdateResult] = await Promise.all([
+    supabaseAdmin
+      .from("invite_claims")
+      .insert({
+        invite_id: invite.id,
+        invite_token_id: null,
+        claimed_user_id: viewerUserId,
+        created_user_id: null,
+        claim_status: invite.requires_acceptance ? "claimed" : "accepted",
+        claim_method: authenticatedInviteOpenClaimMethod,
+        claim_channel: primaryRecipient?.channel ?? "unknown",
+        claim_address: claimAddress,
+        claimed_at: now,
+        accepted_at: invite.requires_acceptance ? null : now,
+        metadata: {
+          source: "authenticated_invite_open_api",
+        },
+      }),
+    supabaseAdmin
+      .from("document_access_invites")
+      .update({
+        status: nextInviteStatus,
+        claimed_user_id: viewerUserId,
+        first_clicked_at: invite.first_clicked_at ?? now,
+        accepted_at: invite.requires_acceptance ? invite.accepted_at : now,
+        updated_at: now,
+      })
+      .eq("id", invite.id),
+    supabaseAdmin
+      .from("invite_recipients")
+      .update({
+        status: invite.requires_acceptance ? "claimed" : "opened",
+        last_event_at: now,
+      })
+      .eq("invite_id", invite.id),
+  ]);
+
+  if (claimResult.error) {
+    throw new Error(claimResult.error.message);
+  }
+
+  if (inviteUpdateResult.error) {
+    throw new Error(inviteUpdateResult.error.message);
+  }
+
+  if (recipientUpdateResult.error) {
+    throw new Error(recipientUpdateResult.error.message);
+  }
+
+  return {
+    inviteId: invite.id,
+    documentId: invite.document_id,
+    signingHref: getSigningHref(invite.document_id),
+    status: nextInviteStatus,
+  } satisfies AuthenticatedInviteOpenResult;
 };
