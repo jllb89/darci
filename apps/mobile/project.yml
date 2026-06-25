@@ -1,0 +1,103 @@
+name: DARCiMobile
+
+options:
+  bundleIdPrefix: dev.mobile
+  deploymentTarget:
+    iOS: "18.0"
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+
+targets:
+  DARCiMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    info:
+      path: DARCiMobile/App/Info.plist
+      properties:
+        CFBundleDisplayName: DARCi
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIAppFonts:
+          - MaisonNeue-Bold.ttf
+          - MaisonNeue-BoldItalic.ttf
+          - MaisonNeue-Book.ttf
+          - MaisonNeue-BookItalic.ttf
+          - MaisonNeue-Demi.ttf
+          - MaisonNeue-DemiItalic.ttf
+          - MaisonNeue-Light.ttf
+          - MaisonNeue-LightItalic.ttf
+          - MaisonNeue-Medium.ttf
+          - MaisonNeue-MediumItalic.ttf
+          - MaisonNeue-Mono.ttf
+          - MaisonNeue-MonoItalic.ttf
+    sources:
+      - path: DARCiMobile
+        excludes:
+          - Resources
+      - path: DARCiMobile/Resources
+        buildPhase: resources
+        excludes:
+          - README.md
+          - "**/.gitkeep"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci
+        PRODUCT_NAME: DARCiMobile
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+
+  DARCiMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - DARCiMobileTests
+    dependencies:
+      - target: DARCiMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  DARCiMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - DARCiMobileUITests
+    dependencies:
+      - target: DARCiMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci.uitests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  DARCiMobile:
+    build:
+      targets:
+        DARCiMobile: all
+        DARCiMobileTests: [test]
+        DARCiMobileUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - DARCiMobileTests
+        - DARCiMobileUITests
+    archive:
+      config: Release

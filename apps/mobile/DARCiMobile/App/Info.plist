@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>DARCi</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>MaisonNeue-Bold.ttf</string>
+		<string>MaisonNeue-BoldItalic.ttf</string>
+		<string>MaisonNeue-Book.ttf</string>
+		<string>MaisonNeue-BookItalic.ttf</string>
+		<string>MaisonNeue-Demi.ttf</string>
+		<string>MaisonNeue-DemiItalic.ttf</string>
+		<string>MaisonNeue-Light.ttf</string>
+		<string>MaisonNeue-LightItalic.ttf</string>
+		<string>MaisonNeue-Medium.ttf</string>
+		<string>MaisonNeue-MediumItalic.ttf</string>
+		<string>MaisonNeue-Mono.ttf</string>
+		<string>MaisonNeue-MonoItalic.ttf</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+</dict>
+</plist>
