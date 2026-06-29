@@ -91,6 +91,12 @@ const HEADING_LINE_GAP = 3.1;
 const TITLE_LINE_GAP = 3.4;
 const NOTICE_LINE_GAP = 1.8;
 const FINE_PRINT_LINE_GAP = 1.3;
+const ACKNOWLEDGMENT_SIGNATURE_MAX_WIDTH = 132;
+const ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT = 42;
+const PDF_POINTS_PER_INCH = 72;
+export const ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS = PDF_POINTS_PER_INCH * 2;
+const ACKNOWLEDGMENT_SEAL_MAX_WIDTH = ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS;
+const ACKNOWLEDGMENT_SEAL_MAX_HEIGHT = ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS;
 const INLINE_VALUE_OPEN = "[[DARCI_VALUE]]";
 const INLINE_VALUE_CLOSE = "[[/DARCI_VALUE]]";
 const INLINE_PENDING_OPEN = "[[DARCI_PENDING]]";
@@ -123,6 +129,10 @@ type PdfFontSet = {
   strong: string;
   italic: string;
   mono: string;
+};
+type PdfAppendixImageAsset = {
+  mimeType: string;
+  bytes: Buffer;
 };
 type TemplateBlock =
   | { kind: "blank" }
@@ -2413,6 +2423,112 @@ const renderTemplateBlocks = (
       lineGap: BODY_LINE_GAP,
     });
   }
+};
+
+const buildAcknowledgmentAppendixTemplate = (acknowledgmentContent: string) => {
+  const lines = acknowledgmentContent.split(/\r?\n/);
+  const titleIndex = lines.findIndex((line) => line.trim().length > 0);
+  if (titleIndex < 0) {
+    return "# Notarial Acknowledgment";
+  }
+
+  const title = normalizeTemplateLine(lines[titleIndex] ?? "Notarial Acknowledgment");
+  const bodyLines = lines.slice(titleIndex + 1).map((line) => normalizeTemplateLine(line));
+
+  return [`# ${title}`, "", ...bodyLines]
+    .join("\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+};
+
+const drawAcknowledgmentAppendixImages = (
+  document: PdfDocument,
+  fonts: PdfFontSet,
+  input: {
+    signatureImage: PdfAppendixImageAsset | null;
+    sealImage: PdfAppendixImageAsset | null;
+  },
+) => {
+  if (!input.signatureImage && !input.sealImage) {
+    return;
+  }
+
+  ensurePageSpace(document, ACKNOWLEDGMENT_SEAL_MAX_HEIGHT + 52);
+  renderTemplateBlocks(document, [{ kind: "heading", text: "Notary signature and seal" }], fonts);
+
+  const left = document.page.margins.left;
+  const right = document.page.width - document.page.margins.right;
+  const topY = document.y + 2;
+
+  if (input.signatureImage) {
+    document.image(input.signatureImage.bytes, left, topY, {
+      fit: [ACKNOWLEDGMENT_SIGNATURE_MAX_WIDTH, ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT],
+    });
+  }
+
+  if (input.sealImage) {
+    document.image(input.sealImage.bytes, right - ACKNOWLEDGMENT_SEAL_MAX_WIDTH, topY, {
+      fit: [ACKNOWLEDGMENT_SEAL_MAX_WIDTH, ACKNOWLEDGMENT_SEAL_MAX_HEIGHT],
+    });
+  }
+
+  document.x = left;
+  document.y = topY + ACKNOWLEDGMENT_SEAL_MAX_HEIGHT + 12;
+};
+
+export const renderAcknowledgmentAppendixPdf = async (input: {
+  pageSize: [number, number];
+  acknowledgmentContent: string;
+  signatureImage: PdfAppendixImageAsset | null;
+  sealImage: PdfAppendixImageAsset | null;
+}) => {
+  const brandAssets = await loadPdfBrandAssets();
+  const pdf = new PDFDocument({
+    size: input.pageSize,
+    margins: PDF_PAGE_MARGINS,
+    compress: false,
+    info: {
+      Title: "Notarial acknowledgment appendix",
+      Author: "DARCi",
+      Subject: "Notarial acknowledgment appendix",
+    },
+  });
+  const fonts = registerPdfFonts(pdf, brandAssets);
+  const drawPageChrome = () => {
+    drawBrandHeader(pdf, {
+      logo: brandAssets.logo,
+      fonts,
+      templateLabel: "Notarial acknowledgment",
+    });
+  };
+
+  pdf.on("pageAdded", drawPageChrome);
+  drawPageChrome();
+
+  const chunks: Buffer[] = [];
+  const completed = new Promise<Buffer>((resolve, reject) => {
+    pdf.on("data", (chunk: Buffer) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    pdf.on("end", () => {
+      resolve(Buffer.concat(chunks));
+    });
+    pdf.on("error", reject);
+  });
+
+  renderTemplateBlocks(
+    pdf,
+    buildTemplateBlocks(buildAcknowledgmentAppendixTemplate(input.acknowledgmentContent)),
+    fonts,
+  );
+  drawAcknowledgmentAppendixImages(pdf, fonts, {
+    signatureImage: input.signatureImage,
+    sealImage: input.sealImage,
+  });
+
+  pdf.end();
+
+  return completed;
 };
 
 export const renderLegalTemplateText = (input: {

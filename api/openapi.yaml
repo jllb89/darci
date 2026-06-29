@@ -139,7 +139,43 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                $ref: "#/components/schemas/OtpStartResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/otp/phone/start:
+    post:
+      summary: Request phone OTP
+      description: Sends a Supabase passwordless SMS OTP for a phone number. Native mobile callers may omit browser-only Origin, CSRF, and request-signature headers.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneActionRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpStartResponse"
         "400":
           description: Bad request
           content:
@@ -169,6 +205,48 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/EmailOtpVerifyRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account inactive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/otp/phone/verify:
+    post:
+      summary: Verify phone OTP
+      description: Verifies a Supabase SMS OTP, syncs the DARCi user mirror, and returns the DARCi session shape for an active account. Native mobile callers may omit browser-only Origin, CSRF, and request-signature headers.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneOtpVerifyRequest"
       responses:
         "200":
           description: OK
@@ -9660,6 +9738,22 @@ components:
           minLength: 1
           maxLength: 500
           description: Optional same-origin app route to return to after the email action.
+    PhoneActionRequest:
+      type: object
+      required:
+        - phone
+      properties:
+        phone:
+          type: string
+          minLength: 10
+          maxLength: 20
+          description: E.164 phone number for SMS OTP delivery.
+          example: "+12025550147"
+        returnTo:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Optional app route to return to after the phone action.
     EmailOtpVerifyRequest:
       type: object
       required:
@@ -9679,6 +9773,42 @@ components:
           minLength: 1
           maxLength: 500
           description: Optional same-origin app route to return to after verification.
+    PhoneOtpVerifyRequest:
+      type: object
+      required:
+        - phone
+        - token
+      properties:
+        phone:
+          type: string
+          minLength: 10
+          maxLength: 20
+          description: E.164 phone number used to request the SMS OTP.
+          example: "+12025550147"
+        token:
+          type: string
+          minLength: 4
+          maxLength: 32
+          description: Supabase SMS OTP entered by the user.
+        returnTo:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Optional app route to return to after verification.
+    OtpStartResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        otpLength:
+          type: integer
+          nullable: true
+          description: OTP digit count when the provider exposes it.
+        cooldownSeconds:
+          type: integer
+          description: Minimum delay before requesting another OTP.
     PasswordResetRequest:
       type: object
       required:
@@ -9712,6 +9842,8 @@ components:
         requiresEmailConfirmation:
           type: boolean
         emailConfirmationSent:
+          type: boolean
+        profileCompletionRequired:
           type: boolean
     UserResponse:
       type: object

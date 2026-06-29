@@ -6,8 +6,18 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
-    func testLaunchesOnboardingSplash() throws {
+    private func makeApp(restoreSession: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchEnvironment["DARCI_MOCK_AUTH"] = "1"
+        if restoreSession {
+            app.launchEnvironment["DARCI_MOCK_AUTH_RESTORE"] = "1"
+        }
+        return app
+    }
+
+    @MainActor
+    func testLaunchesOnboardingSplash() throws {
+        let app = makeApp()
         let firstStory = "Members get documents notarized in seconds not hours. Notaries handle more work without burning out."
         let secondStory = "Every step meets legal standards. Watermarking, sealing, hashing, and ledger anchoring happen automatically so compliance is never a question."
         app.launch()
@@ -42,6 +52,7 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertFalse(app.buttons["I just want to browse the app."].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Use email instead."].waitForExistence(timeout: 2))
+        app.typeText("2025550147")
 
         app.buttons["Continue"].tap()
         XCTAssertTrue(app.buttons["Verify code"].waitForExistence(timeout: 5))
@@ -81,7 +92,7 @@ final class DARCiMobileUITests: XCTestCase {
 
     @MainActor
     func testEmailOptionCanStartFromInitialAuthenticationState() throws {
-        let app = XCUIApplication()
+        let app = makeApp()
         app.launch()
 
         app.buttons["Start"].tap()
@@ -105,6 +116,22 @@ final class DARCiMobileUITests: XCTestCase {
         app.buttons["Use phone number instead."].tap()
         XCTAssertTrue(app.buttons["Use email instead."].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Phone number"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testStoredSessionRestoresAndSignsOut() throws {
+        let app = makeApp(restoreSession: true)
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Welcome to DARCi."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["New document"].waitForExistence(timeout: 5))
+
+        let profileButton = app.buttons["Member"]
+        XCTAssertTrue(profileButton.waitForExistence(timeout: 5))
+        profileButton.tap()
+
+        XCTAssertTrue(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))
     }
 
     @MainActor

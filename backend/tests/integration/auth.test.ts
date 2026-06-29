@@ -77,3 +77,19 @@ describe("auth middleware", () => {
     expect(mocks.getNotarizationRequestByIdMock).toHaveBeenCalledWith("req-1");
   });
 });
+
+describe("native auth contract", () => {
+  it.each([
+    ["/auth/otp/start", { returnTo: "/mobile" }],
+    ["/auth/otp/verify", { token: "123456", returnTo: "/mobile" }],
+    ["/auth/otp/phone/start", { returnTo: "/mobile" }],
+    ["/auth/otp/phone/verify", { token: "123456", returnTo: "/mobile" }],
+  ])("lets %s requests without browser-only auth headers reach validation", async (path, body) => {
+    const response = await request(app)
+      .post(path)
+      .send(body);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("validation_error");
+  });
+});

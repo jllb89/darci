@@ -10,50 +10,110 @@ enum AppLaunchPhase: Equatable {
 
 struct AppRootView: View {
     @State private var launchPhase = AppLaunchPhase.initial
-    @State private var selectedTab: AppTab = .home
+    @State private var didAttemptSessionRestore = false
+
+    @StateObject private var sessionCoordinator: AppSessionCoordinator
+    private let authenticationViewModel: AuthenticationViewModel
+    private let homeAPIClient: HomeAPIProviding
+
+    init(
+        authenticationViewModel: AuthenticationViewModel? = nil,
+        sessionCoordinator: AppSessionCoordinator? = nil,
+        homeAPIClient: HomeAPIProviding? = nil
+    ) {
+        let dependencies = AppRootView.makeAuthDependencies()
+        self.authenticationViewModel = authenticationViewModel ?? AuthenticationViewModel(
+            apiClient: dependencies.apiClient,
+            sessionStore: dependencies.sessionStore
+        )
+        self.homeAPIClient = homeAPIClient ?? dependencies.homeAPIClient
+        _sessionCoordinator = StateObject(
+            wrappedValue: sessionCoordinator ?? AppSessionCoordinator(
+                apiClient: dependencies.apiClient,
+                sessionStore: dependencies.sessionStore
+            )
+        )
+    }
 
     var body: some View {
-        switch launchPhase {
-        case .onboarding:
-            OnboardingFlowView {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    launchPhase = .authentication
+        Group {
+            switch launchPhase {
+            case .onboarding:
+                OnboardingFlowView {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        launchPhase = .authentication
+                    }
                 }
-            }
-        case .authentication:
-            AuthenticationSignInView(content: .signIn) {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    launchPhase = .signedIn
+            case .authentication:
+                AuthenticationSignInView(content: .signIn, viewModel: authenticationViewModel) {
+                    _ = sessionCoordinator.acceptAuthenticatedSession(authenticationViewModel.verifiedSession)
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        launchPhase = .signedIn
+                    }
                 }
+            case .signedIn:
+                signedInShell
             }
-        case .signedIn:
-            tabShell
+        }
+        .task {
+            await restoreSessionOnLaunchIfNeeded()
         }
     }
 
-    private var tabShell: some View {
-        TabView(selection: $selectedTab) {
-            ForEach(AppTab.allCases) { tab in
-                NavigationStack {
-                    content(for: tab)
-                }
-                .tabItem {
-                    Label(tab.title, systemImage: tab.systemImage)
-                }
-                .tag(tab)
-            }
+    private var signedInShell: some View {
+        NavigationStack {
+            HomeView(
+                session: sessionCoordinator.currentSession,
+                viewModel: HomeViewModel(apiClient: homeAPIClient),
+                onProfileAction: signOut
+            )
         }
-        .tint(DARCiTheme.accent)
     }
 
-    @ViewBuilder
-    private func content(for tab: AppTab) -> some View {
-        switch tab {
-        case .home:
-            HomeView()
-        case .documents, .generator, .requests, .notary:
-            PlaceholderScreen(section: tab.section)
+    @MainActor
+    private func restoreSessionOnLaunchIfNeeded() async {
+        guard didAttemptSessionRestore == false else {
+            return
         }
+
+        didAttemptSessionRestore = true
+
+        switch await sessionCoordinator.restoreSessionOnLaunch() {
+        case .noStoredSession:
+            break
+        case .restored:
+            withAnimation(.easeInOut(duration: 0.25)) {
+                launchPhase = .signedIn
+            }
+        case .clearedStoredSession:
+            withAnimation(.easeInOut(duration: 0.25)) {
+                launchPhase = .authentication
+            }
+        }
+    }
+
+    private func signOut() {
+        _ = sessionCoordinator.signOut()
+        authenticationViewModel.clearChallenge()
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            launchPhase = .authentication
+        }
+    }
+
+    private static func makeAuthDependencies() -> (
+        apiClient: AuthAPIProviding,
+        homeAPIClient: HomeAPIProviding,
+        sessionStore: AuthSessionStore
+    ) {
+        if ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH"] == "1" {
+            let storedSession = ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH_RESTORE"] == "1"
+                ? MockAuthAPIClient.mockSession()
+                : nil
+            return (MockAuthAPIClient(), MockHomeAPIClient(), InMemoryAuthSessionStore(session: storedSession))
+        }
+
+        return (AuthAPIClient(), HomeAPIClient(), KeychainAuthSessionStore())
     }
 }
 

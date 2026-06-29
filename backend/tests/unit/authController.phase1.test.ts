@@ -625,6 +625,117 @@ describe("auth controller Phase 1", () => {
     );
   });
 
+  it("requests a phone OTP without browser-only auth headers", async () => {
+    const signInWithOtpMock = vi.fn().mockResolvedValue({ error: null });
+    mocks.createClientMock.mockReturnValue({ auth: { signInWithOtp: signInWithOtpMock } });
+
+    const { requestPhoneOtp } = await import("../../src/controllers/authController.ts");
+    const { res, status, json } = buildResponse();
+    const req = {
+      headers: {},
+      body: { phone: "+15551234567", returnTo: "/mobile" },
+    } as unknown as Request;
+
+    await requestPhoneOtp(req, res);
+
+    expect(signInWithOtpMock).toHaveBeenCalledWith({
+      phone: "+15551234567",
+      options: {
+        shouldCreateUser: true,
+      },
+    });
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "auth.otp_requested",
+        metadata: expect.objectContaining({
+          phone: "+15551234567",
+          return_to: "/app",
+          delivery: "phone_sms",
+        }),
+      }),
+    );
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith({
+      status: "ok",
+      message: "SMS code sent",
+      otpLength: 8,
+      cooldownSeconds: 60,
+    });
+  });
+
+  it("verifies a phone OTP without browser-only auth headers", async () => {
+    const verifyOtpMock = vi.fn().mockResolvedValue({
+      data: {
+        session: {
+          access_token: "phone-access-token",
+          refresh_token: "phone-refresh-token",
+        },
+        user: {
+          id: "auth-user-1",
+          email: null,
+          phone: "+15551234567",
+          app_metadata: { role: "member" },
+          user_metadata: {},
+          email_confirmed_at: null,
+          phone_confirmed_at: "2026-05-07T12:00:00.000Z",
+          confirmed_at: "2026-05-07T12:00:00.000Z",
+          last_sign_in_at: "2026-05-07T12:01:00.000Z",
+        },
+      },
+      error: null,
+    });
+    mocks.createClientMock.mockReturnValue({ auth: { verifyOtp: verifyOtpMock } });
+    mocks.ensureUserIdentityFromAuthMock.mockResolvedValue({
+      ...buildProfile(),
+      email: null,
+      phone: "+15551234567",
+      emailConfirmedAt: null,
+      phoneConfirmedAt: "2026-05-07T12:00:00.000Z",
+    });
+    mocks.toUserResponseMock.mockImplementation((profile: { email: string | null; phone: string | null }) => ({
+      id: "db-user-1",
+      email: profile.email ?? "",
+      phone: profile.phone,
+      role: "member",
+      status: "active",
+    }));
+
+    const { verifyPhoneOtp } = await import("../../src/controllers/authController.ts");
+    const { res, status, json } = buildResponse();
+    const req = {
+      headers: {},
+      body: { phone: "+15551234567", token: "123 456", returnTo: "/mobile" },
+    } as unknown as Request;
+
+    await verifyPhoneOtp(req, res);
+
+    expect(verifyOtpMock).toHaveBeenCalledWith({
+      phone: "+15551234567",
+      token: "123456",
+      type: "sms",
+    });
+    expect(mocks.ensureUserIdentityFromAuthMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: null,
+        phone: "+15551234567",
+        phoneConfirmedAt: "2026-05-07T12:00:00.000Z",
+      }),
+    );
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith({
+      accessToken: "phone-access-token",
+      refreshToken: "phone-refresh-token",
+      user: {
+        id: "db-user-1",
+        email: "",
+        phone: "+15551234567",
+        role: "member",
+        status: "active",
+      },
+      profileCompletionRequired: true,
+    });
+  });
+
   it("resets a password through an authenticated recovery session", async () => {
     const setSessionMock = vi.fn().mockResolvedValue({ error: null });
     const updateUserMock = vi.fn().mockResolvedValue({

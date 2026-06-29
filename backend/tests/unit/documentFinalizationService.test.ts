@@ -9,11 +9,16 @@ vi.hoisted(() => {
 import {
   appendAcknowledgmentPageToPdf,
   applyFinalizationWatermarkToPdf,
+  normalizeAcknowledgmentFamily,
   renderAcknowledgmentContent,
   renderWatermarkTextTemplate,
   resolvePublicVerificationStatus,
   type PublicVerificationEvidence,
 } from "../../src/services/documentFinalizationService";
+import {
+  ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS,
+  renderAcknowledgmentAppendixPdf,
+} from "../../src/services/documentGenerationRenderService";
 
 const createSamplePdf = async () => {
   const pdf = await PdfLibDocument.create();
@@ -93,6 +98,25 @@ describe("documentFinalizationService", () => {
 
     expect(stampedPdf.getPageCount()).toBe(2);
     expect(stampedPdfBytes.byteLength).toBeGreaterThan(textOnlyPdfBytes.byteLength);
+  });
+
+  it("renders the acknowledgment appendix with generated-document chrome", async () => {
+    const appendixPdfBytes = await renderAcknowledgmentAppendixPdf({
+      pageSize: [612, 792],
+      acknowledgmentContent: "ACKNOWLEDGMENT CERTIFICATE\nDocument ID: doc-1\nState of Ohio",
+      signatureImage: null,
+      sealImage: null,
+    });
+    const appendixPdf = await PdfLibDocument.load(appendixPdfBytes);
+    const rawPdf = appendixPdfBytes.toString("latin1");
+
+    expect(appendixPdf.getPageCount()).toBe(1);
+    expect(rawPdf).toContain("Notarial acknowledgment");
+    expect(rawPdf).not.toContain("Generated:");
+  });
+
+  it("uses a two-inch notarial seal render box", () => {
+    expect(ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS).toBe(144);
   });
 
   it("rejects unsupported notary signature image formats instead of silently skipping them", async () => {
@@ -197,6 +221,13 @@ describe("documentFinalizationService", () => {
     expect(
       renderWatermarkTextTemplate("DIGITAL ORIGINAL {{ idn }}", "AB12CD34EF56"),
     ).toBe("DIGITAL ORIGINAL AB12CD34EF56");
+  });
+
+  it("normalizes product-flow and uploaded-document keys for acknowledgment append", () => {
+    expect(normalizeAcknowledgmentFamily("rrr")).toBe("trust_rrr");
+    expect(normalizeAcknowledgmentFamily("DARCi Trust Certification")).toBe("trust_certificate");
+    expect(normalizeAcknowledgmentFamily("uploaded_document")).toBe("poa_general");
+    expect(normalizeAcknowledgmentFamily("notarize_document")).toBe("poa_general");
   });
 
   it("returns unverified when a ledger row exists but anchoring failed", () => {

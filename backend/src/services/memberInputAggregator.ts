@@ -78,6 +78,8 @@ const CANONICAL_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {
   restatement_context_type: "documents",
   trustee_powers: "authority",
   revocation_holders_custom_text: "authority",
+  special_instructions: "authority",
+  special_instructions_text: "authority",
 };
 
 const FIELD_KEY_UI_GROUP_MAP: Readonly<Record<string, UiGroupKey>> = {

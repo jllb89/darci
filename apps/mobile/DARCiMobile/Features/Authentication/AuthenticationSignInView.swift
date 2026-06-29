@@ -81,6 +81,18 @@ struct AuthenticationSignInView: View {
     let content: AuthenticationSignInContent
     var onBrowse: () -> Void = {}
 
+    @StateObject private var viewModel: AuthenticationViewModel
+
+    init(
+        content: AuthenticationSignInContent,
+        viewModel: AuthenticationViewModel = AuthenticationViewModel(),
+        onBrowse: @escaping () -> Void = {}
+    ) {
+        self.content = content
+        self.onBrowse = onBrowse
+        _viewModel = StateObject(wrappedValue: viewModel)
+    }
+
     private let otpBoxLayout: [(x: CGFloat, width: CGFloat)] = [
         (-174.5, 45),
         (-124.5, 43),
@@ -103,6 +115,7 @@ struct AuthenticationSignInView: View {
     @State private var activeInputMode: InputMode?
     @State private var authenticationStep: AuthenticationStep = .entry
     @State private var isEmailPlaceholderVisible = false
+    @State private var isEntryFadingForOTP = false
     @State private var isHeadlineCollapsed = false
     @FocusState private var focusedField: Field?
 
@@ -177,6 +190,17 @@ struct AuthenticationSignInView: View {
                         .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(continueButtonY, in: proxy))
                         .revealOrder(4, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
 
+                    if let feedbackMessage = viewModel.feedbackMessage {
+                        Text(feedbackMessage)
+                            .font(DARCiFont.maisonNeue(.book, size: scaled(13, in: proxy)))
+                            .lineSpacing(scaled(1.3, in: proxy))
+                            .foregroundStyle(.black)
+                            .frame(width: scaled(395, in: proxy), alignment: .leading)
+                            .accessibilityIdentifier("auth-feedback-message")
+                            .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(entryFeedbackY, in: proxy))
+                            .transition(.opacity)
+                    }
+
                     Button(action: toggleInputMode) {
                         Text(inputModeSwitchTitle)
                             .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
@@ -202,6 +226,7 @@ struct AuthenticationSignInView: View {
                         .transition(.opacity)
                     }
                 }
+                .opacity(isEntryFadingForOTP ? 0 : 1)
                 }
             }
             .ignoresSafeArea()
@@ -259,12 +284,42 @@ struct AuthenticationSignInView: View {
         isCompactInputActive ? -102.5 : 387.5 - bottomGroupLift
     }
 
+    private var entryFeedbackY: CGFloat {
+        isCompactInputActive ? -121 : 371 - bottomGroupLift
+    }
+
+    private var isEmailVerified: Bool {
+        viewModel.verifiedContactMethod == .email
+    }
+
+    private var isPhoneVerified: Bool {
+        viewModel.verifiedContactMethod == .phone
+    }
+
+    private var resolvedProfileEmail: String {
+        isEmailVerified ? viewModel.verifiedEmailAddress : profileEmail
+    }
+
     private var resolvedProfilePhone: String {
-        profilePhone.isEmpty ? "+1 (202) 123-45678" : profilePhone
+        isPhoneVerified ? viewModel.verifiedPhoneNumber : profilePhone
+    }
+
+    private var currentInputMethod: AuthIdentifierMethod {
+        activeInputMode == .email ? .email : .phone
+    }
+
+    private var currentRawIdentifier: String {
+        activeInputMode == .email ? emailAddress : phoneNumber
     }
 
     private var isCompleteInfoReady: Bool {
-        !profileName.isEmpty && !profileLastName.isEmpty && !profileEmail.isEmpty
+        let hasName = profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasLastName = profileLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasRequiredContact = isEmailVerified
+            ? profilePhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            : profileEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+
+        return hasName && hasLastName && hasRequiredContact
     }
 
     @ViewBuilder
@@ -371,9 +426,9 @@ struct AuthenticationSignInView: View {
     }
 
     private func continueButton(in proxy: GeometryProxy) -> some View {
-        Button(action: showOTP) {
+        Button(action: requestOTP) {
             HStack(spacing: scaled(8, in: proxy)) {
-                Text(content.continueTitle)
+                Text(viewModel.isRequestingOTP ? "Sending" : content.continueTitle)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
                     .lineSpacing(scaled(2.2, in: proxy))
                     .foregroundStyle(.white)
@@ -392,6 +447,8 @@ struct AuthenticationSignInView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(viewModel.isBusy)
+        .accessibilityIdentifier("auth-continue-button")
     }
 
     private func otpView(in proxy: GeometryProxy) -> some View {
@@ -421,6 +478,16 @@ struct AuthenticationSignInView: View {
 
             verifyCodeButton(in: proxy)
                 .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-82, in: proxy))
+
+            if let feedbackMessage = viewModel.feedbackMessage {
+                Text(feedbackMessage)
+                    .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
+                    .lineSpacing(scaled(1.4, in: proxy))
+                    .foregroundStyle(.white)
+                    .frame(width: scaled(395, in: proxy), alignment: .leading)
+                    .accessibilityIdentifier("auth-feedback-message")
+                    .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-42, in: proxy))
+            }
 
             Button(action: toggleInputModeFromOTP) {
                 Text(inputModeSwitchTitle)
@@ -475,9 +542,9 @@ struct AuthenticationSignInView: View {
     }
 
     private func verifyCodeButton(in proxy: GeometryProxy) -> some View {
-        Button(action: showCompleteInfo) {
+        Button(action: verifyOTP) {
             HStack(spacing: scaled(8, in: proxy)) {
-                Text(content.verifyCodeTitle)
+                Text(viewModel.isVerifyingOTP ? "Verifying" : content.verifyCodeTitle)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
                     .lineSpacing(scaled(2.2, in: proxy))
                     .foregroundStyle(.black)
@@ -496,6 +563,7 @@ struct AuthenticationSignInView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(viewModel.isBusy)
     }
 
     private func completeInfoView(in proxy: GeometryProxy) -> some View {
@@ -525,6 +593,48 @@ struct AuthenticationSignInView: View {
                 proxy: proxy
             )
 
+            completeInfoContactFields(in: proxy)
+
+            if let feedbackMessage = viewModel.feedbackMessage {
+                Text(feedbackMessage)
+                    .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
+                    .lineSpacing(scaled(1.4, in: proxy))
+                    .foregroundStyle(.white)
+                    .frame(width: scaled(392, in: proxy), alignment: .leading)
+                    .accessibilityIdentifier("auth-feedback-message")
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(216, in: proxy))
+            }
+
+            completeInfoContinueButton(in: proxy)
+                .position(x: proxy.size.width / 2 + scaled(-101.5, in: proxy), y: proxy.size.height / 2 + scaled(335, in: proxy))
+        }
+        .accessibilityIdentifier("authentication-complete-info")
+    }
+
+    @ViewBuilder
+    private func completeInfoContactFields(in proxy: GeometryProxy) -> some View {
+        if isEmailVerified {
+            verifiedContactField(
+                title: content.emailFieldTitle,
+                value: resolvedProfileEmail,
+                accessibilityLabel: "Verified email",
+                accessibilityIdentifier: "complete-info-email-field",
+                labelY: -13.5,
+                inputY: 30.5,
+                proxy: proxy
+            )
+
+            completeInfoTextField(
+                title: content.phoneNumberTitle,
+                text: $profilePhone,
+                field: .profilePhone,
+                keyboardType: .phonePad,
+                textContentType: .telephoneNumber,
+                labelY: 80.5,
+                inputY: 124.5,
+                proxy: proxy
+            )
+        } else {
             completeInfoTextField(
                 title: content.emailFieldTitle,
                 text: $profileEmail,
@@ -536,12 +646,16 @@ struct AuthenticationSignInView: View {
                 proxy: proxy
             )
 
-            verifiedPhoneField(in: proxy)
-
-            completeInfoContinueButton(in: proxy)
-                .position(x: proxy.size.width / 2 + scaled(-101.5, in: proxy), y: proxy.size.height / 2 + scaled(335, in: proxy))
+            verifiedContactField(
+                title: content.phoneNumberTitle,
+                value: resolvedProfilePhone,
+                accessibilityLabel: "Verified phone number",
+                accessibilityIdentifier: "complete-info-phone-field",
+                labelY: 80.5,
+                inputY: 124.5,
+                proxy: proxy
+            )
         }
-        .accessibilityIdentifier("authentication-complete-info")
     }
 
     private func completeInfoTextField(
@@ -568,8 +682,8 @@ struct AuthenticationSignInView: View {
                 .foregroundStyle(.white)
                 .keyboardType(keyboardType)
                 .textContentType(textContentType)
-                .textInputAutocapitalization(keyboardType == .emailAddress ? .never : .words)
-                .autocorrectionDisabled(keyboardType == .emailAddress)
+                .textInputAutocapitalization(keyboardType == .emailAddress || keyboardType == .phonePad ? .never : .words)
+                .autocorrectionDisabled(keyboardType == .emailAddress || keyboardType == .phonePad)
                 .tint(.white)
                 .focused($focusedField, equals: field)
                 .padding(.horizontal, scaled(24, in: proxy))
@@ -586,17 +700,25 @@ struct AuthenticationSignInView: View {
         }
     }
 
-    private func verifiedPhoneField(in proxy: GeometryProxy) -> some View {
+    private func verifiedContactField(
+        title: String,
+        value: String,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String,
+        labelY: CGFloat,
+        inputY: CGFloat,
+        proxy: GeometryProxy
+    ) -> some View {
         ZStack {
-            Text(content.phoneNumberTitle)
+            Text(title)
                 .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
                 .lineSpacing(scaled(1.4, in: proxy))
                 .foregroundStyle(.white)
                 .frame(width: scaled(392, in: proxy), alignment: .leading)
-                .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(80.5, in: proxy))
+                .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(labelY, in: proxy))
 
             HStack(spacing: 0) {
-                Text(resolvedProfilePhone)
+                Text(value)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(18, in: proxy)))
                     .lineSpacing(scaled(1.8, in: proxy))
                     .foregroundStyle(Color(red: 0.35, green: 0.35, blue: 0.35))
@@ -613,16 +735,16 @@ struct AuthenticationSignInView: View {
             .frame(width: scaled(392, in: proxy), height: scaled(49, in: proxy), alignment: .leading)
             .background(Color(red: 0.10, green: 0.10, blue: 0.10))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Verified phone number")
-            .accessibilityIdentifier("complete-info-phone-field")
-            .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(124.5, in: proxy))
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(inputY, in: proxy))
         }
     }
 
     private func completeInfoContinueButton(in proxy: GeometryProxy) -> some View {
-        Button(action: showSuccess) {
+        Button(action: completeProfile) {
             HStack(spacing: scaled(8, in: proxy)) {
-                Text(content.continueTitle)
+                Text(viewModel.isCompletingProfile ? "Saving" : content.continueTitle)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
                     .lineSpacing(scaled(2.2, in: proxy))
                     .foregroundStyle(.black)
@@ -641,7 +763,7 @@ struct AuthenticationSignInView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!isCompleteInfoReady)
+        .disabled(!isCompleteInfoReady || viewModel.isBusy)
     }
 
     private func successView(in proxy: GeometryProxy) -> some View {
@@ -729,6 +851,7 @@ struct AuthenticationSignInView: View {
     private func resetInputLayout() {
         focusedField = nil
         isEmailPlaceholderVisible = false
+        viewModel.clearErrors()
 
         withAnimation(.easeInOut(duration: 0.32)) {
             activeInputMode = nil
@@ -736,22 +859,85 @@ struct AuthenticationSignInView: View {
         }
     }
 
+    private func requestOTP() {
+        let method = currentInputMethod
+        let rawIdentifier = currentRawIdentifier
+
+        Task {
+            let didStart = await viewModel.requestOTP(method: method, rawIdentifier: rawIdentifier)
+            if didStart {
+                showOTP()
+            }
+        }
+    }
+
     private func showOTP() {
         focusedField = nil
-        withAnimation(.easeInOut(duration: 0.24)) {
-            authenticationStep = .otp
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isEntryFadingForOTP = true
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-            focusedField = .otp
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                authenticationStep = .otp
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                focusedField = .otp
+                isEntryFadingForOTP = false
+            }
+        }
+    }
+
+    private func verifyOTP() {
+        let token = otpCode
+
+        Task {
+            guard let route = await viewModel.verifyOTP(token: token) else {
+                return
+            }
+
+            switch route {
+            case .completeProfile:
+                showCompleteInfo()
+            case .success:
+                showSuccess()
+            }
         }
     }
 
     private func showCompleteInfo() {
         focusedField = nil
+        hydrateVerifiedContactFields()
 
         withAnimation(.easeInOut(duration: 0.24)) {
             authenticationStep = .completeInfo
+        }
+    }
+
+    private func completeProfile() {
+        Task {
+            let didComplete = await viewModel.completeProfile(
+                firstName: profileName,
+                lastName: profileLastName,
+                email: profileEmail,
+                phone: profilePhone
+            )
+
+            if didComplete {
+                showSuccess()
+            }
+        }
+    }
+
+    private func hydrateVerifiedContactFields() {
+        if isEmailVerified {
+            profileEmail = viewModel.verifiedEmailAddress
+        }
+
+        if isPhoneVerified {
+            profilePhone = viewModel.verifiedPhoneNumber
         }
     }
 
@@ -764,12 +950,18 @@ struct AuthenticationSignInView: View {
     }
 
     private func returnFromOTP() {
+        viewModel.clearErrors()
+        isEntryFadingForOTP = false
+
         withAnimation(.easeInOut(duration: 0.24)) {
             authenticationStep = .entry
         }
     }
 
     private func toggleInputModeFromOTP() {
+        viewModel.clearChallenge()
+        otpCode = ""
+
         withAnimation(.easeInOut(duration: 0.24)) {
             authenticationStep = .entry
         }
@@ -788,6 +980,8 @@ struct AuthenticationSignInView: View {
     }
 
     private func activateInputLayout(_ mode: InputMode) {
+        viewModel.clearErrors()
+
         guard activeInputMode != mode else {
             return
         }
@@ -883,5 +1077,8 @@ private extension View {
 }
 
 #Preview {
-    AuthenticationSignInView(content: .signIn)
+    AuthenticationSignInView(
+        content: .signIn,
+        viewModel: AuthenticationViewModel(apiClient: MockAuthAPIClient(), sessionStore: InMemoryAuthSessionStore())
+    )
 }

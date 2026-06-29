@@ -184,6 +184,8 @@ jobs:
             RESEND_FAILURE_MODE: "strict",
             AUTH_EMAIL_SEND_COOLDOWN_SECONDS: "60",
             GOOGLE_MAPS_GEOCODE_USE_SERVER: process.env.STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER || "true",
+            LEDGER_ANCHOR_MODE: "stub",
+            LEDGER_ALLOW_STUB_PROVIDER: "true",
           };
 
           for (const container of nextDefinition.containerDefinitions) {
@@ -251,10 +253,20 @@ jobs:
               .filter((key) => taskDefinition[key] !== undefined)
               .map((key) => [key, taskDefinition[key]]),
           );
+          const workerEnv = {
+            LEDGER_ANCHOR_MODE: "stub",
+            LEDGER_ALLOW_STUB_PROVIDER: "true",
+          };
 
           for (const container of nextDefinition.containerDefinitions) {
             if (container.name === "worker") {
               container.image = `${process.env.ECR_REGISTRY}/darci-worker:${process.env.IMAGE_TAG}`;
+              const envByName = new Map((container.environment ?? []).map((entry) => [entry.name, entry]));
+              for (const [name, value] of Object.entries(workerEnv)) {
+                envByName.set(name, { name, value });
+              }
+              container.environment = Array.from(envByName.values()).sort((left, right) => left.name.localeCompare(right.name));
+              container.secrets = (container.secrets ?? []).filter((entry) => !Object.prototype.hasOwnProperty.call(workerEnv, entry.name));
             }
           }
 

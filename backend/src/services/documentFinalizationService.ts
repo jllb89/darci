@@ -24,6 +24,7 @@ import {
   updateDocument,
   updateNotarizationRequest,
 } from "./documentService";
+import { renderAcknowledgmentAppendixPdf } from "./documentGenerationRenderService";
 import { hashDocument } from "./hashingService";
 import { transitionIlluminotarizationWorkflowStatus } from "./illuminotarizationWorkflowService";
 import { anchorToLedger } from "./ledgerService";
@@ -357,18 +358,10 @@ const FINAL_IDN_PATTERN = /^[A-Z0-9]{12}$/;
 const DEFAULT_ACK_TEMPLATE_ID = "darci_acknowledgment_v1";
 const DEFAULT_ACK_TEMPLATE_VERSION = "2026.04.20.v1";
 const DEFAULT_PDF_PAGE_SIZE: [number, number] = [612, 792];
-const ACKNOWLEDGMENT_PAGE_MARGIN = 48;
-const ACKNOWLEDGMENT_TITLE_SIZE = 20;
-const ACKNOWLEDGMENT_META_SIZE = 9;
-const ACKNOWLEDGMENT_BODY_SIZE = 11;
-const ACKNOWLEDGMENT_LINE_GAP = 4;
 const WATERMARK_ROTATION_DEGREES = 32;
 const WATERMARK_MIN_FONT_SIZE = 26;
 const WATERMARK_MAX_FONT_SIZE = 54;
 const WATERMARK_OPACITY = 0.18;
-const ACKNOWLEDGMENT_ASSET_MAX_WIDTH = 132;
-const ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT = 42;
-const ACKNOWLEDGMENT_SEAL_MAX_HEIGHT = 76;
 
 const supportedAcknowledgmentFamilies = new Set<AcknowledgmentDocumentFamily>([
   "poa_general",
@@ -1051,7 +1044,7 @@ const asTrimmedString = (value: unknown) => {
   return typeof value === "string" ? value.trim() : "";
 };
 
-const normalizeAcknowledgmentFamily = (
+export const normalizeAcknowledgmentFamily = (
   value: string | null | undefined,
 ): AcknowledgmentDocumentFamily | null => {
   const normalized = value?.trim().toLowerCase();
@@ -1059,20 +1052,38 @@ const normalizeAcknowledgmentFamily = (
     return null;
   }
 
-  if (supportedAcknowledgmentFamilies.has(normalized as AcknowledgmentDocumentFamily)) {
-    return normalized as AcknowledgmentDocumentFamily;
+  const canonical = normalized.replace(/[\s-]+/g, "_");
+  const explicitAliases: Record<string, AcknowledgmentDocumentFamily> = {
+    certification: "trust_certificate",
+    notarize_document: "poa_general",
+    rrr: "trust_rrr",
+    uploaded_document: "poa_general",
+    uploaded_pdf: "poa_general",
+  };
+
+  if (supportedAcknowledgmentFamilies.has(canonical as AcknowledgmentDocumentFamily)) {
+    return canonical as AcknowledgmentDocumentFamily;
   }
 
-  if (normalized.includes("poa") || normalized.includes("ddpoa")) {
+  const explicitFamily = explicitAliases[canonical];
+  if (explicitFamily) {
+    return explicitFamily;
+  }
+
+  if (canonical.includes("poa") || canonical.includes("ddpoa")) {
     return "poa_general";
   }
-  if (normalized.includes("trust_certificate") || normalized.includes("certificate")) {
+  if (
+    canonical.includes("trust_certificate") ||
+    canonical.includes("certificate") ||
+    canonical.includes("certification")
+  ) {
     return "trust_certificate";
   }
   if (
-    normalized.includes("trust_rrr") ||
-    normalized.includes("registration") ||
-    normalized.includes("amendment")
+    canonical.includes("trust_rrr") ||
+    canonical.includes("registration") ||
+    canonical.includes("amendment")
   ) {
     return "trust_rrr";
   }
@@ -1450,45 +1461,6 @@ const fitPdfTextToWidth = (input: {
   return Math.max(size, minSize);
 };
 
-const wrapPdfText = (input: {
-  text: string;
-  font: PDFFont;
-  fontSize: number;
-  maxWidth: number;
-}) => {
-  const wrappedLines: string[] = [];
-
-  for (const rawLine of input.text.split(/\r?\n/)) {
-    const normalizedLine = rawLine.trim();
-    if (normalizedLine.length === 0) {
-      wrappedLines.push("");
-      continue;
-    }
-
-    const words = normalizedLine.split(/\s+/);
-    let currentLine = "";
-
-    for (const word of words) {
-      const candidate = currentLine.length === 0 ? word : `${currentLine} ${word}`;
-      if (input.font.widthOfTextAtSize(candidate, input.fontSize) <= input.maxWidth) {
-        currentLine = candidate;
-        continue;
-      }
-
-      if (currentLine.length > 0) {
-        wrappedLines.push(currentLine);
-      }
-      currentLine = word;
-    }
-
-    if (currentLine.length > 0) {
-      wrappedLines.push(currentLine);
-    }
-  }
-
-  return wrappedLines;
-};
-
 const decodeImageDataUrl = (
   dataUrl: string | null | undefined,
   assetLabel: string,
@@ -1517,178 +1489,6 @@ const decodeImageDataUrl = (
     mimeType: mimeType.toLowerCase(),
     bytes,
   };
-};
-
-const embedImageDataUrl = async (
-  pdf: PdfLibDocument,
-  dataUrl: string | null | undefined,
-  assetLabel: string,
-) => {
-  const decoded = decodeImageDataUrl(dataUrl, assetLabel);
-  if (!decoded) {
-    return null;
-  }
-
-  try {
-    return decoded.mimeType === "image/png"
-      ? await pdf.embedPng(decoded.bytes)
-      : await pdf.embedJpg(decoded.bytes);
-  } catch {
-    throw new DocumentFinalizationConflictError(
-      `${assetLabel} could not be embedded as a PNG or JPEG image`,
-    );
-  }
-};
-
-const fitImageDimensions = (input: {
-  width: number;
-  height: number;
-  maxWidth: number;
-  maxHeight: number;
-}) => {
-  const ratio = Math.min(input.maxWidth / input.width, input.maxHeight / input.height, 1);
-  return {
-    width: input.width * ratio,
-    height: input.height * ratio,
-  };
-};
-
-const drawAcknowledgmentBody = async (input: {
-  pdf: PdfLibDocument;
-  page: PDFPage;
-  bodyText: string;
-  pageSize: [number, number];
-  signatureImageDataUrl?: string | null | undefined;
-  sealImageDataUrl?: string | null | undefined;
-}) => {
-  const titleFont = await input.pdf.embedFont(StandardFonts.HelveticaBold);
-  const bodyFont = await input.pdf.embedFont(StandardFonts.Helvetica);
-  const nonEmptyLines = input.bodyText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  const title = nonEmptyLines[0] ?? "DARCi Notarial Acknowledgment";
-  const detailBody = nonEmptyLines.slice(1).join("\n");
-  const maxWidth = input.pageSize[0] - ACKNOWLEDGMENT_PAGE_MARGIN * 2;
-  const titleSize = fitPdfTextToWidth({
-    text: title,
-    font: titleFont,
-    maxWidth,
-    initialSize: ACKNOWLEDGMENT_TITLE_SIZE,
-    minSize: 16,
-  });
-
-  let currentPage = input.page;
-  let currentY = input.pageSize[1] - ACKNOWLEDGMENT_PAGE_MARGIN;
-
-  const createContinuationPage = () => {
-    currentPage = input.pdf.addPage(input.pageSize);
-    currentY = input.pageSize[1] - ACKNOWLEDGMENT_PAGE_MARGIN;
-  };
-
-  currentPage.drawText(title, {
-    x: ACKNOWLEDGMENT_PAGE_MARGIN,
-    y: currentY,
-    size: titleSize,
-    font: titleFont,
-    color: rgb(0.12, 0.12, 0.12),
-  });
-  currentY -= titleSize + 10;
-
-  currentPage.drawLine({
-    start: { x: ACKNOWLEDGMENT_PAGE_MARGIN, y: currentY },
-    end: { x: input.pageSize[0] - ACKNOWLEDGMENT_PAGE_MARGIN, y: currentY },
-    thickness: 1,
-    color: rgb(0.82, 0.82, 0.82),
-  });
-  currentY -= 22;
-
-  currentPage.drawText(
-    `Generated: ${new Date().toISOString().replace("T", " ").replace("Z", " UTC")}`,
-    {
-      x: ACKNOWLEDGMENT_PAGE_MARGIN,
-      y: currentY,
-      size: ACKNOWLEDGMENT_META_SIZE,
-      font: bodyFont,
-      color: rgb(0.42, 0.42, 0.42),
-    },
-  );
-  currentY -= ACKNOWLEDGMENT_META_SIZE + 16;
-
-  const wrappedLines = wrapPdfText({
-    text: detailBody,
-    font: bodyFont,
-    fontSize: ACKNOWLEDGMENT_BODY_SIZE,
-    maxWidth,
-  });
-
-  for (const line of wrappedLines) {
-    if (currentY <= ACKNOWLEDGMENT_PAGE_MARGIN + ACKNOWLEDGMENT_BODY_SIZE) {
-      createContinuationPage();
-    }
-
-    if (line.length === 0) {
-      currentY -= ACKNOWLEDGMENT_BODY_SIZE + ACKNOWLEDGMENT_LINE_GAP;
-      continue;
-    }
-
-    currentPage.drawText(line, {
-      x: ACKNOWLEDGMENT_PAGE_MARGIN,
-      y: currentY,
-      size: ACKNOWLEDGMENT_BODY_SIZE,
-      font: bodyFont,
-      color: rgb(0.18, 0.18, 0.18),
-    });
-    currentY -= ACKNOWLEDGMENT_BODY_SIZE + ACKNOWLEDGMENT_LINE_GAP;
-  }
-
-  const [signatureImage, sealImage] = await Promise.all([
-    embedImageDataUrl(input.pdf, input.signatureImageDataUrl, "Notary signature image"),
-    embedImageDataUrl(input.pdf, input.sealImageDataUrl, "Notary seal image"),
-  ]);
-
-  if (signatureImage || sealImage) {
-    if (currentY <= ACKNOWLEDGMENT_PAGE_MARGIN + ACKNOWLEDGMENT_SEAL_MAX_HEIGHT + 20) {
-      createContinuationPage();
-    }
-
-    currentY -= 12;
-    currentPage.drawText("Notary signature and seal", {
-      x: ACKNOWLEDGMENT_PAGE_MARGIN,
-      y: currentY,
-      size: ACKNOWLEDGMENT_META_SIZE,
-      font: titleFont,
-      color: rgb(0.24, 0.24, 0.24),
-    });
-    currentY -= ACKNOWLEDGMENT_META_SIZE + 8;
-
-    if (signatureImage) {
-      const dimensions = fitImageDimensions({
-        width: signatureImage.width,
-        height: signatureImage.height,
-        maxWidth: ACKNOWLEDGMENT_ASSET_MAX_WIDTH,
-        maxHeight: ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT,
-      });
-      currentPage.drawImage(signatureImage, {
-        x: ACKNOWLEDGMENT_PAGE_MARGIN,
-        y: currentY - dimensions.height,
-        width: dimensions.width,
-        height: dimensions.height,
-      });
-    }
-
-    if (sealImage) {
-      const dimensions = fitImageDimensions({
-        width: sealImage.width,
-        height: sealImage.height,
-        maxWidth: ACKNOWLEDGMENT_ASSET_MAX_WIDTH,
-        maxHeight: ACKNOWLEDGMENT_SEAL_MAX_HEIGHT,
-      });
-      currentPage.drawImage(sealImage, {
-        x: input.pageSize[0] - ACKNOWLEDGMENT_PAGE_MARGIN - dimensions.width,
-        y: currentY - dimensions.height,
-        width: dimensions.width,
-        height: dimensions.height,
-      });
-    }
-  }
 };
 
 const drawWatermarkOnPage = async (input: {
@@ -1746,15 +1546,22 @@ export const appendAcknowledgmentPageToPdf = async (input: {
     ? [referencePage.getWidth(), referencePage.getHeight()]
     : DEFAULT_PDF_PAGE_SIZE;
 
-  const acknowledgmentPage = pdf.addPage(pageSize);
-  await drawAcknowledgmentBody({
-    pdf,
-    page: acknowledgmentPage,
-    bodyText: input.acknowledgmentContent,
+  const signatureImage = decodeImageDataUrl(input.signatureImageDataUrl, "Notary signature image");
+  const sealImage = decodeImageDataUrl(input.sealImageDataUrl, "Notary seal image");
+  const acknowledgmentPdfBytes = await renderAcknowledgmentAppendixPdf({
     pageSize,
-    signatureImageDataUrl: input.signatureImageDataUrl,
-    sealImageDataUrl: input.sealImageDataUrl,
+    acknowledgmentContent: input.acknowledgmentContent,
+    signatureImage,
+    sealImage,
   });
+  const acknowledgmentPdf = await PdfLibDocument.load(acknowledgmentPdfBytes);
+  const copiedAcknowledgmentPages = await pdf.copyPages(
+    acknowledgmentPdf,
+    acknowledgmentPdf.getPageIndices(),
+  );
+  for (const acknowledgmentPage of copiedAcknowledgmentPages) {
+    pdf.addPage(acknowledgmentPage);
+  }
 
   return Buffer.from(await pdf.save());
 };

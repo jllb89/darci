@@ -564,7 +564,7 @@ describe("memberInputAggregator", () => {
     expect(getField(fields, "authority_scope_selection")?.ui_group).toBe("authority");
     expect(getField(fields, "selected_execution_path")?.ui_group).toBe("execution");
     expect(getField(fields, "uploaded_document_file")?.ui_group).toBe("documents");
-    expect(getField(fields, "special_instructions_text")?.ui_group).toBe("advanced");
+    expect(getField(fields, "special_instructions_text")?.ui_group).toBe("authority");
   });
 
   it("uses canonical ui-group mapping before heuristics", () => {

@@ -13,6 +13,12 @@ This is the exact command used to build, install, and launch the app on `vet`:
 cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
 ```
 
+For real staging auth from the Simulator, build with the public staging API base:
+
+```sh
+cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
+```
+
 Same thing, easier to read:
 
 ```sh
@@ -22,6 +28,22 @@ set -o pipefail
 rm -rf .DerivedData
 xcodegen generate
 xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData build
+xcrun simctl boot vet >/dev/null 2>&1 || true
+open -a Simulator
+xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app"
+xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true
+xcrun simctl launch vet dev.mobile.darci
+```
+
+Staging-auth version:
+
+```sh
+cd /Users/jorge/Desktop/darci/apps/mobile
+set -e
+set -o pipefail
+rm -rf .DerivedData
+xcodegen generate
+xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev build
 xcrun simctl boot vet >/dev/null 2>&1 || true
 open -a Simulator
 xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app"
