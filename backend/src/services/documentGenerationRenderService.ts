@@ -825,6 +825,20 @@ const unescapeTemplateSource = (value: string) => {
     );
 };
 
+const omitTrustTemplateOnlyNotarialAcknowledgmentBlock = (value: string) => {
+  return value
+    .replace(/\n{0,3}(?:#{1,3}\s*)?\*\*Notarial Acknowledg(?:e)?ment\*\*[\s\S]*$/i, "\n")
+    .replace(/\n{0,3}(?:#{1,3}\s*)?\*\*ACKNOWLEDGMENT CERTIFICATE\*\*[\s\S]*$/i, "\n")
+    .trimEnd();
+};
+
+const omitTrustCertificateTemplateOnlySignatureBlocks = (value: string) => {
+  return value.replace(
+    /(#{1,3}\s+\*\*Signatures\*\*[\s\S]*?)\n+Trustmaker\(s\):\s*\n+\|[\s\S]*?(?=\n+Trustee\(s\):)/i,
+    "$1\n\n",
+  );
+};
+
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const humanizeOptionKey = (value: string) => {
@@ -2649,10 +2663,16 @@ export const renderLegalTemplateText = (input: {
   documentKey?: string;
 }) => {
   const normalizedTemplateSource = unescapeTemplateSource(input.templateSource);
+  const trustTemplateSource =
+    input.documentKey === "trust_rrr" || input.documentKey === "trust_certificate"
+      ? omitTrustTemplateOnlyNotarialAcknowledgmentBlock(normalizedTemplateSource)
+      : normalizedTemplateSource;
   const templateSource =
     input.documentKey === "poa_general"
-      ? omitPoaSuccessorAgentBlocks(normalizedTemplateSource, input.canonicalAnswers ?? {})
-      : normalizedTemplateSource;
+      ? omitPoaSuccessorAgentBlocks(trustTemplateSource, input.canonicalAnswers ?? {})
+      : input.documentKey === "trust_certificate"
+        ? omitTrustCertificateTemplateOnlySignatureBlocks(trustTemplateSource)
+        : trustTemplateSource;
   const placeholderLookup = new Map(
     Object.entries(input.placeholders).map(([key, value]) => [
       normalizePlaceholderToken(key),

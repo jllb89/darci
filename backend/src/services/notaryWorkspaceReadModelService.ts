@@ -1,8 +1,11 @@
 import {
   getDocumentById,
   getNotarizationRequestById,
+  listDocumentsByIds,
+  listDocumentGenerationRuns,
   listDocumentVersions,
   listNotarizationRequests,
+  type DocumentGenerationRunRecord,
   type DocumentRecord,
   type DocumentVersionRecord,
   type NotarizationRequestRecord,
@@ -403,6 +406,15 @@ const safelyListFinalizationStatusHistory = (input: { documentId: string; reques
   });
 };
 
+const safelyListDocumentsByIds = (documentIds: string[]) => {
+  return readModelFallback<DocumentRecord[]>({
+    operation: "document_lookup",
+    fallback: [],
+    details: { documentCount: documentIds.length },
+    run: () => listDocumentsByIds(documentIds),
+  });
+};
+
 const isPrivilegedRole = (role: RequestRole) => role === "admin" || role === "service_role";
 
 const requireViewerUserId = (input: {
@@ -667,8 +679,48 @@ const mapDocumentVersionSummary = (version: DocumentVersionRecord) => {
   };
 };
 
-const buildReviewDocumentLabel = (version: DocumentVersionRecord, index: number) => {
-  return version.file_name?.trim() || `Document ${index + 1}`;
+const asTrimmedString = (value: unknown) => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const buildOutputLabelByGenerationRunId = (input: {
+  document: Pick<DocumentRecord, "output_bundle">;
+  generationRuns: DocumentGenerationRunRecord[];
+}) => {
+  const outputLabelByKey = new Map<string, string>();
+
+  for (const rawOutput of input.document.output_bundle ?? []) {
+    const outputKey = asTrimmedString(rawOutput.outputKey);
+    const outputLabel = asTrimmedString(rawOutput.outputLabel);
+
+    if (outputKey && outputLabel) {
+      outputLabelByKey.set(outputKey, outputLabel);
+    }
+  }
+
+  const outputLabelByGenerationRunId = new Map<string, string>();
+
+  for (const run of input.generationRuns) {
+    const outputLabel = outputLabelByKey.get(run.output_key);
+    if (outputLabel) {
+      outputLabelByGenerationRunId.set(run.id, outputLabel);
+    }
+  }
+
+  return outputLabelByGenerationRunId;
+};
+
+const buildReviewDocumentLabel = (input: {
+  version: DocumentVersionRecord;
+  index: number;
+  outputLabelByGenerationRunId: Map<string, string>;
+}) => {
+  const generationRunLabel = input.version.generation_run_id
+    ? input.outputLabelByGenerationRunId.get(input.version.generation_run_id)
+    : null;
+  const fileNameLabel = input.version.file_name?.trim() || null;
+
+  return generationRunLabel ?? fileNameLabel ?? `Document ${input.index + 1}`;
 };
 
 const isPdfDocumentVersion = (version: DocumentVersionRecord) => {
@@ -687,12 +739,22 @@ const isReviewableDocumentVersion = (version: DocumentVersionRecord) => {
       fileName.endsWith("-signed.pdf") ||
       storagePath.endsWith("-signed.pdf") ||
       /-acknowledged-v\d+\.pdf$/.test(fileName) ||
-      /-acknowledged-v\d+\.pdf$/.test(storagePath),
+      /-acknowledged-v\d+\.pdf$/.test(storagePath) ||
+      /-finalized-v\d+\.pdf$/.test(fileName) ||
+      /-finalized-v\d+\.pdf$/.test(storagePath),
   );
 };
 
-const buildReviewDocuments = async (versions: DocumentVersionRecord[]) => {
-  const pdfVersions = versions
+const buildReviewDocuments = async (input: {
+  document: Pick<DocumentRecord, "output_bundle">;
+  versions: DocumentVersionRecord[];
+  generationRuns: DocumentGenerationRunRecord[];
+}) => {
+  const outputLabelByGenerationRunId = buildOutputLabelByGenerationRunId({
+    document: input.document,
+    generationRuns: input.generationRuns,
+  });
+  const pdfVersions = input.versions
     .filter((version) => isPdfDocumentVersion(version) && isReviewableDocumentVersion(version))
     .sort((left, right) => right.version - left.version);
   const latestByOutput = new Map<string, DocumentVersionRecord>();
@@ -725,7 +787,11 @@ const buildReviewDocuments = async (versions: DocumentVersionRecord[]) => {
       return {
         id: version.id,
         versionId: version.id,
-        label: buildReviewDocumentLabel(version, index),
+        label: buildReviewDocumentLabel({
+          version,
+          index,
+          outputLabelByGenerationRunId,
+        }),
         fileName: version.file_name,
         mimeType: version.mime_type,
         sizeBytes: version.size_bytes,
@@ -1142,15 +1208,16 @@ export const listNotaryQueue = async (input: {
     limit: 500,
     offset: 0,
   });
+  const documents = await safelyListDocumentsByIds(requests.map((request) => request.document_id));
+  const documentsById = new Map(documents.map((document) => [document.id, document]));
   const summaries: Array<NotaryQueueRequestSummary | null> = await Promise.all(
     requests.map(async (request): Promise<NotaryQueueRequestSummary | null> => {
-      const [document, workflow] = await Promise.all([
-        getDocumentById(request.document_id),
-        resolveWorkflowForRequest(request),
-      ]);
+      const document = documentsById.get(request.document_id) ?? null;
       if (!document) {
         return null;
       }
+
+      const workflow = await resolveWorkflowForRequest(request);
 
       if (
         !canAccessRequest({
@@ -1228,8 +1295,9 @@ export const getNotaryRequestContext = async (input: {
     role: input.role,
     workflow: resource.workflow,
   });
-  const [versions, notary, finalizationHistory, participants] = await Promise.all([
+  const [versions, generationRuns, notary, finalizationHistory, participants] = await Promise.all([
     listDocumentVersions(resource.document.id),
+    listDocumentGenerationRuns(resource.document.id),
     getWorkspaceIdentitySummaryByUserId(
       resource.workflow?.assigned_notary_user_id ??
         resource.workflow?.selected_notary_user_id ??
@@ -1241,7 +1309,11 @@ export const getNotaryRequestContext = async (input: {
     }),
     base.meetingRecord ? listMeetingParticipants(base.meetingRecord.id) : Promise.resolve([]),
   ]);
-  const reviewDocuments = await buildReviewDocuments(versions);
+  const reviewDocuments = await buildReviewDocuments({
+    document: resource.document,
+    versions,
+    generationRuns,
+  });
 
   const [checkins, geolocationSamples, identityVerifications, proximityEvaluations, artifacts] =
     base.meetingRecord

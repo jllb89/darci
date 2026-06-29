@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import {
   buildRealtimeEqualsFilter,
@@ -224,38 +225,10 @@ const formatProductLabel = (documentType: string | null | undefined) => {
 };
 
 const formatCompactReviewDocumentLabel = (
-  document: { fileName: string | null; label: string; isFinal: boolean },
+  document: { label: string },
   index: number,
-  documentType: string | null | undefined,
 ) => {
-  const text = `${document.fileName ?? ""} ${document.label} ${documentType ?? ""}`.toLowerCase();
-
-  if (text.includes("registration")) {
-    return "Trust registration";
-  }
-
-  if (text.includes("certification")) {
-    return "Trust certification";
-  }
-
-  if (text.includes("amendment")) {
-    return "Trust amendment";
-  }
-
-  const trustmakerMatch = text.match(/trust\s*maker\s*(\d+)/) ?? text.match(/trustmaker[-_\s]*(\d+)/);
-  if (trustmakerMatch?.[1]) {
-    return `POA trustmaker ${trustmakerMatch[1]}`;
-  }
-
-  if (text.includes("trustmaker") || text.includes("trust maker") || text.includes("trust")) {
-    return `POA trustmaker ${index + 1}`;
-  }
-
-  if (text.includes("power") || text.includes("attorney") || text.includes("poa") || text.includes("ddpoa")) {
-    return "POA";
-  }
-
-  return formatProductLabel(documentType);
+  return document.label.trim() || `Document ${index + 1}`;
 };
 
 const isAcknowledgedReviewDocument = (document: { fileName: string | null; label: string }) => {
@@ -372,11 +345,11 @@ export default function RequestWorkspacePage() {
   const params = useParams<{ id: string }>();
   const requestId = typeof params?.id === "string" ? params.id : "";
   const { accessToken, refreshToken } = useStoredAuth();
+  const { showToast } = useAppToast();
   const [payload, setPayload] = useState<RequestDetailPayload | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadRequest = useCallback(async () => {
@@ -444,7 +417,6 @@ export default function RequestWorkspacePage() {
 
     setIsCheckingIn(true);
     setErrorMessage(null);
-    setSessionMessage(null);
 
     try {
       const geolocation = await getCurrentGeolocationSample();
@@ -474,7 +446,10 @@ export default function RequestWorkspacePage() {
         throw new Error(await readApiErrorMessage(response, "Unable to record member check-in."));
       }
 
-      setSessionMessage("Location check-in recorded. Your Illuminotary can continue the session.");
+      showToast({
+        tone: "success",
+        message: "Location check-in recorded. Your Illuminotary can continue the session.",
+      });
       await loadRequest();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to record member check-in.");
@@ -506,7 +481,6 @@ export default function RequestWorkspacePage() {
     ? formatCompactReviewDocumentLabel(
         selectedDocument,
         Math.max(selectedDocumentIndex, 0),
-        payload?.document.documentType,
       )
     : formatProductLabel(payload?.document.documentType);
   const latestPassedProximity =
@@ -554,7 +528,6 @@ export default function RequestWorkspacePage() {
     { description: "The in-person session is closed.", done: isMeetingCompleted, label: "Session completed" },
     { description: "The final package is verification-ready.", done: isVerificationReady, label: "Verification ready" },
   ];
-  const showRealtimeFallbackNotice = realtimeState.status === "degraded" && realtimeState.isPollingFallbackActive;
   const isInitialLoading = isLoading && !payload;
 
   return (
@@ -577,18 +550,6 @@ export default function RequestWorkspacePage() {
       {errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
-        </div>
-      ) : null}
-
-      {sessionMessage ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {sessionMessage}
-        </div>
-      ) : null}
-
-      {showRealtimeFallbackNotice ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Live updates are reconnecting. This page is refreshing automatically.
         </div>
       ) : null}
 
@@ -631,7 +592,7 @@ export default function RequestWorkspacePage() {
                   const isSelected = selectedDocument?.id === document.id;
                   return (
                     <button
-                      className={`min-w-24 rounded-md px-3 py-2 text-left text-xs transition ${
+                      className={`w-full rounded-md px-3 py-2 text-left text-xs transition sm:w-48 ${
                         isSelected
                           ? "bg-Color-Neutral-Lightest shadow-[inset_0_0_0_1px_rgba(0,0,0,0.18)]"
                           : "bg-Color-White shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] hover:bg-Color-Neutral-Lightest"
@@ -640,8 +601,8 @@ export default function RequestWorkspacePage() {
                       onClick={() => setSelectedDocumentId(document.id)}
                       type="button"
                     >
-                      <div className="font-medium text-Color-Scheme-1-Text">
-                        {formatCompactReviewDocumentLabel(document, index, payload.document.documentType)}
+                      <div className="break-words font-medium text-Color-Scheme-1-Text">
+                        {formatCompactReviewDocumentLabel(document, index)}
                       </div>
                       <div className="mt-0.5 text-[11px] text-Color-Neutral">{getReviewDocumentStatusLabel(document)}</div>
                     </button>

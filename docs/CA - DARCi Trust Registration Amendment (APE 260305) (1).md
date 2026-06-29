@@ -71,23 +71,5 @@ Trustee(s):
 |  |  |  |  |  |  |  |
 | ----- | :---: | ----- | :---: | ----- | :---: | ----- |
 | \<\< Trustee1 \>\> |  | Date |  | \<\< Trustee2 \>\> |  | Date |
-
 ## 
-
-## **Notarial Acknowledgement**
-
-A notary public or other officer completing this certificate verifies only the identity of the individual who signed the document to which this certificate is attached, and not the truthfulness, accuracy, or validity of that document.
-
-State of California
-
-County of \<\< County \>\>
-
-On this \<\< Day \>\> day of \<\< Month \>\> \<\< Year \>\>, before me, \<\< Illuminotary \>\>, a notary public, personally appeared \<\< Trustmaker(s) \>\>, who proved to me on the basis of satisfactory evidence to be the person(s) whose name(s) is/are subscribed to the within instrument and acknowledged to me that he/she/they executed the same in his/her/their authorized capacity(ies), and that by his/her/their signature(s) on the instrument the person(s), or the entity upon behalf of which the person(s) acted, executed the instrument.
-
-I certify under penalty of perjury under the laws of the State of California that the foregoing paragraph is true and correct.
-
-Witness my hand and official seal.
-
-| Signature |
-| :---: |
 

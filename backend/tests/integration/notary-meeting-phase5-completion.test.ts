@@ -698,6 +698,80 @@ describe("Phase 5 meeting runtime completion", () => {
     );
   });
 
+  it("blocks in-person session start when the illuminotary signature or seal is missing", async () => {
+    seedMeetingContext({ role: "notary" });
+    mocks.getNotaryProfileByUserIdMock.mockResolvedValue({
+      id: "profile-1",
+      userId: "notary-1",
+      jurisdiction: "US-OH",
+      serviceAreaKind: "county",
+      serviceAreaName: "Franklin County",
+      commissionNumber: "OH-12345",
+      commissionExpiresAt: "2028-04-22",
+      sealStoragePath: null,
+      signatureDataUrl: null,
+      sealDataUrl: "",
+      createdAt: "2026-04-20T10:00:00.000Z",
+      updatedAt: "2026-04-20T10:00:00.000Z",
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/meeting/start")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({
+        recordedAt: "2026-04-22T15:00:00.000Z",
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      error: "conflict",
+      code: "notary_assets_required",
+      message: "Your illuminotary signature and seal must be set before starting an in-person session.",
+      details: {
+        missingAssets: ["signature", "seal"],
+      },
+    });
+    expect(mocks.updateMeetingParticipantMock).not.toHaveBeenCalled();
+    expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks meeting-start check-ins when the illuminotary seal is missing", async () => {
+    seedMeetingContext({ role: "notary" });
+    mocks.getNotaryProfileByUserIdMock.mockResolvedValue({
+      id: "profile-1",
+      userId: "notary-1",
+      jurisdiction: "US-OH",
+      serviceAreaKind: "county",
+      serviceAreaName: "Franklin County",
+      commissionNumber: "OH-12345",
+      commissionExpiresAt: "2028-04-22",
+      sealStoragePath: null,
+      signatureDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+      sealDataUrl: null,
+      createdAt: "2026-04-20T10:00:00.000Z",
+      updatedAt: "2026-04-20T10:00:00.000Z",
+    });
+
+    const response = await request(app)
+      .post("/notary/requests/req-1/meeting/check-in")
+      .set("Authorization", `Bearer ${signToken({ sub: "notary-sub", app_metadata: { role: "notary" } })}`)
+      .send({
+        participantRole: "notary",
+        checkinKind: "meeting_start",
+        recordedAt: "2026-04-22T15:00:00.000Z",
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      error: "conflict",
+      code: "notary_assets_required",
+      details: {
+        missingAssets: ["seal"],
+      },
+    });
+    expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();
+  });
+
   it("records identity verification through the dedicated Phase 5 endpoint", async () => {
     seedMeetingContext({
       role: "notary",

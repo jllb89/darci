@@ -32,6 +32,7 @@ const PROCESS_STEPS: ProcessStep[] = [
 
 type ProcessBandProps = {
   currentStep?: number;
+  forceCompact?: boolean;
 };
 
 const COMPACT_TRANSITION_DURATION_MS = 760;
@@ -39,12 +40,12 @@ const PROCESS_BAND_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 const STICKY_TOP_COMPENSATION_PX = 64;
 const STICKY_CONTENT_GAP_PX = 24;
 
-export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
+export default function ProcessBand({ currentStep = 1, forceCompact = false }: ProcessBandProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const bandRef = useRef<HTMLDivElement | null>(null);
-  const isCompactRef = useRef(false);
+  const isCompactRef = useRef(forceCompact);
   const expandedBandHeightRef = useRef(0);
-  const [isCompact, setIsCompact] = useState(false);
+  const [isCompact, setIsCompact] = useState(forceCompact);
 
   const safeCurrentStep = Math.min(
     Math.max(Math.round(currentStep), 1),
@@ -55,6 +56,15 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
   useEffect(() => {
     isCompactRef.current = isCompact;
   }, [isCompact]);
+
+  useEffect(() => {
+    if (!forceCompact) {
+      return;
+    }
+
+    isCompactRef.current = true;
+    setIsCompact(true);
+  }, [forceCompact]);
 
   useEffect(() => {
     const band = bandRef.current;
@@ -125,6 +135,10 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
   }, []);
 
   useEffect(() => {
+    if (forceCompact) {
+      return;
+    }
+
     const bandRoot = sentinelRef.current;
     const stickyHost = bandRoot?.parentElement;
     const sentinel = stickyHost?.previousElementSibling;
@@ -170,7 +184,7 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
       scrollTarget.removeEventListener("scroll", updateCompactState);
       window.removeEventListener("resize", updateCompactState);
     };
-  }, []);
+  }, [forceCompact]);
 
   return (
     <div ref={sentinelRef} className="relative z-[900] -mx-6 md:-mx-10">

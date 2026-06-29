@@ -102,6 +102,19 @@ describe("Phase 6 document finalization endpoints", () => {
         ledgerTxId: "ledger_AB12CD34EF56",
         anchoredAt: "2026-04-20T16:15:00.000Z",
         status: "verified",
+        documents: [
+          {
+            id: "version-1",
+            versionId: "version-1",
+            label: "Certificate of Trust",
+            fileName: "certificate-finalized-v3.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 12345,
+            isFinal: true,
+            downloadUrl: "https://signed.example/certificate.pdf",
+            createdAt: "2026-04-20T16:14:00.000Z",
+          },
+        ],
       },
     });
 
@@ -114,6 +127,19 @@ describe("Phase 6 document finalization endpoints", () => {
       ledgerTxId: "ledger_AB12CD34EF56",
       anchoredAt: "2026-04-20T16:15:00.000Z",
       status: "verified",
+      documents: [
+        {
+          id: "version-1",
+          versionId: "version-1",
+          label: "Certificate of Trust",
+          fileName: "certificate-finalized-v3.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 12345,
+          isFinal: true,
+          downloadUrl: "https://signed.example/certificate.pdf",
+          createdAt: "2026-04-20T16:14:00.000Z",
+        },
+      ],
     });
     expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(2);
   });

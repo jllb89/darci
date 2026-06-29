@@ -18,6 +18,7 @@ import {
   getDocumentGenerationRunById,
   getDocumentById,
   getUserIdBySupabaseId,
+  listDocumentGenerationRuns,
   listDocumentOutputSigners,
   listDocumentParties,
   listDocumentVersions,
@@ -30,7 +31,7 @@ import { transitionIlluminotarizationWorkflowStatus } from "./illuminotarization
 import { anchorToLedger } from "./ledgerService";
 import { getMeetingByRequestId } from "./meetingService";
 import { isNotaryCommissionCurrent, type NotaryProfileRecord } from "./notaryProfileService";
-import { downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
+import { createDocumentDownloadUrl, downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -196,7 +197,14 @@ export type AcknowledgmentNotaryProfileInput = Pick<
   notaryName: string;
 };
 
-type AcknowledgmentDocumentFamily = "poa_general" | "trust_rrr" | "trust_certificate";
+export type AcknowledgmentDocumentFamily = "poa_general" | "trust_rrr" | "trust_certificate";
+
+export type AcknowledgmentAppendTarget = {
+  sourceVersion: DocumentVersionRecord;
+  family: AcknowledgmentDocumentFamily;
+  generationRun: DocumentGenerationRunRecord | null;
+  outputKey: string | null;
+};
 
 type AcknowledgmentRenderInput = {
   document: DocumentRecord;
@@ -395,6 +403,25 @@ const getLatestPdfVersion = (versions: DocumentVersionRecord[]) => {
   return versions.length > 0 ? (versions[versions.length - 1] ?? null) : null;
 };
 
+const isPdfDocumentVersion = (version: DocumentVersionRecord) => {
+  const mimeType = version.mime_type?.trim().toLowerCase() ?? "";
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+
+  return Boolean(version.storage_path && (mimeType === "application/pdf" || fileName.endsWith(".pdf")));
+};
+
+const isFinalizationDerivedVersion = (version: DocumentVersionRecord) => {
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+  const storagePath = version.storage_path?.trim().toLowerCase() ?? "";
+
+  return (
+    /-acknowledged-v\d+\.pdf$/.test(fileName) ||
+    /-acknowledged-v\d+\.pdf$/.test(storagePath) ||
+    /-finalized-v\d+\.pdf$/.test(fileName) ||
+    /-finalized-v\d+\.pdf$/.test(storagePath)
+  );
+};
+
 const parseExecutionMetadataId = (metadata: Record<string, unknown>, key: string) => {
   const value = metadata[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -414,6 +441,18 @@ const buildDerivedFileName = (
 
 const buildDerivedStoragePath = (document: DocumentRecord, stage: string, fileName: string) => {
   return `${document.owner_id}/${document.id}/finalization/${stage}/${randomUUID()}/${fileName}`;
+};
+
+const resetFinalDocumentVersions = async (documentId: string) => {
+  const { error } = await supabaseAdmin
+    .from("document_versions")
+    .update({ is_final: false })
+    .eq("document_id", documentId)
+    .eq("is_final", true);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 };
 
 const getNextDocumentVersionNumber = async (documentId: string) => {
@@ -442,19 +481,12 @@ const createDerivedDocumentVersion = async (input: {
   createdBy: string | null;
   isFinal?: boolean;
   versionNumber?: number;
+  resetExistingFinal?: boolean;
 }) => {
   const nextVersion = input.versionNumber ?? (await getNextDocumentVersionNumber(input.documentId));
 
-  if (input.isFinal) {
-    const { error: resetFinalError } = await supabaseAdmin
-      .from("document_versions")
-      .update({ is_final: false })
-      .eq("document_id", input.documentId)
-      .eq("is_final", true);
-
-    if (resetFinalError) {
-      throw new Error(resetFinalError.message);
-    }
+  if (input.isFinal && input.resetExistingFinal !== false) {
+    await resetFinalDocumentVersions(input.documentId);
   }
 
   const { data, error } = await supabaseAdmin
@@ -624,6 +656,25 @@ const getLatestDocumentExecutionRun = async (input: {
   }
 
   return data as DocumentExecutionRunRecord | null;
+};
+
+const listCompletedDocumentExecutionRuns = async (input: {
+  documentId: string;
+  executionKind: DocumentExecutionKind;
+}) => {
+  const { data, error } = await supabaseAdmin
+    .from("document_execution_runs")
+    .select(documentExecutionSelectColumns)
+    .eq("document_id", input.documentId)
+    .eq("execution_kind", input.executionKind)
+    .eq("status", "completed")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as unknown as DocumentExecutionRunRecord[];
 };
 
 const getDocumentExecutionRunById = async (executionRunId: string) => {
@@ -1113,6 +1164,152 @@ const resolveFamilyFromOutputBundle = (document: DocumentRecord) => {
   return null;
 };
 
+const getOutputBundleKeyOrder = (document: DocumentRecord) => {
+  const outputOrder = new Map<string, number>();
+
+  for (const [index, output] of (document.output_bundle ?? []).entries()) {
+    const candidates = [output.outputKey, output.output_key];
+    for (const candidate of candidates) {
+      const outputKey = asTrimmedString(candidate);
+      if (outputKey && !outputOrder.has(outputKey)) {
+        outputOrder.set(outputKey, index);
+      }
+    }
+  }
+
+  return outputOrder;
+};
+
+const resolveAcknowledgmentFamilyFromContext = (input: {
+  document: DocumentRecord;
+  generationRun?: DocumentGenerationRunRecord | null;
+  includeDocumentFallback?: boolean;
+  includeOutputBundleFallback?: boolean;
+}) => {
+  const candidates: Array<string | null | undefined> = [
+    input.generationRun?.document_key,
+    input.generationRun?.output_key,
+    input.generationRun?.template_key,
+  ];
+
+  if (input.includeDocumentFallback !== false) {
+    candidates.push(
+      input.document.document_type,
+      input.document.product_flow_mode,
+      ...(input.document.selected_families ?? []),
+    );
+  }
+
+  for (const candidate of candidates) {
+    const family = normalizeAcknowledgmentFamily(candidate);
+    if (family) {
+      return family;
+    }
+  }
+
+  if (input.includeOutputBundleFallback !== false) {
+    return resolveFamilyFromOutputBundle(input.document);
+  }
+
+  return null;
+};
+
+export const resolveAcknowledgmentAppendTargetsForVersions = (input: {
+  document: DocumentRecord;
+  versions: DocumentVersionRecord[];
+  generationRunsById?: Map<string, DocumentGenerationRunRecord>;
+}): AcknowledgmentAppendTarget[] => {
+  const sourceVersions = input.versions
+    .filter((version) => isPdfDocumentVersion(version) && !isFinalizationDerivedVersion(version))
+    .sort((left, right) => right.version - left.version);
+  const outputOrder = getOutputBundleKeyOrder(input.document);
+  const generatedTargetsByOutputKey = new Map<string, AcknowledgmentAppendTarget>();
+
+  for (const sourceVersion of sourceVersions) {
+    const generationRun = sourceVersion.generation_run_id
+      ? input.generationRunsById?.get(sourceVersion.generation_run_id) ?? null
+      : null;
+    if (!generationRun) {
+      continue;
+    }
+
+    const outputKey = generationRun.output_key.trim();
+    if (outputOrder.size > 0 && !outputOrder.has(outputKey)) {
+      continue;
+    }
+    if (generatedTargetsByOutputKey.has(outputKey)) {
+      continue;
+    }
+
+    const family = resolveAcknowledgmentFamilyFromContext({
+      document: input.document,
+      generationRun,
+      includeDocumentFallback: false,
+      includeOutputBundleFallback: false,
+    });
+    if (!family) {
+      continue;
+    }
+
+    generatedTargetsByOutputKey.set(outputKey, {
+      sourceVersion,
+      family,
+      generationRun,
+      outputKey,
+    });
+  }
+
+  const generatedTargets = Array.from(generatedTargetsByOutputKey.values()).sort((left, right) => {
+    const leftIndex = left.outputKey ? outputOrder.get(left.outputKey) : undefined;
+    const rightIndex = right.outputKey ? outputOrder.get(right.outputKey) : undefined;
+    if (leftIndex !== undefined && rightIndex !== undefined && leftIndex !== rightIndex) {
+      return leftIndex - rightIndex;
+    }
+
+    return left.sourceVersion.version - right.sourceVersion.version;
+  });
+  if (generatedTargets.length > 0) {
+    return generatedTargets;
+  }
+
+  const fallbackVersion = sourceVersions[0] ?? null;
+  if (!fallbackVersion) {
+    return [];
+  }
+
+  const family = resolveAcknowledgmentFamilyFromContext({
+    document: input.document,
+    includeDocumentFallback: true,
+    includeOutputBundleFallback: true,
+  });
+  if (!family) {
+    return [];
+  }
+
+  return [
+    {
+      sourceVersion: fallbackVersion,
+      family,
+      generationRun: null,
+      outputKey: null,
+    },
+  ];
+};
+
+const resolveAcknowledgmentAppendTargets = async (input: {
+  document: DocumentRecord;
+  versions: DocumentVersionRecord[];
+}) => {
+  const generationRuns = await listDocumentGenerationRuns(input.document.id);
+  const generationRunsById = new Map(generationRuns.map((run) => [run.id, run]));
+
+  return resolveAcknowledgmentAppendTargetsForVersions({
+    document: input.document,
+    versions: input.versions,
+    generationRunsById,
+  });
+};
+
 const resolveAcknowledgmentFamily = async (input: {
   document: DocumentRecord;
   sourceVersion: DocumentVersionRecord;
@@ -1125,25 +1322,14 @@ const resolveAcknowledgmentFamily = async (input: {
     });
   }
 
-  const candidates = [
-    generationRun?.document_key,
-    generationRun?.output_key,
-    generationRun?.template_key,
-    input.document.document_type,
-    input.document.product_flow_mode,
-    ...(input.document.selected_families ?? []),
-  ];
-
-  for (const candidate of candidates) {
-    const family = normalizeAcknowledgmentFamily(candidate);
-    if (family) {
-      return { family, generationRun };
-    }
-  }
-
-  const bundleFamily = resolveFamilyFromOutputBundle(input.document);
-  if (bundleFamily) {
-    return { family: bundleFamily, generationRun };
+  const family = resolveAcknowledgmentFamilyFromContext({
+    document: input.document,
+    generationRun,
+    includeDocumentFallback: true,
+    includeOutputBundleFallback: true,
+  });
+  if (family) {
+    return { family, generationRun };
   }
 
   throw new DocumentFinalizationConflictError(
@@ -1610,101 +1796,175 @@ export const resolvePublicVerificationStatus = (
     : "unverified";
 };
 
+const sortVersionedItems = <Item extends { version: DocumentVersionRecord }>(items: Item[]) => {
+  return [...items].sort((left, right) => left.version.version - right.version.version);
+};
+
+const loadAcknowledgmentItemsForExecutions = async (input: {
+  document: DocumentRecord;
+  executions: DocumentExecutionRunRecord[];
+}) => {
+  const versions = await listDocumentVersions(input.document.id);
+
+  const items = [] as Array<{
+    acknowledgmentPage: AcknowledgmentPageRecord;
+    execution: DocumentExecutionRunRecord;
+    version: DocumentVersionRecord;
+  }>;
+
+  for (const execution of input.executions) {
+    const versionId = execution.output_document_version_id;
+    if (!versionId) {
+      throw new Error("Acknowledgment execution is missing an output document version");
+    }
+
+    const version = versions.find((candidate) => candidate.id === versionId);
+    if (!version) {
+      throw new Error("Acknowledgment execution output document version not found");
+    }
+
+    const acknowledgmentPageId = parseExecutionMetadataId(
+      execution.metadata,
+      "acknowledgmentPageId",
+    );
+    if (!acknowledgmentPageId) {
+      throw new Error("Acknowledgment execution is missing its acknowledgment page id");
+    }
+
+    const acknowledgmentPage = await getAcknowledgmentPageById(acknowledgmentPageId);
+    if (!acknowledgmentPage) {
+      throw new Error("Acknowledgment page not found");
+    }
+
+    items.push({ acknowledgmentPage, execution, version });
+  }
+
+  return sortVersionedItems(items);
+};
+
 const loadExistingAcknowledgmentResult = async (input: {
   document: DocumentRecord;
   request: AuthorizedFinalizationContext["request"];
-  execution: DocumentExecutionRunRecord;
+  executions: DocumentExecutionRunRecord[];
 }) => {
-  const versionId = input.execution.output_document_version_id;
-  if (!versionId) {
-    throw new Error("Acknowledgment execution is missing an output document version");
-  }
-
-  const versions = await listDocumentVersions(input.document.id);
-  const version = versions.find((candidate) => candidate.id === versionId);
-  if (!version) {
+  const items = await loadAcknowledgmentItemsForExecutions({
+    document: input.document,
+    executions: input.executions,
+  });
+  const primaryItem = items[items.length - 1];
+  if (!primaryItem) {
     throw new Error("Acknowledgment execution output document version not found");
-  }
-
-  const acknowledgmentPageId = parseExecutionMetadataId(
-    input.execution.metadata,
-    "acknowledgmentPageId",
-  );
-  if (!acknowledgmentPageId) {
-    throw new Error("Acknowledgment execution is missing its acknowledgment page id");
-  }
-
-  const acknowledgmentPage = await getAcknowledgmentPageById(acknowledgmentPageId);
-  if (!acknowledgmentPage) {
-    throw new Error("Acknowledgment page not found");
   }
 
   return {
     document: input.document,
     request: input.request,
-    actorUserId: input.execution.initiated_by_user_id,
-    acknowledgmentPage,
-    execution: input.execution,
-    version,
+    actorUserId: primaryItem.execution.initiated_by_user_id,
+    acknowledgmentPage: primaryItem.acknowledgmentPage,
+    execution: primaryItem.execution,
+    version: primaryItem.version,
+    acknowledgmentPages: items.map((item) => item.acknowledgmentPage),
+    executions: items.map((item) => item.execution),
+    versions: items.map((item) => item.version),
   };
+};
+
+const loadWatermarkItemsForExecutions = async (input: {
+  document: DocumentRecord;
+  executions: DocumentExecutionRunRecord[];
+}) => {
+  const versions = await listDocumentVersions(input.document.id);
+
+  const items = [] as Array<{
+    execution: DocumentExecutionRunRecord;
+    version: DocumentVersionRecord;
+    hashRecord: DocumentHashRecordRecord;
+    ledgerEntry: LedgerEntryRecord;
+    ledgerAnchorAttempt: LedgerAnchorAttemptRecord | null;
+  }>;
+
+  for (const execution of input.executions) {
+    const versionId = execution.output_document_version_id;
+    if (!versionId) {
+      throw new Error("Watermark execution is missing an output document version");
+    }
+
+    const version = versions.find((candidate) => candidate.id === versionId);
+    if (!version) {
+      throw new Error("Watermark execution output document version not found");
+    }
+
+    const documentHashRecordId = parseExecutionMetadataId(
+      execution.metadata,
+      "documentHashRecordId",
+    );
+    const ledgerEntryId = parseExecutionMetadataId(execution.metadata, "ledgerEntryId");
+    const ledgerAnchorAttemptId = parseExecutionMetadataId(
+      execution.metadata,
+      "ledgerAnchorAttemptId",
+    );
+
+    const hashRecord = documentHashRecordId
+      ? await getDocumentHashRecordById(documentHashRecordId)
+      : await getLatestDocumentHashRecord(input.document.id);
+    const ledgerEntry = ledgerEntryId
+      ? await getLedgerEntryById(ledgerEntryId)
+      : hashRecord
+        ? await getLatestLedgerEntryForHash({
+            documentId: input.document.id,
+            hash: hashRecord.hash,
+          })
+        : null;
+    const ledgerAnchorAttempt = ledgerAnchorAttemptId
+      ? await getLedgerAnchorAttemptById(ledgerAnchorAttemptId)
+      : hashRecord
+        ? await getLatestLedgerAnchorAttemptForHashRecord(hashRecord.id)
+        : null;
+
+    if (!hashRecord || !ledgerEntry) {
+      throw new Error("Watermark execution is missing its hash or ledger state");
+    }
+
+    items.push({ execution, version, hashRecord, ledgerEntry, ledgerAnchorAttempt });
+  }
+
+  return sortVersionedItems(items);
+};
+
+const getPrimaryWatermarkItem = <Item extends { ledgerAnchorAttempt: LedgerAnchorAttemptRecord | null }>(
+  items: Item[],
+) => {
+  return items.find((item) => item.ledgerAnchorAttempt?.status === "failed") ?? items[items.length - 1];
 };
 
 const loadExistingWatermarkResult = async (input: {
   document: DocumentRecord;
   request: AuthorizedFinalizationContext["request"];
-  execution: DocumentExecutionRunRecord;
+  executions: DocumentExecutionRunRecord[];
 }) => {
-  const versionId = input.execution.output_document_version_id;
-  if (!versionId) {
-    throw new Error("Watermark execution is missing an output document version");
-  }
-
-  const versions = await listDocumentVersions(input.document.id);
-  const version = versions.find((candidate) => candidate.id === versionId);
-  if (!version) {
+  const items = await loadWatermarkItemsForExecutions({
+    document: input.document,
+    executions: input.executions,
+  });
+  const primaryItem = getPrimaryWatermarkItem(items);
+  if (!primaryItem) {
     throw new Error("Watermark execution output document version not found");
-  }
-
-  const documentHashRecordId = parseExecutionMetadataId(
-    input.execution.metadata,
-    "documentHashRecordId",
-  );
-  const ledgerEntryId = parseExecutionMetadataId(input.execution.metadata, "ledgerEntryId");
-  const ledgerAnchorAttemptId = parseExecutionMetadataId(
-    input.execution.metadata,
-    "ledgerAnchorAttemptId",
-  );
-
-  const hashRecord = documentHashRecordId
-    ? await getDocumentHashRecordById(documentHashRecordId)
-    : await getLatestDocumentHashRecord(input.document.id);
-  const ledgerEntry = ledgerEntryId
-    ? await getLedgerEntryById(ledgerEntryId)
-    : hashRecord
-      ? await getLatestLedgerEntryForHash({
-          documentId: input.document.id,
-          hash: hashRecord.hash,
-        })
-      : null;
-  const ledgerAnchorAttempt = ledgerAnchorAttemptId
-    ? await getLedgerAnchorAttemptById(ledgerAnchorAttemptId)
-    : hashRecord
-      ? await getLatestLedgerAnchorAttemptForHashRecord(hashRecord.id)
-      : null;
-
-  if (!hashRecord || !ledgerEntry) {
-    throw new Error("Watermark execution is missing its hash or ledger state");
   }
 
   return {
     document: input.document,
     request: input.request,
-    actorUserId: input.execution.initiated_by_user_id,
-    execution: input.execution,
-    version,
-    hashRecord,
-    ledgerEntry,
-    ledgerAnchorAttempt,
+    actorUserId: primaryItem.execution.initiated_by_user_id,
+    execution: primaryItem.execution,
+    version: primaryItem.version,
+    hashRecord: primaryItem.hashRecord,
+    ledgerEntry: primaryItem.ledgerEntry,
+    ledgerAnchorAttempt: primaryItem.ledgerAnchorAttempt,
+    executions: items.map((item) => item.execution),
+    versions: items.map((item) => item.version),
+    hashRecords: items.map((item) => item.hashRecord),
+    ledgerEntries: items.map((item) => item.ledgerEntry),
+    ledgerAnchorAttempts: items.map((item) => item.ledgerAnchorAttempt),
   };
 };
 
@@ -1755,22 +2015,25 @@ export const appendAcknowledgmentPage = async (input: {
     );
   }
 
-  const existingAcknowledgment = await getLatestDocumentExecutionRun({
+  const existingAcknowledgments = await listCompletedDocumentExecutionRuns({
     documentId: context.document.id,
     executionKind: "acknowledgment_append",
   });
 
-  if (existingAcknowledgment) {
+  if (existingAcknowledgments.length > 0) {
     return loadExistingAcknowledgmentResult({
       document: context.document,
       request: context.request,
-      execution: existingAcknowledgment,
+      executions: existingAcknowledgments,
     });
   }
 
   const versions = await listDocumentVersions(context.document.id);
-  const sourceVersion = getLatestPdfVersion(versions);
-  if (!sourceVersion?.storage_path) {
+  const appendTargets = await resolveAcknowledgmentAppendTargets({
+    document: context.document,
+    versions,
+  });
+  if (appendTargets.length === 0) {
     throw new DocumentFinalizationConflictError(
       "Document must have a stored PDF version before acknowledgment can be appended",
     );
@@ -1807,132 +2070,166 @@ export const appendAcknowledgmentPage = async (input: {
     jurisdiction: context.document.jurisdiction,
     rule,
   });
-  const { family: documentFamily, generationRun } = await resolveAcknowledgmentFamily({
-    document: context.document,
-    sourceVersion,
-  });
-  const acknowledgerNames = await resolveAcknowledgers({
-    documentId: context.document.id,
-    family: documentFamily,
-    generationRunId: generationRun?.id ?? sourceVersion.generation_run_id,
-  });
-  const acknowledgmentRender = renderAcknowledgmentContent({
-    document: context.document,
-    config: finalizationConfig,
-    venue: input.venue,
-    notaryProfile: input.notaryProfile,
-    documentFamily,
-    acknowledgerNames,
-    meetingId: input.meetingId,
-    identityMethodSummary: input.identityMethodSummary,
-  });
-  const acknowledgmentPage = await createAcknowledgmentPageRecord({
-    documentId: context.document.id,
-    jurisdiction: context.document.jurisdiction,
-    content: acknowledgmentRender.content,
-  });
-
-  let sourceContent: Buffer;
-  try {
-    sourceContent = await downloadDocumentObject(sourceVersion.storage_path);
-  } catch (error) {
-    throw new DocumentFinalizationConflictError(
-      error instanceof Error ? error.message : "Failed to load source document for acknowledgment",
-    );
-  }
-
   const nextVersionNumber = await getNextDocumentVersionNumber(context.document.id);
-  const fileName = buildDerivedFileName(sourceVersion, "acknowledged", nextVersionNumber);
-  const storagePath = buildDerivedStoragePath(context.document, "acknowledgment", fileName);
+  const acknowledgmentBatchId = randomUUID();
+  const acknowledgmentItems = [] as Array<{
+    acknowledgmentPage: AcknowledgmentPageRecord;
+    execution: DocumentExecutionRunRecord;
+    version: DocumentVersionRecord;
+  }>;
 
-  let transformedContent: Buffer;
-  try {
-    transformedContent = await appendAcknowledgmentPageToPdf({
-      sourcePdfBytes: sourceContent,
-      acknowledgmentContent: acknowledgmentRender.content,
-      signatureImageDataUrl: input.notaryProfile.signatureDataUrl,
-      sealImageDataUrl: input.notaryProfile.sealDataUrl,
+  for (const [targetIndex, target] of appendTargets.entries()) {
+    const { sourceVersion } = target;
+    if (!sourceVersion.storage_path) {
+      throw new DocumentFinalizationConflictError(
+        "Document must have a stored PDF version before acknowledgment can be appended",
+      );
+    }
+
+    const acknowledgerNames = await resolveAcknowledgers({
+      documentId: context.document.id,
+      family: target.family,
+      generationRunId: target.generationRun?.id ?? sourceVersion.generation_run_id,
     });
-  } catch (error) {
-    throw new DocumentFinalizationConflictError(
-      error instanceof Error
-        ? error.message
-        : "Failed to append the acknowledgment page to the PDF",
-    );
-  }
+    const acknowledgmentRender = renderAcknowledgmentContent({
+      document: context.document,
+      config: finalizationConfig,
+      venue: input.venue,
+      notaryProfile: input.notaryProfile,
+      documentFamily: target.family,
+      acknowledgerNames,
+      meetingId: input.meetingId,
+      identityMethodSummary: input.identityMethodSummary,
+    });
+    const acknowledgmentPage = await createAcknowledgmentPageRecord({
+      documentId: context.document.id,
+      jurisdiction: context.document.jurisdiction,
+      content: acknowledgmentRender.content,
+    });
 
-  await uploadGeneratedDocument({
-    storagePath,
-    content: transformedContent,
-    contentType: "application/pdf",
-  });
+    let sourceContent: Buffer;
+    try {
+      sourceContent = await downloadDocumentObject(sourceVersion.storage_path);
+    } catch (error) {
+      throw new DocumentFinalizationConflictError(
+        error instanceof Error ? error.message : "Failed to load source document for acknowledgment",
+      );
+    }
 
-  const version = await createDerivedDocumentVersion({
-    documentId: context.document.id,
-    sourceVersion,
-    storagePath,
-    fileName,
-    sizeBytes: transformedContent.byteLength,
-    mimeType: "application/pdf",
-    createdBy: context.actorUserId,
-    isFinal: false,
-    versionNumber: nextVersionNumber,
-  });
+    const versionNumber = nextVersionNumber + targetIndex;
+    const fileName = buildDerivedFileName(sourceVersion, "acknowledged", versionNumber);
+    const storagePath = buildDerivedStoragePath(context.document, "acknowledgment", fileName);
 
-  const execution = await createDocumentExecutionRun({
-    documentId: context.document.id,
-    sourceDocumentVersionId: sourceVersion.id,
-    outputDocumentVersionId: version.id,
-    executionKind: "acknowledgment_append",
-    initiatedByUserId: context.actorUserId,
-    templateId: finalizationConfig.acknowledgmentTemplateId,
-    templateVersion: finalizationConfig.acknowledgmentTemplateVersion,
-    metadata: {
-      acknowledgmentPageId: acknowledgmentPage.id,
-      sourceVersionId: sourceVersion.id,
-      outputVersionId: version.id,
-      acknowledgmentRender: {
-        rendererKey: acknowledgmentRender.rendererKey,
-        rendererVersion: acknowledgmentRender.rendererVersion,
-        documentFamily: acknowledgmentRender.documentFamily,
-        venue: acknowledgmentRender.venue,
-        acknowledgerNames: acknowledgmentRender.acknowledgerNames,
-        notaryFacts: acknowledgmentRender.notaryFacts,
-        meetingId: input.meetingId ?? null,
-        identityMethodSummary: input.identityMethodSummary ?? null,
-        assets: {
-          signatureEmbedded: Boolean(input.notaryProfile.signatureDataUrl),
-          sealEmbedded: Boolean(input.notaryProfile.sealDataUrl),
-        },
-      },
-    },
-  });
+    let transformedContent: Buffer;
+    try {
+      transformedContent = await appendAcknowledgmentPageToPdf({
+        sourcePdfBytes: sourceContent,
+        acknowledgmentContent: acknowledgmentRender.content,
+        signatureImageDataUrl: input.notaryProfile.signatureDataUrl,
+        sealImageDataUrl: input.notaryProfile.sealDataUrl,
+      });
+    } catch (error) {
+      throw new DocumentFinalizationConflictError(
+        error instanceof Error
+          ? error.message
+          : "Failed to append the acknowledgment page to the PDF",
+      );
+    }
 
-  await createFinalizationStatusHistoryEntry({
-    documentId: context.document.id,
-    changedByUserId: context.actorUserId,
-    status: "acknowledgment_appended",
-    changeSource: "documents.append-acknowledgment",
-    changeReason: "Acknowledgment page appended to document version chain",
-    executionRunId: execution.id,
-    metadata: {
-      acknowledgmentPageId: acknowledgmentPage.id,
-      sourceVersionId: sourceVersion.id,
-      outputVersionId: version.id,
+    await uploadGeneratedDocument({
+      storagePath,
+      content: transformedContent,
+      contentType: "application/pdf",
+    });
+
+    const version = await createDerivedDocumentVersion({
+      documentId: context.document.id,
+      sourceVersion,
+      storagePath,
+      fileName,
+      sizeBytes: transformedContent.byteLength,
+      mimeType: "application/pdf",
+      createdBy: context.actorUserId,
+      isFinal: false,
+      versionNumber,
+    });
+
+    const acknowledgmentRenderMetadata = {
       rendererKey: acknowledgmentRender.rendererKey,
+      rendererVersion: acknowledgmentRender.rendererVersion,
       documentFamily: acknowledgmentRender.documentFamily,
       venue: acknowledgmentRender.venue,
       acknowledgerNames: acknowledgmentRender.acknowledgerNames,
-    },
-  });
+      notaryFacts: acknowledgmentRender.notaryFacts,
+      meetingId: input.meetingId ?? null,
+      identityMethodSummary: input.identityMethodSummary ?? null,
+      assets: {
+        signatureEmbedded: Boolean(input.notaryProfile.signatureDataUrl),
+        sealEmbedded: Boolean(input.notaryProfile.sealDataUrl),
+      },
+    };
+    const execution = await createDocumentExecutionRun({
+      documentId: context.document.id,
+      sourceDocumentVersionId: sourceVersion.id,
+      outputDocumentVersionId: version.id,
+      executionKind: "acknowledgment_append",
+      initiatedByUserId: context.actorUserId,
+      templateId: finalizationConfig.acknowledgmentTemplateId,
+      templateVersion: finalizationConfig.acknowledgmentTemplateVersion,
+      metadata: {
+        acknowledgmentBatchId,
+        acknowledgmentBatchSize: appendTargets.length,
+        acknowledgmentTargetIndex: targetIndex,
+        acknowledgmentPageId: acknowledgmentPage.id,
+        sourceVersionId: sourceVersion.id,
+        outputVersionId: version.id,
+        outputKey: target.outputKey,
+        generationRunId: target.generationRun?.id ?? sourceVersion.generation_run_id,
+        documentFamily: acknowledgmentRender.documentFamily,
+        acknowledgmentRender: acknowledgmentRenderMetadata,
+      },
+    });
+
+    await createFinalizationStatusHistoryEntry({
+      documentId: context.document.id,
+      changedByUserId: context.actorUserId,
+      status: "acknowledgment_appended",
+      changeSource: "documents.append-acknowledgment",
+      changeReason: "Acknowledgment page appended to document version chain",
+      executionRunId: execution.id,
+      metadata: {
+        acknowledgmentBatchId,
+        acknowledgmentPageId: acknowledgmentPage.id,
+        sourceVersionId: sourceVersion.id,
+        outputVersionId: version.id,
+        outputKey: target.outputKey,
+        rendererKey: acknowledgmentRender.rendererKey,
+        documentFamily: acknowledgmentRender.documentFamily,
+        venue: acknowledgmentRender.venue,
+        acknowledgerNames: acknowledgmentRender.acknowledgerNames,
+      },
+    });
+
+    acknowledgmentItems.push({ acknowledgmentPage, execution, version });
+  }
+
+  const primaryAcknowledgmentItem = acknowledgmentItems[acknowledgmentItems.length - 1];
+  if (!primaryAcknowledgmentItem) {
+    throw new DocumentFinalizationConflictError(
+      "Document must have a stored PDF version before acknowledgment can be appended",
+    );
+  }
 
   return {
     document: context.document,
     request: context.request,
     actorUserId: context.actorUserId,
-    acknowledgmentPage,
-    execution,
-    version,
+    acknowledgmentPage: primaryAcknowledgmentItem.acknowledgmentPage,
+    execution: primaryAcknowledgmentItem.execution,
+    version: primaryAcknowledgmentItem.version,
+    acknowledgmentPages: acknowledgmentItems.map((item) => item.acknowledgmentPage),
+    executions: acknowledgmentItems.map((item) => item.execution),
+    versions: acknowledgmentItems.map((item) => item.version),
   };
 };
 
@@ -1955,36 +2252,36 @@ export const watermarkWithNotice = async (input: {
     );
   }
 
-  const latestWatermark = await getLatestDocumentExecutionRun({
+  const existingWatermarks = await listCompletedDocumentExecutionRuns({
     documentId: context.document.id,
     executionKind: "watermark",
   });
 
-  if (latestWatermark) {
+  if (existingWatermarks.length > 0) {
     return loadExistingWatermarkResult({
       document: context.document,
       request: context.request,
-      execution: latestWatermark,
+      executions: existingWatermarks,
     });
   }
 
-  const latestAcknowledgment = await getLatestDocumentExecutionRun({
+  const acknowledgmentExecutions = await listCompletedDocumentExecutionRuns({
     documentId: context.document.id,
     executionKind: "acknowledgment_append",
   });
-  if (!latestAcknowledgment?.output_document_version_id) {
+  if (acknowledgmentExecutions.length === 0) {
     throw new DocumentFinalizationConflictError(
       "Acknowledgment must be appended before the document can be watermarked",
     );
   }
 
-  const versions = await listDocumentVersions(context.document.id);
-  const sourceVersion = versions.find(
-    (version) => version.id === latestAcknowledgment.output_document_version_id,
-  );
-  if (!sourceVersion?.storage_path) {
+  const acknowledgmentItems = await loadAcknowledgmentItemsForExecutions({
+    document: context.document,
+    executions: acknowledgmentExecutions,
+  });
+  if (acknowledgmentItems.length === 0) {
     throw new DocumentFinalizationConflictError(
-      "Acknowledgment output version is missing its stored PDF asset",
+      "Acknowledgment must be appended before the document can be watermarked",
     );
   }
 
@@ -1993,175 +2290,222 @@ export const watermarkWithNotice = async (input: {
     document: context.document,
     watermarkTextTemplate: finalizationConfig.watermarkTextTemplate,
   });
-
-  let sourceContent: Buffer;
-  try {
-    sourceContent = await downloadDocumentObject(sourceVersion.storage_path);
-  } catch (error) {
-    throw new DocumentFinalizationConflictError(
-      error instanceof Error ? error.message : "Failed to load source document for watermark",
-    );
-  }
-
   const nextVersionNumber = await getNextDocumentVersionNumber(context.document.id);
-  const fileName = buildDerivedFileName(sourceVersion, "finalized", nextVersionNumber);
-  const storagePath = buildDerivedStoragePath(context.document, "watermark", fileName);
+  const watermarkBatchId = randomUUID();
+  const watermarkItems = [] as Array<{
+    execution: DocumentExecutionRunRecord;
+    version: DocumentVersionRecord;
+    hashRecord: DocumentHashRecordRecord;
+    ledgerEntry: LedgerEntryRecord;
+    ledgerAnchorAttempt: LedgerAnchorAttemptRecord;
+  }>;
 
-  let transformedContent: Buffer;
-  try {
-    transformedContent = await applyFinalizationWatermarkToPdf({
-      sourcePdfBytes: sourceContent,
-      watermarkText,
+  await resetFinalDocumentVersions(context.document.id);
+
+  for (const [targetIndex, acknowledgmentItem] of acknowledgmentItems.entries()) {
+    const sourceVersion = acknowledgmentItem.version;
+    if (!sourceVersion.storage_path) {
+      throw new DocumentFinalizationConflictError(
+        "Acknowledgment output version is missing its stored PDF asset",
+      );
+    }
+
+    let sourceContent: Buffer;
+    try {
+      sourceContent = await downloadDocumentObject(sourceVersion.storage_path);
+    } catch (error) {
+      throw new DocumentFinalizationConflictError(
+        error instanceof Error ? error.message : "Failed to load source document for watermark",
+      );
+    }
+
+    const versionNumber = nextVersionNumber + targetIndex;
+    const fileName = buildDerivedFileName(sourceVersion, "finalized", versionNumber);
+    const storagePath = buildDerivedStoragePath(context.document, "watermark", fileName);
+
+    let transformedContent: Buffer;
+    try {
+      transformedContent = await applyFinalizationWatermarkToPdf({
+        sourcePdfBytes: sourceContent,
+        watermarkText,
+      });
+    } catch (error) {
+      throw new DocumentFinalizationConflictError(
+        error instanceof Error ? error.message : "Failed to apply the finalization watermark",
+      );
+    }
+
+    await uploadGeneratedDocument({
+      storagePath,
+      content: transformedContent,
+      contentType: "application/pdf",
     });
-  } catch (error) {
+
+    const version = await createDerivedDocumentVersion({
+      documentId: context.document.id,
+      sourceVersion,
+      storagePath,
+      fileName,
+      sizeBytes: transformedContent.byteLength,
+      mimeType: "application/pdf",
+      createdBy: context.actorUserId,
+      isFinal: true,
+      versionNumber,
+      resetExistingFinal: false,
+    });
+
+    const execution = await createDocumentExecutionRun({
+      documentId: context.document.id,
+      sourceDocumentVersionId: sourceVersion.id,
+      outputDocumentVersionId: version.id,
+      executionKind: "watermark",
+      initiatedByUserId: context.actorUserId,
+      watermarkText,
+      metadata: {
+        watermarkBatchId,
+        watermarkBatchSize: acknowledgmentItems.length,
+        watermarkTargetIndex: targetIndex,
+        acknowledgmentExecutionId: acknowledgmentItem.execution.id,
+        sourceVersionId: sourceVersion.id,
+        outputVersionId: version.id,
+      },
+    });
+
+    const hashResult = await hashDocument(context.document.id, transformedContent);
+    const hashRecord = await createDocumentHashRecord({
+      documentId: context.document.id,
+      documentVersionId: version.id,
+      executionRunId: execution.id,
+      algorithm: "sha256",
+      hash: hashResult.hash,
+      metadata: {
+        watermarkBatchId,
+        sourceVersionId: sourceVersion.id,
+        outputVersionId: version.id,
+      },
+    });
+
+    const ledgerResult = await anchorToLedger(idn, hashRecord.hash);
+    const ledgerEntry = await createLedgerEntryRecord({
+      documentId: context.document.id,
+      idn,
+      hash: hashRecord.hash,
+      ledgerTxId: ledgerResult.ledgerTxId,
+      anchoredAt: ledgerResult.anchoredAt,
+    });
+    const ledgerAnchorAttempt = await createLedgerAnchorAttempt({
+      documentId: context.document.id,
+      documentHashRecordId: hashRecord.id,
+      ledgerEntryId: ledgerEntry.id,
+      status: ledgerResult.status === "anchored" ? "anchored" : "failed",
+      completedAt: ledgerResult.status === "anchored" ? ledgerEntry.anchored_at : null,
+      failedAt: ledgerResult.status === "failed" ? new Date().toISOString() : null,
+      errorMessage: ledgerResult.errorMessage,
+      responsePayload: {
+        idn: ledgerResult.idn,
+        hash: ledgerResult.hash,
+        ledgerTxId: ledgerResult.ledgerTxId,
+        status: ledgerResult.status,
+        anchoredAt: ledgerResult.anchoredAt ?? ledgerEntry.anchored_at,
+        errorMessage: ledgerResult.errorMessage,
+        provider: ledgerResult.provider,
+      },
+    });
+
+    const executionMetadata = {
+      ...execution.metadata,
+      documentHashRecordId: hashRecord.id,
+      ledgerEntryId: ledgerEntry.id,
+      ledgerAnchorAttemptId: ledgerAnchorAttempt.id,
+    };
+    const { data: updatedExecution, error: updatedExecutionError } = await supabaseAdmin
+      .from("document_execution_runs")
+      .update({ metadata: executionMetadata })
+      .eq("id", execution.id)
+      .select(documentExecutionSelectColumns)
+      .single();
+
+    if (updatedExecutionError || !updatedExecution) {
+      throw new Error(updatedExecutionError?.message ?? "Failed to update watermark execution metadata");
+    }
+
+    await createFinalizationStatusHistoryEntry({
+      documentId: context.document.id,
+      changedByUserId: context.actorUserId,
+      status: "watermark_applied",
+      changeSource: "documents.watermark",
+      changeReason: "Digital-original watermark execution completed",
+      executionRunId: execution.id,
+      metadata: {
+        watermarkBatchId,
+        sourceVersionId: sourceVersion.id,
+        outputVersionId: version.id,
+        watermarkText,
+      },
+    });
+    await createFinalizationStatusHistoryEntry({
+      documentId: context.document.id,
+      changedByUserId: context.actorUserId,
+      status: "hash_recorded",
+      changeSource: "documents.watermark",
+      changeReason: "Final document hash recorded",
+      executionRunId: execution.id,
+      documentHashRecordId: hashRecord.id,
+      metadata: {
+        watermarkBatchId,
+        hash: hashRecord.hash,
+        algorithm: hashRecord.algorithm,
+        documentVersionId: version.id,
+      },
+    });
+    await createFinalizationStatusHistoryEntry({
+      documentId: context.document.id,
+      changedByUserId: context.actorUserId,
+      status: ledgerAnchorAttempt.status === "anchored" ? "ledger_anchored" : "failed",
+      changeSource: "documents.watermark",
+      changeReason:
+        ledgerAnchorAttempt.status === "anchored"
+          ? "Ledger anchoring completed"
+          : "Ledger anchoring failed",
+      executionRunId: execution.id,
+      documentHashRecordId: hashRecord.id,
+      ledgerAnchorAttemptId: ledgerAnchorAttempt.id,
+      metadata: {
+        watermarkBatchId,
+        ledgerEntryId: ledgerEntry.id,
+        ledgerTxId: ledgerEntry.ledger_tx_id,
+        hash: hashRecord.hash,
+        errorMessage: ledgerResult.errorMessage,
+      },
+    });
+
+    watermarkItems.push({
+      execution: updatedExecution as unknown as DocumentExecutionRunRecord,
+      version,
+      hashRecord,
+      ledgerEntry,
+      ledgerAnchorAttempt,
+    });
+  }
+
+  const primaryWatermarkItem = getPrimaryWatermarkItem(watermarkItems);
+  if (!primaryWatermarkItem) {
     throw new DocumentFinalizationConflictError(
-      error instanceof Error ? error.message : "Failed to apply the finalization watermark",
+      "Acknowledgment must be appended before the document can be watermarked",
     );
   }
 
-  await uploadGeneratedDocument({
-    storagePath,
-    content: transformedContent,
-    contentType: "application/pdf",
-  });
-
-  const version = await createDerivedDocumentVersion({
-    documentId: context.document.id,
-    sourceVersion,
-    storagePath,
-    fileName,
-    sizeBytes: transformedContent.byteLength,
-    mimeType: "application/pdf",
-    createdBy: context.actorUserId,
-    isFinal: true,
-    versionNumber: nextVersionNumber,
-  });
-
-  const execution = await createDocumentExecutionRun({
-    documentId: context.document.id,
-    sourceDocumentVersionId: sourceVersion.id,
-    outputDocumentVersionId: version.id,
-    executionKind: "watermark",
-    initiatedByUserId: context.actorUserId,
-    watermarkText,
-    metadata: {
-      sourceVersionId: sourceVersion.id,
-      outputVersionId: version.id,
-    },
-  });
-
-  const hashResult = await hashDocument(context.document.id, transformedContent);
-  const hashRecord = await createDocumentHashRecord({
-    documentId: context.document.id,
-    documentVersionId: version.id,
-    executionRunId: execution.id,
-    algorithm: "sha256",
-    hash: hashResult.hash,
-    metadata: {
-      sourceVersionId: sourceVersion.id,
-      outputVersionId: version.id,
-    },
-  });
-
-  const ledgerResult = await anchorToLedger(idn, hashRecord.hash);
-  const ledgerEntry = await createLedgerEntryRecord({
-    documentId: context.document.id,
-    idn,
-    hash: hashRecord.hash,
-    ledgerTxId: ledgerResult.ledgerTxId,
-    anchoredAt: ledgerResult.anchoredAt,
-  });
-  const ledgerAnchorAttempt = await createLedgerAnchorAttempt({
-    documentId: context.document.id,
-    documentHashRecordId: hashRecord.id,
-    ledgerEntryId: ledgerEntry.id,
-    status: ledgerResult.status === "anchored" ? "anchored" : "failed",
-    completedAt: ledgerResult.status === "anchored" ? ledgerEntry.anchored_at : null,
-    failedAt: ledgerResult.status === "failed" ? new Date().toISOString() : null,
-    errorMessage: ledgerResult.errorMessage,
-    responsePayload: {
-      idn: ledgerResult.idn,
-      hash: ledgerResult.hash,
-      ledgerTxId: ledgerResult.ledgerTxId,
-      status: ledgerResult.status,
-      anchoredAt: ledgerResult.anchoredAt ?? ledgerEntry.anchored_at,
-      errorMessage: ledgerResult.errorMessage,
-      provider: ledgerResult.provider,
-    },
-  });
-
-  const executionMetadata = {
-    ...execution.metadata,
-    documentHashRecordId: hashRecord.id,
-    ledgerEntryId: ledgerEntry.id,
-    ledgerAnchorAttemptId: ledgerAnchorAttempt.id,
-  };
-  const { data: updatedExecution, error: updatedExecutionError } = await supabaseAdmin
-    .from("document_execution_runs")
-    .update({ metadata: executionMetadata })
-    .eq("id", execution.id)
-    .select(documentExecutionSelectColumns)
-    .single();
-
-  if (updatedExecutionError || !updatedExecution) {
-    throw new Error(updatedExecutionError?.message ?? "Failed to update watermark execution metadata");
-  }
-
-  await createFinalizationStatusHistoryEntry({
-    documentId: context.document.id,
-    changedByUserId: context.actorUserId,
-    status: "watermark_applied",
-    changeSource: "documents.watermark",
-    changeReason: "Digital-original watermark execution completed",
-    executionRunId: execution.id,
-    metadata: {
-      sourceVersionId: sourceVersion.id,
-      outputVersionId: version.id,
-      watermarkText,
-    },
-  });
-  await createFinalizationStatusHistoryEntry({
-    documentId: context.document.id,
-    changedByUserId: context.actorUserId,
-    status: "hash_recorded",
-    changeSource: "documents.watermark",
-    changeReason: "Final document hash recorded",
-    executionRunId: execution.id,
-    documentHashRecordId: hashRecord.id,
-    metadata: {
-      hash: hashRecord.hash,
-      algorithm: hashRecord.algorithm,
-      documentVersionId: version.id,
-    },
-  });
-  await createFinalizationStatusHistoryEntry({
-    documentId: context.document.id,
-    changedByUserId: context.actorUserId,
-    status: ledgerAnchorAttempt.status === "anchored" ? "ledger_anchored" : "failed",
-    changeSource: "documents.watermark",
-    changeReason:
-      ledgerAnchorAttempt.status === "anchored"
-        ? "Ledger anchoring completed"
-        : "Ledger anchoring failed",
-    executionRunId: execution.id,
-    documentHashRecordId: hashRecord.id,
-    ledgerAnchorAttemptId: ledgerAnchorAttempt.id,
-    metadata: {
-      ledgerEntryId: ledgerEntry.id,
-      ledgerTxId: ledgerEntry.ledger_tx_id,
-      hash: hashRecord.hash,
-      errorMessage: ledgerResult.errorMessage,
-    },
-  });
-
+  const packageAnchored = watermarkItems.every(
+    (item) => item.ledgerAnchorAttempt.status === "anchored",
+  );
   const updatedDocument = await updateDocument(context.document.id, {
-    status: ledgerAnchorAttempt.status === "anchored" ? "completed" : "pending_notary",
+    status: packageAnchored ? "completed" : "pending_notary",
   });
   const updatedRequest = await updateNotarizationRequest(context.request.id, {
-    status: ledgerAnchorAttempt.status === "anchored" ? "completed" : context.request.status,
+    status: packageAnchored ? "completed" : context.request.status,
   });
 
-  if (ledgerAnchorAttempt.status === "anchored" && context.request.workflow_id) {
+  if (packageAnchored && context.request.workflow_id) {
     await transitionIlluminotarizationWorkflowStatus({
       workflowId: context.request.workflow_id,
       nextStatus: "completed",
@@ -2171,9 +2515,12 @@ export const watermarkWithNotice = async (input: {
       legacyRequestId: context.request.id,
       metadata: {
         documentId: context.document.id,
-        documentVersionId: version.id,
-        hashRecordId: hashRecord.id,
-        ledgerEntryId: ledgerEntry.id,
+        documentVersionId: primaryWatermarkItem.version.id,
+        documentVersionIds: watermarkItems.map((item) => item.version.id),
+        hashRecordId: primaryWatermarkItem.hashRecord.id,
+        hashRecordIds: watermarkItems.map((item) => item.hashRecord.id),
+        ledgerEntryId: primaryWatermarkItem.ledgerEntry.id,
+        ledgerEntryIds: watermarkItems.map((item) => item.ledgerEntry.id),
       },
     });
   }
@@ -2182,12 +2529,137 @@ export const watermarkWithNotice = async (input: {
     document: updatedDocument,
     request: updatedRequest,
     actorUserId: context.actorUserId,
-    execution: updatedExecution as unknown as DocumentExecutionRunRecord,
-    version,
-    hashRecord,
-    ledgerEntry,
-    ledgerAnchorAttempt,
+    execution: primaryWatermarkItem.execution,
+    version: primaryWatermarkItem.version,
+    hashRecord: primaryWatermarkItem.hashRecord,
+    ledgerEntry: primaryWatermarkItem.ledgerEntry,
+    ledgerAnchorAttempt: primaryWatermarkItem.ledgerAnchorAttempt,
+    executions: watermarkItems.map((item) => item.execution),
+    versions: watermarkItems.map((item) => item.version),
+    hashRecords: watermarkItems.map((item) => item.hashRecord),
+    ledgerEntries: watermarkItems.map((item) => item.ledgerEntry),
+    ledgerAnchorAttempts: watermarkItems.map((item) => item.ledgerAnchorAttempt),
   };
+};
+
+const buildOutputLabelByGenerationRunId = (input: {
+  document: Pick<DocumentRecord, "output_bundle">;
+  generationRuns: DocumentGenerationRunRecord[];
+}) => {
+  const outputLabelByKey = new Map<string, string>();
+
+  for (const rawOutput of input.document.output_bundle ?? []) {
+    const outputKey = asTrimmedString(rawOutput.outputKey);
+    const outputLabel = asTrimmedString(rawOutput.outputLabel);
+
+    if (outputKey && outputLabel) {
+      outputLabelByKey.set(outputKey, outputLabel);
+    }
+  }
+
+  const outputLabelByGenerationRunId = new Map<string, string>();
+
+  for (const run of input.generationRuns) {
+    const outputLabel = outputLabelByKey.get(run.output_key);
+    if (outputLabel) {
+      outputLabelByGenerationRunId.set(run.id, outputLabel);
+    }
+  }
+
+  return outputLabelByGenerationRunId;
+};
+
+const buildPublicVerificationDocumentLabel = (input: {
+  version: DocumentVersionRecord;
+  index: number;
+  outputLabelByGenerationRunId: Map<string, string>;
+}) => {
+  const generationRunLabel = input.version.generation_run_id
+    ? input.outputLabelByGenerationRunId.get(input.version.generation_run_id)
+    : null;
+  const fileNameLabel = input.version.file_name?.trim() || null;
+
+  return generationRunLabel ?? fileNameLabel ?? `Document ${input.index + 1}`;
+};
+
+const isPublicVerificationDocumentVersion = (version: DocumentVersionRecord) => {
+  const fileName = version.file_name?.trim().toLowerCase() ?? "";
+  const storagePath = version.storage_path?.trim().toLowerCase() ?? "";
+
+  return Boolean(
+    isPdfDocumentVersion(version) &&
+      (version.is_final || /-finalized-v\d+\.pdf$/.test(fileName) || /-finalized-v\d+\.pdf$/.test(storagePath)),
+  );
+};
+
+const buildPublicVerificationDocuments = async (document: DocumentRecord) => {
+  const [versions, generationRuns] = await Promise.all([
+    listDocumentVersions(document.id),
+    listDocumentGenerationRuns(document.id),
+  ]);
+  const outputLabelByGenerationRunId = buildOutputLabelByGenerationRunId({
+    document,
+    generationRuns,
+  });
+  const pdfVersions = versions
+    .filter(isPublicVerificationDocumentVersion)
+    .sort((left, right) => right.version - left.version);
+  const latestByOutput = new Map<string, DocumentVersionRecord>();
+
+  for (const version of pdfVersions) {
+    const key = version.generation_run_id ?? version.file_name ?? version.id;
+    if (!latestByOutput.has(key)) {
+      latestByOutput.set(key, version);
+    }
+  }
+
+  const publicVersions = Array.from(latestByOutput.values()).sort((left, right) => {
+    const leftTime = Date.parse(left.created_at);
+    const rightTime = Date.parse(right.created_at);
+    return leftTime - rightTime;
+  });
+
+  return Promise.all(
+    publicVersions.map(async (version, index) => {
+      let downloadUrl: string | null = null;
+
+      if (version.storage_path) {
+        try {
+          downloadUrl = (await createDocumentDownloadUrl(version.storage_path)).signedUrl;
+        } catch {
+          downloadUrl = null;
+        }
+      }
+
+      return {
+        id: version.id,
+        versionId: version.id,
+        label: buildPublicVerificationDocumentLabel({
+          version,
+          index,
+          outputLabelByGenerationRunId,
+        }),
+        fileName: version.file_name,
+        mimeType: version.mime_type,
+        sizeBytes: version.size_bytes,
+        isFinal: Boolean(version.is_final),
+        downloadUrl,
+        createdAt: version.created_at,
+      };
+    }),
+  );
+};
+
+const safelyBuildPublicVerificationDocuments = async (document: DocumentRecord) => {
+  try {
+    return await buildPublicVerificationDocuments(document);
+  } catch (error) {
+    console.warn("Public verification document preview fallback used", {
+      documentId: document.id,
+      error: error instanceof Error ? error.message : error,
+    });
+    return [];
+  }
 };
 
 export const verifyDocumentByIdn = async (input: {
@@ -2213,6 +2685,7 @@ export const verifyDocumentByIdn = async (input: {
   }
 
   const status = resolvePublicVerificationStatus(snapshot);
+  const documents = await safelyBuildPublicVerificationDocuments(snapshot.document);
   const verificationCheck = await createPublicVerificationCheck({
     documentId: snapshot.document.id,
     documentHashRecordId: snapshot.hashRecord?.id ?? null,
@@ -2249,6 +2722,7 @@ export const verifyDocumentByIdn = async (input: {
       ledgerTxId: snapshot.ledgerEntry?.ledger_tx_id ?? null,
       anchoredAt: snapshot.ledgerEntry?.anchored_at ?? null,
       status,
+      documents,
     },
   };
 };

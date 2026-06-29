@@ -10,6 +10,7 @@ import {
   appendAcknowledgmentPageToPdf,
   applyFinalizationWatermarkToPdf,
   normalizeAcknowledgmentFamily,
+  resolveAcknowledgmentAppendTargetsForVersions,
   renderAcknowledgmentContent,
   renderWatermarkTextTemplate,
   resolvePublicVerificationStatus,
@@ -228,6 +229,104 @@ describe("documentFinalizationService", () => {
     expect(normalizeAcknowledgmentFamily("DARCi Trust Certification")).toBe("trust_certificate");
     expect(normalizeAcknowledgmentFamily("uploaded_document")).toBe("poa_general");
     expect(normalizeAcknowledgmentFamily("notarize_document")).toBe("poa_general");
+  });
+
+  it("selects every latest generated Trust output for acknowledgment append", () => {
+    const document = {
+      id: "doc-trust-1",
+      output_bundle: [
+        { outputKey: "trust_certificate", documentKey: "trust_certificate" },
+        { outputKey: "trust_rrr", documentKey: "trust_rrr" },
+      ],
+      document_type: "trust_bundle",
+      product_flow_mode: "trust_bundle",
+      selected_families: ["trust"],
+    } as never;
+    const versions = [
+      {
+        id: "version-rrr-old",
+        document_id: "doc-trust-1",
+        version: 1,
+        storage_path: "owner/doc/generated/run-rrr-old/trust_rrr.pdf",
+        file_name: "trust_rrr.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1000,
+        is_final: false,
+        generation_run_id: "run-rrr-old",
+        created_by: "owner-1",
+        created_at: "2026-04-22T15:00:00.000Z",
+      },
+      {
+        id: "version-cert",
+        document_id: "doc-trust-1",
+        version: 2,
+        storage_path: "owner/doc/generated/run-cert/trust_certificate.pdf",
+        file_name: "trust_certificate.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1100,
+        is_final: false,
+        generation_run_id: "run-cert",
+        created_by: "owner-1",
+        created_at: "2026-04-22T15:01:00.000Z",
+      },
+      {
+        id: "version-rrr-signed",
+        document_id: "doc-trust-1",
+        version: 3,
+        storage_path: "owner/doc/generated/run-rrr/trust_rrr-signed.pdf",
+        file_name: "trust_rrr-signed.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1200,
+        is_final: false,
+        generation_run_id: "run-rrr",
+        created_by: "owner-1",
+        created_at: "2026-04-22T15:02:00.000Z",
+      },
+    ];
+    const generationRunsById = new Map([
+      [
+        "run-rrr-old",
+        {
+          id: "run-rrr-old",
+          output_key: "trust_rrr",
+          document_key: "trust_rrr",
+          template_key: "oh_trust_rrr",
+        },
+      ],
+      [
+        "run-cert",
+        {
+          id: "run-cert",
+          output_key: "trust_certificate",
+          document_key: "trust_certificate",
+          template_key: "oh_trust_certificate",
+        },
+      ],
+      [
+        "run-rrr",
+        {
+          id: "run-rrr",
+          output_key: "trust_rrr",
+          document_key: "trust_rrr",
+          template_key: "oh_trust_rrr",
+        },
+      ],
+    ]) as never;
+
+    const targets = resolveAcknowledgmentAppendTargetsForVersions({
+      document,
+      versions: versions as never,
+      generationRunsById,
+    });
+
+    expect(targets.map((target) => target.family)).toEqual([
+      "trust_certificate",
+      "trust_rrr",
+    ]);
+    expect(targets.map((target) => target.sourceVersion.id)).toEqual([
+      "version-cert",
+      "version-rrr-signed",
+    ]);
   });
 
   it("returns unverified when a ledger row exists but anchoring failed", () => {

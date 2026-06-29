@@ -2,9 +2,11 @@ import {
   getDocumentById,
   getNotarizationRequestById,
   listDocuments as listDocumentsFromDb,
+  listDocumentGenerationRuns,
   listDocumentSystemValues,
   listDocumentVersions,
   listNotarizationRequests,
+  type DocumentGenerationRunRecord,
   type DocumentVersionRecord,
   type DocumentRecord,
   type NotarizationRequestRecord,
@@ -344,8 +346,48 @@ const mapSharedMeetingResponse = (
   };
 };
 
-const buildReviewDocumentLabel = (version: DocumentVersionRecord, index: number) => {
-  return version.file_name?.trim() || `Document ${index + 1}`;
+const asTrimmedString = (value: unknown) => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const buildOutputLabelByGenerationRunId = (input: {
+  document: Pick<DocumentRecord, "output_bundle">;
+  generationRuns: DocumentGenerationRunRecord[];
+}) => {
+  const outputLabelByKey = new Map<string, string>();
+
+  for (const rawOutput of input.document.output_bundle ?? []) {
+    const outputKey = asTrimmedString(rawOutput.outputKey);
+    const outputLabel = asTrimmedString(rawOutput.outputLabel);
+
+    if (outputKey && outputLabel) {
+      outputLabelByKey.set(outputKey, outputLabel);
+    }
+  }
+
+  const outputLabelByGenerationRunId = new Map<string, string>();
+
+  for (const run of input.generationRuns) {
+    const outputLabel = outputLabelByKey.get(run.output_key);
+    if (outputLabel) {
+      outputLabelByGenerationRunId.set(run.id, outputLabel);
+    }
+  }
+
+  return outputLabelByGenerationRunId;
+};
+
+const buildReviewDocumentLabel = (input: {
+  version: DocumentVersionRecord;
+  index: number;
+  outputLabelByGenerationRunId: Map<string, string>;
+}) => {
+  const generationRunLabel = input.version.generation_run_id
+    ? input.outputLabelByGenerationRunId.get(input.version.generation_run_id)
+    : null;
+  const fileNameLabel = input.version.file_name?.trim() || null;
+
+  return generationRunLabel ?? fileNameLabel ?? `Document ${input.index + 1}`;
 };
 
 const isPdfDocumentVersion = (version: DocumentVersionRecord) => {
@@ -364,14 +406,24 @@ const isReviewableDocumentVersion = (version: DocumentVersionRecord) => {
       fileName.endsWith("-signed.pdf") ||
       storagePath.endsWith("-signed.pdf") ||
       /-acknowledged-v\d+\.pdf$/.test(fileName) ||
-      /-acknowledged-v\d+\.pdf$/.test(storagePath),
+      /-acknowledged-v\d+\.pdf$/.test(storagePath) ||
+      /-finalized-v\d+\.pdf$/.test(fileName) ||
+      /-finalized-v\d+\.pdf$/.test(storagePath),
   );
 };
 
 const buildReviewDocuments = async (
-  versions: DocumentVersionRecord[],
+  input: {
+    document: Pick<DocumentRecord, "output_bundle">;
+    versions: DocumentVersionRecord[];
+    generationRuns: DocumentGenerationRunRecord[];
+  },
 ): Promise<SharedRequestDocumentResponse["reviewDocuments"]> => {
-  const pdfVersions = versions
+  const outputLabelByGenerationRunId = buildOutputLabelByGenerationRunId({
+    document: input.document,
+    generationRuns: input.generationRuns,
+  });
+  const pdfVersions = input.versions
     .filter((version) => isPdfDocumentVersion(version) && isReviewableDocumentVersion(version))
     .sort((left, right) => right.version - left.version);
   const latestByOutput = new Map<string, DocumentVersionRecord>();
@@ -404,7 +456,11 @@ const buildReviewDocuments = async (
       return {
         id: version.id,
         versionId: version.id,
-        label: buildReviewDocumentLabel(version, index),
+        label: buildReviewDocumentLabel({
+          version,
+          index,
+          outputLabelByGenerationRunId,
+        }),
         fileName: version.file_name,
         mimeType: version.mime_type,
         sizeBytes: version.size_bytes,
@@ -832,7 +888,17 @@ export const getSharedRequestDetail = async (input: {
         requestId: resource.request.id,
         documentId: resource.document.id,
       },
-      run: async () => buildReviewDocuments(await listDocumentVersions(resource.document.id)),
+      run: async () => {
+        const [versions, generationRuns] = await Promise.all([
+          listDocumentVersions(resource.document.id),
+          listDocumentGenerationRuns(resource.document.id),
+        ]);
+        return buildReviewDocuments({
+          document: resource.document,
+          versions,
+          generationRuns,
+        });
+      },
     }),
     resource.request.workflow_id
       ? safelyGetWorkflowById({

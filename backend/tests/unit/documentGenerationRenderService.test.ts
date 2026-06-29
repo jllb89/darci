@@ -527,6 +527,103 @@ describe("documentGenerationRenderService", () => {
     expect(rendered).not.toContain("TM2");
   });
 
+  it("omits Trust Certificate template-only trustmaker signatures and acknowledgments", () => {
+    const caRendered = renderLegalTemplateText({
+      templateSource: [
+        "Trust Information",
+        "Trustmaker(s): << Trustmaker(s) >>",
+        "Current trustee(s) of the Trust: << Trustees >>",
+        "",
+        "## **Signatures**",
+        "",
+        "Trustmaker(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << TM1 >> |  | Date |  | << TM2 >> |  | Date |",
+        "",
+        "Trustee(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << Trustee1 >> |  | Date |  | << Trustee2 >> |  | Date |",
+        "",
+        "**Notarial Acknowledgement**",
+        "County of << County >>",
+        "Before me, << illuminotary >>, personally appeared << Trustees >>.",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        grantors: [{ fullName: "Ava Grantor" }],
+        trustees: [{ fullName: "Taylor Trustee" }, { fullName: "Jordan Trustee" }],
+      },
+      documentKey: "trust_certificate",
+      isPreview: true,
+    });
+    const ohRendered = renderLegalTemplateText({
+      templateSource: [
+        "Trustee(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << Trustee1 >> |  | Date |  | << Trustee2 >> |  | Date |",
+        "",
+        "**ACKNOWLEDGMENT CERTIFICATE**",
+        "**County of_______________________**",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        trustees: [{ fullName: "Taylor Trustee" }, { fullName: "Jordan Trustee" }],
+      },
+      documentKey: "trust_certificate",
+      isPreview: true,
+    });
+
+  const caVisible = stripRenderControlTokens(caRendered);
+
+  expect(caVisible).toContain("Trustmaker(s): Ava Grantor");
+  expect(caVisible).toContain("Current trustee(s) of the Trust: Taylor Trustee, Jordan Trustee");
+    expect(caRendered.match(/\[\[DARCI_SIGNATURE_DATE\]\]/g)).toHaveLength(2);
+    expect(caRendered).not.toContain("[[DARCI_SIGNATURE_DATE]] Ava Grantor");
+    expect(caRendered).toContain("[[DARCI_SIGNATURE_DATE]] Taylor Trustee");
+    expect(caRendered).toContain("[[DARCI_SIGNATURE_DATE]] Jordan Trustee");
+    expect(caRendered).not.toContain("Notarial Acknowledgement");
+    expect(caRendered).not.toContain("County of");
+    expect(caRendered).not.toContain("illuminotary");
+    expect(ohRendered).not.toContain("ACKNOWLEDGMENT CERTIFICATE");
+    expect(ohRendered).not.toContain("County of_______________________");
+  });
+
+  it("omits Trust Registration template-side acknowledgments but keeps signature slots", () => {
+    const rendered = renderLegalTemplateText({
+      templateSource: [
+        "## **Signatures**",
+        "",
+        "Trustmaker(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << TM1 >> |  | Date |  | << TM2 >> |  | Date |",
+        "",
+        "Trustee(s):",
+        "|  |  |  |  |  |  |  |",
+        "| ----- | :---: | ----- | :---: | ----- | :---: | ----- |",
+        "| << Trustee1 >> |  | Date |  | << Trustee2 >> |  | Date |",
+        "",
+        "## **Notarial Acknowledgement**",
+        "County of << County >>",
+      ].join("\n"),
+      placeholders: {},
+      canonicalAnswers: {
+        grantors: [{ fullName: "Ava Grantor" }],
+        trustees: [{ fullName: "Taylor Trustee" }],
+      },
+      documentKey: "trust_rrr",
+      isPreview: true,
+    });
+
+    expect(rendered).toContain("[[DARCI_SIGNATURE_DATE]] Ava Grantor");
+    expect(rendered).toContain("[[DARCI_SIGNATURE_DATE]] Taylor Trustee");
+    expect(rendered).not.toContain("Notarial Acknowledgement");
+    expect(rendered).not.toContain("County of");
+  });
+
   it("keeps additional POA authorities inside the authority checklist", () => {
     const rendered = renderLegalTemplateText({
       templateSource: [

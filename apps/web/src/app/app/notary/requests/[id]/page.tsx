@@ -936,38 +936,10 @@ const formatProductLabel = (documentType: string | null | undefined) => {
 };
 
 const formatCompactReviewDocumentLabel = (
-  document: { fileName: string | null; label: string; isFinal: boolean },
+  document: { label: string },
   index: number,
-  documentType: string | null | undefined,
 ) => {
-  const text = `${document.fileName ?? ""} ${document.label} ${documentType ?? ""}`.toLowerCase();
-
-  if (text.includes("registration")) {
-    return "Trust registration";
-  }
-
-  if (text.includes("certification")) {
-    return "Trust certification";
-  }
-
-  if (text.includes("amendment")) {
-    return "Trust amendment";
-  }
-
-  const trustmakerMatch = text.match(/trust\s*maker\s*(\d+)/) ?? text.match(/trustmaker[-_\s]*(\d+)/);
-  if (trustmakerMatch?.[1]) {
-    return `POA trustmaker ${trustmakerMatch[1]}`;
-  }
-
-  if (text.includes("trustmaker") || text.includes("trust maker") || text.includes("trust")) {
-    return `POA trustmaker ${index + 1}`;
-  }
-
-  if (text.includes("power") || text.includes("attorney") || text.includes("poa") || text.includes("ddpoa")) {
-    return "POA";
-  }
-
-  return formatProductLabel(documentType);
+  return document.label.trim() || `Document ${index + 1}`;
 };
 
 const isAcknowledgedReviewDocument = (document: { fileName: string | null; label: string }) => {
@@ -1366,7 +1338,6 @@ export default function NotaryRequestWorkspacePage() {
   const [samePlaceAutomationState, setSamePlaceAutomationState] = useState<SamePlaceAutomationState>("idle");
   const [samePlaceAutomationMessage, setSamePlaceAutomationMessage] = useState("Waiting for live location signals.");
   const previewDocumentSourceRef = useRef<{ id: string; downloadUrl: string | null } | null>(null);
-  const hasShownRealtimeFallbackToastRef = useRef(false);
   const hasShownFinalPackageAnchoredToastRef = useRef(false);
   const lastAutoNotarySampleRefreshRef = useRef<string | null>(null);
   const lastAutoProximityEvaluationRef = useRef<string | null>(null);
@@ -2422,7 +2393,6 @@ export default function NotaryRequestWorkspacePage() {
             : !context.capabilities.canFinalizeDocument
               ? "Final package is not ready for submission."
               : null;
-  const showRealtimeFallbackNotice = realtimeState.status === "degraded" && realtimeState.isPollingFallbackActive;
   const sessionTimelineSteps = [
     { description: "Start the live meeting.", done: hasSessionStart, label: "Start session" },
     { description: "Capture member presence and location.", done: hasMemberCheckin, label: "Check in member" },
@@ -2575,24 +2545,6 @@ export default function NotaryRequestWorkspacePage() {
     firstError: identityFieldErrors[0] ?? null,
   };
   const isVenueStepValid = venueState.trim().length > 0 && venueCounty.trim().length > 0;
-
-  useEffect(() => {
-    if (!showRealtimeFallbackNotice) {
-      hasShownRealtimeFallbackToastRef.current = false;
-      return;
-    }
-
-    if (hasShownRealtimeFallbackToastRef.current) {
-      return;
-    }
-
-    hasShownRealtimeFallbackToastRef.current = true;
-    showToast({
-      tone: "warning",
-      message: "Live updates are reconnecting. This workspace is refreshing automatically.",
-      durationMs: 6000,
-    });
-  }, [showRealtimeFallbackNotice, showToast]);
 
   useEffect(() => {
     if (!isAnchored) {
@@ -2786,7 +2738,7 @@ export default function NotaryRequestWorkspacePage() {
                     const isSelected = selectedDocument?.id === document.id;
                     return (
                       <button
-                        className={`min-w-24 rounded-md px-3 py-2 text-left text-xs transition ${
+                        className={`w-full rounded-md px-3 py-2 text-left text-xs transition sm:w-48 ${
                           isSelected
                             ? "bg-Color-Neutral-Lightest shadow-[inset_0_0_0_1px_rgba(0,0,0,0.18)]"
                             : "bg-Color-White shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] hover:bg-Color-Neutral-Lightest"
@@ -2795,8 +2747,8 @@ export default function NotaryRequestWorkspacePage() {
                         onClick={() => setSelectedDocumentId(document.id)}
                         type="button"
                       >
-                        <div className="font-medium text-Color-Scheme-1-Text">
-                          {formatCompactReviewDocumentLabel(document, index, context.document.documentType)}
+                        <div className="break-words font-medium text-Color-Scheme-1-Text">
+                          {formatCompactReviewDocumentLabel(document, index)}
                         </div>
                         <div className="mt-0.5 text-[11px] text-Color-Neutral">{getReviewDocumentStatusLabel(document)}</div>
                       </button>

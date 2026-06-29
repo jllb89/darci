@@ -649,6 +649,24 @@ export const getDocumentById = async (documentId: string) => {
   return data as DocumentRecord | null;
 };
 
+export const listDocumentsByIds = async (documentIds: string[]) => {
+  const uniqueDocumentIds = Array.from(new Set(documentIds.filter((documentId) => documentId.trim().length > 0)));
+  if (uniqueDocumentIds.length === 0) {
+    return [] as DocumentRecord[];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("documents")
+    .select(documentSelectColumns)
+    .in("id", uniqueDocumentIds);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as DocumentRecord[];
+};
+
 export const getDocumentByIdn = async (idn: string) => {
   const normalizedIdn = idn.trim().toUpperCase();
   const { data, error } = await supabaseAdmin

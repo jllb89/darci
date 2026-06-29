@@ -167,7 +167,7 @@ export default function NotaryHomePage() {
     { table: "ledger_anchor_attempts" },
   ];
 
-  const realtimeState = useRequestRealtimeInvalidation({
+  useRequestRealtimeInvalidation({
     enabled: Boolean(accessToken),
     accessToken,
     refreshToken,
@@ -181,7 +181,6 @@ export default function NotaryHomePage() {
 
   const requestsByTab = splitRequests(queue.requests);
   const visibleRequests = requestsByTab[activeTab];
-  const showRealtimeFallbackNotice = realtimeState.status === "degraded" && realtimeState.isPollingFallbackActive;
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -203,12 +202,6 @@ export default function NotaryHomePage() {
 
       {errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div>
-      ) : null}
-
-      {showRealtimeFallbackNotice ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Live queue updates are reconnecting. Automatic refresh is on.
-        </div>
       ) : null}
 
       <section className="space-y-4 text-sm">

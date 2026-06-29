@@ -18,7 +18,10 @@ import {
   queueNotaryRequestClaimedNotification,
 } from "../services/notificationService";
 import { runDueNotificationJobs } from "../services/notificationOutboxService";
-import { getNotaryProfileByUserId } from "../services/notaryProfileService";
+import {
+  getNotaryProfileByUserId,
+  type NotaryProfileRecord,
+} from "../services/notaryProfileService";
 import { getUserIdentityContextByUserId } from "../services/userRoleService";
 import {
   createNotarizationCode,
@@ -385,6 +388,10 @@ const mapFinalizationVersionSummary = (version: {
   isFinal: version.is_final ?? false,
   createdAt: version.created_at,
 });
+
+const packageEntries = <Entry>(primary: Entry, entries?: Entry[] | null) => {
+  return Array.isArray(entries) && entries.length > 0 ? entries : [primary];
+};
 
 const buildFinalPackageStatusSummary = (input: {
   ledgerStatus: string;
@@ -1118,6 +1125,42 @@ const deriveGeolocationCaptureStage = (checkinKind: MeetingCheckinKind): Geoloca
   return "checkin";
 };
 
+const resolveMissingNotarySessionAssets = (profile: NotaryProfileRecord | null) => {
+  const missingAssets: string[] = [];
+
+  if (!profile?.signatureDataUrl?.trim()) {
+    missingAssets.push("signature");
+  }
+
+  if (!profile?.sealDataUrl?.trim()) {
+    missingAssets.push("seal");
+  }
+
+  return missingAssets;
+};
+
+const ensureNotarySessionAssetsReady = async (input: {
+  assignedNotaryUserId: string;
+  res: Response;
+}) => {
+  const notaryProfile = await getNotaryProfileByUserId(input.assignedNotaryUserId);
+  const missingAssets = resolveMissingNotarySessionAssets(notaryProfile);
+
+  if (missingAssets.length === 0) {
+    return true;
+  }
+
+  input.res.status(409).json({
+    error: "conflict",
+    code: "notary_assets_required",
+    message: "Your illuminotary signature and seal must be set before starting an in-person session.",
+    details: {
+      missingAssets,
+    },
+  });
+  return false;
+};
+
 const syncDefaultMeetingParticipants = async (input: {
   meeting: MeetingRecord;
   ownerUserId: string;
@@ -1280,6 +1323,12 @@ const appendAcknowledgmentForRequest = async (input: {
     },
   });
   const acknowledgmentRender = result.execution.metadata.acknowledgmentRender ?? null;
+  const acknowledgmentPages = packageEntries(result.acknowledgmentPage, result.acknowledgmentPages);
+  const acknowledgmentExecutions = packageEntries(result.execution, result.executions);
+  const acknowledgmentVersions = packageEntries(result.version, result.versions);
+  const acknowledgmentRenders = acknowledgmentExecutions
+    .map((execution) => execution.metadata.acknowledgmentRender ?? null)
+    .filter(Boolean);
   const artifact = await createMeetingArtifact({
     meetingId: input.meeting.id,
     meetingParticipantId: notaryParticipant?.id ?? null,
@@ -1289,7 +1338,9 @@ const appendAcknowledgmentForRequest = async (input: {
     metadata: {
       requestId: input.request.id,
       acknowledgmentPageId: result.acknowledgmentPage.id,
+      acknowledgmentPageIds: acknowledgmentPages.map((page) => page.id),
       acknowledgmentRender,
+      acknowledgmentRenders,
       venue,
       venueCaptureArtifactId: venueCapture?.id ?? null,
       acknowledgment: input.signInput.acknowledgment,
@@ -1310,10 +1361,13 @@ const appendAcknowledgmentForRequest = async (input: {
       document_id: input.document.id,
       meeting_id: input.meeting.id,
       acknowledgment_page_id: result.acknowledgmentPage.id,
+      acknowledgment_page_ids: acknowledgmentPages.map((page) => page.id),
       document_version_id: result.version.id,
+      document_version_ids: acknowledgmentVersions.map((version) => version.id),
       seal_artifact_id: artifact.id,
       venue_capture_artifact_id: venueCapture?.id ?? null,
       acknowledgment_render: acknowledgmentRender,
+      acknowledgment_renders: acknowledgmentRenders,
     },
   });
 
@@ -1334,7 +1388,9 @@ const appendAcknowledgmentForRequest = async (input: {
       createdAt: result.acknowledgmentPage.created_at,
     },
     execution: mapFinalizationExecutionSummary(result.execution),
+    executions: acknowledgmentExecutions.map(mapFinalizationExecutionSummary),
     version: mapFinalizationVersionSummary(result.version),
+    versions: acknowledgmentVersions.map(mapFinalizationVersionSummary),
     venueCapture: venueCapture ? buildMeetingArtifactResponse(venueCapture) : null,
     sealArtifact: buildMeetingArtifactResponse(artifact),
   };
@@ -1357,7 +1413,17 @@ const submitFinalPackageForRequest = async (input: {
     actorSupabaseId: input.req.user?.id,
     actorRole: input.req.user?.role ?? null,
   });
-  const ledgerStatus = result.ledgerAnchorAttempt?.status ?? "anchored";
+  const watermarkExecutions = packageEntries(result.execution, result.executions);
+  const finalizedVersions = packageEntries(result.version, result.versions);
+  const hashRecords = packageEntries(result.hashRecord, result.hashRecords);
+  const ledgerEntries = packageEntries(result.ledgerEntry, result.ledgerEntries);
+  const ledgerAnchorAttempts = packageEntries(
+    result.ledgerAnchorAttempt,
+    result.ledgerAnchorAttempts,
+  );
+  const ledgerStatus = ledgerAnchorAttempts.some((attempt) => attempt?.status === "failed")
+    ? "failed"
+    : result.ledgerAnchorAttempt?.status ?? "anchored";
   const finalPackageStatus = buildFinalPackageStatusSummary({
     ledgerStatus,
     hashCompletedAt: result.hashRecord.completed_at,
@@ -1374,7 +1440,9 @@ const submitFinalPackageForRequest = async (input: {
       document_id: input.document.id,
       meeting_id: meeting.id,
       document_version_id: result.version.id,
+      document_version_ids: finalizedVersions.map((version) => version.id),
       ledger_entry_id: result.ledgerEntry.id,
+      ledger_entry_ids: ledgerEntries.map((entry) => entry.id),
       ledger_status: ledgerStatus,
       notes: input.submitInput.notes?.trim() ?? null,
     },
@@ -1392,7 +1460,9 @@ const submitFinalPackageForRequest = async (input: {
     requestId: result.request.id,
     requestStatus: result.request.status,
     execution: mapFinalizationExecutionSummary(result.execution),
+    executions: watermarkExecutions.map(mapFinalizationExecutionSummary),
     version: mapFinalizationVersionSummary(result.version),
+    versions: finalizedVersions.map(mapFinalizationVersionSummary),
     hashRecord: {
       id: result.hashRecord.id,
       algorithm: result.hashRecord.algorithm,
@@ -1400,6 +1470,13 @@ const submitFinalPackageForRequest = async (input: {
       status: result.hashRecord.status,
       completedAt: result.hashRecord.completed_at,
     },
+    hashRecords: hashRecords.map((hashRecord) => ({
+      id: hashRecord.id,
+      algorithm: hashRecord.algorithm,
+      hash: hashRecord.hash,
+      status: hashRecord.status,
+      completedAt: hashRecord.completed_at,
+    })),
     ledger: {
       id: result.ledgerEntry.id,
       ledgerTxId: result.ledgerEntry.ledger_tx_id,
@@ -1407,6 +1484,13 @@ const submitFinalPackageForRequest = async (input: {
       status: ledgerStatus,
       errorMessage: result.ledgerAnchorAttempt?.error_message ?? null,
     },
+    ledgers: ledgerEntries.map((ledgerEntry, index) => ({
+      id: ledgerEntry.id,
+      ledgerTxId: ledgerEntry.ledger_tx_id,
+      anchoredAt: ledgerEntry.anchored_at,
+      status: ledgerAnchorAttempts[index]?.status ?? ledgerStatus,
+      errorMessage: ledgerAnchorAttempts[index]?.error_message ?? null,
+    })),
     finalizationStatus: finalPackageStatus,
   };
 
@@ -3021,6 +3105,14 @@ export const startInPersonSession = async (req: Request, res: Response) => {
     });
   }
 
+  const sessionAssetsReady = await ensureNotarySessionAssetsReady({
+    assignedNotaryUserId: request.assigned_notary_id,
+    res,
+  });
+  if (!sessionAssetsReady) {
+    return;
+  }
+
   const recordedAt = parsed.data.recordedAt ?? new Date().toISOString();
   const meeting = existingMeeting ?? await createMeeting({
     requestId: request.id,
@@ -3242,6 +3334,16 @@ export const recordMeetingCheckin = async (req: Request, res: Response) => {
       error: "forbidden",
       message: "Member geolocation check-in must be captured from the member account",
     });
+  }
+
+  if (participantRole === "notary" && parsed.data.checkinKind === "meeting_start") {
+    const sessionAssetsReady = await ensureNotarySessionAssetsReady({
+      assignedNotaryUserId: request.assigned_notary_id,
+      res,
+    });
+    if (!sessionAssetsReady) {
+      return;
+    }
   }
 
   const participants = await syncDefaultMeetingParticipants({

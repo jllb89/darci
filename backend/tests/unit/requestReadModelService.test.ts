@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   listNotarizationRequestsMock: vi.fn(),
   getNotarizationRequestByIdMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
+  listDocumentGenerationRunsMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   buildDocumentWorkspaceSummaryMock: vi.fn(),
   getWorkspaceIdentitySummaryByUserIdMock: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("../../src/services/documentService", async () => {
     listNotarizationRequests: mocks.listNotarizationRequestsMock,
     getNotarizationRequestById: mocks.getNotarizationRequestByIdMock,
     getDocumentById: mocks.getDocumentByIdMock,
+    listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
     listDocumentVersions: mocks.listDocumentVersionsMock,
     listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
   };
@@ -127,6 +129,7 @@ describe("requestReadModelService", () => {
     mocks.listNotarizationRequestsMock.mockReset();
     mocks.getNotarizationRequestByIdMock.mockReset();
     mocks.getDocumentByIdMock.mockReset();
+    mocks.listDocumentGenerationRunsMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
     mocks.buildDocumentWorkspaceSummaryMock.mockReset();
     mocks.getWorkspaceIdentitySummaryByUserIdMock.mockReset();
@@ -146,6 +149,7 @@ describe("requestReadModelService", () => {
     mocks.listNotarizationRequestsMock.mockResolvedValue([]);
     mocks.getNotarizationRequestByIdMock.mockResolvedValue(null);
     mocks.getDocumentByIdMock.mockResolvedValue(null);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([]);
     mocks.listDocumentVersionsMock.mockResolvedValue([]);
     mocks.createDocumentDownloadUrlMock.mockResolvedValue({ signedUrl: "https://signed.example/document.pdf" });
     mocks.buildDocumentWorkspaceSummaryMock.mockResolvedValue({
@@ -507,6 +511,19 @@ describe("requestReadModelService", () => {
         created_by: "notary-db-1",
         created_at: "2026-04-22T10:20:00.000Z",
       },
+      {
+        id: "version-3",
+        document_id: "doc-1",
+        version: 3,
+        storage_path: "documents/doc-1/generated-signed-finalized-v3.pdf",
+        file_name: "generated-signed-finalized-v3.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 24567,
+        is_final: false,
+        generation_run_id: "generation-1",
+        created_by: "notary-db-1",
+        created_at: "2026-04-22T10:30:00.000Z",
+      },
     ]);
 
     const detail = await getSharedRequestDetail({
@@ -533,8 +550,8 @@ describe("requestReadModelService", () => {
         outputBundle: [{ outputKey: "poa", outputLabel: "POA" }],
         reviewDocuments: [
           {
-            id: "version-2",
-            label: "generated-signed.pdf",
+            id: "version-3",
+            label: "generated-signed-finalized-v3.pdf",
             downloadUrl: "https://signed.example/document.pdf",
           },
         ],
@@ -607,6 +624,97 @@ describe("requestReadModelService", () => {
         expect.objectContaining({ code: "awaiting_review" }),
       ]),
     );
+  });
+
+  it("labels shared package review documents from generation run output labels", async () => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: null,
+      assigned_notary_id: "notary-db-1",
+      status: "pending_notary",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "trust_bundle",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      selected_families: ["trust", "poa"],
+      output_bundle: [
+        { outputKey: "trust_certificate", outputLabel: "Certificate of Trust" },
+        { outputKey: "trust_rrr", outputLabel: "Trust Registration Amendment" },
+        { outputKey: "poa_document_tm2", outputLabel: "Power of Attorney - Mina Patel" },
+      ],
+      intake_status: "submitted",
+      intake_schema_version: "v1",
+      intake_last_saved_at: null,
+      intake_submitted_at: "2026-04-22T09:30:00.000Z",
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T09:30:00.000Z",
+    });
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      { id: "run-rrr", output_key: "trust_rrr" },
+      { id: "run-cert", output_key: "trust_certificate" },
+      { id: "run-poa-tm2", output_key: "poa_document_tm2" },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "version-cert",
+        document_id: "doc-1",
+        version: 3,
+        storage_path: "documents/doc-1/cert-finalized-v3.pdf",
+        file_name: "cert-finalized-v3.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 12345,
+        is_final: false,
+        generation_run_id: "run-cert",
+        created_by: "member-db-1",
+        created_at: "2026-04-22T09:35:00.000Z",
+      },
+      {
+        id: "version-rrr",
+        document_id: "doc-1",
+        version: 4,
+        storage_path: "documents/doc-1/rrr-finalized-v4.pdf",
+        file_name: "rrr-finalized-v4.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 23456,
+        is_final: false,
+        generation_run_id: "run-rrr",
+        created_by: "member-db-1",
+        created_at: "2026-04-22T09:36:00.000Z",
+      },
+      {
+        id: "version-poa-tm2",
+        document_id: "doc-1",
+        version: 5,
+        storage_path: "documents/doc-1/poa-trustmaker-2-finalized-v5.pdf",
+        file_name: "poa-trustmaker-2-finalized-v5.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 34567,
+        is_final: false,
+        generation_run_id: "run-poa-tm2",
+        created_by: "member-db-1",
+        created_at: "2026-04-22T09:37:00.000Z",
+      },
+    ]);
+
+    const detail = await getSharedRequestDetail({
+      requestId: "req-1",
+      role: "member",
+      viewerUserId: "member-db-1",
+    });
+
+    expect(detail?.document.reviewDocuments.map((document) => document.label)).toEqual([
+      "Certificate of Trust",
+      "Trust Registration Amendment",
+      "Power of Attorney - Mina Patel",
+    ]);
   });
 
   it("builds a shared request timeline for an authorized member", async () => {

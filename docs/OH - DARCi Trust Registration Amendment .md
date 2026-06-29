@@ -72,22 +72,3 @@ Trustee(s):
 | ----- | :---: | ----- | :---: | ----- | :---: | ----- |
 | \<\< Trustee1 \>\> |  | Date |  | \<\< Trustee2 \>\> |  | Date |
 
-**ACKNOWLEDGMENT CERTIFICATE** 
-
-**Signed: \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_** 
-
-**State of Ohio** 
-
-**County of\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_** 
-
-**The foregoing instrument was acknowledged before me on this \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ (date) by \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_    (name of person acknowledging).**  
-
-
-**(Notary Seal)     									 \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_**
-
-**Signature of Notary Public – State of Ohio** 
-
-**My commission expires: \_\_\_\_\_\_\_\_\_\_\_\_\_\_** 
-
-**(date)** 
-

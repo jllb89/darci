@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   listNotarizationRequestsMock: vi.fn(),
   getNotarizationRequestByIdMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
+  listDocumentsByIdsMock: vi.fn(),
+  listDocumentGenerationRunsMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
   buildDocumentWorkspaceSummaryMock: vi.fn(),
   getVerificationSnapshotForDocumentMock: vi.fn(),
@@ -33,6 +35,8 @@ vi.mock("../../src/services/documentService", async () => {
     listNotarizationRequests: mocks.listNotarizationRequestsMock,
     getNotarizationRequestById: mocks.getNotarizationRequestByIdMock,
     getDocumentById: mocks.getDocumentByIdMock,
+    listDocumentsByIds: mocks.listDocumentsByIdsMock,
+    listDocumentGenerationRuns: mocks.listDocumentGenerationRunsMock,
     listDocumentVersions: mocks.listDocumentVersionsMock,
   };
 });
@@ -119,6 +123,11 @@ describe("notaryWorkspaceReadModelService", () => {
     mocks.listNotarizationRequestsMock.mockResolvedValue([]);
     mocks.getNotarizationRequestByIdMock.mockResolvedValue(null);
     mocks.getDocumentByIdMock.mockResolvedValue(null);
+    mocks.listDocumentsByIdsMock.mockImplementation(async (documentIds: string[]) => {
+      const documents = await Promise.all(documentIds.map((documentId) => mocks.getDocumentByIdMock(documentId)));
+      return documents.filter((document) => document !== null);
+    });
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([]);
     mocks.listDocumentVersionsMock.mockResolvedValue([]);
     mocks.buildDocumentWorkspaceSummaryMock.mockResolvedValue({
       workflow: {
@@ -465,6 +474,48 @@ describe("notaryWorkspaceReadModelService", () => {
     });
   });
 
+  it("returns a degraded queue when document lookup temporarily fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.listNotarizationRequestsMock.mockResolvedValue([
+      {
+        id: "req-1",
+        document_id: "doc-1",
+        workflow_id: "wf-1",
+        assigned_notary_id: "notary-db-1",
+        status: "in_review",
+        submitted_at: "2026-04-22T10:00:00.000Z",
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
+    ]);
+    mocks.listDocumentsByIdsMock.mockRejectedValue(new Error("<html><h1>502 Bad Gateway</h1></html>"));
+
+    try {
+      const queue = await listNotaryQueue({
+        role: "notary",
+        viewerUserId: "notary-db-1",
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(queue.requests).toEqual([]);
+      expect(queue.meetings).toEqual([]);
+      expect(queue.counts).toEqual({
+        pending: 0,
+        scheduled: 0,
+        readyForInPerson: 0,
+        completed: 0,
+        total: 0,
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Notary workspace read model enrichment fallback used",
+        expect.objectContaining({ operation: "document_lookup", documentCount: 1 }),
+      );
+      expect(mocks.getIlluminotarizationWorkflowByIdMock).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("lists assigned notary queue requests when workflow lookup temporarily fails", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.listNotarizationRequestsMock.mockResolvedValue([
@@ -661,6 +712,97 @@ describe("notaryWorkspaceReadModelService", () => {
         canOpenVerification: true,
       },
     });
+  });
+
+  it("labels package review documents from generation run output labels", async () => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: "notary-db-1",
+      status: "in_review",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "completed",
+      document_type: "trust_bundle",
+      jurisdiction: "US-CA",
+      product_flow_mode: "trust_bundle",
+      selected_families: null,
+      output_bundle: [
+        { outputKey: "trust_certificate", outputLabel: "Certificate of Trust" },
+        { outputKey: "trust_rrr", outputLabel: "Trust Registration Amendment" },
+        { outputKey: "poa_document_tm1", outputLabel: "Power of Attorney - Jorge Lopez" },
+      ],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      { id: "run-cert", output_key: "trust_certificate" },
+      { id: "run-rrr", output_key: "trust_rrr" },
+      { id: "run-poa-tm1", output_key: "poa_document_tm1" },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-cert",
+        document_id: "doc-1",
+        version: 4,
+        storage_path: "documents/doc-1/trust-certificate-finalized-v4.pdf",
+        file_name: "trust-certificate-finalized-v4.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1234,
+        is_final: false,
+        generation_run_id: "run-cert",
+        created_by: null,
+        created_at: "2026-04-22T09:30:00.000Z",
+      },
+      {
+        id: "ver-rrr",
+        document_id: "doc-1",
+        version: 5,
+        storage_path: "documents/doc-1/trust-rrr-finalized-v5.pdf",
+        file_name: "trust-rrr-finalized-v5.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 2345,
+        is_final: false,
+        generation_run_id: "run-rrr",
+        created_by: null,
+        created_at: "2026-04-22T09:31:00.000Z",
+      },
+      {
+        id: "ver-poa-tm1",
+        document_id: "doc-1",
+        version: 6,
+        storage_path: "documents/doc-1/poa-trustmaker-1-finalized-v6.pdf",
+        file_name: "poa-trustmaker-1-finalized-v6.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 3456,
+        is_final: false,
+        generation_run_id: "run-poa-tm1",
+        created_by: null,
+        created_at: "2026-04-22T09:32:00.000Z",
+      },
+    ]);
+
+    const context = await getNotaryRequestContext({
+      requestId: "req-1",
+      role: "notary",
+      viewerUserId: "notary-db-1",
+    });
+
+    expect(context?.document.reviewDocuments.map((document) => document.label)).toEqual([
+      "Certificate of Trust",
+      "Trust Registration Amendment",
+      "Power of Attorney - Jorge Lopez",
+    ]);
   });
 
   it("gets notary request context when finalization history temporarily fails", async () => {
@@ -1014,7 +1156,7 @@ describe("notaryWorkspaceReadModelService", () => {
     expect(context).toBeNull();
   });
 
-  it("includes only signed PDF versions in notary review documents before finalization", async () => {
+  it("includes only signed and finalized PDF versions in notary review documents", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",
       document_id: "doc-1",
@@ -1081,6 +1223,19 @@ describe("notaryWorkspaceReadModelService", () => {
         created_by: null,
         created_at: "2026-04-22T09:50:00.000Z",
       },
+      {
+        id: "ver-finalized-1",
+        document_id: "doc-1",
+        version: 4,
+        storage_path: "documents/doc-1-signed-acknowledged-v3-finalized-v4.pdf",
+        file_name: "doc-1-signed-acknowledged-v3-finalized-v4.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1890,
+        is_final: false,
+        generation_run_id: "run-1",
+        created_by: null,
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
     ]);
 
     const context = await getNotaryRequestContext({
@@ -1090,12 +1245,12 @@ describe("notaryWorkspaceReadModelService", () => {
     });
 
     expect(context).not.toBeNull();
-    expect(context?.document.versions).toHaveLength(3);
+    expect(context?.document.versions).toHaveLength(4);
     expect(context?.document.reviewDocuments).toMatchObject([
       {
-        id: "ver-acknowledged-1",
-        versionId: "ver-acknowledged-1",
-        fileName: "doc-1-signed-acknowledged-v3.pdf",
+        id: "ver-finalized-1",
+        versionId: "ver-finalized-1",
+        fileName: "doc-1-signed-acknowledged-v3-finalized-v4.pdf",
         mimeType: "application/pdf",
         isFinal: false,
       },
