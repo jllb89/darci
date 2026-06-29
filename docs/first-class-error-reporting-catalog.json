@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-06-09",
+  "lastUpdated": "2026-06-29",
   "owners": {
     "backend-platform": {
       "label": "Backend platform on-call",
@@ -200,6 +200,16 @@
       "runbookAnchor": "#signing-and-notarization-family",
       "checks": ["Check the signing request generationRunId, documentId, and current document_generation_runs rows.", "Confirm the signer is not applying a stale browser state after a run was regenerated."],
       "mitigations": ["Have the user reload signing after generation repair completes.", "If the run was accidentally removed, regenerate the required output and invalidate stale signing state."]
+    },
+    {
+      "code": "GENERATION_SIGNATURE_LAYOUT_OVERLAP",
+      "family": "generation",
+      "severity": "P1",
+      "owner": "document-generation",
+      "alertRuleIds": ["p1-generation-template", "p1-signing-notarization"],
+      "runbookAnchor": "#generation-and-template-family",
+      "checks": ["Inspect issues in the Sentry details for signerId, executionDatePlacement, signatureRect, and page numbers.", "Regenerate the affected output locally and confirm execution-date and signature placements remain on the same page with visible spacing."],
+      "mitigations": ["Adjust the template spacing or renderer reservation rules, then regenerate the affected document output.", "If the issue is limited to one template/output, pause that output until a clean PDF can be generated."]
     },
     {
       "code": "SIGNING_FIELD_PLACEMENT_MISSING",
