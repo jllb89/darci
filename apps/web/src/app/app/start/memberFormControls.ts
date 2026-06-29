@@ -247,6 +247,7 @@ export type MemberFieldControlKind =
   | "number"
   | "date"
   | "person-contact"
+  | "address-autocomplete"
   | "select"
   | "checkbox-multi"
   | "repeatable-person-list"
@@ -307,6 +308,10 @@ export const isPersonContactField = (field: MemberFieldLike) => {
   return personContactFieldKeys.has(normalizeCanonicalKey(field.canonical_key));
 };
 
+export const isPersonAddressField = (field: MemberFieldLike) => {
+  return field.semantic_type === "person_address";
+};
+
 export const isStructuredPersonListField = (field: MemberFieldLike) => {
   if (field.data_type !== "array") {
     return false;
@@ -351,6 +356,10 @@ export const getMemberFieldControlKind = (
 
   if (isPersonContactField(field)) {
     return "person-contact";
+  }
+
+  if (isPersonAddressField(field)) {
+    return "address-autocomplete";
   }
 
   if (field.data_type === "object") {

@@ -12,11 +12,13 @@ import {
   listIdnJurisdictionsForType,
 } from "../controllers/idnController";
 import {
+  autocompleteMemberFormAddressByJurisdiction,
   getMemberFormDocumentExtractionByJurisdiction,
   getMemberFormRulesByJurisdiction,
   listServiceAreasByJurisdiction,
   listProductFlowModesForSelection,
   listMemberFormJurisdictionsForSelection,
+  resolveMemberFormAddressDetailsByJurisdiction,
   validateMemberFormSubmissionByJurisdiction,
 } from "../controllers/memberFormRulesController";
 import { requireRole } from "../middleware/roles";
@@ -81,6 +83,18 @@ router.get(
   "/member-form/:jurisdiction/document-extraction",
   requireRole(["member", "notary", "admin", "service_role"]),
   getMemberFormDocumentExtractionByJurisdiction,
+);
+
+router.post(
+  "/member-form/:jurisdiction/address-autocomplete",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  autocompleteMemberFormAddressByJurisdiction,
+);
+
+router.post(
+  "/member-form/:jurisdiction/address-details",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  resolveMemberFormAddressDetailsByJurisdiction,
 );
 
 router.get(

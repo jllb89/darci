@@ -184,18 +184,6 @@ const isActiveGenerationStatus = (value: string) => {
   );
 };
 
-const formatProductFlowModeLabel = (value: string | null | undefined) => {
-  if (!value) {
-    return null;
-  }
-
-  if (value === "poa_only") {
-    return "POA Only";
-  }
-
-  return formatLabel(value).replace(/\bPoa\b/g, "POA");
-};
-
 export default function ReviewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -776,9 +764,6 @@ export default function ReviewPage() {
     (payload?.review?.pendingOutputs ?? []).some((output) =>
       isActiveGenerationStatus(output.status),
     );
-  const selectedProductLabel = formatProductFlowModeLabel(
-    payload?.document?.productFlowMode ?? payload?.document?.documentType,
-  );
   const previewSourceUrl =
     previewUrl ?? (previewErrorMessage ? selectedOutput?.downloadUrl ?? null : null);
 
@@ -913,29 +898,16 @@ export default function ReviewPage() {
 
       <div className="space-y-6">
         <div
-          className="flex flex-wrap items-center gap-2"
-          style={{ animation: "darciContentFadeIn 220ms ease-out both" }}
-        >
-          <div className="text-xs font-regular text-Color-Neutral">Selected product:</div>
-          <div className="inline-flex w-fit items-center gap-2 rounded-full bg-black px-3 py-1.5">
-            <div className="text-xs font-medium text-white">
-              {selectedProductLabel ?? "Selected product"}
-            </div>
-          </div>
-        </div>
-
-        <div aria-hidden className="h-px w-full" />
-        <div
           className="sticky top-[-4rem] z-[500]"
           data-process-band-sticky-host
-          style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
+          style={{ animation: "darciContentFadeIn 220ms ease-out both" }}
         >
           <ProcessBand currentStep={payload?.review?.reviewApproval ? 3 : 2} />
         </div>
 
         <div
           className="relative z-0 grid gap-6 lg:grid-cols-[1fr_2fr]"
-          style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "120ms" }}
+          style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
         >
           <div
             className="relative z-0 space-y-6 overflow-visible lg:sticky lg:self-start"

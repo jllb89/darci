@@ -335,6 +335,17 @@ export default function AppSidebar({
   }, [isCollapsed]);
 
   useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--darci-start-layout-origin-offset",
+      isCollapsed ? "2.875rem" : "1.25rem",
+    );
+
+    return () => {
+      document.documentElement.style.removeProperty("--darci-start-layout-origin-offset");
+    };
+  }, [isCollapsed]);
+
+  useEffect(() => {
     if (!isCollapsed) {
       return;
     }

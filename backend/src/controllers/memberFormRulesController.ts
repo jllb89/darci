@@ -132,6 +132,11 @@ const stateAbbreviationByName: Record<string, string> = {
   "DISTRICT OF COLUMBIA": "DC",
 };
 
+const stateNameByAbbreviation: Record<string, string> = {};
+for (const [stateName, abbreviation] of Object.entries(stateAbbreviationByName)) {
+  stateNameByAbbreviation[abbreviation] = stateName;
+}
+
 const resolveStateAbbreviation = (jurisdiction: string) => {
   const normalized = jurisdiction.trim().toUpperCase();
   if (!normalized) {
@@ -343,6 +348,323 @@ const memberFormValidationSchema = z
     formValues: z.record(z.string(), memberFormValueSchema),
   })
   .passthrough();
+
+const addressAutocompleteSchema = z
+  .object({
+    input: z.string().trim().min(2).max(160),
+    sessionToken: z.string().max(128).optional(),
+  })
+  .passthrough();
+
+const addressDetailsSchema = z
+  .object({
+    placeId: z.string().trim().min(1).max(256),
+    sessionToken: z.string().max(128).optional(),
+  })
+  .passthrough();
+
+type GoogleAddressComponent = {
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+};
+
+type GoogleAddressPrediction = {
+  description?: string;
+  place_id?: string;
+  structured_formatting?: {
+    main_text?: string;
+    secondary_text?: string;
+  };
+  terms?: Array<{
+    value?: string;
+  }>;
+};
+
+type GooglePlaceDetailsResult = {
+  address_components?: GoogleAddressComponent[];
+  formatted_address?: string;
+  name?: string;
+  place_id?: string;
+};
+
+type MemberFormAddressSuggestion = {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+};
+
+export type NormalizedMemberFormAddress = {
+  line1: string;
+  line2: string;
+  city: string;
+  county: string;
+  state: string;
+  stateCode: string;
+  postalCode: string;
+  country: string;
+  formattedAddress: string;
+  normalizedAddress: string;
+};
+
+const normalizeAddressToken = (value: string) => {
+  return value.trim().toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
+};
+
+const escapeRegExp = (value: string) => {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const formatStateName = (abbreviation: string) => {
+  const stateName = stateNameByAbbreviation[abbreviation];
+  if (!stateName) {
+    return abbreviation;
+  }
+
+  return stateName.toLowerCase().replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+};
+
+const normalizeOptionalSessionToken = (value: string | undefined) => {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+export const predictionMatchesJurisdictionState = (
+  prediction: GoogleAddressPrediction,
+  stateCode: string,
+) => {
+  const normalizedStateCode = normalizeAddressToken(stateCode);
+  const normalizedStateName = stateNameByAbbreviation[normalizedStateCode] ?? "";
+  const normalizedTerms = (prediction.terms ?? [])
+    .map((term) => normalizeAddressToken(term.value ?? ""))
+    .filter(Boolean);
+
+  if (
+    normalizedTerms.some(
+      (term) => term === normalizedStateCode || term === normalizedStateName,
+    )
+  ) {
+    return true;
+  }
+
+  const normalizedDescription = normalizeAddressToken(prediction.description ?? "");
+  if (!normalizedDescription) {
+    return false;
+  }
+
+  const stateCodePattern = new RegExp(
+    `(?:^|[\\s,])${escapeRegExp(normalizedStateCode)}(?:[\\s,]|$)`,
+  );
+
+  return (
+    stateCodePattern.test(normalizedDescription) ||
+    (normalizedStateName.length > 0 && normalizedDescription.includes(normalizedStateName))
+  );
+};
+
+const findGoogleAddressComponent = (
+  components: GoogleAddressComponent[],
+  type: string,
+) => {
+  return components.find(
+    (component) => Array.isArray(component.types) && component.types.includes(type),
+  );
+};
+
+const componentLongName = (
+  components: GoogleAddressComponent[],
+  type: string,
+) => {
+  return findGoogleAddressComponent(components, type)?.long_name?.trim() ?? "";
+};
+
+const componentShortName = (
+  components: GoogleAddressComponent[],
+  type: string,
+) => {
+  return findGoogleAddressComponent(components, type)?.short_name?.trim() ?? "";
+};
+
+const normalizeCountyLabel = (value: string) => {
+  return value.replace(/\s+County$/i, "").trim();
+};
+
+export const normalizeGooglePlaceAddress = (
+  result: GooglePlaceDetailsResult,
+): NormalizedMemberFormAddress | null => {
+  const components = Array.isArray(result.address_components)
+    ? result.address_components
+    : [];
+  const formattedAddress = result.formatted_address?.trim() ?? "";
+  const streetNumber = componentLongName(components, "street_number");
+  const route = componentLongName(components, "route");
+  const subpremise = componentLongName(components, "subpremise");
+  const line1 =
+    [streetNumber, route].filter(Boolean).join(" ").trim() ||
+    formattedAddress.split(",")[0]?.trim() ||
+    result.name?.trim() ||
+    "";
+  const line2 = subpremise;
+  const city =
+    componentLongName(components, "locality") ||
+    componentLongName(components, "postal_town") ||
+    componentLongName(components, "sublocality_level_1") ||
+    componentLongName(components, "administrative_area_level_3");
+  const county = normalizeCountyLabel(componentLongName(components, "administrative_area_level_2"));
+  const state = componentLongName(components, "administrative_area_level_1");
+  const stateCode = componentShortName(components, "administrative_area_level_1").toUpperCase();
+  const postalCode = [
+    componentLongName(components, "postal_code"),
+    componentLongName(components, "postal_code_suffix"),
+  ]
+    .filter(Boolean)
+    .join("-");
+  const country = componentShortName(components, "country") || componentLongName(components, "country");
+
+  if (!line1 && !formattedAddress) {
+    return null;
+  }
+
+  const cityStatePostal = [stateCode, postalCode].filter(Boolean).join(" ").trim();
+  const normalizedAddress =
+    [
+      [line1, line2].filter(Boolean).join(", "),
+      city,
+      cityStatePostal,
+    ]
+      .filter(Boolean)
+      .join(", ") || formattedAddress;
+
+  return {
+    line1,
+    line2,
+    city,
+    county,
+    state,
+    stateCode,
+    postalCode,
+    country,
+    formattedAddress,
+    normalizedAddress,
+  };
+};
+
+const getGoogleMapsServerApiKey = () => {
+  return process.env.GOOGLE_MAPS_SERVER_API_KEY?.trim() ?? "";
+};
+
+const resolveJurisdictionStateForAddressLookup = (jurisdiction: string, res: Response) => {
+  const abbreviation = resolveStateAbbreviation(jurisdiction);
+  if (!abbreviation) {
+    res.status(400).json({
+      error: "validation_error",
+      message: "Unsupported jurisdiction format",
+    });
+    return null;
+  }
+
+  if (!stateFipsByAbbreviation[abbreviation]) {
+    res.status(400).json({
+      error: "validation_error",
+      message: "Jurisdiction is not a supported US state",
+    });
+    return null;
+  }
+
+  return abbreviation;
+};
+
+export const buildMemberFormAddressSuggestionsFromGeocodeResults = (
+  results: GooglePlaceDetailsResult[],
+  stateCode: string,
+): MemberFormAddressSuggestion[] => {
+  return results
+    .map((result) => {
+      const address = normalizeGooglePlaceAddress(result);
+      if (!address || address.stateCode !== stateCode) {
+        return null;
+      }
+
+      const description = address.formattedAddress || address.normalizedAddress;
+      if (!result.place_id || !description) {
+        return null;
+      }
+
+      const cityStatePostal = [
+        address.city,
+        [address.stateCode, address.postalCode].filter(Boolean).join(" "),
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      return {
+        placeId: result.place_id,
+        description,
+        mainText: address.line1 || description,
+        secondaryText: cityStatePostal,
+      };
+    })
+    .filter((suggestion): suggestion is MemberFormAddressSuggestion => Boolean(suggestion))
+    .slice(0, 5);
+};
+
+const fetchGoogleGeocodeResults = async (url: URL) => {
+  const response = await fetch(url.toString(), { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("Geocode request failed");
+  }
+
+  const payload = (await response.json()) as {
+    status?: string;
+    results?: GooglePlaceDetailsResult[];
+  };
+
+  if (payload.status === "ZERO_RESULTS") {
+    return [];
+  }
+
+  if (payload.status && payload.status !== "OK") {
+    throw new Error(`Geocode status ${payload.status}`);
+  }
+
+  return payload.results ?? [];
+};
+
+const fetchGoogleGeocodeAddressSuggestions = async ({
+  input,
+  stateCode,
+  googleMapsServerKey,
+}: {
+  input: string;
+  stateCode: string;
+  googleMapsServerKey: string;
+}) => {
+  const geocodeUrl = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  geocodeUrl.searchParams.set("address", input);
+  geocodeUrl.searchParams.set("components", `country:US|administrative_area:${stateCode}`);
+  geocodeUrl.searchParams.set("region", "us");
+  geocodeUrl.searchParams.set("key", googleMapsServerKey);
+
+  return buildMemberFormAddressSuggestionsFromGeocodeResults(
+    await fetchGoogleGeocodeResults(geocodeUrl),
+    stateCode,
+  );
+};
+
+const fetchGoogleGeocodeAddressByPlaceId = async ({
+  placeId,
+  googleMapsServerKey,
+}: {
+  placeId: string;
+  googleMapsServerKey: string;
+}) => {
+  const geocodeUrl = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  geocodeUrl.searchParams.set("place_id", placeId);
+  geocodeUrl.searchParams.set("key", googleMapsServerKey);
+
+  return (await fetchGoogleGeocodeResults(geocodeUrl))[0] ?? null;
+};
 
 const ensureAuthenticatedUser = (req: Request, res: Response) => {
   if (req.user?.id) {
@@ -705,6 +1027,223 @@ export const getMemberFormDocumentExtractionByJurisdiction = async (
         error instanceof Error
           ? error.message
           : "Failed to build member form document extraction payload",
+    });
+  }
+};
+
+export const autocompleteMemberFormAddressByJurisdiction = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!ensureAuthenticatedUser(req, res)) {
+    return;
+  }
+
+  if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
+    return sendJurisdictionRequiredError(res);
+  }
+
+  const parsedBody = addressAutocompleteSchema.safeParse(req.body ?? {});
+  if (!parsedBody.success) {
+    return sendValidationError(res, parsedBody.error);
+  }
+
+  const stateCode = resolveJurisdictionStateForAddressLookup(req.params.jurisdiction, res);
+  if (!stateCode) {
+    return;
+  }
+
+  const googleMapsServerKey = getGoogleMapsServerApiKey();
+  if (!googleMapsServerKey) {
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Address autocomplete service is not configured",
+    });
+  }
+
+  try {
+    const placesUrl = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
+    placesUrl.searchParams.set("input", parsedBody.data.input);
+    placesUrl.searchParams.set("types", "address");
+    placesUrl.searchParams.set("components", "country:us");
+    placesUrl.searchParams.set("language", "en");
+    placesUrl.searchParams.set("region", "us");
+    placesUrl.searchParams.set("key", googleMapsServerKey);
+
+    const sessionToken = normalizeOptionalSessionToken(parsedBody.data.sessionToken);
+    if (sessionToken) {
+      placesUrl.searchParams.set("sessiontoken", sessionToken);
+    }
+
+    let suggestions: MemberFormAddressSuggestion[] = [];
+
+    try {
+      const response = await fetch(placesUrl.toString(), { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Places autocomplete request failed");
+      }
+
+      const payload = (await response.json()) as {
+        status?: string;
+        predictions?: GoogleAddressPrediction[];
+      };
+
+      if (payload.status === "OK") {
+        suggestions = (payload.predictions ?? [])
+          .filter((prediction) => predictionMatchesJurisdictionState(prediction, stateCode))
+          .map((prediction) => ({
+            placeId: prediction.place_id ?? "",
+            description: prediction.description ?? "",
+            mainText: prediction.structured_formatting?.main_text ?? prediction.description ?? "",
+            secondaryText: prediction.structured_formatting?.secondary_text ?? "",
+          }))
+          .filter((suggestion) => suggestion.placeId && suggestion.description)
+          .slice(0, 5);
+      } else if (payload.status && payload.status !== "ZERO_RESULTS") {
+        console.warn("Member form Places autocomplete unavailable", {
+          status: payload.status,
+          jurisdiction: req.params.jurisdiction,
+        });
+      }
+    } catch (error) {
+      console.warn("Member form Places autocomplete request failed", {
+        jurisdiction: req.params.jurisdiction,
+        message: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+
+    if (suggestions.length === 0) {
+      suggestions = await fetchGoogleGeocodeAddressSuggestions({
+        input: parsedBody.data.input,
+        stateCode,
+        googleMapsServerKey,
+      });
+    }
+
+    return res.status(200).json({
+      jurisdiction: req.params.jurisdiction,
+      state: { code: stateCode, name: formatStateName(stateCode) },
+      suggestions,
+    });
+  } catch (error) {
+    console.error("Member form address autocomplete error:", error);
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Address autocomplete service is temporarily unavailable",
+    });
+  }
+};
+
+export const resolveMemberFormAddressDetailsByJurisdiction = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!ensureAuthenticatedUser(req, res)) {
+    return;
+  }
+
+  if (typeof req.params.jurisdiction !== "string" || !req.params.jurisdiction.trim()) {
+    return sendJurisdictionRequiredError(res);
+  }
+
+  const parsedBody = addressDetailsSchema.safeParse(req.body ?? {});
+  if (!parsedBody.success) {
+    return sendValidationError(res, parsedBody.error);
+  }
+
+  const stateCode = resolveJurisdictionStateForAddressLookup(req.params.jurisdiction, res);
+  if (!stateCode) {
+    return;
+  }
+
+  const googleMapsServerKey = getGoogleMapsServerApiKey();
+  if (!googleMapsServerKey) {
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Address details service is not configured",
+    });
+  }
+
+  try {
+    const detailsUrl = new URL("https://maps.googleapis.com/maps/api/place/details/json");
+    detailsUrl.searchParams.set("place_id", parsedBody.data.placeId);
+    detailsUrl.searchParams.set("fields", "address_component,formatted_address,name,place_id");
+    detailsUrl.searchParams.set("language", "en");
+    detailsUrl.searchParams.set("key", googleMapsServerKey);
+
+    const sessionToken = normalizeOptionalSessionToken(parsedBody.data.sessionToken);
+    if (sessionToken) {
+      detailsUrl.searchParams.set("sessiontoken", sessionToken);
+    }
+
+    let result: GooglePlaceDetailsResult | null = null;
+
+    try {
+      const response = await fetch(detailsUrl.toString(), { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Places details request failed");
+      }
+
+      const payload = (await response.json()) as {
+        status?: string;
+        result?: GooglePlaceDetailsResult;
+      };
+
+      if (payload.status === "OK") {
+        result = payload.result ?? null;
+      } else if (payload.status && payload.status !== "ZERO_RESULTS" && payload.status !== "NOT_FOUND") {
+        console.warn("Member form Places details unavailable", {
+          status: payload.status,
+          jurisdiction: req.params.jurisdiction,
+        });
+      }
+    } catch (error) {
+      console.warn("Member form Places details request failed", {
+        jurisdiction: req.params.jurisdiction,
+        message: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+
+    if (!result) {
+      result = await fetchGoogleGeocodeAddressByPlaceId({
+        placeId: parsedBody.data.placeId,
+        googleMapsServerKey,
+      });
+    }
+
+    if (!result) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Address was not found",
+      });
+    }
+
+    const address = normalizeGooglePlaceAddress(result);
+    if (!address) {
+      return res.status(422).json({
+        error: "validation_error",
+        message: "Google did not return a usable address for this place",
+      });
+    }
+
+    if (address.stateCode !== stateCode) {
+      return res.status(422).json({
+        error: "validation_error",
+        message: `Address must be in ${formatStateName(stateCode)} (${stateCode})`,
+      });
+    }
+
+    return res.status(200).json({
+      jurisdiction: req.params.jurisdiction,
+      state: { code: stateCode, name: formatStateName(stateCode) },
+      placeId: result.place_id ?? parsedBody.data.placeId,
+      address,
+    });
+  } catch (error) {
+    console.error("Member form address details error:", error);
+    return res.status(503).json({
+      error: "service_unavailable",
+      message: "Address details service is temporarily unavailable",
     });
   }
 };

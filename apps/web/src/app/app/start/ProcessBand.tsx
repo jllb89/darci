@@ -94,6 +94,12 @@ export default function ProcessBand({ currentStep = 1 }: ProcessBandProps) {
       nearestScrollRoot instanceof HTMLElement ? nearestScrollRoot : document.documentElement;
 
     const updateStickyMetrics = () => {
+      if (!window.matchMedia("(min-width: 1024px)").matches) {
+        stickyMetricTarget.style.setProperty("--darci-process-band-height", "0px");
+        stickyMetricTarget.style.setProperty("--darci-process-band-follow-offset", "1.5rem");
+        return;
+      }
+
       const bandHeight = band.getBoundingClientRect().height;
       const followOffset = Math.max(
         STICKY_CONTENT_GAP_PX,

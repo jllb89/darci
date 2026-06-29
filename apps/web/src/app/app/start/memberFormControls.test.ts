@@ -59,6 +59,18 @@ describe("memberFormControls", () => {
     expect(getMemberFieldControlKind(principalContactField, [])).toBe("person-contact");
   });
 
+  it("maps person address fields to address autocomplete controls", () => {
+    const principalAddressField = buildField({
+      canonical_key: "principal_address",
+      data_type: "string",
+      semantic_type: "person_address",
+    });
+
+    expect(getMemberFieldControlKind(principalAddressField, [])).toBe(
+      "address-autocomplete",
+    );
+  });
+
   it("keeps successor-agent person list fields as repeatable text list controls", () => {
     const successorAgentsField = buildField({
       canonical_key: "successor_agent_list",

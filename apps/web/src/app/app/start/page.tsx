@@ -121,6 +121,50 @@ type ContractSelectOption = {
   label: string;
 };
 
+type AddressAutocompleteSuggestion = {
+  placeId: string;
+  description: string;
+  mainText?: string;
+  secondaryText?: string;
+};
+
+type AddressAutocompleteState = {
+  activeFieldKey: string | null;
+  query: string;
+  suggestions: AddressAutocompleteSuggestion[];
+  isLoading: boolean;
+  error: string | null;
+};
+
+type AddressAutocompleteResponsePayload = {
+  suggestions?: AddressAutocompleteSuggestion[];
+  message?: string;
+};
+
+type AddressDetailsResponsePayload = {
+  address?: {
+    formattedAddress?: string;
+    normalizedAddress?: string;
+  };
+  message?: string;
+};
+
+const emptyAddressAutocompleteState = (): AddressAutocompleteState => ({
+  activeFieldKey: null,
+  query: "",
+  suggestions: [],
+  isLoading: false,
+  error: null,
+});
+
+const createAddressSessionToken = () => {
+  if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
 function ContractSelectControl({
   value,
   placeholder,
@@ -927,6 +971,9 @@ export default function StartDocumentPage() {
   const [memberForm, setMemberForm] = useState<MemberFormRulesContract | null>(null);
   const [formValues, setFormValues] = useState<Record<string, FormValue>>({});
   const [blurredInputKeys, setBlurredInputKeys] = useState<Set<string>>(() => new Set());
+  const [addressAutocompleteState, setAddressAutocompleteState] =
+    useState<AddressAutocompleteState>(() => emptyAddressAutocompleteState());
+  const [resolvingAddressFieldKey, setResolvingAddressFieldKey] = useState<string | null>(null);
 
   const [isLoadingJurisdictions, setIsLoadingJurisdictions] = useState(false);
   const [isLoadingMemberForm, setIsLoadingMemberForm] = useState(false);
@@ -957,6 +1004,7 @@ export default function StartDocumentPage() {
   const draftRevisionRef = useRef<number | null>(null);
   const draftSaveTimerRef = useRef<number | null>(null);
   const draftSaveQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const addressSessionTokensRef = useRef<Record<string, string>>({});
 
   const syncDraftDocumentId = useCallback((nextDraftDocumentId: string | null) => {
     draftDocumentIdRef.current = nextDraftDocumentId;
@@ -975,6 +1023,17 @@ export default function StartDocumentPage() {
     }
 
     draftSaveQueueRef.current = Promise.resolve(true);
+  }, []);
+
+  const getAddressAutocompleteSessionToken = useCallback((fieldKey: string) => {
+    const existingToken = addressSessionTokensRef.current[fieldKey];
+    if (existingToken) {
+      return existingToken;
+    }
+
+    const nextToken = createAddressSessionToken();
+    addressSessionTokensRef.current[fieldKey] = nextToken;
+    return nextToken;
   }, []);
 
   const selectedJurisdictionLabel = useMemo(() => {
@@ -1105,6 +1164,118 @@ export default function StartDocumentPage() {
     isLoadingMemberForm ||
     !memberForm;
   const isActiveSourceToggleDisabled = isLoadingMemberForm || !memberForm;
+
+  useEffect(() => {
+    const activeFieldKey = addressAutocompleteState.activeFieldKey;
+    const query = addressAutocompleteState.query.trim();
+
+    if (!activeFieldKey || !selectedJurisdiction || !accessToken || query.length < 3) {
+      setAddressAutocompleteState((current) => {
+        if (!current.isLoading && current.suggestions.length === 0 && !current.error) {
+          return current;
+        }
+
+        return {
+          ...current,
+          suggestions: [],
+          isLoading: false,
+          error: null,
+        };
+      });
+      return;
+    }
+
+    let isCancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      setAddressAutocompleteState((current) => {
+        if (current.activeFieldKey !== activeFieldKey || current.query.trim() !== query) {
+          return current;
+        }
+
+        return {
+          ...current,
+          isLoading: true,
+          error: null,
+        };
+      });
+
+      try {
+        const response = await fetchWithTokenRefresh(
+          `${apiBaseUrl}/rules/member-form/${encodeURIComponent(selectedJurisdiction)}/address-autocomplete`,
+          accessToken,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              input: query,
+              sessionToken: getAddressAutocompleteSessionToken(activeFieldKey),
+            }),
+          },
+        );
+        const payload = (await response.json().catch(() => null)) as
+          | AddressAutocompleteResponsePayload
+          | null;
+
+        if (!response.ok) {
+          throw new Error(payload?.message ?? "Address lookup failed.");
+        }
+
+        if (isCancelled) {
+          return;
+        }
+
+        setAddressAutocompleteState((current) => {
+          if (current.activeFieldKey !== activeFieldKey || current.query.trim() !== query) {
+            return current;
+          }
+
+          return {
+            ...current,
+            suggestions: payload?.suggestions ?? [],
+            isLoading: false,
+            error: null,
+          };
+        });
+      } catch (error) {
+        captureAppException(error, {
+          level: "warning",
+          tags: {
+            feature: "member_form_address_autocomplete",
+            jurisdiction: selectedJurisdiction,
+          },
+          fingerprint: ["member_form_address_autocomplete", "lookup_failed"],
+        });
+
+        if (isCancelled) {
+          return;
+        }
+
+        setAddressAutocompleteState((current) => {
+          if (current.activeFieldKey !== activeFieldKey || current.query.trim() !== query) {
+            return current;
+          }
+
+          return {
+            ...current,
+            suggestions: [],
+            isLoading: false,
+            error: "Address lookup is unavailable. You can keep typing the address manually.",
+          };
+        });
+      }
+    }, 260);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    accessToken,
+    addressAutocompleteState.activeFieldKey,
+    addressAutocompleteState.query,
+    getAddressAutocompleteSessionToken,
+    selectedJurisdiction,
+  ]);
 
   const queueDraftSave = useCallback(
     (snapshot: DraftSaveSnapshot) => {
@@ -3365,10 +3536,16 @@ export default function StartDocumentPage() {
     setErrorMessage(null);
     setSubmissionErrorMessage(null);
     setShowContinueValidationDetails(false);
+    setAddressAutocompleteState(emptyAddressAutocompleteState());
+    setResolvingAddressFieldKey(null);
+    addressSessionTokensRef.current = {};
   };
 
   const applyJurisdictionSelection = (nextJurisdiction: string) => {
     setSelectedJurisdiction(nextJurisdiction);
+    setAddressAutocompleteState(emptyAddressAutocompleteState());
+    setResolvingAddressFieldKey(null);
+    addressSessionTokensRef.current = {};
 
     if (!nextJurisdiction) {
       setIsMockDataEnabled(false);
@@ -3440,6 +3617,81 @@ export default function StartDocumentPage() {
       ...current,
       [key]: value,
     }));
+  };
+
+  const handleAddressSuggestionSelect = async (
+    field: MemberFacingField,
+    suggestion: AddressAutocompleteSuggestion,
+  ) => {
+    if (!accessToken || !selectedJurisdiction) {
+      handleFieldChange(field.canonical_key, suggestion.description);
+      setAddressAutocompleteState(emptyAddressAutocompleteState());
+      return;
+    }
+
+    setResolvingAddressFieldKey(field.canonical_key);
+    setAddressAutocompleteState((current) => ({
+      ...current,
+      activeFieldKey: field.canonical_key,
+      query: suggestion.description,
+      suggestions: [],
+      error: null,
+    }));
+
+    try {
+      const response = await fetchWithTokenRefresh(
+        `${apiBaseUrl}/rules/member-form/${encodeURIComponent(selectedJurisdiction)}/address-details`,
+        accessToken,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placeId: suggestion.placeId,
+            sessionToken: getAddressAutocompleteSessionToken(field.canonical_key),
+          }),
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | AddressDetailsResponsePayload
+        | null;
+
+      if (!response.ok || !payload?.address) {
+        throw new Error(payload?.message ?? "Address normalization failed.");
+      }
+
+      const normalizedAddress =
+        payload.address.normalizedAddress?.trim() ||
+        payload.address.formattedAddress?.trim() ||
+        suggestion.description;
+
+      handleFieldChange(field.canonical_key, normalizedAddress);
+      setAddressAutocompleteState(emptyAddressAutocompleteState());
+      delete addressSessionTokensRef.current[field.canonical_key];
+    } catch (error) {
+      captureAppException(error, {
+        level: "warning",
+        tags: {
+          feature: "member_form_address_details",
+          jurisdiction: selectedJurisdiction,
+        },
+        fingerprint: ["member_form_address_autocomplete", "details_failed"],
+      });
+
+      setAddressAutocompleteState((current) => ({
+        ...current,
+        activeFieldKey: field.canonical_key,
+        query: suggestion.description,
+        suggestions: [],
+        error:
+          error instanceof Error
+            ? error.message
+            : "Address normalization failed. You can keep typing the address manually.",
+      }));
+    } finally {
+      setResolvingAddressFieldKey((current) => {
+        return current === field.canonical_key ? null : current;
+      });
+    }
   };
 
   const markInputBlurred = (inputKey: string) => {
@@ -3770,6 +4022,105 @@ export default function StartDocumentPage() {
               </div>
             </div>
           </div>
+        </div>
+      );
+    }
+
+    if (controlKind === "address-autocomplete") {
+      const inputValue = typeof fieldValue === "string" ? fieldValue : "";
+      const isActiveAddressField = addressAutocompleteState.activeFieldKey === field.canonical_key;
+      const suggestions = isActiveAddressField ? addressAutocompleteState.suggestions : [];
+      const isResolvingAddress = resolvingAddressFieldKey === field.canonical_key;
+      const shouldShowAddressMenu =
+        isActiveAddressField && (suggestions.length > 0 || addressAutocompleteState.isLoading);
+
+      return (
+        <div className="relative space-y-1">
+          <input
+            autoComplete="street-address"
+            className={baseInputClassName}
+            maxLength={getNumberConstraint(field, "maxLength")}
+            minLength={getNumberConstraint(field, "minLength")}
+            onBlur={() => {
+              window.setTimeout(() => {
+                setAddressAutocompleteState((current) => {
+                  if (current.activeFieldKey !== field.canonical_key) {
+                    return current;
+                  }
+
+                  return {
+                    ...current,
+                    suggestions: [],
+                    isLoading: false,
+                  };
+                });
+              }, 140);
+            }}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              handleFieldChange(field.canonical_key, nextValue);
+              setAddressAutocompleteState({
+                activeFieldKey: field.canonical_key,
+                query: nextValue,
+                suggestions: [],
+                isLoading: false,
+                error: null,
+              });
+            }}
+            onFocus={() => {
+              setAddressAutocompleteState((current) => {
+                if (current.activeFieldKey === field.canonical_key) {
+                  return current;
+                }
+
+                return {
+                  activeFieldKey: field.canonical_key,
+                  query: inputValue,
+                  suggestions: [],
+                  isLoading: false,
+                  error: null,
+                };
+              });
+            }}
+            placeholder="Start typing an address"
+            type="text"
+            value={inputValue}
+          />
+
+          {shouldShowAddressMenu ? (
+            <div className="absolute left-0 right-0 top-full z-[800] mt-1 max-h-64 overflow-y-auto rounded-md border border-Color-Scheme-1-Border/40 bg-white py-1 shadow-xl">
+              {addressAutocompleteState.isLoading ? (
+                <div className="px-3 py-2 text-xs text-Color-Neutral">Looking up addresses...</div>
+              ) : (
+                suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.placeId}
+                    className="block w-full px-3 py-2 text-left text-sm transition hover:bg-Color-Neutral-Lightest"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      void handleAddressSuggestionSelect(field, suggestion);
+                    }}
+                    type="button"
+                  >
+                    <span className="block truncate font-medium text-Color-Scheme-1-Text">
+                      {suggestion.mainText || suggestion.description}
+                    </span>
+                    {suggestion.secondaryText ? (
+                      <span className="block truncate text-xs text-Color-Neutral">
+                        {suggestion.secondaryText}
+                      </span>
+                    ) : null}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {isResolvingAddress ? (
+            <div className="px-1 text-xs text-Color-Neutral">Normalizing address...</div>
+          ) : addressAutocompleteState.error && isActiveAddressField ? (
+            <div className="px-1 text-xs text-amber-800">{addressAutocompleteState.error}</div>
+          ) : null}
         </div>
       );
     }
@@ -4807,6 +5158,9 @@ export default function StartDocumentPage() {
   const startPageSubtitle = isProductSelectionStep
     ? "Select a product based on your needs."
     : "Fill in your details to generate your document. You\'ll review, sign and finalize it securely.";
+  const contractLayoutGridClassName = shouldRenderDocumentsColumn
+    ? "relative z-0 grid gap-6 lg:w-fit lg:grid-cols-[minmax(0,44rem)_minmax(18rem,22rem)] lg:justify-start lg:[margin-left:max(0px,calc((100%_-_67.5rem)/4_-_var(--darci-start-layout-origin-offset,1.25rem)))]"
+    : "relative z-0 grid gap-6 lg:w-fit lg:grid-cols-[minmax(0,44rem)] lg:justify-start lg:[margin-left:max(0px,calc((100%_-_44rem)/4_-_var(--darci-start-layout-origin-offset,1.25rem)))]";
 
   return (
     <div className="space-y-8">
@@ -4857,9 +5211,9 @@ export default function StartDocumentPage() {
             </div>
           </div>
 
-          <div aria-hidden className="h-px w-full" />
+          <div aria-hidden className="hidden h-px w-full lg:block" />
           <div
-            className="sticky top-[-4rem] z-[500]"
+            className="sticky top-[-4rem] z-[500] hidden lg:block"
             data-process-band-sticky-host
             style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
           >
@@ -4867,7 +5221,7 @@ export default function StartDocumentPage() {
           </div>
 
           <div
-            className="relative z-0 grid gap-6 lg:grid-cols-[2fr_1fr]"
+            className={contractLayoutGridClassName}
             style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "120ms" }}
           >
             <div className="space-y-6">
@@ -5096,12 +5450,6 @@ export default function StartDocumentPage() {
                 <div className="text-sm text-Color-Neutral">Loading document requirements...</div>
               ) : memberForm ? (
                 <div className="space-y-4">
-                  {documentsColumnHasPriorDocumentItems ? (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                      Documents to Include is required before review. Start with the originating trust agreement or declaration, then add amendments and supporting records in date order.
-                    </div>
-                  ) : null}
-
                   {shouldShowUploadColumn && documentsColumnFields.length > 0 ? (
                     documentsColumnFields.map((field) => {
                       const fieldMicrocopy = getFieldMicrocopy(field.canonical_key);
