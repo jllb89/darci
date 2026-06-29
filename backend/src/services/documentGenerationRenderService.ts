@@ -91,6 +91,9 @@ const HEADING_LINE_GAP = 3.1;
 const TITLE_LINE_GAP = 3.4;
 const NOTICE_LINE_GAP = 1.8;
 const FINE_PRINT_LINE_GAP = 1.3;
+const SIGNATURE_BLOCK_RESERVED_HEIGHT = 96;
+const EXECUTION_DATE_SIGNATURE_GROUP_RESERVED_HEIGHT = 132;
+const SIGNATURE_LAYOUT_MIN_GAP = 4;
 const ACKNOWLEDGMENT_SIGNATURE_MAX_WIDTH = 132;
 const ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT = 42;
 const PDF_POINTS_PER_INCH = 72;
@@ -149,6 +152,7 @@ type SignatureFieldRect = {
 };
 
 type ExecutionDatePlacement = {
+  pageNumber?: number;
   lineRect?: SignatureFieldRect;
   dayRect?: SignatureFieldRect;
   monthRect?: SignatureFieldRect;
@@ -482,6 +486,7 @@ const parseExecutionDatePlacement = (value: unknown): ExecutionDatePlacement | n
     return null;
   }
 
+  const pageNumber = value.pageNumber;
   const lineRect = parseSignatureFieldRect(value.lineRect);
   const dayRect = parseSignatureFieldRect(value.dayRect);
   const monthRect = parseSignatureFieldRect(value.monthRect);
@@ -492,6 +497,7 @@ const parseExecutionDatePlacement = (value: unknown): ExecutionDatePlacement | n
   }
 
   return {
+    ...(isFiniteNumber(pageNumber) ? { pageNumber } : {}),
     ...(lineRect ? { lineRect } : {}),
     ...(dayRect ? { dayRect } : {}),
     ...(monthRect ? { monthRect } : {}),
@@ -988,6 +994,7 @@ const drawExecutionDateLine = (
   document: PdfDocument,
   text: string,
   profile: TextRenderProfile,
+  pageNumber: number,
 ) => {
   const match = matchExecutionDateLine(text);
   if (!match) {
@@ -1009,6 +1016,7 @@ const drawExecutionDateLine = (
   });
 
   return {
+    pageNumber,
     lineRect: {
       x: startX,
       y: rectY,
@@ -1240,6 +1248,17 @@ const ensurePageSpace = (document: PdfDocument, minHeight = 72) => {
   if (document.y + minHeight > pageBottom) {
     document.addPage();
   }
+};
+
+const getNextMeaningfulTemplateBlock = (blocks: TemplateBlock[], startIndex: number) => {
+  for (let index = startIndex + 1; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (block && block.kind !== "blank") {
+      return block;
+    }
+  }
+
+  return null;
 };
 
 const normalizeTemplateLine = (value: string) => {
@@ -2326,7 +2345,12 @@ const renderTemplateBlocks = (
   };
   let pendingExecutionDatePlacement: ExecutionDatePlacement | null = null;
 
-  for (const block of blocks) {
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (!block) {
+      continue;
+    }
+
     if (block.kind === "blank") {
       document.moveDown(0.76);
       continue;
@@ -2369,8 +2393,17 @@ const renderTemplateBlocks = (
     }
 
     if (block.kind === "executionDate") {
-      ensurePageSpace(document, 42);
-      pendingExecutionDatePlacement = drawExecutionDateLine(document, block.text, bodyProfile);
+      const nextBlock = getNextMeaningfulTemplateBlock(blocks, index);
+      ensurePageSpace(
+        document,
+        nextBlock?.kind === "signature" ? EXECUTION_DATE_SIGNATURE_GROUP_RESERVED_HEIGHT : 42,
+      );
+      pendingExecutionDatePlacement = drawExecutionDateLine(
+        document,
+        block.text,
+        bodyProfile,
+        options?.getCurrentPageNumber?.() ?? 1,
+      );
       continue;
     }
 
@@ -2390,7 +2423,7 @@ const renderTemplateBlocks = (
     }
 
     if (block.kind === "signature") {
-      ensurePageSpace(document, 96);
+      ensurePageSpace(document, SIGNATURE_BLOCK_RESERVED_HEIGHT);
       const executionDatePlacement = pendingExecutionDatePlacement;
       pendingExecutionDatePlacement = null;
       drawDigitalSignatureField(document, block.text, block.includeDate, fonts, {
@@ -2423,6 +2456,82 @@ const renderTemplateBlocks = (
       lineGap: BODY_LINE_GAP,
     });
   }
+};
+
+const getExecutionDatePlacementRects = (placement: ExecutionDatePlacement) => {
+  return [placement.lineRect, placement.dayRect, placement.monthRect, placement.yearRect].filter(
+    (rect): rect is SignatureFieldRect => Boolean(rect),
+  );
+};
+
+export const validateSignaturePlacementLayout = (
+  placements: Map<string, SignatureFieldPlacement>,
+) => {
+  const issues: Array<Record<string, unknown>> = [];
+
+  for (const [signerId, placement] of placements.entries()) {
+    const executionDatePlacement = placement.executionDatePlacement;
+    if (!executionDatePlacement) {
+      continue;
+    }
+
+    if (
+      isFiniteNumber(executionDatePlacement.pageNumber) &&
+      executionDatePlacement.pageNumber !== placement.pageNumber
+    ) {
+      issues.push({
+        signerId,
+        reason: "execution_date_signature_page_split",
+        signaturePageNumber: placement.pageNumber,
+        executionDatePageNumber: executionDatePlacement.pageNumber,
+      });
+      continue;
+    }
+
+    const executionDateRects = getExecutionDatePlacementRects(executionDatePlacement);
+    const overlapsSignatureField = executionDateRects.some(
+      (rect) => rect.y + rect.height + SIGNATURE_LAYOUT_MIN_GAP > placement.signatureRect.y,
+    );
+
+    if (overlapsSignatureField) {
+      issues.push({
+        signerId,
+        reason: "execution_date_signature_overlap",
+        signatureRect: placement.signatureRect,
+        executionDatePlacement,
+      });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new DomainError({
+      code: "GENERATION_SIGNATURE_LAYOUT_OVERLAP",
+      family: "generation",
+      message: "Generated signature and execution-date layout would overlap or split across pages",
+      details: {
+        issues,
+      },
+    });
+  }
+};
+
+const canStampExecutionDatePlacement = (placement: SignatureFieldPlacement) => {
+  const executionDatePlacement = placement.executionDatePlacement;
+  if (!executionDatePlacement) {
+    return false;
+  }
+
+  if (isFiniteNumber(executionDatePlacement.pageNumber)) {
+    return true;
+  }
+
+  const executionDateRects = getExecutionDatePlacementRects(executionDatePlacement);
+  return (
+    executionDateRects.length > 0 &&
+    executionDateRects.every(
+      (rect) => rect.y + rect.height + SIGNATURE_LAYOUT_MIN_GAP <= placement.signatureRect.y,
+    )
+  );
 };
 
 const buildAcknowledgmentAppendixTemplate = (acknowledgmentContent: string) => {
@@ -2724,6 +2833,7 @@ const buildRenderedPdf = async (input: {
       signaturePlacements.set(signer.id, placement);
     },
   });
+  validateSignaturePlacementLayout(signaturePlacements);
 
   pdf.end();
 
@@ -3022,13 +3132,16 @@ const stampSignatureOnPdf = async (input: {
     });
   }
 
-  if (input.placement.executionDatePlacement) {
+  if (input.placement.executionDatePlacement && canStampExecutionDatePlacement(input.placement)) {
     const executionDateParts = formatExecutionDatePartsForLine(executionDateSource);
     if (executionDateParts) {
       const dateLineFont = await pdf.embedFont(StandardFonts.Helvetica);
+      const executionDatePageNumber = input.placement.executionDatePlacement.pageNumber ?? input.placement.pageNumber;
+      const executionDatePage = pages[executionDatePageNumber - 1] ?? page;
+
       if (input.placement.executionDatePlacement.lineRect) {
         drawExecutionDateLineInRect({
-          page,
+          page: executionDatePage,
           rect: input.placement.executionDatePlacement.lineRect,
           dateParts: executionDateParts,
           font: dateLineFont,
@@ -3039,19 +3152,19 @@ const stampSignatureOnPdf = async (input: {
         input.placement.executionDatePlacement.yearRect
       ) {
         drawTextInRect({
-          page,
+          page: executionDatePage,
           rect: input.placement.executionDatePlacement.dayRect,
           text: executionDateParts.day,
           font: dateLineFont,
         });
         drawTextInRect({
-          page,
+          page: executionDatePage,
           rect: input.placement.executionDatePlacement.monthRect,
           text: executionDateParts.month,
           font: dateLineFont,
         });
         drawTextInRect({
-          page,
+          page: executionDatePage,
           rect: input.placement.executionDatePlacement.yearRect,
           text: executionDateParts.year,
           font: dateLineFont,

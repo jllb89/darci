@@ -3182,9 +3182,15 @@ export default function NotaryRequestWorkspacePage() {
                       <CompletionStep done={isAnchored} label="Ledger anchored" />
                       <CompletionStep done={isVerificationReady} label="Verification ready" />
                     </div>
-                    <div className="mt-3 grid gap-1 break-words">
-                      <div>Hash: {context.finalization.hash ?? "-"}</div>
-                      <div>Ledger TX: {context.finalization.ledgerTxId ?? "-"}</div>
+                    <div className="mt-3 grid min-w-0 gap-1">
+                      <div className="min-w-0">
+                        <span className="font-medium text-Color-Scheme-1-Text">Hash: </span>
+                        <span className="font-mono break-all text-[11px] leading-5">{context.finalization.hash ?? "-"}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="font-medium text-Color-Scheme-1-Text">Ledger TX: </span>
+                        <span className="font-mono break-all text-[11px] leading-5">{context.finalization.ledgerTxId ?? "-"}</span>
+                      </div>
                       <div>Anchored: {formatDateTime(context.finalization.anchoredAt)}</div>
                       <div>Last checked: {formatDateTime(context.finalization.lastCheckedAt)}</div>
                     </div>

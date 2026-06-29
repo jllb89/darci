@@ -7055,6 +7055,38 @@ const completeSignatureCapture = async (input: {
   };
 };
 
+const resolveCompletedSignatureCaptureRetry = async (input: {
+  document: DocumentRecord;
+  generationRunId: string;
+  outputSignerId: string;
+  signerUserId: string;
+}) => {
+  if (!postSigningReadableStatuses.has(input.document.status ?? "")) {
+    return null;
+  }
+
+  const existingSignatures = await listDocumentSignatures({
+    documentId: input.document.id,
+    generationRunId: input.generationRunId,
+    documentOutputSignerId: input.outputSignerId,
+  });
+  const existingSignature = existingSignatures.find(
+    (signature) =>
+      signature.signer_id === input.signerUserId &&
+      signature.status === "captured" &&
+      Boolean(signature.captured_at),
+  );
+
+  if (!existingSignature) {
+    return null;
+  }
+
+  return {
+    ...(await mapCapturedSignatureResponse(existingSignature)),
+    retryResolved: true,
+  };
+};
+
 export const captureSignature = async (req: Request, res: Response) => {
   const parsed = signatureCaptureSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -7066,6 +7098,18 @@ export const captureSignature = async (req: Request, res: Response) => {
     return;
   }
   const { document } = signingAccess;
+
+  if (document.status !== "pending_signature") {
+    const retryResponse = await resolveCompletedSignatureCaptureRetry({
+      document,
+      generationRunId: parsed.data.generationRunId,
+      outputSignerId: parsed.data.outputSignerId,
+      signerUserId: signingAccess.signerUserId,
+    });
+    if (retryResponse) {
+      return res.status(200).json(retryResponse);
+    }
+  }
 
   if (!ensureDocumentReadyForSignature(res, document)) {
     return;

@@ -898,7 +898,7 @@ export default function ReviewPage() {
 
       <div className="space-y-6">
         <div
-          className="sticky top-[-4rem] z-[500]"
+          className="sticky top-[-4rem] z-[500] hidden xl:block"
           data-process-band-sticky-host
           style={{ animation: "darciContentFadeIn 220ms ease-out both" }}
         >

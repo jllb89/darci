@@ -9,6 +9,7 @@ import {
   PREVIEW_WATERMARK_TEXT,
   renderLegalTemplateText,
   stripRenderControlTokens,
+  validateSignaturePlacementLayout,
 } from "../../src/services/documentGenerationRenderService";
 
 describe("documentGenerationRenderService", () => {
@@ -713,6 +714,73 @@ describe("documentGenerationRenderService", () => {
     });
     expect(formatExecutionDatePartsForLine("2026-06-12T15:30:00.000Z")?.day).toBe("12th");
     expect(formatExecutionDatePartsForLine("not-a-date")).toBeNull();
+  });
+
+  it("accepts generated execution-date and signature placements with clear spacing", () => {
+    expect(() =>
+      validateSignaturePlacementLayout(
+        new Map([
+          [
+            "signer-1",
+            {
+              pageNumber: 4,
+              label: "Morgan Principal",
+              includeDate: false,
+              signatureRect: { x: 54, y: 184, width: 504, height: 40 },
+              dateRect: null,
+              executionDatePlacement: {
+                pageNumber: 4,
+                lineRect: { x: 54, y: 148, width: 504, height: 18 },
+              },
+            },
+          ],
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects generated execution-date placements that split or overlap the signature block", () => {
+    expect(() =>
+      validateSignaturePlacementLayout(
+        new Map([
+          [
+            "signer-1",
+            {
+              pageNumber: 4,
+              label: "Morgan Principal",
+              includeDate: false,
+              signatureRect: { x: 54, y: 184, width: 504, height: 40 },
+              dateRect: null,
+              executionDatePlacement: {
+                pageNumber: 3,
+                lineRect: { x: 54, y: 148, width: 504, height: 18 },
+              },
+            },
+          ],
+        ]),
+      ),
+    ).toThrow(/overlap or split/);
+
+    expect(() =>
+      validateSignaturePlacementLayout(
+        new Map([
+          [
+            "signer-1",
+            {
+              pageNumber: 4,
+              label: "Morgan Principal",
+              includeDate: false,
+              signatureRect: { x: 54, y: 184, width: 504, height: 40 },
+              dateRect: null,
+              executionDatePlacement: {
+                pageNumber: 4,
+                lineRect: { x: 54, y: 180, width: 504, height: 18 },
+              },
+            },
+          ],
+        ]),
+      ),
+    ).toThrow(/overlap or split/);
   });
 
   it("classifies California acknowledgment body text as fine print", () => {

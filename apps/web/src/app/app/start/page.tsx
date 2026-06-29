@@ -5211,9 +5211,9 @@ export default function StartDocumentPage() {
             </div>
           </div>
 
-          <div aria-hidden className="hidden h-px w-full lg:block" />
+          <div aria-hidden className="hidden h-px w-full xl:block" />
           <div
-            className="sticky top-[-4rem] z-[500] hidden lg:block"
+            className="sticky top-[-4rem] z-[500] hidden xl:block"
             data-process-band-sticky-host
             style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
           >

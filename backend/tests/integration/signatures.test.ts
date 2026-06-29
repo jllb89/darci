@@ -547,6 +547,73 @@ describe("member signature capture", () => {
     );
   });
 
+  it("treats repeated signature capture after signing completion as idempotent", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_notary",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      {
+        id: "sig-existing",
+        document_id: "doc-1",
+        generation_run_id: generationRunId,
+        document_output_signer_id: outputSignerId,
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: null,
+        capture_method: "type",
+        typed_value: "Owner One",
+        typed_kind: "name",
+        mime_type: null,
+        size_bytes: null,
+        status: "captured",
+        metadata: { savedSignatureId: "saved-1" },
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
+      },
+    ]);
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/signatures",
+      {
+        ...signatureTargetPayload,
+        captureMethod: "saved",
+        savedSignatureId: "saved-1",
+      },
+      "retries completed signature capture",
+      token,
+    );
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        retryResolved: true,
+        signature: expect.objectContaining({
+          id: "sig-existing",
+          outputSignerId,
+          status: "captured",
+        }),
+      }),
+    );
+    expect(mocks.createSignatureRecordMock).not.toHaveBeenCalled();
+    expect(mocks.applySignatureCaptureToDocumentOutputMock).not.toHaveBeenCalled();
+  });
+
   it("lists saved signatures when an older saved asset is missing", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.getDocumentByIdMock.mockResolvedValue({

@@ -2,42 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildMemberFormAddressSuggestionsFromGeocodeResults,
   normalizeGooglePlaceAddress,
-  predictionMatchesJurisdictionState,
 } from "../../src/controllers/memberFormRulesController.ts";
 
 describe("member form address helpers", () => {
-  it("keeps autocomplete predictions scoped to the selected jurisdiction state", () => {
-    expect(
-      predictionMatchesJurisdictionState(
-        {
-          description: "123 Market St, San Francisco, CA, USA",
-          terms: [
-            { value: "123 Market St" },
-            { value: "San Francisco" },
-            { value: "CA" },
-            { value: "USA" },
-          ],
-        },
-        "CA",
-      ),
-    ).toBe(true);
-
-    expect(
-      predictionMatchesJurisdictionState(
-        {
-          description: "123 Market St, San Francisco, CA, USA",
-          terms: [
-            { value: "123 Market St" },
-            { value: "San Francisco" },
-            { value: "CA" },
-            { value: "USA" },
-          ],
-        },
-        "OH",
-      ),
-    ).toBe(false);
-  });
-
   it("normalizes Google place details into a stable final address string", () => {
     const address = normalizeGooglePlaceAddress({
       formatted_address: "123 Market St Apt 4, San Francisco, CA 94105, USA",
@@ -70,7 +37,7 @@ describe("member form address helpers", () => {
     });
   });
 
-  it("builds state-scoped autocomplete suggestions from geocode results", () => {
+  it("builds US-scoped autocomplete suggestions from geocode results across states", () => {
     const suggestions = buildMemberFormAddressSuggestionsFromGeocodeResults(
       [
         {
@@ -97,8 +64,19 @@ describe("member form address helpers", () => {
             { long_name: "United States", short_name: "US", types: ["country"] },
           ],
         },
+        {
+          place_id: "ca-non-us-place",
+          formatted_address: "123 Market St, Toronto, ON M5E 1C3, Canada",
+          address_components: [
+            { long_name: "123", short_name: "123", types: ["street_number"] },
+            { long_name: "Market Street", short_name: "Market St", types: ["route"] },
+            { long_name: "Toronto", short_name: "Toronto", types: ["locality"] },
+            { long_name: "Ontario", short_name: "ON", types: ["administrative_area_level_1"] },
+            { long_name: "M5E 1C3", short_name: "M5E 1C3", types: ["postal_code"] },
+            { long_name: "Canada", short_name: "CA", types: ["country"] },
+          ],
+        },
       ],
-      "CA",
     );
 
     expect(suggestions).toEqual([
@@ -107,6 +85,12 @@ describe("member form address helpers", () => {
         description: "123 Market St, San Francisco, CA 94105, USA",
         mainText: "123 Market Street",
         secondaryText: "San Francisco, CA 94105",
+      },
+      {
+        placeId: "oh-place",
+        description: "123 Market St, Columbus, OH 43215, USA",
+        mainText: "123 Market Street",
+        secondaryText: "Columbus, OH 43215",
       },
     ]);
   });

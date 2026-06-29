@@ -132,11 +132,6 @@ const stateAbbreviationByName: Record<string, string> = {
   "DISTRICT OF COLUMBIA": "DC",
 };
 
-const stateNameByAbbreviation: Record<string, string> = {};
-for (const [stateName, abbreviation] of Object.entries(stateAbbreviationByName)) {
-  stateNameByAbbreviation[abbreviation] = stateName;
-}
-
 const resolveStateAbbreviation = (jurisdiction: string) => {
   const normalized = jurisdiction.trim().toUpperCase();
   if (!normalized) {
@@ -408,59 +403,9 @@ export type NormalizedMemberFormAddress = {
   normalizedAddress: string;
 };
 
-const normalizeAddressToken = (value: string) => {
-  return value.trim().toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
-};
-
-const escapeRegExp = (value: string) => {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-};
-
-const formatStateName = (abbreviation: string) => {
-  const stateName = stateNameByAbbreviation[abbreviation];
-  if (!stateName) {
-    return abbreviation;
-  }
-
-  return stateName.toLowerCase().replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
-};
-
 const normalizeOptionalSessionToken = (value: string | undefined) => {
   const trimmed = value?.trim() ?? "";
   return trimmed.length > 0 ? trimmed : undefined;
-};
-
-export const predictionMatchesJurisdictionState = (
-  prediction: GoogleAddressPrediction,
-  stateCode: string,
-) => {
-  const normalizedStateCode = normalizeAddressToken(stateCode);
-  const normalizedStateName = stateNameByAbbreviation[normalizedStateCode] ?? "";
-  const normalizedTerms = (prediction.terms ?? [])
-    .map((term) => normalizeAddressToken(term.value ?? ""))
-    .filter(Boolean);
-
-  if (
-    normalizedTerms.some(
-      (term) => term === normalizedStateCode || term === normalizedStateName,
-    )
-  ) {
-    return true;
-  }
-
-  const normalizedDescription = normalizeAddressToken(prediction.description ?? "");
-  if (!normalizedDescription) {
-    return false;
-  }
-
-  const stateCodePattern = new RegExp(
-    `(?:^|[\\s,])${escapeRegExp(normalizedStateCode)}(?:[\\s,]|$)`,
-  );
-
-  return (
-    stateCodePattern.test(normalizedDescription) ||
-    (normalizedStateName.length > 0 && normalizedDescription.includes(normalizedStateName))
-  );
 };
 
 const findGoogleAddressComponent = (
@@ -554,35 +499,23 @@ const getGoogleMapsServerApiKey = () => {
   return process.env.GOOGLE_MAPS_SERVER_API_KEY?.trim() ?? "";
 };
 
-const resolveJurisdictionStateForAddressLookup = (jurisdiction: string, res: Response) => {
-  const abbreviation = resolveStateAbbreviation(jurisdiction);
-  if (!abbreviation) {
-    res.status(400).json({
-      error: "validation_error",
-      message: "Unsupported jurisdiction format",
-    });
-    return null;
-  }
-
-  if (!stateFipsByAbbreviation[abbreviation]) {
-    res.status(400).json({
-      error: "validation_error",
-      message: "Jurisdiction is not a supported US state",
-    });
-    return null;
-  }
-
-  return abbreviation;
+const isUnitedStatesAddress = (address: NormalizedMemberFormAddress) => {
+  const country = address.country.trim().toUpperCase().replace(/\./g, "");
+  return (
+    country === "US" ||
+    country === "USA" ||
+    country === "UNITED STATES" ||
+    country === "UNITED STATES OF AMERICA"
+  );
 };
 
 export const buildMemberFormAddressSuggestionsFromGeocodeResults = (
   results: GooglePlaceDetailsResult[],
-  stateCode: string,
 ): MemberFormAddressSuggestion[] => {
   return results
     .map((result) => {
       const address = normalizeGooglePlaceAddress(result);
-      if (!address || address.stateCode !== stateCode) {
+      if (!address || !isUnitedStatesAddress(address)) {
         return null;
       }
 
@@ -633,22 +566,19 @@ const fetchGoogleGeocodeResults = async (url: URL) => {
 
 const fetchGoogleGeocodeAddressSuggestions = async ({
   input,
-  stateCode,
   googleMapsServerKey,
 }: {
   input: string;
-  stateCode: string;
   googleMapsServerKey: string;
 }) => {
   const geocodeUrl = new URL("https://maps.googleapis.com/maps/api/geocode/json");
   geocodeUrl.searchParams.set("address", input);
-  geocodeUrl.searchParams.set("components", `country:US|administrative_area:${stateCode}`);
+  geocodeUrl.searchParams.set("components", "country:US");
   geocodeUrl.searchParams.set("region", "us");
   geocodeUrl.searchParams.set("key", googleMapsServerKey);
 
   return buildMemberFormAddressSuggestionsFromGeocodeResults(
     await fetchGoogleGeocodeResults(geocodeUrl),
-    stateCode,
   );
 };
 
@@ -1048,11 +978,6 @@ export const autocompleteMemberFormAddressByJurisdiction = async (
     return sendValidationError(res, parsedBody.error);
   }
 
-  const stateCode = resolveJurisdictionStateForAddressLookup(req.params.jurisdiction, res);
-  if (!stateCode) {
-    return;
-  }
-
   const googleMapsServerKey = getGoogleMapsServerApiKey();
   if (!googleMapsServerKey) {
     return res.status(503).json({
@@ -1090,7 +1015,6 @@ export const autocompleteMemberFormAddressByJurisdiction = async (
 
       if (payload.status === "OK") {
         suggestions = (payload.predictions ?? [])
-          .filter((prediction) => predictionMatchesJurisdictionState(prediction, stateCode))
           .map((prediction) => ({
             placeId: prediction.place_id ?? "",
             description: prediction.description ?? "",
@@ -1115,14 +1039,13 @@ export const autocompleteMemberFormAddressByJurisdiction = async (
     if (suggestions.length === 0) {
       suggestions = await fetchGoogleGeocodeAddressSuggestions({
         input: parsedBody.data.input,
-        stateCode,
         googleMapsServerKey,
       });
     }
 
     return res.status(200).json({
       jurisdiction: req.params.jurisdiction,
-      state: { code: stateCode, name: formatStateName(stateCode) },
+      country: "US",
       suggestions,
     });
   } catch (error) {
@@ -1149,11 +1072,6 @@ export const resolveMemberFormAddressDetailsByJurisdiction = async (
   const parsedBody = addressDetailsSchema.safeParse(req.body ?? {});
   if (!parsedBody.success) {
     return sendValidationError(res, parsedBody.error);
-  }
-
-  const stateCode = resolveJurisdictionStateForAddressLookup(req.params.jurisdiction, res);
-  if (!stateCode) {
-    return;
   }
 
   const googleMapsServerKey = getGoogleMapsServerApiKey();
@@ -1226,16 +1144,16 @@ export const resolveMemberFormAddressDetailsByJurisdiction = async (
       });
     }
 
-    if (address.stateCode !== stateCode) {
+    if (!isUnitedStatesAddress(address)) {
       return res.status(422).json({
         error: "validation_error",
-        message: `Address must be in ${formatStateName(stateCode)} (${stateCode})`,
+        message: "Address must be in the United States",
       });
     }
 
     return res.status(200).json({
       jurisdiction: req.params.jurisdiction,
-      state: { code: stateCode, name: formatStateName(stateCode) },
+      country: "US",
       placeId: result.place_id ?? parsedBody.data.placeId,
       address,
     });
