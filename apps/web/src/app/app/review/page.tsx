@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
-import { formatLabel } from "@/app/app/start/startPageUtils";
 import { useAppToast } from "@/components/app/AppToastContext";
 import {
   addFeatureBreadcrumb,

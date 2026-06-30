@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   queueInPersonSessionStartedNotificationMock: vi.fn(),
   runDueNotificationJobsMock: vi.fn(),
+  getNotaryProfileByUserIdMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -87,6 +88,14 @@ vi.mock("../../src/services/notificationService", async (importOriginal) => {
 vi.mock("../../src/services/notificationOutboxService", () => ({
   runDueNotificationJobs: mocks.runDueNotificationJobsMock,
 }));
+
+vi.mock("../../src/services/notaryProfileService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/notaryProfileService")>();
+  return {
+    ...actual,
+    getNotaryProfileByUserId: mocks.getNotaryProfileByUserIdMock,
+  };
+});
 
 import { app } from "../../src/index";
 
@@ -255,6 +264,20 @@ describe("Phase 5 meeting runtime slice", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.getNotaryProfileByUserIdMock.mockResolvedValue({
+      id: "notary-profile-1",
+      userId: "11111111-1111-1111-1111-111111111111",
+      jurisdiction: "US-OH",
+      serviceAreaKind: "county",
+      serviceAreaName: "Cuyahoga County",
+      commissionNumber: "OH-12345",
+      commissionExpiresAt: "2028-05-27T00:00:00.000Z",
+      sealStoragePath: null,
+      signatureDataUrl: "data:image/png;base64,aGVsbG8=",
+      sealDataUrl: "data:image/png;base64,aGVsbG8=",
+      createdAt: "2026-05-27T14:00:00.000Z",
+      updatedAt: "2026-05-27T14:00:00.000Z",
+    });
   });
 
   it("creates a meeting proposal and seeds default participants", async () => {

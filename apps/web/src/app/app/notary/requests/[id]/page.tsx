@@ -1611,7 +1611,7 @@ export default function NotaryRequestWorkspacePage() {
     { table: "document_hash_records", filter: buildRealtimeEqualsFilter("document_id", context?.document.id) },
   ];
 
-  const realtimeState = useRequestRealtimeInvalidation({
+  useRequestRealtimeInvalidation({
     enabled: Boolean(accessToken && requestId),
     accessToken,
     refreshToken,

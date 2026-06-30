@@ -398,7 +398,7 @@ export default function RequestWorkspacePage() {
     { table: "document_hash_records", filter: buildRealtimeEqualsFilter("document_id", payload?.document.id) },
   ];
 
-  const realtimeState = useRequestRealtimeInvalidation({
+  useRequestRealtimeInvalidation({
     enabled: Boolean(accessToken && requestId),
     accessToken,
     refreshToken,

@@ -45,7 +45,8 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
   const bandRef = useRef<HTMLDivElement | null>(null);
   const isCompactRef = useRef(forceCompact);
   const expandedBandHeightRef = useRef(0);
-  const [isCompact, setIsCompact] = useState(forceCompact);
+  const [isCompact, setIsCompact] = useState(false);
+  const effectiveIsCompact = forceCompact || isCompact;
 
   const safeCurrentStep = Math.min(
     Math.max(Math.round(currentStep), 1),
@@ -54,17 +55,8 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
   const progressLineWidth = (safeCurrentStep / PROCESS_STEPS.length) * 100;
 
   useEffect(() => {
-    isCompactRef.current = isCompact;
-  }, [isCompact]);
-
-  useEffect(() => {
-    if (!forceCompact) {
-      return;
-    }
-
-    isCompactRef.current = true;
-    setIsCompact(true);
-  }, [forceCompact]);
+    isCompactRef.current = effectiveIsCompact;
+  }, [effectiveIsCompact]);
 
   useEffect(() => {
     const band = bandRef.current;
@@ -191,7 +183,7 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
       <div
         ref={bandRef}
         className={`relative isolate z-[910] transition-[background-color,box-shadow,border-radius] ${
-          isCompact
+          effectiveIsCompact
             ? "bg-Color-Neutral-Lightest shadow-[0_8px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm"
             : ""
         }`}
@@ -202,7 +194,7 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
       >
         <div
           className={`relative flex flex-col border-Color-Scheme-1-Border lg:flex-row ${
-            isCompact ? "" : "border-t"
+            effectiveIsCompact ? "" : "border-t"
           }`}
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px]">
@@ -223,7 +215,7 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
               <div
                 key={item.title}
                 className={`flex-1 border-Color-Scheme-1-Border transition-[padding,border-color,background-color] ${
-                  isCompact ? "px-3 py-3" : "px-4 py-8"
+                  effectiveIsCompact ? "px-3 py-3" : "px-4 py-8"
                 } ${
                   index < PROCESS_STEPS.length - 1 ? "border-b lg:border-b-0 lg:border-r" : ""
                 } ${
@@ -239,7 +231,7 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
                 <div className="flex h-full flex-col gap-2">
                   <div
                     className={`relative h-12 w-12 shrink-0 origin-top overflow-hidden transition-[opacity,max-height,transform] ${
-                      isCompact
+                      effectiveIsCompact
                         ? "max-h-0 -translate-y-1 opacity-0 pointer-events-none"
                         : "max-h-12 translate-y-0 opacity-100"
                     }`}
@@ -257,7 +249,7 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
                   <div className="flex flex-col overflow-hidden">
                     <div
                       className={`font-display font-medium leading-tight tracking-tight transition-[color,font-size] ${
-                        isCompact ? "text-sm md:text-[15px]" : "text-base md:text-lg"
+                        effectiveIsCompact ? "text-sm md:text-[15px]" : "text-base md:text-lg"
                       } ${
                         isActive ? "text-Color-Scheme-1-Text" : "text-Color-Neutral"
                       }`}
