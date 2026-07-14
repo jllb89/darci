@@ -124,7 +124,23 @@ final class DARCiMobileUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Welcome to DARCi."].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["New document"].waitForExistence(timeout: 5))
+        let powerOfAttorneyCard = app.buttons["home-product-card-poa_only"]
+        XCTAssertTrue(powerOfAttorneyCard.waitForExistence(timeout: 5))
+        powerOfAttorneyCard.tap()
+        XCTAssertTrue(app.staticTexts["New power of attorney."].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+
+        let trustCard = app.buttons["home-product-card-trust_bundle"]
+        XCTAssertTrue(trustCard.waitForExistence(timeout: 5))
+        trustCard.tap()
+        XCTAssertTrue(app.staticTexts["New trust package."].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+
+        let notarizationCard = app.buttons["home-product-card-notarize_document"]
+        XCTAssertTrue(notarizationCard.waitForExistence(timeout: 5))
+        notarizationCard.tap()
+        XCTAssertTrue(app.staticTexts["New document notarization."].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
 
         let profileButton = app.buttons["Member"]
         XCTAssertTrue(profileButton.waitForExistence(timeout: 5))

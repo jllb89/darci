@@ -367,6 +367,7 @@ type GoogleAddressComponent = {
 type GoogleAddressPrediction = {
   description?: string;
   place_id?: string;
+  types?: string[];
   structured_formatting?: {
     main_text?: string;
     secondary_text?: string;
@@ -381,6 +382,7 @@ type GooglePlaceDetailsResult = {
   formatted_address?: string;
   name?: string;
   place_id?: string;
+  types?: string[];
 };
 
 type MemberFormAddressSuggestion = {
@@ -388,6 +390,7 @@ type MemberFormAddressSuggestion = {
   description: string;
   mainText: string;
   secondaryText: string;
+  types: string[];
 };
 
 export type NormalizedMemberFormAddress = {
@@ -509,11 +512,62 @@ const isUnitedStatesAddress = (address: NormalizedMemberFormAddress) => {
   );
 };
 
+const addressOnlyGoogleTypes = new Set(["street_address", "premise", "subpremise"]);
+const nonAddressGoogleTypes = new Set([
+  "administrative_area_level_1",
+  "administrative_area_level_2",
+  "administrative_area_level_3",
+  "country",
+  "locality",
+  "political",
+]);
+
+const hasAddressOnlyGoogleType = (types: string[] | undefined) => {
+  return (types ?? []).some((type) => addressOnlyGoogleTypes.has(type));
+};
+
+const hasNonAddressGoogleType = (types: string[] | undefined) => {
+  return (types ?? []).some((type) => nonAddressGoogleTypes.has(type));
+};
+
+const hasStreetAddressComponents = (components: GoogleAddressComponent[]) => {
+  return Boolean(
+    findGoogleAddressComponent(components, "street_number")
+      && findGoogleAddressComponent(components, "route"),
+  );
+};
+
+const isAddressOnlyPlaceResult = (result: GooglePlaceDetailsResult) => {
+  if (hasAddressOnlyGoogleType(result.types)) {
+    return true;
+  }
+
+  if (hasNonAddressGoogleType(result.types)) {
+    return false;
+  }
+
+  return hasStreetAddressComponents(
+    Array.isArray(result.address_components) ? result.address_components : [],
+  );
+};
+
+const isAddressOnlyPrediction = (prediction: GoogleAddressPrediction) => {
+  if (hasAddressOnlyGoogleType(prediction.types)) {
+    return true;
+  }
+
+  return !hasNonAddressGoogleType(prediction.types);
+};
+
 export const buildMemberFormAddressSuggestionsFromGeocodeResults = (
   results: GooglePlaceDetailsResult[],
 ): MemberFormAddressSuggestion[] => {
   return results
     .map((result) => {
+      if (!isAddressOnlyPlaceResult(result)) {
+        return null;
+      }
+
       const address = normalizeGooglePlaceAddress(result);
       if (!address || !isUnitedStatesAddress(address)) {
         return null;
@@ -536,6 +590,7 @@ export const buildMemberFormAddressSuggestionsFromGeocodeResults = (
         description,
         mainText: address.line1 || description,
         secondaryText: cityStatePostal,
+        types: result.types ?? [],
       };
     })
     .filter((suggestion): suggestion is MemberFormAddressSuggestion => Boolean(suggestion))
@@ -1015,11 +1070,13 @@ export const autocompleteMemberFormAddressByJurisdiction = async (
 
       if (payload.status === "OK") {
         suggestions = (payload.predictions ?? [])
+          .filter(isAddressOnlyPrediction)
           .map((prediction) => ({
             placeId: prediction.place_id ?? "",
             description: prediction.description ?? "",
             mainText: prediction.structured_formatting?.main_text ?? prediction.description ?? "",
             secondaryText: prediction.structured_formatting?.secondary_text ?? "",
+            types: prediction.types ?? [],
           }))
           .filter((suggestion) => suggestion.placeId && suggestion.description)
           .slice(0, 5);

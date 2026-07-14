@@ -3,19 +3,26 @@ import SwiftUI
 struct HomeView: View {
     private let designSize = CGSize(width: 440, height: 956)
     private let session: AuthSession?
+    private let onProductSelected: (HomeProductCard) -> Void
     private let onProfileAction: () -> Void
 
     @StateObject private var viewModel: HomeViewModel
+    @Binding private var selectedProductModeKey: String?
     @State private var visibleGroupCount = 0
+    @State private var entranceAnimationID = UUID()
 
     init(
         session: AuthSession? = nil,
         viewModel: HomeViewModel = HomeViewModel(),
+        selectedProductModeKey: Binding<String?> = .constant(nil),
+        onProductSelected: @escaping (HomeProductCard) -> Void = { _ in },
         onProfileAction: @escaping () -> Void = {}
     ) {
         self.session = session
+        self.onProductSelected = onProductSelected
         self.onProfileAction = onProfileAction
         _viewModel = StateObject(wrappedValue: viewModel)
+        _selectedProductModeKey = selectedProductModeKey
     }
 
     var body: some View {
@@ -32,18 +39,13 @@ struct HomeView: View {
                         .padding(.horizontal, scaled(33, in: proxy))
                         .homeRevealOrder(1, visibleGroupCount: visibleGroupCount)
 
-                    newDocumentHeader(in: proxy)
-                        .padding(.top, scaled(42, in: proxy))
-                        .padding(.horizontal, scaled(14, in: proxy))
-                        .homeRevealOrder(2, visibleGroupCount: visibleGroupCount)
-
                     productStatus(in: proxy)
-                        .padding(.top, scaled(10, in: proxy))
+                        .padding(.top, scaled(34, in: proxy))
                         .padding(.horizontal, scaled(14, in: proxy))
                         .homeRevealOrder(2, visibleGroupCount: visibleGroupCount)
 
                     productGrid(in: proxy)
-                        .padding(.top, scaled(12, in: proxy))
+                        .padding(.top, scaled(34, in: proxy))
                         .padding(.horizontal, scaled(14, in: proxy))
                         .padding(.bottom, scaled(64, in: proxy))
                         .homeRevealOrder(3, visibleGroupCount: visibleGroupCount, verticalOffset: 14)
@@ -60,6 +62,7 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: session?.accessToken) {
             await viewModel.loadProducts(for: session)
+            clearUnavailableProductSelection()
         }
         .onAppear(perform: startEntranceAnimation)
     }
@@ -103,22 +106,6 @@ struct HomeView: View {
             .accessibilityIdentifier("home-welcome-title")
     }
 
-    private func newDocumentHeader(in proxy: GeometryProxy) -> some View {
-        HStack(spacing: scaled(14, in: proxy)) {
-            HomeResourceIconGlyph(icon: .new)
-                .stroke(.black, style: StrokeStyle(lineWidth: 2, lineCap: .butt, lineJoin: .miter))
-                .frame(width: scaled(25, in: proxy), height: scaled(25, in: proxy))
-                .accessibilityHidden(true)
-
-            Text("New document")
-                .font(DARCiFont.maisonNeue(.book, size: 15))
-                .lineSpacing(19.5)
-                .foregroundStyle(Color(red: 0.19, green: 0.19, blue: 0.19))
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("home-new-document-heading")
-    }
-
     @ViewBuilder
     private func productStatus(in proxy: GeometryProxy) -> some View {
         if viewModel.isLoadingProducts {
@@ -148,9 +135,24 @@ struct HomeView: View {
 
         return LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
             ForEach(viewModel.productCards) { card in
-                HomeProductCardView(card: card)
-                    .accessibilityIdentifier("home-product-card-\(card.modeKey)")
+                HomeProductCardView(
+                    card: card,
+                    isSelected: selectedProductModeKey == card.modeKey
+                ) {
+                    selectedProductModeKey = card.modeKey
+                    onProductSelected(card)
+                }
             }
+        }
+    }
+
+    private func clearUnavailableProductSelection() {
+        guard let selectedProductModeKey else {
+            return
+        }
+
+        if viewModel.productCards.contains(where: { $0.modeKey == selectedProductModeKey }) == false {
+            self.selectedProductModeKey = nil
         }
     }
 
@@ -169,12 +171,16 @@ struct HomeView: View {
     }
 
     private func startEntranceAnimation() {
-        guard visibleGroupCount == 0 else {
-            return
-        }
+        let animationID = UUID()
+        entranceAnimationID = animationID
+        visibleGroupCount = 0
 
         for groupIndex in 1...5 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(groupIndex - 1) * 0.09) {
+                guard entranceAnimationID == animationID else {
+                    return
+                }
+
                 withAnimation(.easeOut(duration: 0.36)) {
                     visibleGroupCount = groupIndex
                 }
@@ -246,40 +252,52 @@ private struct HomeProfileButton: View {
 
 private struct HomeProductCardView: View {
     let card: HomeProductCard
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color(red: 0.85, green: 0.85, blue: 0.85)
+        Button(action: action) {
+            ZStack(alignment: .topLeading) {
+                Color(red: 0.85, green: 0.85, blue: 0.85)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text(card.title)
-                    .font(DARCiFont.maisonNeue(.medium, size: 15))
-                    .lineSpacing(19.5)
-                    .foregroundStyle(Color(red: 0.19, green: 0.19, blue: 0.19))
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(card.title)
+                        .font(DARCiFont.maisonNeue(.medium, size: 15))
+                        .lineSpacing(19.5)
+                        .foregroundStyle(Color(red: 0.19, green: 0.19, blue: 0.19))
+                        .fixedSize(horizontal: false, vertical: true)
 
-                HomeResourceIconGlyph(icon: .smallArrow)
-                    .stroke(Color(red: 0.19, green: 0.19, blue: 0.19), style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
-                    .frame(width: 12, height: 12)
-                    .padding(.top, 30)
-                    .accessibilityHidden(true)
+                    HomeResourceIconGlyph(icon: .smallArrow)
+                        .stroke(Color(red: 0.19, green: 0.19, blue: 0.19), style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
+                        .frame(width: 12, height: 12)
+                        .padding(.top, 30)
+                        .accessibilityHidden(true)
 
-                Spacer(minLength: 18)
+                    Spacer(minLength: 18)
 
-                Text(card.description)
-                    .font(DARCiFont.maisonNeue(.light, size: 10))
-                    .lineSpacing(3)
-                    .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(card.description)
+                        .font(DARCiFont.maisonNeue(.light, size: 10))
+                        .lineSpacing(3)
+                        .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.leading, 18)
+                .padding(.trailing, 18)
+                .padding(.top, 23)
+                .padding(.bottom, 25)
             }
-            .padding(.leading, 18)
-            .padding(.trailing, 18)
-            .padding(.top, 23)
-            .padding(.bottom, 25)
+            .aspectRatio(200 / 251.53, contentMode: .fit)
+            .clipShape(Rectangle())
+            .contentShape(Rectangle())
+            .overlay {
+                Rectangle()
+                    .stroke(isSelected ? Color.black : Color.clear, lineWidth: 1.5)
+            }
         }
-        .aspectRatio(200 / 251.53, contentMode: .fit)
-        .clipShape(Rectangle())
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home-product-card-\(card.modeKey)")
+        .accessibilityLabel(card.title)
+        .accessibilityValue(isSelected ? "Selected" : "")
     }
 }
 
@@ -317,8 +335,6 @@ private struct HomeResourceIconGlyph: Shape {
             homePath(in: rect)
         case .mail:
             mailPath(in: rect)
-        case .new:
-            newPath(in: rect)
         case .search:
             searchPath(in: rect)
         case .smallArrow:
@@ -425,24 +441,6 @@ private struct HomeResourceIconGlyph: Shape {
         path.move(to: point(22.9167, 6.25, in: rect, source: source))
         path.addLine(to: point(12.5, 13.5417, in: rect, source: source))
         path.addLine(to: point(2.08333, 6.25, in: rect, source: source))
-
-        return path
-    }
-
-    private func newPath(in rect: CGRect) -> Path {
-        var path = Path()
-        let source: CGFloat = 25
-
-        path.addEllipse(in: CGRect(
-            x: rect.minX + (2.08334 / source) * rect.width,
-            y: rect.minY + (2.08337 / source) * rect.height,
-            width: (20.83336 / source) * rect.width,
-            height: (20.83333 / source) * rect.height
-        ))
-        path.move(to: point(12.5, 8.33337, in: rect, source: source))
-        path.addLine(to: point(12.5, 16.6667, in: rect, source: source))
-        path.move(to: point(8.33334, 12.5, in: rect, source: source))
-        path.addLine(to: point(16.6667, 12.5, in: rect, source: source))
 
         return path
     }

@@ -291,7 +291,10 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     func testAuthConfigFallsBackToLocalDevelopmentURL() {
-        let config = AuthConfig.current(environment: ["DARCI_API_BASE_URL": "$(DARCI_API_BASE_URL)"])
+        let config = AuthConfig.current(
+            bundle: Bundle(for: DARCiMobileTests.self),
+            environment: ["DARCI_API_BASE_URL": "$(DARCI_API_BASE_URL)"]
+        )
 
         XCTAssertEqual(config.apiBaseURL, AuthConfig.defaultLocalBaseURL)
     }
@@ -359,6 +362,222 @@ final class DARCiMobileTests: XCTestCase {
 
         XCTAssertEqual(response.modes?.first?.modeKey, "poa_only")
         XCTAssertEqual(response.modes?.first?.displayName, "Power of Attorney")
+    }
+
+    func testDocumentIntakeAPIClientLoadsJurisdictionsWithModeQuery() async throws {
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/rules/member-form")
+            XCTAssertEqual(request.url?.query, "mode=poa_only")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )),
+                Data(#"{"jurisdictions":[{"code":"CA","label":"California"}]}"#.utf8)
+            )
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = DocumentIntakeAPIClient(authClient: authClient)
+
+        let response = try await client.listMemberFormJurisdictions(modeKey: "poa_only", accessToken: "access-token")
+
+        XCTAssertEqual(response.jurisdictions?.first?.code, "CA")
+        XCTAssertEqual(response.jurisdictions?.first?.label, "California")
+    }
+
+    func testDocumentIntakeAPIClientBootstrapsAndSavesRevisionedDraft() async throws {
+        var requestIndex = 0
+        let urlSession = makeStubbedURLSession { request in
+            requestIndex += 1
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            switch requestIndex {
+            case 1:
+                XCTAssertEqual(request.url?.path, "/documents/intake/bootstrap")
+                XCTAssertEqual(request.httpMethod, "POST")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["productFlowMode"] as? String, "poa_only")
+                XCTAssertEqual(json["jurisdiction"] as? String, "CA")
+                XCTAssertEqual(json["rulesSnapshotVersion"] as? String, "member_form_rules_contract_v1")
+                XCTAssertEqual(json["resumeLatestDraft"] as? Bool, false)
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"created":true,"document":{"id":"document-1"},"draft":{"documentId":"document-1","ownerId":"user-1","productFlowMode":"poa_only","jurisdiction":"CA","currentStep":"general_information","rulesSnapshotVersion":"member_form_rules_contract_v1","answers":{},"canonicalAnswers":{},"revision":0,"createdAt":"2026-07-13T00:00:00.000Z","updatedAt":"2026-07-13T00:00:00.000Z"}}"#.utf8)
+                )
+            case 2:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/intake-draft")
+                XCTAssertEqual(request.httpMethod, "PUT")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["currentStep"] as? String, "poa_requirements")
+                XCTAssertEqual(json["expectedRevision"] as? Int, 0)
+                let answers = try XCTUnwrap(json["answers"] as? [String: Any])
+                XCTAssertEqual(answers["principal_full_legal_name"] as? String, "Ada Lovelace")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"draft":{"documentId":"document-1","ownerId":"user-1","productFlowMode":"poa_only","jurisdiction":"CA","currentStep":"poa_requirements","rulesSnapshotVersion":"member_form_rules_contract_v1","answers":{"principal_full_legal_name":"Ada Lovelace"},"canonicalAnswers":{},"revision":1,"createdAt":"2026-07-13T00:00:00.000Z","updatedAt":"2026-07-13T00:00:00.000Z"}}"#.utf8)
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = DocumentIntakeAPIClient(authClient: authClient)
+
+        let bootstrapResponse = try await client.bootstrapDocumentIntake(
+            DocumentIntakeBootstrapRequest(
+                productFlowMode: "poa_only",
+                jurisdiction: "CA",
+                rulesSnapshotVersion: "member_form_rules_contract_v1",
+                resumeLatestDraft: false
+            ),
+            accessToken: "access-token"
+        )
+        let saveResponse = try await client.saveDocumentIntakeDraft(
+            documentId: "document-1",
+            request: DocumentIntakeDraftUpsertRequest(
+                currentStep: "poa_requirements",
+                rulesSnapshotVersion: "member_form_rules_contract_v1",
+                answers: ["principal_full_legal_name": .string("Ada Lovelace")],
+                expectedRevision: bootstrapResponse.draft?.revision
+            ),
+            accessToken: "access-token"
+        )
+
+        XCTAssertEqual(bootstrapResponse.document?.id, "document-1")
+        XCTAssertEqual(saveResponse.draft?.revision, 1)
+        XCTAssertEqual(requestIndex, 2)
+    }
+
+    func testDocumentIntakeAPIClientCreatesUploadsAndFinalizesNotarizationDocument() async throws {
+        var requestIndex = 0
+        let urlSession = makeStubbedURLSession { request in
+            requestIndex += 1
+
+            switch requestIndex {
+            case 1:
+                XCTAssertEqual(request.url?.path, "/documents")
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["productFlowMode"] as? String, "notarize_document")
+                XCTAssertEqual(json["documentType"] as? String, "notarize_document")
+                XCTAssertEqual(json["jurisdiction"] as? String, "CA")
+                XCTAssertEqual(json["fileName"] as? String, "trust.pdf")
+                XCTAssertEqual(json["fileSize"] as? Int, 7)
+                XCTAssertEqual(json["mimeType"] as? String, "application/pdf")
+                XCTAssertEqual(json["documentDescription"] as? String, "Trust certification")
+                XCTAssertEqual(json["requesterName"] as? String, "Ada Lovelace")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"document":{"id":"document-upload-1"},"version":{"id":"version-1","version":1,"fileName":"trust.pdf","mimeType":"application/pdf","sizeBytes":7,"isFinal":false},"upload":{"signedUrl":"https://upload.example.test/document.pdf"}}"#.utf8)
+                )
+            case 2:
+                XCTAssertEqual(request.url?.absoluteString, "https://upload.example.test/document.pdf")
+                XCTAssertEqual(request.httpMethod, "PUT")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/pdf")
+                XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                let body = try self.requestBodyData(for: request)
+                XCTAssertEqual(body, Data("pdfdata".utf8))
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )),
+                    Data()
+                )
+            case 3:
+                XCTAssertEqual(request.url?.path, "/documents/document-upload-1/upload-finalize")
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["documentVersionId"] as? String, "version-1")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"document":{"id":"document-upload-1"}}"#.utf8)
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = DocumentIntakeAPIClient(authClient: authClient, urlSession: urlSession)
+
+        let createResponse = try await client.createDocumentUpload(
+            DocumentUploadCreateRequest(
+                productFlowMode: "notarize_document",
+                documentType: "notarize_document",
+                jurisdiction: "CA",
+                fileName: "trust.pdf",
+                fileSize: 7,
+                mimeType: "application/pdf",
+                documentDescription: "Trust certification",
+                notarizationReason: "Bank request",
+                requesterName: "Ada Lovelace",
+                requesterEmail: "ada@example.com",
+                requesterPhone: "+15555550123",
+                requesterPhoneCountryCode: "+1"
+            ),
+            accessToken: "access-token"
+        )
+        try await client.uploadDocument(
+            data: Data("pdfdata".utf8),
+            mimeType: "application/pdf",
+            to: try XCTUnwrap(URL(string: createResponse.upload?.signedUrl ?? ""))
+        )
+        let finalizeResponse = try await client.finalizeDocumentUpload(
+            documentId: "document-upload-1",
+            request: DocumentUploadFinalizeRequest(documentVersionId: "version-1"),
+            accessToken: "access-token"
+        )
+
+        XCTAssertEqual(createResponse.document?.id, "document-upload-1")
+        XCTAssertEqual(finalizeResponse.document?.id, "document-upload-1")
+        XCTAssertEqual(requestIndex, 3)
     }
 
     @MainActor
@@ -807,6 +1026,35 @@ final class DARCiMobileTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AuthURLProtocolStub.self]
         return URLSession(configuration: configuration)
+    }
+
+    private func requestBodyData(for request: URLRequest) throws -> Data {
+        if let httpBody = request.httpBody {
+            return httpBody
+        }
+
+        guard let stream = request.httpBodyStream else {
+            return Data()
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                throw stream.streamError ?? URLError(.cannotDecodeContentData)
+            }
+            if count == 0 {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+
+        return data
     }
 
     private func makeAuthSession() -> AuthSession {

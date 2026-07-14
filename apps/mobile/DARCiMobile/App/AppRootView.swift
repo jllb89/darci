@@ -11,15 +11,19 @@ enum AppLaunchPhase: Equatable {
 struct AppRootView: View {
     @State private var launchPhase = AppLaunchPhase.initial
     @State private var didAttemptSessionRestore = false
+    @State private var selectedProductModeKey: String?
+    @State private var intakeRoute: ProductIntakeRoute?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     private let authenticationViewModel: AuthenticationViewModel
     private let homeAPIClient: HomeAPIProviding
+    private let documentIntakeAPIClient: DocumentIntakeAPIProviding
 
     init(
         authenticationViewModel: AuthenticationViewModel? = nil,
         sessionCoordinator: AppSessionCoordinator? = nil,
-        homeAPIClient: HomeAPIProviding? = nil
+        homeAPIClient: HomeAPIProviding? = nil,
+        documentIntakeAPIClient: DocumentIntakeAPIProviding? = nil
     ) {
         let dependencies = AppRootView.makeAuthDependencies()
         self.authenticationViewModel = authenticationViewModel ?? AuthenticationViewModel(
@@ -27,6 +31,7 @@ struct AppRootView: View {
             sessionStore: dependencies.sessionStore
         )
         self.homeAPIClient = homeAPIClient ?? dependencies.homeAPIClient
+        self.documentIntakeAPIClient = documentIntakeAPIClient ?? dependencies.documentIntakeAPIClient
         _sessionCoordinator = StateObject(
             wrappedValue: sessionCoordinator ?? AppSessionCoordinator(
                 apiClient: dependencies.apiClient,
@@ -65,8 +70,20 @@ struct AppRootView: View {
             HomeView(
                 session: sessionCoordinator.currentSession,
                 viewModel: HomeViewModel(apiClient: homeAPIClient),
+                selectedProductModeKey: $selectedProductModeKey,
+                onProductSelected: beginProductIntake,
                 onProfileAction: signOut
             )
+            .navigationDestination(item: $intakeRoute) { route in
+                ProductIntakeFlowView(
+                    session: sessionCoordinator.currentSession,
+                    productModeKey: route.modeKey,
+                    apiClient: documentIntakeAPIClient
+                )
+                .onDisappear {
+                    selectedProductModeKey = nil
+                }
+            }
         }
     }
 
@@ -95,25 +112,38 @@ struct AppRootView: View {
     private func signOut() {
         _ = sessionCoordinator.signOut()
         authenticationViewModel.clearChallenge()
+        selectedProductModeKey = nil
+        intakeRoute = nil
 
         withAnimation(.easeInOut(duration: 0.25)) {
             launchPhase = .authentication
         }
     }
 
+    private func beginProductIntake(_ card: HomeProductCard) {
+        selectedProductModeKey = nil
+        intakeRoute = ProductIntakeRoute(modeKey: card.modeKey)
+    }
+
     private static func makeAuthDependencies() -> (
         apiClient: AuthAPIProviding,
         homeAPIClient: HomeAPIProviding,
+        documentIntakeAPIClient: DocumentIntakeAPIProviding,
         sessionStore: AuthSessionStore
     ) {
         if ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH"] == "1" {
             let storedSession = ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH_RESTORE"] == "1"
                 ? MockAuthAPIClient.mockSession()
                 : nil
-            return (MockAuthAPIClient(), MockHomeAPIClient(), InMemoryAuthSessionStore(session: storedSession))
+            return (
+                MockAuthAPIClient(),
+                MockHomeAPIClient(),
+                MockDocumentIntakeAPIClient(),
+                InMemoryAuthSessionStore(session: storedSession)
+            )
         }
 
-        return (AuthAPIClient(), HomeAPIClient(), KeychainAuthSessionStore())
+        return (AuthAPIClient(), HomeAPIClient(), DocumentIntakeAPIClient(), KeychainAuthSessionStore())
     }
 }
 

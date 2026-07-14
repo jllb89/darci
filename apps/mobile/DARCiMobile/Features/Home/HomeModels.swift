@@ -83,7 +83,7 @@ struct HomeProductCard: Identifiable, Equatable, Sendable {
     private static func fallback(for modeKey: String) -> HomeProductCard {
         fallbackCards.first { $0.modeKey == modeKey } ?? HomeProductCard(
             modeKey: modeKey,
-            title: "New document",
+            title: "Document",
             description: "Select this product to begin.",
             icon: .file,
             sortOrder: 999
@@ -95,7 +95,6 @@ enum HomeProductIcon: String, Equatable, Sendable {
     case file = "file 1"
     case home = "home 1"
     case mail = "mail 1"
-    case new = "new"
     case search = "search"
     case smallArrow = "small-arrow"
 }

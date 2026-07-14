@@ -90,14 +90,39 @@ struct AuthAPIClient: Sendable {
         try validateEmptyResponse(data: data, response: response)
     }
 
-    func get<Response: Decodable>(path: String, accessToken: String? = nil) async throws -> Response {
-        let request = try makeRequest(path: path, method: "GET", accessToken: accessToken)
+    func get<Response: Decodable>(
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        accessToken: String? = nil
+    ) async throws -> Response {
+        let request = try makeRequest(path: path, method: "GET", queryItems: queryItems, accessToken: accessToken)
         let (data, response) = try await urlSession.data(for: request)
         return try decode(data: data, response: response)
     }
 
-    func makeRequest(path: String, method: String, accessToken: String? = nil) throws -> URLRequest {
-        let url = try makeURL(path: path)
+    func post<Response: Decodable, Body: Encodable>(
+        path: String,
+        body: Body,
+        accessToken: String? = nil
+    ) async throws -> Response {
+        try await send(path: path, body: body, accessToken: accessToken)
+    }
+
+    func put<Response: Decodable, Body: Encodable>(
+        path: String,
+        body: Body,
+        accessToken: String? = nil
+    ) async throws -> Response {
+        try await send(path: path, method: "PUT", body: body, accessToken: accessToken)
+    }
+
+    func makeRequest(
+        path: String,
+        method: String,
+        queryItems: [URLQueryItem] = [],
+        accessToken: String? = nil
+    ) throws -> URLRequest {
+        let url = try makeURL(path: path, queryItems: queryItems)
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -112,10 +137,11 @@ struct AuthAPIClient: Sendable {
     func makeJSONRequest<Body: Encodable>(
         path: String,
         method: String = "POST",
+        queryItems: [URLQueryItem] = [],
         body: Body,
         accessToken: String? = nil
     ) throws -> URLRequest {
-        var request = try makeRequest(path: path, method: method, accessToken: accessToken)
+        var request = try makeRequest(path: path, method: method, queryItems: queryItems, accessToken: accessToken)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try jsonEncoder.encode(body)
         return request
@@ -132,13 +158,16 @@ struct AuthAPIClient: Sendable {
         return try decode(data: data, response: response)
     }
 
-    private func makeURL(path: String) throws -> URL {
+    private func makeURL(path: String, queryItems: [URLQueryItem] = []) throws -> URL {
         var components = URLComponents(url: config.apiBaseURL, resolvingAgainstBaseURL: false)
         let basePath = components?.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
         let endpointPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         components?.path = "/" + [basePath, endpointPath]
             .filter { $0.isEmpty == false }
             .joined(separator: "/")
+        if queryItems.isEmpty == false {
+            components?.queryItems = queryItems
+        }
 
         guard let url = components?.url else {
             throw AuthAPIError.invalidURL(path: path)
