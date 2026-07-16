@@ -99,3 +99,93 @@ enum IntakeContactFormatting {
         String(value.filter(\.isNumber))
     }
 }
+
+enum IntakeDateFormatting {
+    static func formatISODateInput(_ value: String) -> String {
+        let digits = value.filter(\.isNumber).prefix(8)
+        let digitText = String(digits)
+
+        switch digitText.count {
+        case 0...4:
+            return digitText
+        case 5...6:
+            let year = digitText.prefix(4)
+            let month = digitText.dropFirst(4)
+            return "\(year)-\(month)"
+        default:
+            let year = digitText.prefix(4)
+            let month = digitText.dropFirst(4).prefix(2)
+            let day = digitText.dropFirst(6)
+            return "\(year)-\(month)-\(day)"
+        }
+    }
+
+    static func isValidISODate(_ value: String) -> Bool {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4,
+              parts[1].count == 2,
+              parts[2].count == 2,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else {
+            return false
+        }
+
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.year = year
+        components.month = month
+        components.day = day
+
+        guard let date = components.calendar?.date(from: components),
+              let resolved = components.calendar?.dateComponents([.year, .month, .day], from: date) else {
+            return false
+        }
+
+        return resolved.year == year && resolved.month == month && resolved.day == day
+    }
+
+    static func isFutureISODate(_ value: String, today: Date = Date()) -> Bool {
+        guard let date = date(fromISODate: value) else {
+            return false
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let startOfToday = calendar.startOfDay(for: today)
+        return date > startOfToday
+    }
+
+    static func isValidPastOrTodayISODate(_ value: String, today: Date = Date()) -> Bool {
+        isValidISODate(value) && isFutureISODate(value, today: today) == false
+    }
+
+    private static func date(fromISODate value: String) -> Date? {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4,
+              parts[1].count == 2,
+              parts[2].count == 2,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else {
+            return nil
+        }
+
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.year = year
+        components.month = month
+        components.day = day
+
+        guard let date = components.calendar?.date(from: components),
+              let resolved = components.calendar?.dateComponents([.year, .month, .day], from: date),
+              resolved.year == year,
+              resolved.month == month,
+              resolved.day == day else {
+            return nil
+        }
+
+        return date
+    }
+}

@@ -10,6 +10,7 @@ final class DocumentIntakeViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
     @Published private(set) var isSubmitted = false
+    @Published private(set) var trustmakerPrincipalIndex = 0
     @Published var errorMessage: String?
     @Published var draftNotice: String?
     @Published var selectedJurisdiction = "CA"
@@ -19,10 +20,17 @@ final class DocumentIntakeViewModel: ObservableObject {
     @Published var selectedAgentSignatureAuthority = ""
     @Published var selectedAuthorityScopes: Set<String> = []
     @Published var trustName = ""
-    @Published var trustDate = ""
-    @Published var grantors = ""
-    @Published var trustees = ""
-    @Published var successorTrustees = ""
+    @Published var trustDate = "" {
+        didSet {
+            let formatted = IntakeDateFormatting.formatISODateInput(trustDate)
+            if trustDate != formatted {
+                trustDate = formatted
+            }
+        }
+    }
+    @Published var grantors = [IntakePersonListItem()]
+    @Published var trustees = [IntakePersonListItem()]
+    @Published var successorTrustees = [IntakePersonListItem()]
     @Published var revocationHolders = ""
     @Published var selectedTrusteeSignatureAuthority = ""
     @Published var trusteeSignatureAuthorityCustomText = ""
@@ -30,7 +38,7 @@ final class DocumentIntakeViewModel: ObservableObject {
     @Published var assetTitlingFormat = ""
     @Published var selectedTrusteePowers: Set<String> = []
     @Published var revocationHoldersCustomText = ""
-    @Published var priorDocumentItems = ""
+    @Published var priorDocumentItems = [IntakePriorDocumentItem]()
     @Published var notarizationFileName = ""
     @Published var notarizationFileSize = 0
     @Published var notarizationFileData: Data?
@@ -131,18 +139,27 @@ final class DocumentIntakeViewModel: ObservableObject {
         case .productInfo:
             return hasText(selectedJurisdiction)
         case .trustBasicInformation:
-            return hasText(selectedJurisdiction) && hasText(trustName) && hasText(trustDate)
+            return hasText(selectedJurisdiction) && hasText(trustName) && IntakeDateFormatting.isValidPastOrTodayISODate(trustDate)
         case .trustPeople:
-            return hasText(grantors) && hasText(trustees)
+            return hasValidRequiredPersonRows(grantors)
+                && hasValidRequiredPersonRows(trustees)
+                && hasValidOptionalPersonRows(successorTrustees)
+                && filledPersonRows(grantors).count <= 2
         case .trustAuthority:
             guard hasText(selectedTrusteeSignatureAuthority) else {
                 return false
             }
 
-            return selectedTrusteeSignatureAuthority != "custom" || hasText(trusteeSignatureAuthorityCustomText)
+            return (selectedTrusteeSignatureAuthority != "custom" || hasText(trusteeSignatureAuthorityCustomText))
+                && (requiresNamedSigningTrusteeSelection == false || signingTrusteeCount == 1)
+                && (requiresTaxIdOwnerSelection == false || hasText(selectedTaxIdOwner))
         case .trustDocuments:
-            return true
+            return hasValidPriorDocuments
         case .principal:
+            if productModeKey == "trust_bundle" {
+                return hasValidCurrentTrustmakerPrincipal
+            }
+
             return isComplete(
                 person: principal,
                 requiresAddress: showsPrincipalAddress,
@@ -195,12 +212,21 @@ final class DocumentIntakeViewModel: ObservableObject {
         (stepOrder.firstIndex(of: step) ?? 0) + 1
     }
 
+    var scrollResetKey: String {
+        "\(step.rawValue)-\(trustmakerPrincipalIndex)"
+    }
+
     var trusteeSignatureAuthorityOptions: [IntakeOption] {
         field(for: ["trustee_signature_authority"])?.allowedOptions ?? []
     }
 
     var trusteePowerOptions: [IntakeOption] {
         field(for: ["trustee_powers"])?.allowedOptions ?? []
+    }
+
+    var areAllTrusteePowersSelected: Bool {
+        trusteePowerOptions.isEmpty == false
+            && Set(trusteePowerOptions.map(\.id)).isSubset(of: selectedTrusteePowers)
     }
 
     var taxIdOwnerOptions: [IntakeOption] {
@@ -210,6 +236,115 @@ final class DocumentIntakeViewModel: ObservableObject {
         }
 
         return field(for: ["tax_id_owner"])?.allowedOptions ?? []
+    }
+
+    var canAddTrustmaker: Bool {
+        grantors.count < 2
+    }
+
+    var requiresNamedSigningTrusteeSelection: Bool {
+        selectedTrusteeSignatureAuthority == "named_signing_trustee"
+    }
+
+    var requiresTaxIdOwnerSelection: Bool {
+        trustmakerPrincipalRows.count > 1
+    }
+
+    var signingTrusteeCount: Int {
+        filledPersonRows(trustees).filter { $0.fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false && $0.isSigningTrustee }.count
+    }
+
+    var trustmakerPrincipalRows: [IntakePersonListItem] {
+        filledPersonRows(grantors)
+    }
+
+    var trustmakerPrincipalCount: Int {
+        trustmakerPrincipalRows.count
+    }
+
+    var currentTrustmakerPrincipal: IntakePersonListItem? {
+        guard let index = currentTrustmakerPrincipalGrantorIndex else {
+            return nil
+        }
+
+        return grantors[index]
+    }
+
+    var currentTrustmakerPrincipalGrantorIndex: Int? {
+        let indices = grantors.indices.filter { hasAnyPersonRowValue(grantors[$0]) }
+        guard indices.isEmpty == false else {
+            return nil
+        }
+
+        guard indices.indices.contains(trustmakerPrincipalIndex) else {
+            return indices.first
+        }
+
+        return indices[trustmakerPrincipalIndex]
+    }
+
+    var trustmakerPrincipalProgressLabel: String {
+        let count = max(trustmakerPrincipalCount, 1)
+        let index = min(trustmakerPrincipalIndex + 1, count)
+        return "Principal \(index) of \(count)"
+    }
+
+    var priorDocumentTypeOptions: [IntakeOption] {
+        [
+            "trust_agreement",
+            "declaration_of_trust",
+            "amendment",
+            "restatement",
+            "schedule_of_assets",
+            "affidavit",
+            "incapacity_letter",
+            "trust_certification",
+            "change_of_trustee",
+            "power_of_attorney",
+            "other",
+        ].map { IntakeOption(id: $0, label: Self.formattedPriorDocumentTypeLabel($0)) }
+    }
+
+    var incompletePriorDocumentRowCount: Int {
+        filledPriorDocumentRows.filter { hasCompletePriorDocumentRow($0) == false }.count
+    }
+
+    var hasMissingOriginatingPriorDocument: Bool {
+        guard let firstFilledRow = filledPriorDocumentRows.first else {
+            return false
+        }
+
+        return Self.originatingPriorDocumentTypes.contains(firstFilledRow.documentType.trimmingCharacters(in: .whitespacesAndNewlines)) == false
+    }
+
+    var priorDocumentChronologyOutOfOrderCount: Int {
+        var previousDate = ""
+        var outOfOrderCount = 0
+
+        for item in filledPriorDocumentRows where hasCompletePriorDocumentRow(item) && hasValidPriorDocumentDate(item) {
+            let currentDate = item.documentDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if previousDate.isEmpty == false, currentDate < previousDate {
+                outOfOrderCount += 1
+            }
+
+            previousDate = currentDate
+        }
+
+        return outOfOrderCount
+    }
+
+    var invalidPriorDocumentDateCount: Int {
+        filledPriorDocumentRows.filter { item in
+            let date = item.documentDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            return date.isEmpty == false && IntakeDateFormatting.isValidPastOrTodayISODate(date) == false
+        }.count
+    }
+
+    var hasValidPriorDocuments: Bool {
+        incompletePriorDocumentRowCount == 0
+            && hasMissingOriginatingPriorDocument == false
+            && invalidPriorDocumentDateCount == 0
+            && priorDocumentChronologyOutOfOrderCount == 0
     }
 
     private var stepOrder: [POAIntakeStep] {
@@ -230,6 +365,7 @@ final class DocumentIntakeViewModel: ObservableObject {
 
         productModeKey = modeKey
         step = initialStep(for: modeKey)
+    resetTrustmakerPrincipalProgress()
         isSubmitted = false
 
         guard let accessToken = session?.accessToken, accessToken.isEmpty == false else {
@@ -297,7 +433,18 @@ final class DocumentIntakeViewModel: ObservableObject {
     }
 
     func goBack() -> Bool {
+        if productModeKey == "trust_bundle", step == .principal, trustmakerPrincipalIndex > 0 {
+            trustmakerPrincipalIndex -= 1
+            return true
+        }
+
         if let previous = previousStep() {
+            if productModeKey == "trust_bundle", previous == .principal {
+                trustmakerPrincipalIndex = max(trustmakerPrincipalRows.count - 1, 0)
+            } else {
+                trustmakerPrincipalIndex = 0
+            }
+
             step = previous
             return true
         }
@@ -330,9 +477,14 @@ final class DocumentIntakeViewModel: ObservableObject {
 
         await saveCurrentDraft(accessToken: accessToken)
 
+        if errorMessage == nil, productModeKey == "trust_bundle", step == .principal, advanceTrustmakerPrincipal() {
+            return
+        }
+
         if errorMessage == nil, let next = nextStep() {
             if productModeKey == "trust_bundle", step == .trustDocuments, next == .principal {
                 seedPrincipalFromTrustmaker()
+                resetTrustmakerPrincipalProgress()
             }
             step = next
         }
@@ -365,6 +517,84 @@ final class DocumentIntakeViewModel: ObservableObject {
             selectedTrusteePowers.remove(option.id)
         } else {
             selectedTrusteePowers.insert(option.id)
+        }
+    }
+
+    func selectAllTrusteePowers() {
+        let allPowerIds = trusteePowerOptions.map(\.id)
+        if allPowerIds.isEmpty == false, Set(allPowerIds).isSubset(of: selectedTrusteePowers) {
+            selectedTrusteePowers.subtract(allPowerIds)
+        } else {
+            selectedTrusteePowers.formUnion(allPowerIds)
+        }
+    }
+
+    func addTrustmaker() {
+        guard canAddTrustmaker else {
+            return
+        }
+
+        grantors.append(IntakePersonListItem())
+    }
+
+    func removeTrustmaker(at index: Int) {
+        removePersonRow(from: &grantors, at: index)
+        trustmakerPrincipalIndex = min(trustmakerPrincipalIndex, max(trustmakerPrincipalRows.count - 1, 0))
+    }
+
+    func addTrustee() {
+        trustees.append(IntakePersonListItem())
+    }
+
+    func removeTrustee(at index: Int) {
+        removePersonRow(from: &trustees, at: index)
+    }
+
+    func addSuccessorTrustee() {
+        successorTrustees.append(IntakePersonListItem())
+    }
+
+    func removeSuccessorTrustee(at index: Int) {
+        removePersonRow(from: &successorTrustees, at: index)
+    }
+
+    func addPriorDocumentItem() {
+        priorDocumentItems.append(
+            IntakePriorDocumentItem(
+                chronologyOrder: priorDocumentItems.count + 1,
+                documentType: priorDocumentItems.isEmpty ? "trust_agreement" : "amendment"
+            )
+        )
+    }
+
+    func removePriorDocumentItem(at index: Int) {
+        guard priorDocumentItems.indices.contains(index) else {
+            return
+        }
+
+        priorDocumentItems.remove(at: index)
+        reindexPriorDocumentItems()
+    }
+
+    func setPriorDocumentAttachmentReference(at index: Int, fileName: String) {
+        guard priorDocumentItems.indices.contains(index) else {
+            return
+        }
+
+        priorDocumentItems[index].attachmentReference = fileName
+    }
+
+    func priorDocumentTypeLabel(for id: String) -> String {
+        Self.formattedPriorDocumentTypeLabel(id)
+    }
+
+    func setSigningTrustee(at index: Int, isSelected: Bool) {
+        guard trustees.indices.contains(index) else {
+            return
+        }
+
+        for trusteeIndex in trustees.indices {
+            trustees[trusteeIndex].isSigningTrustee = trusteeIndex == index ? isSelected : false
         }
     }
 
@@ -640,7 +870,7 @@ final class DocumentIntakeViewModel: ObservableObject {
         grantors = personListDisplay(answers["grantors"]?.stringArrayValue ?? [])
         trustees = personListDisplay(answers["trustees"]?.stringArrayValue ?? [])
         successorTrustees = personListDisplay(answers["successor_trustees"]?.stringArrayValue ?? [])
-        revocationHolders = personListDisplay(answers["revocation_holders"]?.stringArrayValue ?? [])
+        revocationHolders = legacyPersonListDisplay(answers["revocation_holders"]?.stringArrayValue ?? [])
         selectedTrusteeSignatureAuthority = answers["trustee_signature_authority"]?.stringValue ?? ""
         trusteeSignatureAuthorityCustomText = answers["trustee_signature_authority_custom_text"]?.stringValue ?? ""
         selectedTaxIdOwner = answers["tax_id_owner"]?.stringValue ?? ""
@@ -652,12 +882,13 @@ final class DocumentIntakeViewModel: ObservableObject {
 
     private func buildAnswers() -> [String: JSONValue] {
         var answers: [String: JSONValue] = [:]
+        let answerPrincipal = trustBundlePrimaryPrincipalForAnswers() ?? principal
         if productModeKey == "trust_bundle" {
             answers["trust_name"] = .string(trustName)
             answers["trust_date"] = .string(trustDate)
-            answers["grantors"] = .array(personListItems(from: grantors).map { .string(serializePersonListItem($0)) })
-            answers["trustees"] = .array(personListItems(from: trustees).map { .string(serializePersonListItem($0)) })
-            answers["successor_trustees"] = .array(personListItems(from: successorTrustees).map { .string(serializePersonListItem($0)) })
+            answers["grantors"] = .array(serializedPersonListValues(from: grantors).map(JSONValue.string))
+            answers["trustees"] = .array(serializedPersonListValues(from: trustees).map(JSONValue.string))
+            answers["successor_trustees"] = .array(serializedPersonListValues(from: successorTrustees).map(JSONValue.string))
             answers["revocation_holders"] = .array(personListItems(from: revocationHolders).map { .string(serializePersonListItem($0)) })
             answers["trustee_signature_authority"] = .string(selectedTrusteeSignatureAuthority)
             answers["trustee_signature_authority_custom_text"] = .string(trusteeSignatureAuthorityCustomText)
@@ -668,9 +899,9 @@ final class DocumentIntakeViewModel: ObservableObject {
             answers["prior_document_items"] = .array(priorDocumentValues().map(JSONValue.string))
         }
 
-        answers[nameKey(preferred: ["principal_full_legal_name", "principal_full_name"])] = .string(principal.fullLegalName)
-        answers["principal_address"] = .string(principal.address)
-        answers["principal_contact"] = .string(serializeContact(principal.contact))
+        answers[nameKey(preferred: ["principal_full_legal_name", "principal_full_name"])] = .string(answerPrincipal.fullLegalName)
+        answers["principal_address"] = .string(answerPrincipal.address)
+        answers["principal_contact"] = .string(serializeContact(answerPrincipal.contact))
         answers[nameKey(preferred: ["agent_full_legal_name", "agent_full_name"])] = .string(agent.fullLegalName)
         answers["agent_address"] = .string(agent.address)
         answers["agent_contact"] = .string(serializeContact(agent.contact))
@@ -846,22 +1077,39 @@ final class DocumentIntakeViewModel: ObservableObject {
         field(for: keys) != nil
     }
 
-    private func personListNames(from value: String) -> [String] {
-        value
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private func personListNames(from value: [IntakePersonListItem]) -> [String] {
+        filledPersonRows(value)
+            .map { $0.fullName.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
     }
 
     private func personListItems(from value: String) -> [IntakePersonListItem] {
-        personListNames(from: value).map { IntakePersonListItem(fullName: $0) }
+        value
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+            .map { IntakePersonListItem(fullName: $0) }
     }
 
     private func serializePersonListItem(_ item: IntakePersonListItem) -> String {
         (try? String(data: JSONEncoder().encode(item), encoding: .utf8)) ?? ""
     }
 
-    private func personListDisplay(_ values: [String]) -> String {
+    private func personListDisplay(_ values: [String]) -> [IntakePersonListItem] {
+        let items = values.compactMap { value in
+            guard let data = value.data(using: .utf8),
+                  let item = try? JSONDecoder().decode(IntakePersonListItem.self, from: data) else {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : IntakePersonListItem(fullName: trimmed)
+            }
+
+            return item
+        }
+
+        return items.isEmpty ? [IntakePersonListItem()] : items
+    }
+
+    private func legacyPersonListDisplay(_ values: [String]) -> String {
         values.compactMap { value in
             guard let data = value.data(using: .utf8),
                   let item = try? JSONDecoder().decode(IntakePersonListItem.self, from: data) else {
@@ -874,44 +1122,213 @@ final class DocumentIntakeViewModel: ObservableObject {
         .joined(separator: "\n")
     }
 
+    private func serializedPersonListValues(from items: [IntakePersonListItem]) -> [String] {
+        filledPersonRows(items).map(serializePersonListItem)
+    }
+
+    private func filledPersonRows(_ items: [IntakePersonListItem]) -> [IntakePersonListItem] {
+        items.filter(hasAnyPersonRowValue)
+    }
+
+    private func hasAnyPersonRowValue(_ item: IntakePersonListItem) -> Bool {
+        hasText(item.fullName) || hasText(item.email) || hasText(item.address) || hasText(item.phone)
+    }
+
+    private func hasValidRequiredPersonRows(_ items: [IntakePersonListItem]) -> Bool {
+        let filledRows = filledPersonRows(items)
+        guard filledRows.isEmpty == false else {
+            return false
+        }
+
+        return filledRows.allSatisfy(isCompletePersonRow)
+    }
+
+    private func hasValidOptionalPersonRows(_ items: [IntakePersonListItem]) -> Bool {
+        filledPersonRows(items).allSatisfy(isCompletePersonRow)
+    }
+
+    private func isCompletePersonRow(_ item: IntakePersonListItem) -> Bool {
+        hasText(item.fullName)
+            && hasText(item.email)
+            && IntakeContactFormatting.isValidEmail(item.email)
+            && hasText(item.phoneCountryCode)
+            && IntakeContactFormatting.isValidPhoneCountryCode(item.phoneCountryCode)
+            && hasText(item.phone)
+            && IntakeContactFormatting.isValidPhone(item.phone, countryIso2: item.phoneCountryIso2)
+    }
+
+    private var hasValidCurrentTrustmakerPrincipal: Bool {
+        guard let trustmaker = currentTrustmakerPrincipal else {
+            return false
+        }
+
+        return hasText(trustmaker.address)
+    }
+
+    private func removePersonRow(from items: inout [IntakePersonListItem], at index: Int) {
+        guard items.indices.contains(index) else {
+            return
+        }
+
+        items.remove(at: index)
+        if items.isEmpty {
+            items.append(IntakePersonListItem())
+        }
+    }
+
     private func priorDocumentValues() -> [String] {
         priorDocumentItems
-            .split(whereSeparator: \.isNewline)
             .enumerated()
-            .compactMap { index, line in
-                let parts = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                let title = parts.indices.contains(0) ? parts[0] : ""
-                guard title.isEmpty == false else {
+            .compactMap { index, item in
+                guard hasPriorDocumentRowValue(item) else {
                     return nil
                 }
 
-                let item = IntakePriorDocumentItem(
-                    chronologyOrder: index + 1,
-                    documentType: parts.indices.contains(1) ? parts[1] : "other",
-                    documentLabel: title,
-                    documentDate: parts.indices.contains(2) ? parts[2] : "",
-                    attachmentReference: parts.indices.contains(3) ? parts[3] : ""
-                )
-                return (try? String(data: JSONEncoder().encode(item), encoding: .utf8)) ?? ""
+                return serializedPriorDocumentValue(item, index: index)
             }
     }
 
-    private func priorDocumentDisplay(_ values: [String]) -> String {
-        values.compactMap { value in
-            guard let data = value.data(using: .utf8),
-                  let item = try? JSONDecoder().decode(IntakePriorDocumentItem.self, from: data) else {
-                return value
+    private func priorDocumentDisplay(_ values: [String]) -> [IntakePriorDocumentItem] {
+        values.enumerated().compactMap { index, value -> IntakePriorDocumentItem? in
+            let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedValue.isEmpty == false else {
+                return nil
             }
 
-            return [item.documentLabel, item.documentType, item.documentDate, item.attachmentReference]
-                .filter { $0.isEmpty == false }
-                .joined(separator: " | ")
+            if let item = parsePriorDocumentValue(trimmedValue, fallbackOrder: index + 1) {
+                return item
+            }
+
+            return IntakePriorDocumentItem(
+                chronologyOrder: index + 1,
+                documentType: "",
+                documentLabel: trimmedValue,
+                documentDate: "",
+                attachmentReference: ""
+            )
         }
-        .joined(separator: "\n")
+        .sorted { $0.chronologyOrder < $1.chronologyOrder }
+        .enumerated()
+        .map { index, item in
+            var reindexedItem = item
+            reindexedItem.chronologyOrder = index + 1
+            return reindexedItem
+        }
+    }
+
+    private var filledPriorDocumentRows: [IntakePriorDocumentItem] {
+        priorDocumentItems.filter(hasPriorDocumentRowValue)
+    }
+
+    private func hasPriorDocumentRowValue(_ item: IntakePriorDocumentItem) -> Bool {
+        item.documentType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || item.documentLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || item.documentDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || item.attachmentReference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private func hasCompletePriorDocumentRow(_ item: IntakePriorDocumentItem) -> Bool {
+        item.documentType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && item.documentLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && item.documentDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && item.attachmentReference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private func hasValidPriorDocumentDate(_ item: IntakePriorDocumentItem) -> Bool {
+        IntakeDateFormatting.isValidPastOrTodayISODate(item.documentDate.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func advanceTrustmakerPrincipal() -> Bool {
+        let nextIndex = trustmakerPrincipalIndex + 1
+        guard nextIndex < trustmakerPrincipalRows.count else {
+            return false
+        }
+
+        trustmakerPrincipalIndex = nextIndex
+        return true
+    }
+
+    private func resetTrustmakerPrincipalProgress() {
+        trustmakerPrincipalIndex = 0
+    }
+
+    private func reindexPriorDocumentItems() {
+        priorDocumentItems = priorDocumentItems.enumerated().map { index, item in
+            var reindexedItem = item
+            reindexedItem.chronologyOrder = index + 1
+            return reindexedItem
+        }
+    }
+
+    private func serializedPriorDocumentValue(_ item: IntakePriorDocumentItem, index: Int) -> String? {
+        let documentType = item.documentType.trimmingCharacters(in: .whitespacesAndNewlines)
+        let documentLabel = item.documentLabel
+        let documentDate = item.documentDate
+        let attachmentReference = item.attachmentReference
+        let object: [String: Any] = [
+            "chronology_order": index + 1,
+            "document_type": documentType,
+            "title": documentLabel,
+            "date": documentDate,
+            "recording_reference": attachmentReference,
+            "documentType": documentType,
+            "documentLabel": documentLabel,
+            "documentDate": documentDate,
+            "attachmentReference": attachmentReference,
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: []),
+              let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return value
+    }
+
+    private func parsePriorDocumentValue(_ value: String, fallbackOrder: Int) -> IntakePriorDocumentItem? {
+        guard let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let chronologyOrder = object["chronologyOrder"] as? Int
+            ?? object["chronology_order"] as? Int
+            ?? fallbackOrder
+
+        return IntakePriorDocumentItem(
+            chronologyOrder: max(1, chronologyOrder),
+            documentType: object["documentType"] as? String
+                ?? object["document_type"] as? String
+                ?? "",
+            documentLabel: object["documentLabel"] as? String
+                ?? object["title"] as? String
+                ?? "",
+            documentDate: object["documentDate"] as? String
+                ?? object["date"] as? String
+                ?? "",
+            attachmentReference: object["attachmentReference"] as? String
+                ?? object["attachment_reference"] as? String
+                ?? object["recording_reference"] as? String
+                ?? ""
+        )
+    }
+
+    private static let originatingPriorDocumentTypes: Set<String> = [
+        "trust_agreement",
+        "declaration_of_trust",
+    ]
+
+    private static func formattedPriorDocumentTypeLabel(_ value: String) -> String {
+        value
+            .split(separator: "_")
+            .map { word in
+                word.prefix(1).uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     private func seedPrincipalFromTrustmaker() {
-        guard let trustmaker = personListItems(from: grantors).first else {
+        guard let trustmaker = filledPersonRows(grantors).first else {
             return
         }
 
@@ -928,6 +1345,28 @@ final class DocumentIntakeViewModel: ObservableObject {
                 phone: trustmaker.phone
             )
         }
+
+        if principal.addressLine1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            principal.addressLine1 = trustmaker.address
+        }
+    }
+
+    private func trustBundlePrimaryPrincipalForAnswers() -> IntakePersonDetails? {
+        guard productModeKey == "trust_bundle", let trustmaker = trustmakerPrincipalRows.first else {
+            return nil
+        }
+
+        return IntakePersonDetails(
+            fullLegalName: trustmaker.fullName,
+            addressLine1: trustmaker.address,
+            addressLine2: "",
+            contact: IntakePersonContact(
+                email: trustmaker.email,
+                phoneCountryIso2: trustmaker.phoneCountryIso2,
+                phoneCountryCode: trustmaker.phoneCountryCode,
+                phone: trustmaker.phone
+            )
+        )
     }
 
     private func requesterDisplayName(from session: AuthSession?) -> String {
@@ -1009,9 +1448,9 @@ final class DocumentIntakeViewModel: ObservableObject {
         selectedAuthorityScopes = []
         trustName = ""
         trustDate = ""
-        grantors = ""
-        trustees = ""
-        successorTrustees = ""
+        grantors = [IntakePersonListItem()]
+        trustees = [IntakePersonListItem()]
+        successorTrustees = [IntakePersonListItem()]
         revocationHolders = ""
         selectedTrusteeSignatureAuthority = ""
         trusteeSignatureAuthorityCustomText = ""
@@ -1019,7 +1458,8 @@ final class DocumentIntakeViewModel: ObservableObject {
         assetTitlingFormat = ""
         selectedTrusteePowers = []
         revocationHoldersCustomText = ""
-        priorDocumentItems = ""
+        priorDocumentItems = []
+        trustmakerPrincipalIndex = 0
         clearNotarizationFile()
         notarizationDocumentDescription = ""
         notarizationReason = ""

@@ -369,12 +369,52 @@ struct IntakePersonDetails: Equatable, Sendable {
 }
 
 struct IntakePersonListItem: Codable, Equatable, Sendable {
-    var fullName: String = ""
-    var email: String = ""
-    var phoneCountryIso2: String = "US"
-    var phoneCountryCode: String = "+1"
-    var phone: String = ""
-    var isSigningTrustee: Bool = false
+    var fullName: String
+    var email: String
+    var address: String
+    var phoneCountryIso2: String
+    var phoneCountryCode: String
+    var phone: String
+    var isSigningTrustee: Bool
+
+    init(
+        fullName: String = "",
+        email: String = "",
+        address: String = "",
+        phoneCountryIso2: String = "US",
+        phoneCountryCode: String = "+1",
+        phone: String = "",
+        isSigningTrustee: Bool = false
+    ) {
+        self.fullName = fullName
+        self.email = email
+        self.address = address
+        self.phoneCountryIso2 = phoneCountryIso2
+        self.phoneCountryCode = phoneCountryCode
+        self.phone = phone
+        self.isSigningTrustee = isSigningTrustee
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fullName
+        case email
+        case address
+        case phoneCountryIso2
+        case phoneCountryCode
+        case phone
+        case isSigningTrustee
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fullName = try container.decodeIfPresent(String.self, forKey: .fullName) ?? ""
+        email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
+        address = try container.decodeIfPresent(String.self, forKey: .address) ?? ""
+        phoneCountryIso2 = try container.decodeIfPresent(String.self, forKey: .phoneCountryIso2) ?? "US"
+        phoneCountryCode = try container.decodeIfPresent(String.self, forKey: .phoneCountryCode) ?? "+1"
+        phone = try container.decodeIfPresent(String.self, forKey: .phone) ?? ""
+        isSigningTrustee = try container.decodeIfPresent(Bool.self, forKey: .isSigningTrustee) ?? false
+    }
 }
 
 struct IntakePriorDocumentItem: Codable, Equatable, Sendable {

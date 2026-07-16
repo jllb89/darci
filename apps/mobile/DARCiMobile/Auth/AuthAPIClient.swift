@@ -204,7 +204,7 @@ struct AuthAPIClient: Sendable {
 
     private func mapError(statusCode: Int, data: Data) -> AuthAPIError {
         let payload = try? jsonDecoder.decode(AuthErrorResponse.self, from: data)
-        let message = payload?.message
+        let message = errorMessage(from: payload)
         let error = payload?.error
 
         switch statusCode {
@@ -222,6 +222,24 @@ struct AuthAPIClient: Sendable {
         default:
             return .unexpectedStatus(statusCode: statusCode, message: message)
         }
+    }
+
+    private func errorMessage(from payload: AuthErrorResponse?) -> String? {
+        let summary = payload?.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let details = payload?.errors?
+            .compactMap { $0.message?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false } ?? []
+
+        guard details.isEmpty == false else {
+            return summary?.isEmpty == false ? summary : nil
+        }
+
+        let detailText = Array(NSOrderedSet(array: details)).compactMap { $0 as? String }.joined(separator: "\n")
+        guard let summary, summary.isEmpty == false, summary != "Member form validation failed" else {
+            return detailText
+        }
+
+        return "\(summary)\n\(detailText)"
     }
 
     private func isWrongCodeError(error: String?, message: String?) -> Bool {

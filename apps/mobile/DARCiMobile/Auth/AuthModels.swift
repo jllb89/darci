@@ -91,7 +91,14 @@ struct AuthUserResponse: Decodable, Equatable, Sendable {
     let user: AuthenticatedUser
 }
 
+struct AuthValidationErrorResponse: Decodable, Equatable, Sendable {
+    let code: String?
+    let field: String?
+    let message: String?
+}
+
 struct AuthErrorResponse: Decodable, Equatable, Sendable {
     let error: String?
     let message: String?
+    let errors: [AuthValidationErrorResponse]?
 }

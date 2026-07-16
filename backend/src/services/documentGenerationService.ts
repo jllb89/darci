@@ -81,6 +81,7 @@ type ParsedContact = {
 
 type ParsedPerson = ParsedContact & {
   fullName: string;
+  address: string | null;
   isSigningTrustee: boolean;
   metadata: Record<string, unknown>;
 };
@@ -286,9 +287,16 @@ const parsePersonValue = (value: unknown): ParsedPerson => {
       asTrimmedString(value.name) ||
       asTrimmedString(value.displayName);
     const contact = parseContactValue(value.contact ?? value);
+    const address =
+      asTrimmedString(value.address) ||
+      [asTrimmedString(value.addressLine1), asTrimmedString(value.addressLine2)]
+        .filter((part) => part.length > 0)
+        .join("\n") ||
+      null;
 
     return {
       fullName,
+      address,
       email: contact.email,
       phone: contact.phone,
       phoneCountryCode: contact.phoneCountryCode,
@@ -305,6 +313,7 @@ const parsePersonValue = (value: unknown): ParsedPerson => {
 
     return {
       fullName: value.trim(),
+      address: null,
       email: fallback.email,
       phone: fallback.phone,
       phoneCountryCode: fallback.phoneCountryCode,
@@ -315,6 +324,7 @@ const parsePersonValue = (value: unknown): ParsedPerson => {
 
   return {
     fullName: "",
+    address: null,
     email: fallback.email,
     phone: fallback.phone,
     phoneCountryCode: fallback.phoneCountryCode,
@@ -354,6 +364,7 @@ const resolveCanonicalAnswersForOutput = (input: {
   return {
     ...input.canonicalAnswers,
     principal_full_name: grantor.fullName,
+    principal_address: grantor.address ?? input.canonicalAnswers.principal_address,
     principal_contact: {
       email: grantor.email,
       phone: grantor.phone,
