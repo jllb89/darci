@@ -1,0 +1,359 @@
+import Foundation
+
+@MainActor
+final class DocumentSigningViewModel: ObservableObject {
+    @Published private(set) var payload: DocumentSigningResponse?
+    @Published private(set) var savedSignatures: [SavedDocumentSignature] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isSavingCapture = false
+    @Published private(set) var isConfirming = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var inviteDispatchSummary: SigningInviteDispatchSummary?
+
+    let documentId: String
+
+    private let apiClient: DocumentIntakeAPIProviding
+    private var pollTask: Task<Void, Never>?
+
+    init(documentId: String, apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient()) {
+        self.documentId = documentId
+        self.apiClient = apiClient
+    }
+
+    var signing: DocumentSigningState? {
+        payload?.signing
+    }
+
+    var primarySelfSignature: DocumentSigningSignature? {
+        signing?.signatures.first { $0.partyRole == "principal" }
+            ?? signing?.signatures.first
+    }
+
+    var canConfirm: Bool {
+        signing?.completion.canConfirm == true && isConfirming == false
+    }
+
+    func load(session: AuthSession?) async {
+        await fetchSigning(session: session, silent: false)
+    }
+
+    func stop() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
+    func fetchSavedSignatures(session: AuthSession?) async {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to load saved signatures."
+            return
+        }
+
+        do {
+            let response = try await apiClient.listSavedSignatures(documentId: documentId, accessToken: accessToken)
+            savedSignatures = response.savedSignatures ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to load saved signatures.")
+        }
+    }
+
+    func captureTypedSignature(
+        _ signature: DocumentSigningSignature,
+        typedValue: String,
+        typedKind: String,
+        session: AuthSession?
+    ) async -> Bool {
+        let trimmedValue = typedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedValue.isEmpty == false else {
+            errorMessage = "Enter the typed signature first."
+            return false
+        }
+
+        return await captureSignature(
+            signature,
+            request: DocumentSignatureCaptureRequest(
+                generationRunId: signature.generationRunId,
+                outputSignerId: signature.outputSignerId,
+                captureMethod: "type",
+                typedValue: trimmedValue,
+                typedKind: typedKind,
+                imageDataUrl: nil,
+                savedSignatureId: nil
+            ),
+            session: session,
+            fallback: "Failed to save typed signature."
+        )
+    }
+
+    func captureDrawnSignature(
+        _ signature: DocumentSigningSignature,
+        imageDataUrl: String,
+        session: AuthSession?
+    ) async -> Bool {
+        guard imageDataUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            errorMessage = "Draw the signature before saving it."
+            return false
+        }
+
+        return await captureSignature(
+            signature,
+            request: DocumentSignatureCaptureRequest(
+                generationRunId: signature.generationRunId,
+                outputSignerId: signature.outputSignerId,
+                captureMethod: "draw",
+                typedValue: nil,
+                typedKind: nil,
+                imageDataUrl: imageDataUrl,
+                savedSignatureId: nil
+            ),
+            session: session,
+            fallback: "Failed to save drawn signature."
+        )
+    }
+
+    func applySavedSignature(
+        _ signature: DocumentSigningSignature,
+        savedSignatureId: String,
+        session: AuthSession?
+    ) async -> Bool {
+        await captureSignature(
+            signature,
+            request: DocumentSignatureCaptureRequest(
+                generationRunId: signature.generationRunId,
+                outputSignerId: signature.outputSignerId,
+                captureMethod: "saved",
+                typedValue: nil,
+                typedKind: nil,
+                imageDataUrl: nil,
+                savedSignatureId: savedSignatureId
+            ),
+            session: session,
+            fallback: "Failed to apply saved signature."
+        )
+    }
+
+    func uploadSignatureAsset(
+        _ signature: DocumentSigningSignature,
+        fileName: String,
+        data: Data,
+        mimeType: String,
+        session: AuthSession?
+    ) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to upload this signature."
+            return false
+        }
+
+        isSavingCapture = true
+        defer { isSavingCapture = false }
+
+        do {
+            let requestResponse = try await apiClient.requestSignatureUpload(
+                documentId: documentId,
+                request: DocumentSignatureUploadRequest(
+                    generationRunId: signature.generationRunId,
+                    outputSignerId: signature.outputSignerId,
+                    fileName: fileName,
+                    fileSize: data.count,
+                    mimeType: mimeType
+                ),
+                accessToken: accessToken
+            )
+
+            guard let signatureId = requestResponse.signature?.id,
+                  let signedUrlString = requestResponse.upload?.signedUrl,
+                  let signedUrl = URL(string: signedUrlString) else {
+                throw SigningError.missingUploadTarget
+            }
+
+            try await apiClient.uploadSignatureAsset(data: data, mimeType: mimeType, to: signedUrl)
+            let finalizeResponse = try await apiClient.finalizeSignatureUpload(
+                documentId: documentId,
+                request: DocumentSignatureFinalizeRequest(
+                    signatureId: signatureId,
+                    generationRunId: signature.generationRunId,
+                    outputSignerId: signature.outputSignerId
+                ),
+                accessToken: accessToken
+            )
+
+            applyRemainingSignerInviteDispatchSummary(finalizeResponse.remainingSignerInvites)
+            await fetchSigning(session: session, silent: true)
+            await fetchSavedSignatures(session: session)
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to upload signature image.")
+            return false
+        }
+    }
+
+    func deleteSavedSignature(_ signatureId: String, session: AuthSession?) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to delete this saved signature."
+            return false
+        }
+
+        do {
+            _ = try await apiClient.deleteSavedSignature(documentId: documentId, signatureId: signatureId, accessToken: accessToken)
+            savedSignatures.removeAll { $0.id == signatureId }
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to delete saved signature.")
+            return false
+        }
+    }
+
+    func confirmSigning(session: AuthSession?) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to confirm signatures."
+            return false
+        }
+
+        guard signing?.completion.canConfirm == true else {
+            errorMessage = "Complete required signatures before confirming."
+            return false
+        }
+
+        isConfirming = true
+        defer { isConfirming = false }
+
+        do {
+            _ = try await apiClient.confirmDocumentSigning(
+                documentId: documentId,
+                request: DocumentSignConfirmRequest(confirmed: true),
+                accessToken: accessToken
+            )
+            await fetchSigning(session: session, silent: true)
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to confirm signatures.")
+            return false
+        }
+    }
+
+    private func fetchSigning(session: AuthSession?, silent: Bool) async {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to load signing workspace."
+            return
+        }
+
+        if silent == false {
+            isLoading = true
+        }
+
+        do {
+            let response = try await apiClient.getDocumentSigning(documentId: documentId, accessToken: accessToken)
+            guard response.document != nil, response.signing != nil else {
+                throw SigningError.missingSigningWorkspace
+            }
+
+            payload = response
+            errorMessage = nil
+            schedulePollIfNeeded(session: session)
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to load signing workspace.")
+        }
+
+        if silent == false {
+            isLoading = false
+        }
+    }
+
+    private func captureSignature(
+        _ signature: DocumentSigningSignature,
+        request: DocumentSignatureCaptureRequest,
+        session: AuthSession?,
+        fallback: String
+    ) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to save this signature."
+            return false
+        }
+
+        isSavingCapture = true
+        defer { isSavingCapture = false }
+
+        do {
+            let response = try await apiClient.captureSignature(documentId: documentId, request: request, accessToken: accessToken)
+            applyRemainingSignerInviteDispatchSummary(response.remainingSignerInvites)
+            await fetchSigning(session: session, silent: true)
+            if request.captureMethod != "saved" {
+                await fetchSavedSignatures(session: session)
+            }
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: fallback)
+            return false
+        }
+    }
+
+    private func schedulePollIfNeeded(session: AuthSession?) {
+        pollTask?.cancel()
+
+        guard signing?.state == "preparing" else {
+            pollTask = nil
+            return
+        }
+
+        pollTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard Task.isCancelled == false else { return }
+            await self?.fetchSigning(session: session, silent: true)
+        }
+    }
+
+    private func applyRemainingSignerInviteDispatchSummary(_ response: RemainingSignerInviteDispatchResponse?) {
+        guard let response else {
+            inviteDispatchSummary = nil
+            return
+        }
+
+        let invitedCount = response.invited?.count ?? 0
+        let failureCount = response.failures?.count ?? 0
+        let skippedCount = response.skipped?.filter { $0.reason != "recipient_already_completed" }.count ?? 0
+
+        if failureCount > 0 {
+            inviteDispatchSummary = SigningInviteDispatchSummary(status: "partial", message: "Some signer invites could not be sent.")
+        } else if invitedCount > 0 {
+            inviteDispatchSummary = SigningInviteDispatchSummary(status: "done", message: "Remaining signer invites sent.")
+        } else if skippedCount > 0 {
+            inviteDispatchSummary = SigningInviteDispatchSummary(status: "done", message: "No additional signer invites were needed.")
+        } else {
+            inviteDispatchSummary = SigningInviteDispatchSummary(status: "idle", message: nil)
+        }
+    }
+
+    private func displayMessage(for error: Error, fallback: String) -> String {
+        if case AuthAPIError.validation(let message) = error {
+            return message ?? fallback
+        }
+
+        if case AuthAPIError.unauthorized(let message) = error {
+            return message ?? "Sign in again to continue."
+        }
+
+        if case AuthAPIError.server(_, let message) = error {
+            return message ?? fallback
+        }
+
+        if case AuthAPIError.unexpectedStatus(_, let message) = error {
+            return message ?? fallback
+        }
+
+        return fallback
+    }
+}
+
+struct SigningInviteDispatchSummary: Equatable, Sendable {
+    let status: String
+    let message: String?
+}
+
+private enum SigningError: Error {
+    case missingSigningWorkspace
+    case missingUploadTarget
+}

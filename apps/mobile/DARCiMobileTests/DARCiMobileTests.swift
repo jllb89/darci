@@ -580,6 +580,215 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(requestIndex, 3)
     }
 
+    func testDocumentIntakeAPIClientRunsSigningWorkflowRequests() async throws {
+        var requestIndex = 0
+        let urlSession = makeStubbedURLSession { request in
+            requestIndex += 1
+
+            switch requestIndex {
+            case 1:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/signing")
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"document":{"id":"document-1","createdAt":"2026-06-05T12:00:00.000Z"},"signing":{"state":"ready","reviewApproval":null,"signingExecution":null,"approvedOutputKeys":["poa_document"],"outputs":[],"pendingOutputs":[],"missingOutputKeys":[],"requiresGeneration":false,"allOutputsReady":true,"signatures":[],"groups":[],"completion":{"requiredSignatureCount":1,"capturedRequiredSignatureCount":0,"allRequiredSignaturesComplete":false,"canConfirm":false}}}"#.utf8)
+                )
+            case 2:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/signatures/saved")
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"savedSignatures":[{"id":"saved-1","captureMethod":"type","typedValue":"Ada Lovelace","typedKind":"name","assetDownloadUrl":null,"mimeType":null,"sizeBytes":null,"capturedAt":"2026-06-05T12:20:00.000Z","createdAt":"2026-06-05T12:20:00.000Z"}]}"#.utf8)
+                )
+            case 3:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/signatures")
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["generationRunId"] as? String, "run-1")
+                XCTAssertEqual(json["outputSignerId"] as? String, "output-signer-1")
+                XCTAssertEqual(json["captureMethod"] as? String, "type")
+                XCTAssertEqual(json["typedValue"] as? String, "Ada Lovelace")
+                XCTAssertEqual(json["typedKind"] as? String, "name")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"signature":{"id":"signature-1","status":"captured"}}"#.utf8)
+                )
+            case 4:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/signatures/request")
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["generationRunId"] as? String, "run-1")
+                XCTAssertEqual(json["outputSignerId"] as? String, "output-signer-1")
+                XCTAssertEqual(json["fileName"] as? String, "signature.png")
+                XCTAssertEqual(json["fileSize"] as? Int, 9)
+                XCTAssertEqual(json["mimeType"] as? String, "image/png")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"signature":{"id":"signature-upload-1","documentId":"document-1","generationRunId":"run-1","outputSignerId":"output-signer-1","status":"pending_upload"},"upload":{"signedUrl":"https://upload.example.test/signature.png"}}"#.utf8)
+                )
+            case 5:
+                XCTAssertEqual(request.url?.absoluteString, "https://upload.example.test/signature.png")
+                XCTAssertEqual(request.httpMethod, "PUT")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "image/png")
+                XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                let body = try self.requestBodyData(for: request)
+                XCTAssertEqual(body, Data("imagedata".utf8))
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )),
+                    Data()
+                )
+            case 6:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/signatures/finalize")
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["signatureId"] as? String, "signature-upload-1")
+                XCTAssertEqual(json["generationRunId"] as? String, "run-1")
+                XCTAssertEqual(json["outputSignerId"] as? String, "output-signer-1")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"signature":{"id":"signature-upload-1","status":"captured"}}"#.utf8)
+                )
+            case 7:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/signatures/saved/saved-1")
+                XCTAssertEqual(request.httpMethod, "DELETE")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"message":"deleted"}"#.utf8)
+                )
+            case 8:
+                XCTAssertEqual(request.url?.path, "/documents/document-1/sign")
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+                let body = try self.requestBodyData(for: request)
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(json["confirmed"] as? Bool, true)
+
+                return (
+                    try XCTUnwrap(HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )),
+                    Data(#"{"message":"confirmed"}"#.utf8)
+                )
+            default:
+                throw URLError(.badServerResponse)
+            }
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = DocumentIntakeAPIClient(authClient: authClient, urlSession: urlSession)
+
+        let signingResponse = try await client.getDocumentSigning(documentId: "document-1", accessToken: "access-token")
+        let savedResponse = try await client.listSavedSignatures(documentId: "document-1", accessToken: "access-token")
+        let captureResponse = try await client.captureSignature(
+            documentId: "document-1",
+            request: DocumentSignatureCaptureRequest(
+                generationRunId: "run-1",
+                outputSignerId: "output-signer-1",
+                captureMethod: "type",
+                typedValue: "Ada Lovelace",
+                typedKind: "name",
+                imageDataUrl: nil,
+                savedSignatureId: nil
+            ),
+            accessToken: "access-token"
+        )
+        let uploadResponse = try await client.requestSignatureUpload(
+            documentId: "document-1",
+            request: DocumentSignatureUploadRequest(
+                generationRunId: "run-1",
+                outputSignerId: "output-signer-1",
+                fileName: "signature.png",
+                fileSize: 9,
+                mimeType: "image/png"
+            ),
+            accessToken: "access-token"
+        )
+        try await client.uploadSignatureAsset(
+            data: Data("imagedata".utf8),
+            mimeType: "image/png",
+            to: try XCTUnwrap(URL(string: uploadResponse.upload?.signedUrl ?? ""))
+        )
+        let finalizeResponse = try await client.finalizeSignatureUpload(
+            documentId: "document-1",
+            request: DocumentSignatureFinalizeRequest(
+                signatureId: try XCTUnwrap(uploadResponse.signature?.id),
+                generationRunId: "run-1",
+                outputSignerId: "output-signer-1"
+            ),
+            accessToken: "access-token"
+        )
+        let deleteResponse = try await client.deleteSavedSignature(documentId: "document-1", signatureId: "saved-1", accessToken: "access-token")
+        let confirmResponse = try await client.confirmDocumentSigning(
+            documentId: "document-1",
+            request: DocumentSignConfirmRequest(confirmed: true),
+            accessToken: "access-token"
+        )
+
+        XCTAssertEqual(signingResponse.document?.id, "document-1")
+        XCTAssertEqual(savedResponse.savedSignatures?.first?.id, "saved-1")
+        XCTAssertEqual(captureResponse.signature?.id, "signature-1")
+        XCTAssertEqual(finalizeResponse.signature?.id, "signature-upload-1")
+        XCTAssertEqual(deleteResponse.message, "deleted")
+        XCTAssertEqual(confirmResponse.message, "confirmed")
+        XCTAssertEqual(requestIndex, 8)
+    }
+
     @MainActor
     func testHomeViewModelUsesActiveProductFlowModes() async {
         let response = HomeProductFlowModesResponse(

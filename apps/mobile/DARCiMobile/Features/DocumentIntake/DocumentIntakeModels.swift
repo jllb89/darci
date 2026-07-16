@@ -223,6 +223,292 @@ struct DocumentUploadFinalizeResponse: Decodable, Equatable, Sendable {
     let message: String?
 }
 
+struct EmptyDocumentAPIRequest: Encodable, Equatable, Sendable {}
+
+struct DocumentReviewDocumentSummary: Decodable, Equatable, Sendable {
+    let id: String
+    let idn: String?
+    let status: String?
+    let documentType: String?
+    let jurisdiction: String?
+    let createdAt: String
+    let productFlowMode: String?
+}
+
+struct DocumentReviewApproval: Decodable, Equatable, Sendable {
+    let approvedAt: String?
+    let reviewSource: String?
+    let latestVersionId: String?
+    let latestRenderedRunId: String?
+    let approvedOutputKeys: [String]
+    let approvedVersionIds: [String]
+}
+
+struct DocumentReviewOutput: Decodable, Identifiable, Equatable, Sendable {
+    let outputKey: String
+    let outputLabel: String
+    let versionId: String
+    let generationRunId: String?
+    let version: Int
+    let fileName: String?
+    let mimeType: String?
+    let sizeBytes: Int?
+    let createdAt: String
+    let downloadUrl: String
+    let isFinal: Bool
+
+    var id: String { "\(outputKey)-\(versionId)" }
+}
+
+struct PendingReviewBlocker: Decodable, Identifiable, Equatable, Sendable {
+    let code: String
+    let source: String?
+    let field: String?
+    let message: String
+    let blocking: Bool
+
+    var id: String { "\(code)-\(field ?? source ?? message)" }
+}
+
+struct PendingReviewOutput: Decodable, Identifiable, Equatable, Sendable {
+    let outputKey: String
+    let outputLabel: String
+    let status: String
+    let errorMessage: String?
+    let versionId: String?
+    let mimeType: String?
+    let blockers: [PendingReviewBlocker]?
+
+    var id: String { outputKey }
+}
+
+struct DocumentReviewState: Decodable, Equatable, Sendable {
+    let state: String
+    let requiresGeneration: Bool
+    let missingOutputKeys: [String]
+    let allVisibleOutputsReady: Bool
+    let canApprove: Bool
+    let reviewApproval: DocumentReviewApproval?
+    let outputs: [DocumentReviewOutput]
+    let pendingOutputs: [PendingReviewOutput]
+}
+
+struct DocumentReviewResponse: Decodable, Equatable, Sendable {
+    let document: DocumentReviewDocumentSummary?
+    let review: DocumentReviewState?
+    let message: String?
+}
+
+struct DocumentGenerationRunsRequest: Encodable, Equatable, Sendable {
+    let outputKeys: [String]
+}
+
+struct DocumentGenerationRunSummary: Decodable, Equatable, Sendable {
+    let id: String?
+    let outputKey: String?
+    let documentKey: String?
+    let status: String?
+    let blockedCount: Int?
+    let errorMessage: String?
+}
+
+struct DocumentGenerationRunsResponse: Decodable, Equatable, Sendable {
+    let runs: [DocumentGenerationRunSummary]?
+    let message: String?
+}
+
+struct DocumentReviewApprovalRequest: Encodable, Equatable, Sendable {
+    let agreed: Bool
+}
+
+struct DocumentReviewApprovalResponse: Decodable, Equatable, Sendable {
+    let document: DocumentReviewDocumentSummary?
+    let reviewApproval: DocumentReviewApproval?
+    let message: String?
+}
+
+struct DocumentAPIMessageResponse: Decodable, Equatable, Sendable {
+    let message: String?
+}
+
+struct DocumentSigningExecution: Decodable, Equatable, Sendable {
+    let confirmedAt: String?
+    let confirmedBySupabaseId: String?
+    let confirmedByRole: String?
+    let generationRunIds: [String]
+    let completedOutputSignerIds: [String]
+    let completedSignatureIds: [String]
+}
+
+struct DocumentSigningGroup: Decodable, Identifiable, Equatable, Sendable {
+    let generationRunId: String
+    let outputKey: String
+    let outputLabel: String
+    let signingGroup: String
+    let label: String
+    let minimumRequired: Int
+    let capturedCount: Int
+    let totalCount: Int
+    let isSatisfied: Bool
+
+    var id: String { "\(generationRunId)-\(signingGroup)" }
+}
+
+struct DocumentSigningSignature: Decodable, Identifiable, Equatable, Sendable {
+    let outputSignerId: String
+    let generationRunId: String
+    let outputKey: String
+    let outputLabel: String
+    let documentKey: String
+    let partyName: String
+    let partyRole: String
+    let signingGroup: String?
+    let isRequired: Bool
+    let status: String
+    let captureMethod: String?
+    let typedValue: String?
+    let typedKind: String?
+    let signatureId: String?
+    let storagePath: String?
+    let assetDownloadUrl: String?
+    let mimeType: String?
+    let sizeBytes: Int?
+    let capturedAt: String?
+    let groupMinimumRequired: Int?
+    let groupSatisfied: Bool
+
+    var id: String { outputSignerId }
+}
+
+struct DocumentSigningCompletion: Decodable, Equatable, Sendable {
+    let requiredSignatureCount: Int
+    let capturedRequiredSignatureCount: Int
+    let allRequiredSignaturesComplete: Bool
+    let canConfirm: Bool
+}
+
+struct DocumentSigningViewerAccess: Decodable, Equatable, Sendable {
+    let kind: String
+    let inviteId: String?
+    let documentOutputSignerId: String?
+    let documentPartyId: String?
+}
+
+struct DocumentSigningState: Decodable, Equatable, Sendable {
+    let state: String
+    let reviewApproval: DocumentReviewApproval?
+    let signingExecution: DocumentSigningExecution?
+    let approvedOutputKeys: [String]
+    let outputs: [DocumentReviewOutput]
+    let pendingOutputs: [PendingReviewOutput]
+    let missingOutputKeys: [String]
+    let requiresGeneration: Bool
+    let allOutputsReady: Bool
+    let signatures: [DocumentSigningSignature]
+    let groups: [DocumentSigningGroup]
+    let completion: DocumentSigningCompletion
+    let viewerAccess: DocumentSigningViewerAccess?
+}
+
+struct DocumentSigningResponse: Decodable, Equatable, Sendable {
+    let document: DocumentReviewDocumentSummary?
+    let signing: DocumentSigningState?
+    let message: String?
+}
+
+struct RemainingSignerInviteTrigger: Decodable, Equatable, Sendable {
+    let shouldQueueInvites: Bool?
+    let blockedReason: String?
+}
+
+struct RemainingSignerInviteRecipient: Decodable, Equatable, Sendable {
+    let documentOutputSignerId: String
+    let recipientEmail: String?
+}
+
+struct RemainingSignerInviteSkip: Decodable, Equatable, Sendable {
+    let documentOutputSignerId: String
+    let reason: String
+}
+
+struct RemainingSignerInviteFailure: Decodable, Equatable, Sendable {
+    let documentOutputSignerId: String
+    let errorMessage: String
+}
+
+struct RemainingSignerInviteDispatchResponse: Decodable, Equatable, Sendable {
+    let trigger: RemainingSignerInviteTrigger?
+    let invited: [RemainingSignerInviteRecipient]?
+    let skipped: [RemainingSignerInviteSkip]?
+    let failures: [RemainingSignerInviteFailure]?
+}
+
+struct DocumentSignatureSummary: Decodable, Equatable, Sendable {
+    let id: String
+    let documentId: String?
+    let generationRunId: String?
+    let outputSignerId: String?
+    let storagePath: String?
+    let status: String
+}
+
+struct DocumentSignatureUploadRequest: Encodable, Equatable, Sendable {
+    let generationRunId: String
+    let outputSignerId: String
+    let fileName: String
+    let fileSize: Int
+    let mimeType: String
+}
+
+struct DocumentSignatureUploadResponse: Decodable, Equatable, Sendable {
+    let signature: DocumentSignatureSummary?
+    let upload: DocumentUploadTarget?
+    let message: String?
+}
+
+struct DocumentSignatureFinalizeRequest: Encodable, Equatable, Sendable {
+    let signatureId: String
+    let generationRunId: String
+    let outputSignerId: String
+}
+
+struct DocumentSignatureCaptureRequest: Encodable, Equatable, Sendable {
+    let generationRunId: String
+    let outputSignerId: String
+    let captureMethod: String
+    let typedValue: String?
+    let typedKind: String?
+    let imageDataUrl: String?
+    let savedSignatureId: String?
+}
+
+struct DocumentSignatureCaptureResponse: Decodable, Equatable, Sendable {
+    let signature: DocumentSignatureSummary?
+    let remainingSignerInvites: RemainingSignerInviteDispatchResponse?
+    let message: String?
+}
+
+struct SavedDocumentSignature: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let captureMethod: String
+    let typedValue: String?
+    let typedKind: String?
+    let assetDownloadUrl: String?
+    let mimeType: String?
+    let sizeBytes: Int?
+    let capturedAt: String?
+    let createdAt: String
+}
+
+struct SavedDocumentSignaturesResponse: Decodable, Equatable, Sendable {
+    let savedSignatures: [SavedDocumentSignature]?
+    let message: String?
+}
+
+struct DocumentSignConfirmRequest: Encodable, Equatable, Sendable {
+    let confirmed: Bool
+}
+
 struct DocumentIntakeDraft: Decodable, Equatable, Sendable {
     let documentId: String
     let ownerId: String?

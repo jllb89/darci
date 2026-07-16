@@ -18,6 +18,7 @@ struct ProductIntakeFlowView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DocumentIntakeViewModel
     @State private var isFileImporterPresented = false
+    @State private var isPriorDocumentFileImporterPresented = false
     @State private var priorDocumentFileImporterIndex: Int?
     @State private var hasAppeared = false
     @State private var expandedSelectKey: String?
@@ -659,6 +660,32 @@ struct ProductIntakeFlowView: View {
                 }
             }
 
+            intakeField(label: "Who can revoke the trust?", helpText: fieldHelpText(["revocation_holders"]), tooltipKey: "revocation_holders") {
+                optionMenu(
+                    key: "revocation-holders",
+                    selection: $viewModel.revocationHolders,
+                    options: viewModel.revocationHolderOptions,
+                    placeholder: "Select an option"
+                )
+                .accessibilityIdentifier("trust-revocation-holders-menu")
+            }
+
+            if viewModel.revocationHolders == "custom" {
+                intakeField(label: "Describe the revocation rule", helpText: fieldHelpText(["revocation_holders_custom_text"]), tooltipKey: "revocation_holders_custom_text") {
+                    intakeTextEditor(text: $viewModel.revocationHoldersCustomText, prompt: "")
+                }
+            }
+
+            intakeField(label: "How is trustee incapacity determined?", helpText: fieldHelpText(["trustee_incapacity_standard"]), tooltipKey: "trustee_incapacity_standard") {
+                optionMenu(
+                    key: "trustee-incapacity-standard",
+                    selection: $viewModel.selectedTrusteeIncapacityStandard,
+                    options: viewModel.trusteeIncapacityStandardOptions,
+                    placeholder: "Select an option"
+                )
+                .accessibilityIdentifier("trust-trustee-incapacity-standard-menu")
+            }
+
             intakeField(label: "Primary tax ID owner", optionalLabel: viewModel.requiresTaxIdOwnerSelection ? nil : "Optional", helpText: fieldHelpText(["tax_id_owner"]), tooltipKey: "tax_id_owner") {
                 optionMenu(
                     key: "tax-id-owner",
@@ -769,6 +796,7 @@ struct ProductIntakeFlowView: View {
 
                     Button {
                         priorDocumentFileImporterIndex = viewModel.priorDocumentItems.count
+                        isPriorDocumentFileImporterPresented = true
                     } label: {
                         Text("Add document to include")
                             .font(DARCiFont.maisonNeue(.book, size: 12))
@@ -788,14 +816,7 @@ struct ProductIntakeFlowView: View {
                 .padding(.top, scaled(8, in: proxy))
         }
         .fileImporter(
-            isPresented: Binding(
-                get: { priorDocumentFileImporterIndex != nil },
-                set: { isPresented in
-                    if isPresented == false {
-                        priorDocumentFileImporterIndex = nil
-                    }
-                }
-            ),
+            isPresented: $isPriorDocumentFileImporterPresented,
             allowedContentTypes: [.pdf],
             allowsMultipleSelection: false
         ) { result in
@@ -853,6 +874,7 @@ struct ProductIntakeFlowView: View {
 
             Button {
                 priorDocumentFileImporterIndex = index
+                isPriorDocumentFileImporterPresented = true
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Select PDF attachment")
@@ -1355,6 +1377,22 @@ struct ProductIntakeFlowView: View {
             ) { selectedId in
                 viewModel.selectedTaxIdOwner = selectedId
             }
+        case "revocation-holders":
+            return selectPresentation(
+                key: expandedSelectKey,
+                selectedValue: viewModel.revocationHolders,
+                options: viewModel.revocationHolderOptions
+            ) { selectedId in
+                viewModel.revocationHolders = selectedId
+            }
+        case "trustee-incapacity-standard":
+            return selectPresentation(
+                key: expandedSelectKey,
+                selectedValue: viewModel.selectedTrusteeIncapacityStandard,
+                options: viewModel.trusteeIncapacityStandardOptions
+            ) { selectedId in
+                viewModel.selectedTrusteeIncapacityStandard = selectedId
+            }
         case "agent-signature-authority":
             return selectPresentation(
                 key: expandedSelectKey,
@@ -1643,6 +1681,7 @@ struct ProductIntakeFlowView: View {
     private func handlePriorDocumentFileImport(_ result: Result<[URL], Error>) {
         defer {
             priorDocumentFileImporterIndex = nil
+            isPriorDocumentFileImporterPresented = false
         }
 
         do {

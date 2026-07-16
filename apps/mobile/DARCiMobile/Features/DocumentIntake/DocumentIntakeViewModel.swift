@@ -36,6 +36,7 @@ final class DocumentIntakeViewModel: ObservableObject {
     @Published var revocationHolders = ""
     @Published var selectedTrusteeSignatureAuthority = ""
     @Published var trusteeSignatureAuthorityCustomText = ""
+    @Published var selectedTrusteeIncapacityStandard = ""
     @Published var selectedTaxIdOwner = ""
     @Published var assetTitlingFormat = ""
     @Published var selectedTrusteePowers: Set<String> = []
@@ -150,11 +151,12 @@ final class DocumentIntakeViewModel: ObservableObject {
                 && hasValidOptionalPersonRows(successorTrustees)
                 && filledPersonRows(grantors).count <= 2
         case .trustAuthority:
-            guard hasText(selectedTrusteeSignatureAuthority) else {
+            guard hasText(selectedTrusteeSignatureAuthority), hasText(revocationHolders), hasText(selectedTrusteeIncapacityStandard) else {
                 return false
             }
 
             return (selectedTrusteeSignatureAuthority != "custom" || hasText(trusteeSignatureAuthorityCustomText))
+                && (revocationHolders != "custom" || hasText(revocationHoldersCustomText))
                 && (requiresNamedSigningTrusteeSelection == false || signingTrusteeCount == 1)
                 && (requiresTaxIdOwnerSelection == false || hasText(selectedTaxIdOwner))
         case .trustDocuments:
@@ -234,6 +236,40 @@ final class DocumentIntakeViewModel: ObservableObject {
 
     var trusteePowerOptions: [IntakeOption] {
         field(for: ["trustee_powers"])?.allowedOptions ?? []
+    }
+
+    var revocationHolderOptions: [IntakeOption] {
+        let options = field(for: ["revocation_holders"])?.allowedOptions ?? []
+        guard options.isEmpty else {
+            return options
+        }
+
+        return [
+            IntakeOption(id: "trustmaker_only", label: "Trustmaker only"),
+            IntakeOption(id: "all_trustmakers_jointly", label: "All Trustmakers jointly"),
+            IntakeOption(id: "each_trustmaker_as_to_own_property", label: "Each Trustmaker as to own property"),
+            IntakeOption(id: "trustee_controlled", label: "Trustee controlled"),
+            IntakeOption(id: "custom", label: "Custom revocation rule"),
+            IntakeOption(id: "unsure", label: "Unsure")
+        ]
+    }
+
+    var trusteeIncapacityStandardOptions: [IntakeOption] {
+        let options = field(for: ["trustee_incapacity_standard"])?.allowedOptions ?? []
+        guard options.isEmpty else {
+            return options
+        }
+
+        return [
+            IntakeOption(id: "licensed_physician_determination", label: "Licensed physician determination"),
+            IntakeOption(id: "two_physician_determination", label: "Two physician determination"),
+            IntakeOption(id: "court_determination", label: "Court determination"),
+            IntakeOption(id: "written_resignation", label: "Written resignation"),
+            IntakeOption(id: "unanimous_trustee_determination", label: "Unanimous trustee determination"),
+            IntakeOption(id: "unable_to_manage_financial_affairs", label: "Unable to manage financial affairs"),
+            IntakeOption(id: "other", label: "Other"),
+            IntakeOption(id: "unsure", label: "Unsure")
+        ]
     }
 
     var areAllTrusteePowersSelected: Bool {
@@ -975,9 +1011,11 @@ final class DocumentIntakeViewModel: ObservableObject {
         grantors = personListDisplay(answers["grantors"]?.stringArrayValue ?? [])
         trustees = personListDisplay(answers["trustees"]?.stringArrayValue ?? [])
         successorTrustees = personListDisplay(answers["successor_trustees"]?.stringArrayValue ?? [])
-        revocationHolders = legacyPersonListDisplay(answers["revocation_holders"]?.stringArrayValue ?? [])
+        revocationHolders = answers["revocation_holders"]?.stringValue
+            ?? legacyPersonListDisplay(answers["revocation_holders"]?.stringArrayValue ?? [])
         selectedTrusteeSignatureAuthority = answers["trustee_signature_authority"]?.stringValue ?? ""
         trusteeSignatureAuthorityCustomText = answers["trustee_signature_authority_custom_text"]?.stringValue ?? ""
+        selectedTrusteeIncapacityStandard = answers["trustee_incapacity_standard"]?.stringValue ?? ""
         selectedTaxIdOwner = answers["tax_id_owner"]?.stringValue ?? ""
         assetTitlingFormat = answers["asset_titling_format"]?.stringValue ?? ""
         selectedTrusteePowers = Set(answers["trustee_powers"]?.stringArrayValue ?? [])
@@ -994,9 +1032,10 @@ final class DocumentIntakeViewModel: ObservableObject {
             answers["grantors"] = .array(serializedPersonListValues(from: grantors).map(JSONValue.string))
             answers["trustees"] = .array(serializedPersonListValues(from: trustees).map(JSONValue.string))
             answers["successor_trustees"] = .array(serializedPersonListValues(from: successorTrustees).map(JSONValue.string))
-            answers["revocation_holders"] = .array(personListItems(from: revocationHolders).map { .string(serializePersonListItem($0)) })
+            answers["revocation_holders"] = .string(revocationHolders)
             answers["trustee_signature_authority"] = .string(selectedTrusteeSignatureAuthority)
             answers["trustee_signature_authority_custom_text"] = .string(trusteeSignatureAuthorityCustomText)
+            answers["trustee_incapacity_standard"] = .string(selectedTrusteeIncapacityStandard)
             answers["tax_id_owner"] = .string(selectedTaxIdOwner)
             answers["asset_titling_format"] = .string(assetTitlingFormat)
             answers["trustee_powers"] = .array(selectedTrusteePowers.sorted().map(JSONValue.string))
@@ -1628,6 +1667,7 @@ final class DocumentIntakeViewModel: ObservableObject {
         revocationHolders = ""
         selectedTrusteeSignatureAuthority = ""
         trusteeSignatureAuthorityCustomText = ""
+        selectedTrusteeIncapacityStandard = ""
         selectedTaxIdOwner = ""
         assetTitlingFormat = ""
         selectedTrusteePowers = []

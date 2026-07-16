@@ -116,6 +116,15 @@ struct AuthAPIClient: Sendable {
         try await send(path: path, method: "PUT", body: body, accessToken: accessToken)
     }
 
+    func delete<Response: Decodable>(
+        path: String,
+        accessToken: String? = nil
+    ) async throws -> Response {
+        let request = try makeRequest(path: path, method: "DELETE", accessToken: accessToken)
+        let (data, response) = try await urlSession.data(for: request)
+        return try decode(data: data, response: response)
+    }
+
     func makeRequest(
         path: String,
         method: String,

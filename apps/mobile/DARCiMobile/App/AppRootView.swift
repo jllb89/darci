@@ -14,6 +14,7 @@ struct AppRootView: View {
     @State private var selectedProductModeKey: String?
     @State private var intakeRoute: ProductIntakeRoute?
     @State private var reviewRoute: DocumentReviewRoute?
+    @State private var signingRoute: DocumentSigningRoute?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     private let authenticationViewModel: AuthenticationViewModel
@@ -88,10 +89,30 @@ struct AppRootView: View {
                 }
             }
             .navigationDestination(item: $reviewRoute) { route in
-                DocumentReviewPendingView(documentId: route.documentId)
+                DocumentReviewView(
+                    session: sessionCoordinator.currentSession,
+                    documentId: route.documentId,
+                    apiClient: documentIntakeAPIClient,
+                    onSavedToDraft: {
+                        selectedProductModeKey = nil
+                        intakeRoute = nil
+                        reviewRoute = nil
+                    },
+                    onContinueToSign: { documentId in
+                        signingRoute = DocumentSigningRoute(documentId: documentId)
+                    }
+                )
                     .onDisappear {
                         selectedProductModeKey = nil
                         intakeRoute = nil
+                    }
+            }
+            .navigationDestination(item: $signingRoute) { route in
+                DocumentSigningPendingView(documentId: route.documentId)
+                    .onDisappear {
+                        selectedProductModeKey = nil
+                        intakeRoute = nil
+                        reviewRoute = nil
                     }
             }
         }
@@ -125,6 +146,7 @@ struct AppRootView: View {
         selectedProductModeKey = nil
         intakeRoute = nil
         reviewRoute = nil
+        signingRoute = nil
 
         withAnimation(.easeInOut(duration: 0.25)) {
             launchPhase = .authentication
@@ -164,7 +186,13 @@ struct DocumentReviewRoute: Identifiable, Hashable {
     var id: String { documentId }
 }
 
-private struct DocumentReviewPendingView: View {
+struct DocumentSigningRoute: Identifiable, Hashable {
+    let documentId: String
+
+    var id: String { documentId }
+}
+
+private struct DocumentSigningPendingView: View {
     let documentId: String
 
     var body: some View {
@@ -172,11 +200,11 @@ private struct DocumentReviewPendingView: View {
             Color.black.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 18) {
-                Text("Review")
+                Text("Signing")
                     .font(DARCiFont.maisonNeue(.book, size: 28))
                     .foregroundStyle(.white)
 
-                Text("Intake is submitted. Document review and generation are next.")
+                Text("Review is approved. Signature capture is next.")
                     .font(DARCiFont.maisonNeue(.light, size: 14))
                     .lineSpacing(4)
                     .foregroundStyle(.white.opacity(0.78))

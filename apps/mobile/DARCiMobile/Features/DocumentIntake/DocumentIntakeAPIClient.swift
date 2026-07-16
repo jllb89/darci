@@ -7,9 +7,21 @@ protocol DocumentIntakeAPIProviding: Sendable {
     func getDocumentIntakeDraft(documentId: String, accessToken: String) async throws -> DocumentIntakeDraftResponse
     func saveDocumentIntakeDraft(documentId: String, request: DocumentIntakeDraftUpsertRequest, accessToken: String) async throws -> DocumentIntakeDraftResponse
     func submitDocumentIntakeDraft(documentId: String, request: DocumentIntakeSubmitRequest, accessToken: String) async throws -> DocumentIntakeSubmitResponse
+    func resaveDocumentIntakeDraft(documentId: String, accessToken: String) async throws -> DocumentIntakeDraftResponse
     func createDocumentUpload(_ request: DocumentUploadCreateRequest, accessToken: String) async throws -> DocumentUploadCreateResponse
     func uploadDocument(data: Data, mimeType: String, to signedUrl: URL) async throws
     func finalizeDocumentUpload(documentId: String, request: DocumentUploadFinalizeRequest, accessToken: String) async throws -> DocumentUploadFinalizeResponse
+    func getDocumentReview(documentId: String, accessToken: String) async throws -> DocumentReviewResponse
+    func createDocumentGenerationRuns(documentId: String, request: DocumentGenerationRunsRequest, accessToken: String) async throws -> DocumentGenerationRunsResponse
+    func approveDocumentReview(documentId: String, request: DocumentReviewApprovalRequest, accessToken: String) async throws -> DocumentReviewApprovalResponse
+    func getDocumentSigning(documentId: String, accessToken: String) async throws -> DocumentSigningResponse
+    func listSavedSignatures(documentId: String, accessToken: String) async throws -> SavedDocumentSignaturesResponse
+    func deleteSavedSignature(documentId: String, signatureId: String, accessToken: String) async throws -> DocumentAPIMessageResponse
+    func captureSignature(documentId: String, request: DocumentSignatureCaptureRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse
+    func requestSignatureUpload(documentId: String, request: DocumentSignatureUploadRequest, accessToken: String) async throws -> DocumentSignatureUploadResponse
+    func uploadSignatureAsset(data: Data, mimeType: String, to signedUrl: URL) async throws
+    func finalizeSignatureUpload(documentId: String, request: DocumentSignatureFinalizeRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse
+    func confirmDocumentSigning(documentId: String, request: DocumentSignConfirmRequest, accessToken: String) async throws -> DocumentAPIMessageResponse
     func autocompleteAddress(jurisdiction: String, request: AddressAutocompleteRequest, accessToken: String) async throws -> AddressAutocompleteResponse
     func resolveAddressDetails(jurisdiction: String, request: AddressDetailsRequest, accessToken: String) async throws -> AddressDetailsResponse
 }
@@ -55,6 +67,10 @@ struct DocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
         try await authClient.post(path: "/documents/\(documentId)/intake-submit", body: request, accessToken: accessToken)
     }
 
+    func resaveDocumentIntakeDraft(documentId: String, accessToken: String) async throws -> DocumentIntakeDraftResponse {
+        try await authClient.post(path: "/documents/\(documentId)/intake-draft/resave", body: EmptyDocumentAPIRequest(), accessToken: accessToken)
+    }
+
     func createDocumentUpload(_ request: DocumentUploadCreateRequest, accessToken: String) async throws -> DocumentUploadCreateResponse {
         try await authClient.post(path: "/documents", body: request, accessToken: accessToken)
     }
@@ -76,6 +92,64 @@ struct DocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
 
     func finalizeDocumentUpload(documentId: String, request: DocumentUploadFinalizeRequest, accessToken: String) async throws -> DocumentUploadFinalizeResponse {
         try await authClient.post(path: "/documents/\(documentId)/upload-finalize", body: request, accessToken: accessToken)
+    }
+
+    func getDocumentReview(documentId: String, accessToken: String) async throws -> DocumentReviewResponse {
+        try await authClient.get(path: "/documents/\(documentId)/review", accessToken: accessToken)
+    }
+
+    func createDocumentGenerationRuns(documentId: String, request: DocumentGenerationRunsRequest, accessToken: String) async throws -> DocumentGenerationRunsResponse {
+        try await authClient.post(path: "/documents/\(documentId)/generation-runs", body: request, accessToken: accessToken)
+    }
+
+    func approveDocumentReview(documentId: String, request: DocumentReviewApprovalRequest, accessToken: String) async throws -> DocumentReviewApprovalResponse {
+        try await authClient.post(path: "/documents/\(documentId)/review-approval", body: request, accessToken: accessToken)
+    }
+
+    func getDocumentSigning(documentId: String, accessToken: String) async throws -> DocumentSigningResponse {
+        try await authClient.get(path: "/documents/\(documentId)/signing", accessToken: accessToken)
+    }
+
+    func listSavedSignatures(documentId: String, accessToken: String) async throws -> SavedDocumentSignaturesResponse {
+        try await authClient.get(path: "/documents/\(documentId)/signatures/saved", accessToken: accessToken)
+    }
+
+    func deleteSavedSignature(documentId: String, signatureId: String, accessToken: String) async throws -> DocumentAPIMessageResponse {
+        var allowedCharacters = CharacterSet.urlPathAllowed
+        allowedCharacters.remove(charactersIn: "/")
+        let encodedSignatureId = signatureId.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? signatureId
+        return try await authClient.delete(path: "/documents/\(documentId)/signatures/saved/\(encodedSignatureId)", accessToken: accessToken)
+    }
+
+    func captureSignature(documentId: String, request: DocumentSignatureCaptureRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse {
+        try await authClient.post(path: "/documents/\(documentId)/signatures", body: request, accessToken: accessToken)
+    }
+
+    func requestSignatureUpload(documentId: String, request: DocumentSignatureUploadRequest, accessToken: String) async throws -> DocumentSignatureUploadResponse {
+        try await authClient.post(path: "/documents/\(documentId)/signatures/request", body: request, accessToken: accessToken)
+    }
+
+    func uploadSignatureAsset(data: Data, mimeType: String, to signedUrl: URL) async throws {
+        var request = URLRequest(url: signedUrl)
+        request.httpMethod = "PUT"
+        request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+
+        let (_, response) = try await urlSession.upload(for: request, from: data)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthAPIError.invalidResponse
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw AuthAPIError.unexpectedStatus(statusCode: httpResponse.statusCode, message: "Failed to upload signature image.")
+        }
+    }
+
+    func finalizeSignatureUpload(documentId: String, request: DocumentSignatureFinalizeRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse {
+        try await authClient.post(path: "/documents/\(documentId)/signatures/finalize", body: request, accessToken: accessToken)
+    }
+
+    func confirmDocumentSigning(documentId: String, request: DocumentSignConfirmRequest, accessToken: String) async throws -> DocumentAPIMessageResponse {
+        try await authClient.post(path: "/documents/\(documentId)/sign", body: request, accessToken: accessToken)
     }
 
     func autocompleteAddress(jurisdiction: String, request: AddressAutocompleteRequest, accessToken: String) async throws -> AddressAutocompleteResponse {
@@ -176,6 +250,27 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
         )
     }
 
+    func resaveDocumentIntakeDraft(documentId: String, accessToken: String) async throws -> DocumentIntakeDraftResponse {
+        DocumentIntakeDraftResponse(
+            draft: DocumentIntakeDraft(
+                documentId: documentId,
+                ownerId: "user-1",
+                productFlowMode: "poa_only",
+                jurisdiction: "CA",
+                currentStep: "poa_requirements",
+                rulesSnapshotVersion: "member_form_rules_contract_v1",
+                answers: [:],
+                canonicalAnswers: nil,
+                revision: 2,
+                createdAt: nil,
+                updatedAt: "2026-06-05T12:00:00.000Z"
+            ),
+            message: nil,
+            currentRevision: nil,
+            intakeStatus: nil
+        )
+    }
+
     func createDocumentUpload(_ request: DocumentUploadCreateRequest, accessToken: String) async throws -> DocumentUploadCreateResponse {
         DocumentUploadCreateResponse(
             document: DocumentSummary(id: "document-upload-1"),
@@ -189,6 +284,187 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
 
     func finalizeDocumentUpload(documentId: String, request: DocumentUploadFinalizeRequest, accessToken: String) async throws -> DocumentUploadFinalizeResponse {
         DocumentUploadFinalizeResponse(document: DocumentSummary(id: documentId), message: nil)
+    }
+
+    func getDocumentReview(documentId: String, accessToken: String) async throws -> DocumentReviewResponse {
+        DocumentReviewResponse(
+            document: DocumentReviewDocumentSummary(
+                id: documentId,
+                idn: nil,
+                status: "pending_review",
+                documentType: "poa_document",
+                jurisdiction: "US-CA",
+                createdAt: "2026-06-05T12:00:00.000Z",
+                productFlowMode: "poa_only"
+            ),
+            review: DocumentReviewState(
+                state: "ready",
+                requiresGeneration: false,
+                missingOutputKeys: [],
+                allVisibleOutputsReady: true,
+                canApprove: true,
+                reviewApproval: nil,
+                outputs: [
+                    DocumentReviewOutput(
+                        outputKey: "poa_document",
+                        outputLabel: "Power of Attorney",
+                        versionId: "version-1",
+                        generationRunId: "run-1",
+                        version: 1,
+                        fileName: "power-of-attorney.pdf",
+                        mimeType: "application/pdf",
+                        sizeBytes: 1024,
+                        createdAt: "2026-06-05T12:05:00.000Z",
+                        downloadUrl: "https://download.example.test/power-of-attorney.pdf",
+                        isFinal: false
+                    )
+                ],
+                pendingOutputs: []
+            ),
+            message: nil
+        )
+    }
+
+    func createDocumentGenerationRuns(documentId: String, request: DocumentGenerationRunsRequest, accessToken: String) async throws -> DocumentGenerationRunsResponse {
+        DocumentGenerationRunsResponse(
+            runs: request.outputKeys.map { key in
+                DocumentGenerationRunSummary(id: "run-\(key)", outputKey: key, documentKey: key, status: "queued", blockedCount: 0, errorMessage: nil)
+            },
+            message: nil
+        )
+    }
+
+    func approveDocumentReview(documentId: String, request: DocumentReviewApprovalRequest, accessToken: String) async throws -> DocumentReviewApprovalResponse {
+        DocumentReviewApprovalResponse(
+            document: nil,
+            reviewApproval: DocumentReviewApproval(
+                approvedAt: "2026-06-05T12:10:00.000Z",
+                reviewSource: "mobile",
+                latestVersionId: "version-1",
+                latestRenderedRunId: "run-1",
+                approvedOutputKeys: ["poa_document"],
+                approvedVersionIds: ["version-1"]
+            ),
+            message: nil
+        )
+    }
+
+    func getDocumentSigning(documentId: String, accessToken: String) async throws -> DocumentSigningResponse {
+        DocumentSigningResponse(
+            document: DocumentReviewDocumentSummary(
+                id: documentId,
+                idn: nil,
+                status: "pending_signature",
+                documentType: "poa_document",
+                jurisdiction: "US-CA",
+                createdAt: "2026-06-05T12:00:00.000Z",
+                productFlowMode: "poa_only"
+            ),
+            signing: DocumentSigningState(
+                state: "ready",
+                reviewApproval: DocumentReviewApproval(
+                    approvedAt: "2026-06-05T12:10:00.000Z",
+                    reviewSource: "mobile",
+                    latestVersionId: "version-1",
+                    latestRenderedRunId: "run-1",
+                    approvedOutputKeys: ["poa_document"],
+                    approvedVersionIds: ["version-1"]
+                ),
+                signingExecution: nil,
+                approvedOutputKeys: ["poa_document"],
+                outputs: [
+                    DocumentReviewOutput(
+                        outputKey: "poa_document",
+                        outputLabel: "Power of Attorney",
+                        versionId: "version-1",
+                        generationRunId: "run-1",
+                        version: 1,
+                        fileName: "power-of-attorney.pdf",
+                        mimeType: "application/pdf",
+                        sizeBytes: 1024,
+                        createdAt: "2026-06-05T12:05:00.000Z",
+                        downloadUrl: "https://download.example.test/power-of-attorney.pdf",
+                        isFinal: false
+                    )
+                ],
+                pendingOutputs: [],
+                missingOutputKeys: [],
+                requiresGeneration: false,
+                allOutputsReady: true,
+                signatures: [
+                    DocumentSigningSignature(
+                        outputSignerId: "output-signer-1",
+                        generationRunId: "run-1",
+                        outputKey: "poa_document",
+                        outputLabel: "Power of Attorney",
+                        documentKey: "poa_document",
+                        partyName: "Ada Lovelace",
+                        partyRole: "principal",
+                        signingGroup: nil,
+                        isRequired: true,
+                        status: "pending",
+                        captureMethod: nil,
+                        typedValue: nil,
+                        typedKind: nil,
+                        signatureId: nil,
+                        storagePath: nil,
+                        assetDownloadUrl: nil,
+                        mimeType: nil,
+                        sizeBytes: nil,
+                        capturedAt: nil,
+                        groupMinimumRequired: nil,
+                        groupSatisfied: false
+                    )
+                ],
+                groups: [],
+                completion: DocumentSigningCompletion(
+                    requiredSignatureCount: 1,
+                    capturedRequiredSignatureCount: 0,
+                    allRequiredSignaturesComplete: false,
+                    canConfirm: false
+                ),
+                viewerAccess: DocumentSigningViewerAccess(kind: "owner", inviteId: nil, documentOutputSignerId: nil, documentPartyId: nil)
+            ),
+            message: nil
+        )
+    }
+
+    func listSavedSignatures(documentId: String, accessToken: String) async throws -> SavedDocumentSignaturesResponse {
+        SavedDocumentSignaturesResponse(savedSignatures: [], message: nil)
+    }
+
+    func deleteSavedSignature(documentId: String, signatureId: String, accessToken: String) async throws -> DocumentAPIMessageResponse {
+        DocumentAPIMessageResponse(message: nil)
+    }
+
+    func captureSignature(documentId: String, request: DocumentSignatureCaptureRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse {
+        DocumentSignatureCaptureResponse(
+            signature: DocumentSignatureSummary(id: "signature-1", documentId: documentId, generationRunId: request.generationRunId, outputSignerId: request.outputSignerId, storagePath: nil, status: "captured"),
+            remainingSignerInvites: nil,
+            message: nil
+        )
+    }
+
+    func requestSignatureUpload(documentId: String, request: DocumentSignatureUploadRequest, accessToken: String) async throws -> DocumentSignatureUploadResponse {
+        DocumentSignatureUploadResponse(
+            signature: DocumentSignatureSummary(id: "signature-upload-1", documentId: documentId, generationRunId: request.generationRunId, outputSignerId: request.outputSignerId, storagePath: nil, status: "pending_upload"),
+            upload: DocumentUploadTarget(bucket: nil, path: nil, signedUrl: "https://upload.example.test/signature.png", token: nil),
+            message: nil
+        )
+    }
+
+    func uploadSignatureAsset(data: Data, mimeType: String, to signedUrl: URL) async throws {}
+
+    func finalizeSignatureUpload(documentId: String, request: DocumentSignatureFinalizeRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse {
+        DocumentSignatureCaptureResponse(
+            signature: DocumentSignatureSummary(id: request.signatureId, documentId: documentId, generationRunId: request.generationRunId, outputSignerId: request.outputSignerId, storagePath: nil, status: "captured"),
+            remainingSignerInvites: nil,
+            message: nil
+        )
+    }
+
+    func confirmDocumentSigning(documentId: String, request: DocumentSignConfirmRequest, accessToken: String) async throws -> DocumentAPIMessageResponse {
+        DocumentAPIMessageResponse(message: nil)
     }
 
     func autocompleteAddress(jurisdiction: String, request: AddressAutocompleteRequest, accessToken: String) async throws -> AddressAutocompleteResponse {
