@@ -24,6 +24,7 @@ struct ProductIntakeFlowView: View {
     @State private var selectInputFrames: [String: CGRect] = [:]
     @State private var activeTooltipKey: String?
     @State private var activeTooltipContent: String?
+    private let maxPDFUploadBytes = 25 * 1024 * 1024
 
     init(
         session: AuthSession?,
@@ -1015,45 +1016,54 @@ struct ProductIntakeFlowView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
-                Text("Jurisdiction")
-                    .font(DARCiFont.maisonNeue(.book, size: 14))
-                    .foregroundStyle(.white)
-
-                jurisdictionMenu
-            }
-
             intakeField(label: "Document upload") {
                 Button {
                     isFileImporterPresented = true
                 } label: {
-                    menuLabel(
-                        text: viewModel.notarizationFileName.isEmpty ? "Select PDF" : viewModel.notarizationFileName,
-                        placeholder: "Select PDF"
-                    )
+                    Text(viewModel.notarizationFileName.isEmpty ? "Select PDF" : viewModel.notarizationFileName)
+                        .font(DARCiFont.maisonNeue(.book, size: 12))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .padding(.horizontal, 14)
+                        .overlay {
+                            Rectangle()
+                                .stroke(.white.opacity(0.36), lineWidth: 1)
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("notarization-pdf-picker")
             }
 
             if viewModel.notarizationFileName.isEmpty == false {
-                Button("Clear selected file") {
-                    viewModel.clearNotarizationFile()
+                VStack(alignment: .leading, spacing: scaled(24, in: proxy)) {
+                    Button("Clear selected file") {
+                        viewModel.clearNotarizationFile()
+                    }
+                    .font(DARCiFont.maisonNeue(.book, size: 15))
+                    .foregroundStyle(.white.opacity(0.7))
+
+                    VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
+                        Text("Jurisdiction")
+                            .font(DARCiFont.maisonNeue(.book, size: 14))
+                            .foregroundStyle(.white)
+
+                        jurisdictionMenu
+                    }
+
+                    intakeField(label: "Document description") {
+                        intakeTextEditor(text: $viewModel.notarizationDocumentDescription, prompt: "")
+                            .frame(minHeight: 120)
+                            .accessibilityIdentifier("notarization-description-field")
+                    }
+
+                    intakeField(label: "Reason for notarizing document", optionalLabel: "Optional") {
+                        intakeTextEditor(text: $viewModel.notarizationReason, prompt: "")
+                            .frame(minHeight: 110)
+                            .accessibilityIdentifier("notarization-reason-field")
+                    }
                 }
-                .font(DARCiFont.maisonNeue(.book, size: 15))
-                .foregroundStyle(.white.opacity(0.7))
-            }
-
-            intakeField(label: "Document description") {
-                intakeTextEditor(text: $viewModel.notarizationDocumentDescription, prompt: "")
-                    .frame(minHeight: 120)
-                    .accessibilityIdentifier("notarization-description-field")
-            }
-
-            intakeField(label: "Reason for notarizing document", optionalLabel: "Optional") {
-                intakeTextEditor(text: $viewModel.notarizationReason, prompt: "")
-                    .frame(minHeight: 110)
-                    .accessibilityIdentifier("notarization-reason-field")
             }
         }
         .fileImporter(
@@ -1605,6 +1615,12 @@ struct ProductIntakeFlowView: View {
                 return
             }
 
+            let fileName = url.lastPathComponent
+            guard fileName.lowercased().hasSuffix(".pdf") else {
+                viewModel.errorMessage = "Document upload: select a PDF file."
+                return
+            }
+
             let didAccess = url.startAccessingSecurityScopedResource()
             defer {
                 if didAccess {
@@ -1613,7 +1629,12 @@ struct ProductIntakeFlowView: View {
             }
 
             let data = try Data(contentsOf: url)
-            viewModel.selectNotarizationFile(name: url.lastPathComponent, size: data.count, data: data)
+            guard data.count <= maxPDFUploadBytes else {
+                viewModel.errorMessage = "Document upload: PDFs must be 25 MB or smaller."
+                return
+            }
+
+            viewModel.selectNotarizationFile(name: fileName, size: data.count, data: data)
         } catch {
             viewModel.errorMessage = "Document upload: failed to read the selected PDF."
         }

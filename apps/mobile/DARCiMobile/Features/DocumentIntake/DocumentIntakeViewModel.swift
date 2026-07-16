@@ -1195,6 +1195,7 @@ final class DocumentIntakeViewModel: ObservableObject {
                 accessToken: accessToken
             )
             isSubmitted = true
+            submittedDocumentId = documentId
             draftNotice = "Document uploaded for review."
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Failed to upload this document for notarization.")
