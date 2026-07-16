@@ -74,10 +74,7 @@ enum IntakeContactFormatting {
         }
 
         if countryIso2.uppercased() == "US" {
-            let nationalDigits = digits.count > usPhoneDigitLimit && digits.first == "1"
-                ? String(digits.dropFirst())
-                : digits
-            return nationalDigits.count == usPhoneDigitLimit
+            return digits.count == usPhoneDigitLimit
         }
 
         return (7...15).contains(digits.count)
@@ -89,10 +86,7 @@ enum IntakeContactFormatting {
             return digits
         }
 
-        let nationalDigits = digits.count > usPhoneDigitLimit && digits.first == "1"
-            ? String(digits.dropFirst())
-            : digits
-        return String(nationalDigits.prefix(usPhoneDigitLimit))
+        return String(digits.prefix(usPhoneDigitLimit))
     }
 
     private static func phoneDigits(_ value: String) -> String {

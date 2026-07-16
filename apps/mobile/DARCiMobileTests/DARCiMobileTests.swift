@@ -408,7 +408,7 @@ final class DARCiMobileTests: XCTestCase {
                 XCTAssertEqual(json["productFlowMode"] as? String, "poa_only")
                 XCTAssertEqual(json["jurisdiction"] as? String, "CA")
                 XCTAssertEqual(json["rulesSnapshotVersion"] as? String, "member_form_rules_contract_v1")
-                XCTAssertEqual(json["resumeLatestDraft"] as? Bool, false)
+                XCTAssertEqual(json["resumeLatestDraft"] as? Bool, true)
 
                 return (
                     try XCTUnwrap(HTTPURLResponse(
@@ -453,7 +453,7 @@ final class DARCiMobileTests: XCTestCase {
                 productFlowMode: "poa_only",
                 jurisdiction: "CA",
                 rulesSnapshotVersion: "member_form_rules_contract_v1",
-                resumeLatestDraft: false
+                resumeLatestDraft: true
             ),
             accessToken: "access-token"
         )

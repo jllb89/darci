@@ -13,6 +13,7 @@ struct AppRootView: View {
     @State private var didAttemptSessionRestore = false
     @State private var selectedProductModeKey: String?
     @State private var intakeRoute: ProductIntakeRoute?
+    @State private var reviewRoute: DocumentReviewRoute?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     private let authenticationViewModel: AuthenticationViewModel
@@ -79,10 +80,19 @@ struct AppRootView: View {
                     session: sessionCoordinator.currentSession,
                     productModeKey: route.modeKey,
                     apiClient: documentIntakeAPIClient
-                )
+                ) { documentId in
+                    reviewRoute = DocumentReviewRoute(documentId: documentId)
+                }
                 .onDisappear {
                     selectedProductModeKey = nil
                 }
+            }
+            .navigationDestination(item: $reviewRoute) { route in
+                DocumentReviewPendingView(documentId: route.documentId)
+                    .onDisappear {
+                        selectedProductModeKey = nil
+                        intakeRoute = nil
+                    }
             }
         }
     }
@@ -114,6 +124,7 @@ struct AppRootView: View {
         authenticationViewModel.clearChallenge()
         selectedProductModeKey = nil
         intakeRoute = nil
+        reviewRoute = nil
 
         withAnimation(.easeInOut(duration: 0.25)) {
             launchPhase = .authentication
@@ -144,6 +155,44 @@ struct AppRootView: View {
         }
 
         return (AuthAPIClient(), HomeAPIClient(), DocumentIntakeAPIClient(), KeychainAuthSessionStore())
+    }
+}
+
+struct DocumentReviewRoute: Identifiable, Hashable {
+    let documentId: String
+
+    var id: String { documentId }
+}
+
+private struct DocumentReviewPendingView: View {
+    let documentId: String
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Review")
+                    .font(DARCiFont.maisonNeue(.book, size: 28))
+                    .foregroundStyle(.white)
+
+                Text("Intake is submitted. Document review and generation are next.")
+                    .font(DARCiFont.maisonNeue(.light, size: 14))
+                    .lineSpacing(4)
+                    .foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(documentId)
+                    .font(DARCiFont.maisonNeue(.light, size: 11))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("document-review-document-id")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+        }
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

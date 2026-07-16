@@ -10,7 +10,9 @@ final class DocumentIntakeViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
     @Published private(set) var isSubmitted = false
+    @Published private(set) var submittedDocumentId: String?
     @Published private(set) var trustmakerPrincipalIndex = 0
+    @Published private(set) var draftUpdatedAt: String?
     @Published var errorMessage: String?
     @Published var draftNotice: String?
     @Published var selectedJurisdiction = "CA"
@@ -56,6 +58,8 @@ final class DocumentIntakeViewModel: ObservableObject {
     private var fieldsByKey: [String: MemberFacingField] = [:]
     private var documentId: String?
     private var draftRevision: Int?
+    private var lastServerDraftSignature: String?
+    private var autosaveTask: Task<Void, Never>?
     private var addressSessionTokens: [String: String] = [:]
 
     init(apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient()) {
@@ -216,6 +220,14 @@ final class DocumentIntakeViewModel: ObservableObject {
         "\(step.rawValue)-\(trustmakerPrincipalIndex)"
     }
 
+    var autosaveSignature: String {
+        guard canAutosaveDraft else {
+            return ""
+        }
+
+        return draftSignature()
+    }
+
     var trusteeSignatureAuthorityOptions: [IntakeOption] {
         field(for: ["trustee_signature_authority"])?.allowedOptions ?? []
     }
@@ -365,8 +377,9 @@ final class DocumentIntakeViewModel: ObservableObject {
 
         productModeKey = modeKey
         step = initialStep(for: modeKey)
-    resetTrustmakerPrincipalProgress()
+        resetTrustmakerPrincipalProgress()
         isSubmitted = false
+        submittedDocumentId = nil
 
         guard let accessToken = session?.accessToken, accessToken.isEmpty == false else {
             errorMessage = "Sign in again to start document intake."
@@ -376,6 +389,7 @@ final class DocumentIntakeViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         draftNotice = nil
+        cancelPendingAutosave()
         defer { isLoading = false }
 
         do {
@@ -490,6 +504,49 @@ final class DocumentIntakeViewModel: ObservableObject {
         }
     }
 
+    func scheduleAutosave(session: AuthSession?) {
+        guard canAutosaveDraft,
+              let accessToken = session?.accessToken,
+              accessToken.isEmpty == false else {
+            cancelPendingAutosave()
+            return
+        }
+
+        let signature = autosaveSignature
+        guard signature.isEmpty == false, signature != lastServerDraftSignature else {
+            cancelPendingAutosave()
+            return
+        }
+
+        cancelPendingAutosave()
+        autosaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            await self?.performAutosave(accessToken: accessToken, expectedSignature: signature)
+        }
+    }
+
+    func flushAutosave(session: AuthSession?) async {
+        guard canAutosaveDraft,
+              let accessToken = session?.accessToken,
+              accessToken.isEmpty == false else {
+            cancelPendingAutosave()
+            return
+        }
+
+        let signature = autosaveSignature
+        cancelPendingAutosave()
+
+        guard signature.isEmpty == false, signature != lastServerDraftSignature else {
+            return
+        }
+
+        await performAutosave(accessToken: accessToken, expectedSignature: signature)
+    }
+
     func toggleAuthorityScope(_ option: IntakeOption) {
         if selectedAuthorityScopes.contains(option.id) {
             selectedAuthorityScopes.remove(option.id)
@@ -558,13 +615,16 @@ final class DocumentIntakeViewModel: ObservableObject {
         removePersonRow(from: &successorTrustees, at: index)
     }
 
-    func addPriorDocumentItem() {
+    @discardableResult
+    func addPriorDocumentItem() -> Int {
+        let index = priorDocumentItems.count
         priorDocumentItems.append(
             IntakePriorDocumentItem(
-                chronologyOrder: priorDocumentItems.count + 1,
+                chronologyOrder: index + 1,
                 documentType: priorDocumentItems.isEmpty ? "trust_agreement" : "amendment"
             )
         )
+        return index
     }
 
     func removePriorDocumentItem(at index: Int) {
@@ -743,13 +803,13 @@ final class DocumentIntakeViewModel: ObservableObject {
                 productFlowMode: modeKey,
                 jurisdiction: selectedJurisdiction,
                 rulesSnapshotVersion: Self.rulesSnapshotVersion,
-                resumeLatestDraft: false
+                resumeLatestDraft: true
             ),
             accessToken: accessToken
         )
 
         documentId = bootstrapResponse.document?.id ?? bootstrapResponse.draft?.documentId
-        applyDraft(bootstrapResponse.draft)
+        applyDraft(bootstrapResponse.draft, restoreStep: true)
     }
 
     private static func isAddressSuggestion(_ suggestion: AddressAutocompleteSuggestion) -> Bool {
@@ -775,11 +835,15 @@ final class DocumentIntakeViewModel: ObservableObject {
         return suggestion.description.contains(",")
     }
 
-    private func saveCurrentDraft(accessToken: String) async {
+    private func saveCurrentDraft(accessToken: String, retryingAfterConflict: Bool = false) async {
         guard let documentId else {
             errorMessage = "Document draft is not ready yet."
             return
         }
+
+        let draftStep = step
+        let draftAnswers = buildAnswers()
+        let signature = draftSignature(stepKey: draftStep.persistedStepKey, answers: draftAnswers)
 
         isSaving = true
         defer { isSaving = false }
@@ -788,16 +852,25 @@ final class DocumentIntakeViewModel: ObservableObject {
             let response = try await apiClient.saveDocumentIntakeDraft(
                 documentId: documentId,
                 request: DocumentIntakeDraftUpsertRequest(
-                    currentStep: step.persistedStepKey,
+                    currentStep: draftStep.persistedStepKey,
                     rulesSnapshotVersion: Self.rulesSnapshotVersion,
-                    answers: buildAnswers(),
+                    answers: draftAnswers,
                     expectedRevision: draftRevision
                 ),
                 accessToken: accessToken
             )
-            applyDraft(response.draft)
+            applyDraft(response.draft, restoreStep: false)
+            lastServerDraftSignature = signature
         } catch AuthAPIError.unexpectedStatus(let statusCode, _) where statusCode == 409 {
-            await reloadDraftAfterConflict(documentId: documentId, accessToken: accessToken)
+            await reloadDraftAfterConflict(
+                documentId: documentId,
+                accessToken: accessToken,
+                preservingAnswers: draftAnswers,
+                preferredStep: draftStep
+            )
+            if retryingAfterConflict == false, errorMessage == nil, isSubmitted == false {
+                await saveCurrentDraft(accessToken: accessToken, retryingAfterConflict: true)
+            }
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Failed to save this draft.")
         }
@@ -809,6 +882,11 @@ final class DocumentIntakeViewModel: ObservableObject {
             return
         }
 
+        cancelPendingAutosave()
+
+        let submitStep = step
+        let submitAnswers = buildAnswers()
+
         isSaving = true
         defer { isSaving = false }
 
@@ -816,15 +894,17 @@ final class DocumentIntakeViewModel: ObservableObject {
             let response = try await apiClient.submitDocumentIntakeDraft(
                 documentId: documentId,
                 request: DocumentIntakeSubmitRequest(
-                    currentStep: step.persistedStepKey,
+                    currentStep: submitStep.persistedStepKey,
                     rulesSnapshotVersion: Self.rulesSnapshotVersion,
-                    answers: buildAnswers(),
+                    answers: submitAnswers,
                     expectedRevision: draftRevision
                 ),
                 accessToken: accessToken
             )
-            applyDraft(response.draft)
+            applyDraft(response.draft, restoreStep: false)
+            lastServerDraftSignature = draftSignature(stepKey: submitStep.persistedStepKey, answers: submitAnswers)
             isSubmitted = true
+            submittedDocumentId = documentId
             draftNotice = "Intake submitted. Review is next."
         } catch AuthAPIError.unexpectedStatus(let statusCode, _) where statusCode == 409 {
             await reloadDraftAfterConflict(documentId: documentId, accessToken: accessToken)
@@ -833,24 +913,49 @@ final class DocumentIntakeViewModel: ObservableObject {
         }
     }
 
-    private func reloadDraftAfterConflict(documentId: String, accessToken: String) async {
+    private func reloadDraftAfterConflict(
+        documentId: String,
+        accessToken: String,
+        preservingAnswers: [String: JSONValue]? = nil,
+        preferredStep: POAIntakeStep? = nil
+    ) async {
         do {
             let response = try await apiClient.getDocumentIntakeDraft(documentId: documentId, accessToken: accessToken)
-            applyDraft(response.draft)
-            draftNotice = "Draft changed elsewhere. Synced the latest saved draft."
+            applyDraft(response.draft, restoreStep: preservingAnswers == nil)
+
+            if let preservingAnswers {
+                var mergedAnswers = response.draft?.answers ?? [:]
+                preservingAnswers.forEach { key, value in
+                    mergedAnswers[key] = value
+                }
+                applyAnswers(mergedAnswers)
+                if let preferredStep {
+                    step = preferredStep
+                }
+                lastServerDraftSignature = draftSignature()
+                draftNotice = "Draft changed elsewhere. Synced latest draft without overriding your current edits."
+            } else {
+                draftNotice = "Draft changed elsewhere. Synced the latest saved draft."
+            }
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Draft changed elsewhere and could not be reloaded.")
         }
     }
 
-    private func applyDraft(_ draft: DocumentIntakeDraft?) {
+    private func applyDraft(_ draft: DocumentIntakeDraft?, restoreStep: Bool) {
         guard let draft else {
             return
         }
 
         documentId = draft.documentId
         draftRevision = draft.revision
+        draftUpdatedAt = draft.updatedAt
         applyAnswers(draft.answers)
+        if restoreStep, let restoredStep = restoredStep(from: draft.currentStep, productModeKey: draft.productFlowMode) {
+            step = restoredStep
+            resetTrustmakerPrincipalProgress()
+        }
+        lastServerDraftSignature = draftSignature()
     }
 
     private func applyAnswers(_ answers: [String: JSONValue]) {
@@ -917,6 +1022,49 @@ final class DocumentIntakeViewModel: ObservableObject {
         step == stepOrder.last
     }
 
+    private var canAutosaveDraft: Bool {
+        productModeKey != "notarize_document"
+            && memberForm != nil
+            && documentId != nil
+            && isLoading == false
+            && isSubmitted == false
+    }
+
+    private struct DraftSignaturePayload: Encodable {
+        let currentStep: String
+        let answers: [String: JSONValue]
+    }
+
+    private func draftSignature(stepKey: String? = nil, answers: [String: JSONValue]? = nil) -> String {
+        let payload = DraftSignaturePayload(
+            currentStep: stepKey ?? step.persistedStepKey,
+            answers: answers ?? buildAnswers()
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(payload) else {
+            return UUID().uuidString
+        }
+
+        return String(data: data, encoding: .utf8) ?? UUID().uuidString
+    }
+
+    private func performAutosave(accessToken: String, expectedSignature: String) async {
+        guard canAutosaveDraft,
+              isSaving == false,
+              expectedSignature == autosaveSignature,
+              expectedSignature != lastServerDraftSignature else {
+            return
+        }
+
+        await saveCurrentDraft(accessToken: accessToken)
+    }
+
+    private func cancelPendingAutosave() {
+        autosaveTask?.cancel()
+        autosaveTask = nil
+    }
+
     private func nextStep() -> POAIntakeStep? {
         guard let index = stepOrder.firstIndex(of: step), index < stepOrder.count - 1 else {
             return nil
@@ -941,6 +1089,28 @@ final class DocumentIntakeViewModel: ObservableObject {
             .notarization
         default:
             .productInfo
+        }
+    }
+
+    private func restoredStep(from currentStep: String?, productModeKey: String) -> POAIntakeStep? {
+        let normalizedStep = currentStep?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch productModeKey {
+        case "trust_bundle":
+            switch normalizedStep {
+            case "poa_requirements":
+                return .principal
+            default:
+                return .trustBasicInformation
+            }
+        case "notarize_document":
+            return .notarization
+        default:
+            switch normalizedStep {
+            case "poa_requirements":
+                return .principal
+            default:
+                return .productInfo
+            }
         }
     }
 
@@ -1441,6 +1611,9 @@ final class DocumentIntakeViewModel: ObservableObject {
         fieldsByKey = [:]
         documentId = nil
         draftRevision = nil
+        draftUpdatedAt = nil
+        lastServerDraftSignature = nil
+        cancelPendingAutosave()
         principal = IntakePersonDetails()
         agent = IntakePersonDetails()
         successorAgents = ""
@@ -1466,6 +1639,7 @@ final class DocumentIntakeViewModel: ObservableObject {
         clearAddressAutocomplete()
         addressSessionTokens = [:]
         isSubmitted = false
+        submittedDocumentId = nil
         draftNotice = nil
     }
 

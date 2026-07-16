@@ -13,6 +13,7 @@ struct ProductIntakeRoute: Identifiable, Hashable {
 struct ProductIntakeFlowView: View {
     private let session: AuthSession?
     private let productModeKey: String
+    private let onSubmittedToReview: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DocumentIntakeViewModel
@@ -27,10 +28,12 @@ struct ProductIntakeFlowView: View {
     init(
         session: AuthSession?,
         productModeKey: String,
-        apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient()
+        apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient(),
+        onSubmittedToReview: @escaping (String) -> Void = { _ in }
     ) {
         self.session = session
         self.productModeKey = productModeKey
+        self.onSubmittedToReview = onSubmittedToReview
         _viewModel = StateObject(wrappedValue: DocumentIntakeViewModel(apiClient: apiClient))
     }
 
@@ -129,6 +132,21 @@ struct ProductIntakeFlowView: View {
         .onChange(of: viewModel.step) { _, _ in
             activeTooltipKey = nil
             activeTooltipContent = nil
+        }
+        .onChange(of: viewModel.autosaveSignature) { _, _ in
+            viewModel.scheduleAutosave(session: session)
+        }
+        .onChange(of: viewModel.submittedDocumentId) { _, documentId in
+            guard let documentId else {
+                return
+            }
+
+            onSubmittedToReview(documentId)
+        }
+        .onDisappear {
+            Task {
+                await viewModel.flushAutosave(session: session)
+            }
         }
         .animation(.easeOut(duration: 0.28), value: viewModel.canContinue)
     }
@@ -749,7 +767,7 @@ struct ProductIntakeFlowView: View {
                     }
 
                     Button {
-                        viewModel.addPriorDocumentItem()
+                        priorDocumentFileImporterIndex = viewModel.priorDocumentItems.count
                     } label: {
                         Text("Add document to include")
                             .font(DARCiFont.maisonNeue(.book, size: 12))
@@ -1618,7 +1636,12 @@ struct ProductIntakeFlowView: View {
                 return
             }
 
-            viewModel.setPriorDocumentAttachmentReference(at: index, fileName: fileName)
+            if index == viewModel.priorDocumentItems.count {
+                let newIndex = viewModel.addPriorDocumentItem()
+                viewModel.setPriorDocumentAttachmentReference(at: newIndex, fileName: fileName)
+            } else {
+                viewModel.setPriorDocumentAttachmentReference(at: index, fileName: fileName)
+            }
         } catch {
             viewModel.errorMessage = "Documents to include: failed to read the selected PDF."
         }
