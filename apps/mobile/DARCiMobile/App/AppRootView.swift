@@ -108,7 +108,11 @@ struct AppRootView: View {
                     }
             }
             .navigationDestination(item: $signingRoute) { route in
-                DocumentSigningPendingView(documentId: route.documentId)
+                DocumentSigningView(
+                    session: sessionCoordinator.currentSession,
+                    documentId: route.documentId,
+                    apiClient: documentIntakeAPIClient
+                )
                     .onDisappear {
                         selectedProductModeKey = nil
                         intakeRoute = nil
@@ -190,38 +194,6 @@ struct DocumentSigningRoute: Identifiable, Hashable {
     let documentId: String
 
     var id: String { documentId }
-}
-
-private struct DocumentSigningPendingView: View {
-    let documentId: String
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Signing")
-                    .font(DARCiFont.maisonNeue(.book, size: 28))
-                    .foregroundStyle(.white)
-
-                Text("Review is approved. Signature capture is next.")
-                    .font(DARCiFont.maisonNeue(.light, size: 14))
-                    .lineSpacing(4)
-                    .foregroundStyle(.white.opacity(0.78))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(documentId)
-                    .font(DARCiFont.maisonNeue(.light, size: 11))
-                    .foregroundStyle(.white.opacity(0.48))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .accessibilityIdentifier("document-review-document-id")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 28)
-        }
-        .navigationBarTitleDisplayMode(.inline)
-    }
 }
 
 private struct PlaceholderScreen: View {

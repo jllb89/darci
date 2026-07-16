@@ -26,7 +26,32 @@ final class DocumentSigningViewModel: ObservableObject {
 
     var primarySelfSignature: DocumentSigningSignature? {
         signing?.signatures.first { $0.partyRole == "principal" }
+            ?? signing?.signatures.first { $0.partyRole == "grantor" }
             ?? signing?.signatures.first
+    }
+
+    var visibleSignatures: [DocumentSigningSignature] {
+        guard let signing else { return [] }
+        guard let primarySignerName = Self.normalizedPartyName(primarySelfSignature?.partyName), primarySignerName.isEmpty == false else {
+            return signing.signatures
+        }
+
+        return signing.signatures.filter { Self.normalizedPartyName($0.partyName) == primarySignerName }
+    }
+
+    var activeSignature: DocumentSigningSignature? {
+        visibleSignatures.first { $0.isRequired && $0.status != "captured" }
+            ?? visibleSignatures.first
+    }
+
+    var selectedOutput: DocumentReviewOutput? {
+        guard let signing else { return nil }
+        if let activeSignature,
+           let matchingOutput = signing.outputs.first(where: { $0.outputKey == activeSignature.outputKey }) {
+            return matchingOutput
+        }
+
+        return signing.outputs.first
     }
 
     var canConfirm: Bool {
@@ -85,6 +110,35 @@ final class DocumentSigningViewModel: ObservableObject {
         )
     }
 
+    func captureTypedSignatureForRequiredDocuments(
+        from signature: DocumentSigningSignature,
+        typedValue: String,
+        typedKind: String,
+        session: AuthSession?
+    ) async -> Bool {
+        let trimmedValue = typedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedValue.isEmpty == false else {
+            errorMessage = "Enter the typed signature first."
+            return false
+        }
+
+        return await captureRequiredSignatures(
+            from: signature,
+            session: session,
+            fallback: "Failed to save typed signature."
+        ) { targetSignature in
+            DocumentSignatureCaptureRequest(
+                generationRunId: targetSignature.generationRunId,
+                outputSignerId: targetSignature.outputSignerId,
+                captureMethod: "type",
+                typedValue: trimmedValue,
+                typedKind: typedKind,
+                imageDataUrl: nil,
+                savedSignatureId: nil
+            )
+        }
+    }
+
     func captureDrawnSignature(
         _ signature: DocumentSigningSignature,
         imageDataUrl: String,
@@ -111,6 +165,33 @@ final class DocumentSigningViewModel: ObservableObject {
         )
     }
 
+    func captureDrawnSignatureForRequiredDocuments(
+        from signature: DocumentSigningSignature,
+        imageDataUrl: String,
+        session: AuthSession?
+    ) async -> Bool {
+        guard imageDataUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            errorMessage = "Draw the signature before saving it."
+            return false
+        }
+
+        return await captureRequiredSignatures(
+            from: signature,
+            session: session,
+            fallback: "Failed to save drawn signature."
+        ) { targetSignature in
+            DocumentSignatureCaptureRequest(
+                generationRunId: targetSignature.generationRunId,
+                outputSignerId: targetSignature.outputSignerId,
+                captureMethod: "draw",
+                typedValue: nil,
+                typedKind: nil,
+                imageDataUrl: imageDataUrl,
+                savedSignatureId: nil
+            )
+        }
+    }
+
     func applySavedSignature(
         _ signature: DocumentSigningSignature,
         savedSignatureId: String,
@@ -130,6 +211,28 @@ final class DocumentSigningViewModel: ObservableObject {
             session: session,
             fallback: "Failed to apply saved signature."
         )
+    }
+
+    func applySavedSignatureForRequiredDocuments(
+        from signature: DocumentSigningSignature,
+        savedSignatureId: String,
+        session: AuthSession?
+    ) async -> Bool {
+        await captureRequiredSignatures(
+            from: signature,
+            session: session,
+            fallback: "Failed to apply saved signature."
+        ) { targetSignature in
+            DocumentSignatureCaptureRequest(
+                generationRunId: targetSignature.generationRunId,
+                outputSignerId: targetSignature.outputSignerId,
+                captureMethod: "saved",
+                typedValue: nil,
+                typedKind: nil,
+                imageDataUrl: nil,
+                savedSignatureId: savedSignatureId
+            )
+        }
     }
 
     func uploadSignatureAsset(
@@ -178,6 +281,67 @@ final class DocumentSigningViewModel: ObservableObject {
             )
 
             applyRemainingSignerInviteDispatchSummary(finalizeResponse.remainingSignerInvites)
+            await fetchSigning(session: session, silent: true)
+            await fetchSavedSignatures(session: session)
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to upload signature image.")
+            return false
+        }
+    }
+
+    func uploadSignatureAssetForRequiredDocuments(
+        from signature: DocumentSigningSignature,
+        fileName: String,
+        data: Data,
+        mimeType: String,
+        session: AuthSession?
+    ) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to upload this signature."
+            return false
+        }
+
+        let targetSignatures = targetSignaturesForSharedCapture(from: signature)
+        isSavingCapture = true
+        defer { isSavingCapture = false }
+
+        do {
+            var latestInviteDispatch: RemainingSignerInviteDispatchResponse?
+            for targetSignature in targetSignatures {
+                let requestResponse = try await apiClient.requestSignatureUpload(
+                    documentId: documentId,
+                    request: DocumentSignatureUploadRequest(
+                        generationRunId: targetSignature.generationRunId,
+                        outputSignerId: targetSignature.outputSignerId,
+                        fileName: fileName,
+                        fileSize: data.count,
+                        mimeType: mimeType
+                    ),
+                    accessToken: accessToken
+                )
+
+                guard let signatureId = requestResponse.signature?.id,
+                      let signedUrlString = requestResponse.upload?.signedUrl,
+                      let signedUrl = URL(string: signedUrlString) else {
+                    throw SigningError.missingUploadTarget
+                }
+
+                try await apiClient.uploadSignatureAsset(data: data, mimeType: mimeType, to: signedUrl)
+                let finalizeResponse = try await apiClient.finalizeSignatureUpload(
+                    documentId: documentId,
+                    request: DocumentSignatureFinalizeRequest(
+                        signatureId: signatureId,
+                        generationRunId: targetSignature.generationRunId,
+                        outputSignerId: targetSignature.outputSignerId
+                    ),
+                    accessToken: accessToken
+                )
+                latestInviteDispatch = finalizeResponse.remainingSignerInvites
+            }
+
+            applyRemainingSignerInviteDispatchSummary(latestInviteDispatch)
             await fetchSigning(session: session, silent: true)
             await fetchSavedSignatures(session: session)
             errorMessage = nil
@@ -291,6 +455,61 @@ final class DocumentSigningViewModel: ObservableObject {
         }
     }
 
+    private func captureRequiredSignatures(
+        from signature: DocumentSigningSignature,
+        session: AuthSession?,
+        fallback: String,
+        makeRequest: (DocumentSigningSignature) -> DocumentSignatureCaptureRequest
+    ) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to save this signature."
+            return false
+        }
+
+        let targetSignatures = targetSignaturesForSharedCapture(from: signature)
+        isSavingCapture = true
+        defer { isSavingCapture = false }
+
+        do {
+            var latestInviteDispatch: RemainingSignerInviteDispatchResponse?
+            var shouldRefreshSavedSignatures = false
+            for targetSignature in targetSignatures {
+                let request = makeRequest(targetSignature)
+                let response = try await apiClient.captureSignature(documentId: documentId, request: request, accessToken: accessToken)
+                latestInviteDispatch = response.remainingSignerInvites
+                if request.captureMethod != "saved" {
+                    shouldRefreshSavedSignatures = true
+                }
+            }
+
+            applyRemainingSignerInviteDispatchSummary(latestInviteDispatch)
+            await fetchSigning(session: session, silent: true)
+            if shouldRefreshSavedSignatures {
+                await fetchSavedSignatures(session: session)
+            }
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: fallback)
+            return false
+        }
+    }
+
+    private func targetSignaturesForSharedCapture(from signature: DocumentSigningSignature) -> [DocumentSigningSignature] {
+        let signerName = Self.normalizedPartyName(signature.partyName)
+        let pendingRequiredSignatures = visibleSignatures.filter { candidate in
+            candidate.isRequired
+                && candidate.status != "captured"
+                && Self.normalizedPartyName(candidate.partyName) == signerName
+        }
+
+        if pendingRequiredSignatures.isEmpty == false {
+            return pendingRequiredSignatures
+        }
+
+        return [signature]
+    }
+
     private func schedulePollIfNeeded(session: AuthSession?) {
         pollTask?.cancel()
 
@@ -345,6 +564,13 @@ final class DocumentSigningViewModel: ObservableObject {
         }
 
         return fallback
+    }
+
+    private static func normalizedPartyName(_ value: String?) -> String? {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
 }
 

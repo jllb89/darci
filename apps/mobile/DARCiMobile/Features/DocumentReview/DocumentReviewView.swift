@@ -27,46 +27,47 @@ struct DocumentReviewView: View {
     var body: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: scaled(28, in: proxy)) {
-                        header
+                VStack(alignment: .leading, spacing: reviewSectionSpacing(in: proxy)) {
+                    header
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Review documents")
-                                .font(DARCiFont.maisonNeue(.demi, size: 12))
-                                .foregroundStyle(.black)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Review documents")
+                            .font(DARCiFont.maisonNeue(.demi, size: 12))
+                            .foregroundStyle(.black)
 
-                            Text("Review each PDF carefully before approving for signing.")
-                                .font(DARCiFont.maisonNeue(.book, size: 12))
-                                .lineSpacing(6)
-                                .foregroundStyle(.black)
-                        }
-                        .padding(.top, scaled(12, in: proxy))
-
-                        if let errorMessage = viewModel.errorMessage {
-                            statusMessage(errorMessage, tone: .error)
-                        }
-
-                        if let draftNotice = viewModel.draftNotice {
-                            statusMessage(draftNotice, tone: .success)
-                        }
-
-                        if let outputs = viewModel.review?.outputs, outputs.count > 1 {
-                            outputSelector(outputs)
-                        }
-
-                        pendingOutputs
-
-                        reviewPreview(proxy: proxy)
-
-                        if let approvalHelperText = viewModel.approvalHelperText {
-                            statusMessage(approvalHelperText, tone: viewModel.review?.reviewApproval == nil ? .neutral : .success)
-                        }
+                        Text("Review each PDF carefully before approving for signing.")
+                            .font(DARCiFont.maisonNeue(.book, size: 12))
+                            .lineSpacing(5)
+                            .foregroundStyle(.black)
                     }
-                    .padding(.horizontal, scaled(25, in: proxy))
-                    .padding(.top, scaled(56, in: proxy))
-                    .padding(.bottom, scaled(24, in: proxy))
+
+                    if let errorMessage = viewModel.errorMessage {
+                        statusMessage(errorMessage, tone: .error)
+                    }
+
+                    if let draftNotice = viewModel.draftNotice {
+                        statusMessage(draftNotice, tone: .success)
+                    }
+
+                    if let outputs = viewModel.review?.outputs, outputs.count > 1 {
+                        outputSelector(outputs)
+                    }
+
+                    if hasPendingOutputContent {
+                        pendingOutputs
+                    }
+
+                    reviewPreview(proxy: proxy)
+                        .layoutPriority(1)
+
+                    if let approvalHelperText = viewModel.approvalHelperText {
+                        statusMessage(approvalHelperText, tone: viewModel.review?.reviewApproval == nil ? .neutral : .success)
+                    }
                 }
+                .padding(.horizontal, scaled(25, in: proxy))
+                .padding(.top, reviewTopPadding(in: proxy))
+                .padding(.bottom, scaled(10, in: proxy))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                 actionBar(proxy: proxy)
             }
@@ -144,6 +145,12 @@ struct DocumentReviewView: View {
                 }
             }
         }
+    }
+
+    private var hasPendingOutputContent: Bool {
+        (viewModel.isLoading && viewModel.payload == nil)
+            || viewModel.isWaitingForRenderableOutputs
+            || (viewModel.review?.pendingOutputs.isEmpty == false)
     }
 
     private func outputSelector(_ outputs: [DocumentReviewOutput]) -> some View {
@@ -230,11 +237,12 @@ struct DocumentReviewView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: scaled(456, in: proxy))
+            .frame(maxHeight: .infinity)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity)
+        .frame(maxHeight: .infinity)
         .background(Color(red: 0.85, green: 0.85, blue: 0.85))
         .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
         .overlay {
@@ -290,6 +298,14 @@ struct DocumentReviewView: View {
         .padding(.top, 12)
         .padding(.bottom, 18)
         .background(Color.white)
+    }
+
+    private func reviewTopPadding(in proxy: GeometryProxy) -> CGFloat {
+        scaled(proxy.size.height < 720 ? 20 : 30, in: proxy)
+    }
+
+    private func reviewSectionSpacing(in proxy: GeometryProxy) -> CGFloat {
+        scaled(proxy.size.height < 720 ? 12 : 16, in: proxy)
     }
 
     private func statusMessage(_ text: String, tone: StatusTone) -> some View {
