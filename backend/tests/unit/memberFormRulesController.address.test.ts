@@ -85,12 +85,14 @@ describe("member form address helpers", () => {
         description: "123 Market St, San Francisco, CA 94105, USA",
         mainText: "123 Market Street",
         secondaryText: "San Francisco, CA 94105",
+        types: [],
       },
       {
         placeId: "oh-place",
         description: "123 Market St, Columbus, OH 43215, USA",
         mainText: "123 Market Street",
         secondaryText: "Columbus, OH 43215",
+        types: [],
       },
     ]);
   });
