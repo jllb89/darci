@@ -5,10 +5,16 @@ struct DocumentReviewView: View {
     let session: AuthSession?
     let onSavedToDraft: () -> Void
     let onContinueToSign: (String) -> Void
+    let onContinueWithoutSignature: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DocumentReviewViewModel
     @State private var pageCount = 1
+    @State private var currentPage = 1
+    @State private var zoomInTrigger = 0
+    @State private var zoomOutTrigger = 0
+    @State private var isContinuingToSign = false
+    @State private var isContinuingWithoutSignature = false
     @Environment(\.openURL) private var openURL
 
     init(
@@ -16,60 +22,69 @@ struct DocumentReviewView: View {
         documentId: String,
         apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient(),
         onSavedToDraft: @escaping () -> Void,
-        onContinueToSign: @escaping (String) -> Void
+        onContinueToSign: @escaping (String) -> Void,
+        onContinueWithoutSignature: @escaping (String) -> Void
     ) {
         self.session = session
         self.onSavedToDraft = onSavedToDraft
         self.onContinueToSign = onContinueToSign
+        self.onContinueWithoutSignature = onContinueWithoutSignature
         _viewModel = StateObject(wrappedValue: DocumentReviewViewModel(documentId: documentId, apiClient: apiClient))
     }
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: reviewSectionSpacing(in: proxy)) {
-                    header
+            ZStack {
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: reviewSectionSpacing(in: proxy)) {
+                        header
 
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("Review documents")
-                            .font(DARCiFont.maisonNeue(.demi, size: 12))
-                            .foregroundStyle(.black)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("Review documents")
+                                .font(DARCiFont.maisonNeue(.demi, size: 12))
+                                .foregroundStyle(.black)
 
-                        Text("Review each PDF carefully before approving for signing.")
-                            .font(DARCiFont.maisonNeue(.book, size: 12))
-                            .lineSpacing(5)
-                            .foregroundStyle(.black)
+                            Text("Review each PDF carefully before approving for signing.")
+                                .font(DARCiFont.maisonNeue(.book, size: 12))
+                                .lineSpacing(5)
+                                .foregroundStyle(.black)
+                        }
+
+                        if let errorMessage = viewModel.errorMessage {
+                            statusMessage(errorMessage, tone: .error)
+                        }
+
+                        if let draftNotice = viewModel.draftNotice {
+                            statusMessage(draftNotice, tone: .success)
+                        }
+
+                        if let outputs = viewModel.review?.outputs, outputs.count > 1 {
+                            outputSelector(outputs)
+                        }
+
+                        if hasPendingOutputContent && viewModel.isPreparingPreview == false {
+                            pendingOutputs
+                        }
+
+                        reviewPreview(proxy: proxy)
+                            .layoutPriority(1)
+
+                        if let approvalHelperText = viewModel.approvalHelperText {
+                            statusMessage(approvalHelperText, tone: viewModel.review?.reviewApproval == nil ? .neutral : .success)
+                        }
                     }
+                    .padding(.horizontal, scaled(25, in: proxy))
+                    .padding(.top, reviewTopPadding(in: proxy))
+                    .padding(.bottom, scaled(10, in: proxy))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                    if let errorMessage = viewModel.errorMessage {
-                        statusMessage(errorMessage, tone: .error)
-                    }
-
-                    if let draftNotice = viewModel.draftNotice {
-                        statusMessage(draftNotice, tone: .success)
-                    }
-
-                    if let outputs = viewModel.review?.outputs, outputs.count > 1 {
-                        outputSelector(outputs)
-                    }
-
-                    if hasPendingOutputContent {
-                        pendingOutputs
-                    }
-
-                    reviewPreview(proxy: proxy)
-                        .layoutPriority(1)
-
-                    if let approvalHelperText = viewModel.approvalHelperText {
-                        statusMessage(approvalHelperText, tone: viewModel.review?.reviewApproval == nil ? .neutral : .success)
-                    }
+                    actionBar(proxy: proxy)
                 }
-                .padding(.horizontal, scaled(25, in: proxy))
-                .padding(.top, reviewTopPadding(in: proxy))
-                .padding(.bottom, scaled(10, in: proxy))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .opacity(viewModel.isPreparingPreview ? 0 : 1)
 
-                actionBar(proxy: proxy)
+                if viewModel.isPreparingPreview {
+                    documentGenerationLoader(proxy: proxy)
+                }
             }
             .background(Color.white.ignoresSafeArea())
         }
@@ -101,6 +116,38 @@ struct DocumentReviewView: View {
                 .minimumScaleFactor(0.78)
                 .foregroundStyle(.black)
         }
+    }
+
+    private func documentGenerationLoader(proxy: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: scaled(28, in: proxy)) {
+            header
+
+            Spacer(minLength: 0)
+
+            VStack(alignment: .leading, spacing: 18) {
+                ProgressView()
+                    .tint(.black)
+                    .scaleEffect(1.15)
+
+                Text("Preparing documents")
+                    .font(DARCiFont.maisonNeue(.medium, size: 24))
+                    .foregroundStyle(.black)
+
+                Text("DARCi is rendering every required PDF and loading the preview. This usually takes a moment.")
+                    .font(DARCiFont.maisonNeue(.book, size: 13))
+                    .lineSpacing(5)
+                    .foregroundStyle(.black.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, scaled(25, in: proxy))
+        .padding(.top, reviewTopPadding(in: proxy))
+        .padding(.bottom, scaled(44, in: proxy))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.white.ignoresSafeArea())
     }
 
     private var pendingOutputs: some View {
@@ -181,18 +228,32 @@ struct DocumentReviewView: View {
     private func reviewPreview(proxy: GeometryProxy) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 28) {
-                Text("1/\(max(pageCount, 1))")
+                Text("\(min(currentPage, max(pageCount, 1)))/\(max(pageCount, 1))")
                     .font(DARCiFont.maisonNeue(.book, size: 12))
                     .foregroundStyle(.black)
                     .frame(minWidth: 44, alignment: .leading)
 
-                Image(systemName: "plus.magnifyingglass")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(.black)
+                Button {
+                    zoomInTrigger += 1
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(.black)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.pdfData == nil)
 
-                Image(systemName: "minus.magnifyingglass")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(.black)
+                Button {
+                    zoomOutTrigger += 1
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(.black)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.pdfData == nil)
 
                 Spacer()
 
@@ -202,17 +263,12 @@ struct DocumentReviewView: View {
                     }
                 } label: {
                     Image(systemName: "arrow.down.to.line")
-                        .font(.system(size: 18, weight: .regular))
+                        .font(.system(size: 16, weight: .regular))
                         .foregroundStyle(.black)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.selectedOutput == nil)
-
-                Image(systemName: "ellipsis")
-                    .rotationEffect(.degrees(90))
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(.black)
             }
             .padding(.horizontal, 16)
             .frame(height: 58)
@@ -221,7 +277,13 @@ struct DocumentReviewView: View {
                 Color.white
 
                 if let pdfData = viewModel.pdfData {
-                    PDFKitPreview(data: pdfData, pageCount: $pageCount)
+                    PDFKitDocumentPreview(
+                        data: pdfData,
+                        pageCount: $pageCount,
+                        currentPage: $currentPage,
+                        zoomInTrigger: zoomInTrigger,
+                        zoomOutTrigger: zoomOutTrigger
+                    )
                 } else if viewModel.isLoadingPreview {
                     ProgressView()
                         .tint(.black)
@@ -252,52 +314,89 @@ struct DocumentReviewView: View {
     }
 
     private func actionBar(proxy: GeometryProxy) -> some View {
-        HStack(spacing: scaled(18, in: proxy)) {
-            Button {
-                Task {
-                    if await viewModel.saveToDraft(session: session) {
-                        onSavedToDraft()
+        VStack(spacing: scaled(10, in: proxy)) {
+            if viewModel.isDocumentNotarization {
+                Button {
+                    Task {
+                        isContinuingWithoutSignature = true
+                        defer { isContinuingWithoutSignature = false }
+                        if await viewModel.continueWithoutSignature(session: session) {
+                            onContinueWithoutSignature(viewModel.documentId)
+                        }
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(isContinuingWithoutSignature ? "Approving..." : "Continue without signature")
+                        DARCiArrowCornerIcon()
+                            .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                            .frame(width: 18, height: 18)
+                    }
+                    .font(DARCiFont.maisonNeue(.book, size: 16))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .background(viewModel.canContinueWithoutSignature ? Color.black : Color.black.opacity(0.42))
                 }
-            } label: {
-                HStack(spacing: 12) {
-                    Text(viewModel.isSavingDraft ? "Saving..." : "Save to drafts")
-                    Image(systemName: "externaldrive")
-                        .font(.system(size: 16, weight: .regular))
-                }
-                .font(DARCiFont.maisonNeue(.book, size: 16))
-                .foregroundStyle(.black)
-                .frame(maxWidth: .infinity, minHeight: 54)
-                .background(Color(red: 0.67, green: 0.67, blue: 0.67).opacity(0.61))
+                .buttonStyle(.plain)
+                .disabled(viewModel.canContinueWithoutSignature == false)
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isSavingDraft)
 
-            Button {
-                Task {
-                    if await viewModel.continueToSign(session: session) {
-                        onContinueToSign(viewModel.documentId)
+            HStack(spacing: scaled(18, in: proxy)) {
+                Button {
+                    Task {
+                        if await viewModel.saveToDraft(session: session) {
+                            onSavedToDraft()
+                        }
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(viewModel.isSavingDraft ? "Saving..." : "Save to drafts")
+                        Image(systemName: "externaldrive")
+                            .font(.system(size: 16, weight: .regular))
+                    }
+                    .font(DARCiFont.maisonNeue(.book, size: 16))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .background(Color(red: 0.67, green: 0.67, blue: 0.67).opacity(0.61))
                 }
-            } label: {
-                HStack(spacing: 12) {
-                    Text(viewModel.isApproving ? "Approving..." : "Continue to sign")
-                    DARCiArrowCornerIcon()
-                        .stroke(.black, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
-                        .frame(width: 18, height: 18)
+                .buttonStyle(.plain)
+                .disabled(viewModel.isSavingDraft)
+
+                Button {
+                    Task {
+                        isContinuingToSign = true
+                        defer { isContinuingToSign = false }
+                        if await viewModel.continueToSign(session: session) {
+                            onContinueToSign(viewModel.documentId)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(isContinuingToSign ? "Approving..." : continueWithSignatureTitle)
+                        DARCiArrowCornerIcon()
+                            .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                            .frame(width: 18, height: 18)
+                    }
+                    .font(DARCiFont.maisonNeue(.book, size: 16))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .background(viewModel.canContinueToSign ? Color.black : Color.black.opacity(0.42))
                 }
-                .font(DARCiFont.maisonNeue(.book, size: 16))
-                .foregroundStyle(.black)
-                .frame(maxWidth: .infinity, minHeight: 54)
-                .background(viewModel.canContinueToSign ? DARCiTheme.onboardingGreen : Color(red: 0.67, green: 0.67, blue: 0.67).opacity(0.61))
+                .buttonStyle(.plain)
+                .disabled(viewModel.canContinueToSign == false)
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.canContinueToSign == false)
         }
         .padding(.horizontal, scaled(25, in: proxy))
         .padding(.top, 12)
         .padding(.bottom, 18)
         .background(Color.white)
+    }
+
+    private var continueWithSignatureTitle: String {
+        viewModel.isDocumentNotarization ? "Sign document" : "Continue to sign"
     }
 
     private func reviewTopPadding(in proxy: GeometryProxy) -> CGFloat {
@@ -396,42 +495,5 @@ private enum StatusTone {
         case .error:
             Color(red: 0.88, green: 0.66, blue: 0.66)
         }
-    }
-}
-
-private struct PDFKitPreview: UIViewRepresentable {
-    let data: Data
-    @Binding var pageCount: Int
-
-    func makeUIView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.autoScales = true
-        view.displayMode = .singlePageContinuous
-        view.displayDirection = .vertical
-        view.backgroundColor = .white
-        return view
-    }
-
-    func updateUIView(_ uiView: PDFView, context: Context) {
-        guard context.coordinator.data != data else {
-            return
-        }
-
-        context.coordinator.data = data
-        let document = PDFDocument(data: data)
-        uiView.document = document
-        uiView.autoScales = true
-
-        DispatchQueue.main.async {
-            pageCount = max(document?.pageCount ?? 1, 1)
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    final class Coordinator {
-        var data: Data?
     }
 }

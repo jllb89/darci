@@ -28,8 +28,9 @@ final class DocumentReviewViewModel: ObservableObject {
 
     var documentTitle: String {
         let dateLabel = Self.compactDateLabel(from: payload?.document?.createdAt) ?? "Review"
-        let outputLabel = selectedOutput?.outputLabel ?? Self.documentTypeLabel(payload?.document?.documentType)
-        return "\(dateLabel) - \(outputLabel.uppercased())"
+        let outputLabel = Self.documentOutputLabel(selectedOutput?.outputLabel)
+            ?? Self.documentTypeLabel(payload?.document?.documentType)
+        return "\(dateLabel) - \(outputLabel)"
     }
 
     var review: DocumentReviewState? {
@@ -51,6 +52,23 @@ final class DocumentReviewViewModel: ObservableObject {
         }
 
         return review?.canApprove == true
+    }
+
+    var canContinueWithoutSignature: Bool {
+        guard isApproving == false else { return false }
+        guard isDocumentNotarization else { return false }
+
+        if review?.reviewApproval != nil {
+            return true
+        }
+
+        return review?.canApprove == true
+    }
+
+    var isDocumentNotarization: Bool {
+        payload?.document?.productFlowMode == "notarize_document"
+            || payload?.document?.documentType == "notarize_document"
+            || payload?.document?.documentType == "uploaded_document"
     }
 
     var approvalHelperText: String? {
@@ -81,6 +99,30 @@ final class DocumentReviewViewModel: ObservableObject {
 
     var hasBlockedOutputs: Bool {
         review?.pendingOutputs.contains { Self.isBlockedStatus($0.status) } ?? false
+    }
+
+    var isPreparingPreview: Bool {
+        if isLoading && payload == nil {
+            return true
+        }
+
+        guard let review else {
+            return true
+        }
+
+        if review.requiresGeneration || review.missingOutputKeys.isEmpty == false {
+            return true
+        }
+
+        if review.pendingOutputs.contains(where: { Self.isActiveGenerationStatus($0.status) }) {
+            return true
+        }
+
+        if review.outputs.isEmpty {
+            return hasBlockedOutputs == false
+        }
+
+        return pdfData == nil && previewErrorMessage == nil
     }
 
     func load(session: AuthSession?) async {
@@ -153,6 +195,11 @@ final class DocumentReviewViewModel: ObservableObject {
             errorMessage = displayMessage(for: error, fallback: "Failed to approve document review.")
             return false
         }
+    }
+
+    func continueWithoutSignature(session: AuthSession?) async -> Bool {
+        guard isDocumentNotarization else { return false }
+        return await continueToSign(session: session)
     }
 
     private func fetchReview(session: AuthSession?, silent: Bool) async {
@@ -327,7 +374,7 @@ final class DocumentReviewViewModel: ObservableObject {
     }
 
     private static func documentTypeLabel(_ value: String?) -> String {
-        switch value {
+        switch normalizedDocumentLabelKey(value) {
         case "poa_document", "power_of_attorney":
             return "Power of Attorney"
         case "trust_certificate":
@@ -342,6 +389,28 @@ final class DocumentReviewViewModel: ObservableObject {
                 .map { $0.prefix(1).uppercased() + $0.dropFirst() }
                 .joined(separator: " ") ?? "Document"
         }
+    }
+
+    private static func documentOutputLabel(_ value: String?) -> String? {
+        guard let value, value.isEmpty == false else { return nil }
+        guard let normalizedKey = normalizedDocumentLabelKey(value) else { return value }
+        if normalizedKey == "notarize_document" || normalizedKey == "uploaded_document" {
+            return "Document Notarization"
+        }
+
+        if normalizedKey.contains("_") {
+            return documentTypeLabel(normalizedKey)
+        }
+
+        return value
+    }
+
+    private static func normalizedDocumentLabelKey(_ value: String?) -> String? {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
     }
 
     private static func compactDateLabel(from value: String?) -> String? {

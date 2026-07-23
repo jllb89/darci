@@ -58,6 +58,10 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
         )
     }
 
+    func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse {
+        AuthUserResponse(user: Self.mockUser(email: "member@example.com", phone: "+12025550147").withMockRole(role))
+    }
+
     static func mockSession() -> AuthSession {
         AuthSession(
             accessToken: "mock-stored-access-token",
@@ -80,6 +84,25 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
             phoneConfirmedAt: phone == nil ? nil : "2026-06-26T00:00:00.000Z",
             lastSignInAt: "2026-06-26T00:00:00.000Z",
             lastAuthSyncedAt: "2026-06-26T00:00:00.000Z"
+        )
+    }
+}
+
+private extension AuthenticatedUser {
+    func withMockRole(_ role: String) -> AuthenticatedUser {
+        AuthenticatedUser(
+            id: id,
+            email: email,
+            phone: phone,
+            role: role,
+            availableRoles: ["member", "notary"],
+            status: status,
+            firstName: firstName,
+            lastName: lastName,
+            emailConfirmedAt: emailConfirmedAt,
+            phoneConfirmedAt: phoneConfirmedAt,
+            lastSignInAt: lastSignInAt,
+            lastAuthSyncedAt: lastAuthSyncedAt
         )
     }
 }

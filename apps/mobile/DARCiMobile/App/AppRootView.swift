@@ -11,21 +11,29 @@ enum AppLaunchPhase: Equatable {
 struct AppRootView: View {
     @State private var launchPhase = AppLaunchPhase.initial
     @State private var didAttemptSessionRestore = false
+    @State private var selectedTab: AppTab = .home
     @State private var selectedProductModeKey: String?
     @State private var intakeRoute: ProductIntakeRoute?
     @State private var reviewRoute: DocumentReviewRoute?
     @State private var signingRoute: DocumentSigningRoute?
+    @State private var isProfileSelectionPresented = false
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     private let authenticationViewModel: AuthenticationViewModel
     private let homeAPIClient: HomeAPIProviding
+    private let documentsAPIClient: DocumentsAPIProviding
     private let documentIntakeAPIClient: DocumentIntakeAPIProviding
+    private let requestsAPIClient: RequestsAPIProviding
+    private let notaryProfileAPIClient: NotaryProfileAPIProviding
 
     init(
         authenticationViewModel: AuthenticationViewModel? = nil,
         sessionCoordinator: AppSessionCoordinator? = nil,
         homeAPIClient: HomeAPIProviding? = nil,
-        documentIntakeAPIClient: DocumentIntakeAPIProviding? = nil
+        documentsAPIClient: DocumentsAPIProviding? = nil,
+        documentIntakeAPIClient: DocumentIntakeAPIProviding? = nil,
+        requestsAPIClient: RequestsAPIProviding? = nil,
+        notaryProfileAPIClient: NotaryProfileAPIProviding? = nil
     ) {
         let dependencies = AppRootView.makeAuthDependencies()
         self.authenticationViewModel = authenticationViewModel ?? AuthenticationViewModel(
@@ -33,7 +41,10 @@ struct AppRootView: View {
             sessionStore: dependencies.sessionStore
         )
         self.homeAPIClient = homeAPIClient ?? dependencies.homeAPIClient
+        self.documentsAPIClient = documentsAPIClient ?? dependencies.documentsAPIClient
         self.documentIntakeAPIClient = documentIntakeAPIClient ?? dependencies.documentIntakeAPIClient
+        self.requestsAPIClient = requestsAPIClient ?? dependencies.requestsAPIClient
+        self.notaryProfileAPIClient = notaryProfileAPIClient ?? dependencies.notaryProfileAPIClient
         _sessionCoordinator = StateObject(
             wrappedValue: sessionCoordinator ?? AppSessionCoordinator(
                 apiClient: dependencies.apiClient,
@@ -69,17 +80,29 @@ struct AppRootView: View {
 
     private var signedInShell: some View {
         NavigationStack {
-            HomeView(
-                session: sessionCoordinator.currentSession,
-                viewModel: HomeViewModel(apiClient: homeAPIClient),
-                selectedProductModeKey: $selectedProductModeKey,
-                onProductSelected: beginProductIntake,
-                onProfileAction: signOut
-            )
+            ZStack(alignment: .top) {
+                signedInTabContent
+
+                if isProfileSelectionPresented {
+                    ProfileTypeSelectionView(
+                        session: sessionCoordinator.currentSession,
+                        onBack: hideProfileSelection,
+                        onSelectRole: switchProfileRole,
+                        onBecomeIlluminotary: {}
+                    )
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .topTrailing)),
+                        removal: .opacity.combined(with: .scale(scale: 1.01, anchor: .topTrailing))
+                    ))
+                    .zIndex(10)
+                }
+            }
+            .animation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.42), value: isProfileSelectionPresented)
             .navigationDestination(item: $intakeRoute) { route in
                 ProductIntakeFlowView(
                     session: sessionCoordinator.currentSession,
                     productModeKey: route.modeKey,
+                    draftDocumentId: route.draftDocumentId,
                     apiClient: documentIntakeAPIClient
                 ) { documentId in
                     reviewRoute = DocumentReviewRoute(documentId: documentId)
@@ -100,6 +123,9 @@ struct AppRootView: View {
                     },
                     onContinueToSign: { documentId in
                         signingRoute = DocumentSigningRoute(documentId: documentId)
+                    },
+                    onContinueWithoutSignature: { documentId in
+                        signingRoute = DocumentSigningRoute(documentId: documentId, skipSignatureForNotarization: true)
                     }
                 )
                     .onDisappear {
@@ -111,6 +137,7 @@ struct AppRootView: View {
                 DocumentSigningView(
                     session: sessionCoordinator.currentSession,
                     documentId: route.documentId,
+                    skipSignatureForNotarization: route.skipSignatureForNotarization,
                     apiClient: documentIntakeAPIClient
                 )
                     .onDisappear {
@@ -119,6 +146,53 @@ struct AppRootView: View {
                         reviewRoute = nil
                     }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var signedInTabContent: some View {
+        switch selectedTab {
+        case .home:
+            if MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) == .notary {
+                NotaryProfileView(
+                    session: sessionCoordinator.currentSession,
+                    viewModel: NotaryProfileViewModel(apiClient: notaryProfileAPIClient),
+                    onProfileAction: showProfileSelection
+                )
+            } else {
+                HomeView(
+                    session: sessionCoordinator.currentSession,
+                    viewModel: HomeViewModel(apiClient: homeAPIClient),
+                    selectedProductModeKey: $selectedProductModeKey,
+                    selectedTab: $selectedTab,
+                    onProductSelected: beginProductIntake,
+                    onProfileAction: showProfileSelection
+                )
+            }
+        case .documents:
+            DocumentsView(
+                session: sessionCoordinator.currentSession,
+                selectedTab: $selectedTab,
+                viewModel: DocumentsViewModel(apiClient: documentsAPIClient),
+                onDocumentSelected: openDocument
+            )
+        case .requests:
+            RequestsView(
+                session: sessionCoordinator.currentSession,
+                selectedTab: $selectedTab,
+                viewModel: RequestsViewModel(apiClient: requestsAPIClient),
+                onOpenDocument: { documentId in
+                    signingRoute = DocumentSigningRoute(documentId: documentId)
+                }
+            )
+        case .generator:
+            PlaceholderScreen(section: .documentGenerator)
+        case .notary:
+            NotaryProfileView(
+                session: sessionCoordinator.currentSession,
+                viewModel: NotaryProfileViewModel(apiClient: notaryProfileAPIClient),
+                onProfileAction: showProfileSelection
+            )
         }
     }
 
@@ -147,13 +221,40 @@ struct AppRootView: View {
     private func signOut() {
         _ = sessionCoordinator.signOut()
         authenticationViewModel.clearChallenge()
+        selectedTab = .home
         selectedProductModeKey = nil
         intakeRoute = nil
         reviewRoute = nil
         signingRoute = nil
+        isProfileSelectionPresented = false
 
         withAnimation(.easeInOut(duration: 0.25)) {
             launchPhase = .authentication
+        }
+    }
+
+    private func showProfileSelection() {
+        isProfileSelectionPresented = true
+    }
+
+    private func hideProfileSelection() {
+        isProfileSelectionPresented = false
+    }
+
+    private func switchProfileRole(_ role: MobileProfileRole) {
+        let sessionRole = role.sessionRoleValue(for: sessionCoordinator.currentSession?.user)
+
+        Task {
+            guard await sessionCoordinator.switchActiveRole(to: sessionRole) else {
+                return
+            }
+
+            selectedTab = .home
+            selectedProductModeKey = nil
+            intakeRoute = nil
+            reviewRoute = nil
+            signingRoute = nil
+            isProfileSelectionPresented = false
         }
     }
 
@@ -162,10 +263,58 @@ struct AppRootView: View {
         intakeRoute = ProductIntakeRoute(modeKey: card.modeKey)
     }
 
+    private func openDocument(_ document: DocumentsListItem) {
+        selectedProductModeKey = nil
+        intakeRoute = nil
+        reviewRoute = nil
+        signingRoute = nil
+
+        let targetPath = document.nextAction?.targetPath.lowercased() ?? ""
+        let status = document.status?.lowercased() ?? ""
+        let actionCode = document.nextAction?.code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let intakeStatus = document.intakeStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+
+        if actionCode == "complete_intake" || targetPath.contains("/app/start") || intakeStatus == "draft" || status == "draft" || status.contains("intake") {
+            intakeRoute = ProductIntakeRoute(
+                modeKey: intakeModeKey(for: document),
+                draftDocumentId: document.id
+            )
+            return
+        }
+
+        if targetPath.contains("/app/sign") || status.contains("sign") || status.contains("notary") || status.contains("complete") || status.contains("final") {
+            signingRoute = DocumentSigningRoute(
+                documentId: document.id,
+                skipSignatureForNotarization: DocumentsDisplay.canContinueWithoutSignature(for: document)
+            )
+        } else {
+            reviewRoute = DocumentReviewRoute(documentId: document.id)
+        }
+    }
+
+    private func intakeModeKey(for document: DocumentsListItem) -> String {
+        let modeKey = document.productFlowMode?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if modeKey.isEmpty == false {
+            return modeKey
+        }
+
+        switch DocumentsDisplay.productKind(for: document) {
+        case .trust:
+            return "trust_bundle"
+        case .notarization:
+            return "notarize_document"
+        case .poa, .none:
+            return "poa_only"
+        }
+    }
+
     private static func makeAuthDependencies() -> (
         apiClient: AuthAPIProviding,
         homeAPIClient: HomeAPIProviding,
+        documentsAPIClient: DocumentsAPIProviding,
         documentIntakeAPIClient: DocumentIntakeAPIProviding,
+        requestsAPIClient: RequestsAPIProviding,
+        notaryProfileAPIClient: NotaryProfileAPIProviding,
         sessionStore: AuthSessionStore
     ) {
         if ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH"] == "1" {
@@ -175,12 +324,15 @@ struct AppRootView: View {
             return (
                 MockAuthAPIClient(),
                 MockHomeAPIClient(),
+                MockDocumentsAPIClient(),
                 MockDocumentIntakeAPIClient(),
+                MockRequestsAPIClient(),
+                MockNotaryProfileAPIClient(),
                 InMemoryAuthSessionStore(session: storedSession)
             )
         }
 
-        return (AuthAPIClient(), HomeAPIClient(), DocumentIntakeAPIClient(), KeychainAuthSessionStore())
+        return (AuthAPIClient(), HomeAPIClient(), DocumentsAPIClient(), DocumentIntakeAPIClient(), RequestsAPIClient(), NotaryProfileAPIClient(), KeychainAuthSessionStore())
     }
 }
 
@@ -192,8 +344,9 @@ struct DocumentReviewRoute: Identifiable, Hashable {
 
 struct DocumentSigningRoute: Identifiable, Hashable {
     let documentId: String
+    var skipSignatureForNotarization = false
 
-    var id: String { documentId }
+    var id: String { "\(documentId)-\(skipSignatureForNotarization)" }
 }
 
 private struct PlaceholderScreen: View {

@@ -22,6 +22,8 @@ protocol DocumentIntakeAPIProviding: Sendable {
     func uploadSignatureAsset(data: Data, mimeType: String, to signedUrl: URL) async throws
     func finalizeSignatureUpload(documentId: String, request: DocumentSignatureFinalizeRequest, accessToken: String) async throws -> DocumentSignatureCaptureResponse
     func confirmDocumentSigning(documentId: String, request: DocumentSignConfirmRequest, accessToken: String) async throws -> DocumentAPIMessageResponse
+    func listAvailableNotaries(documentId: String, accessToken: String) async throws -> AvailableNotariesResponse
+    func submitNotarization(documentId: String, request: SubmitNotarizationRequest, accessToken: String) async throws -> SubmitNotarizationResponse
     func autocompleteAddress(jurisdiction: String, request: AddressAutocompleteRequest, accessToken: String) async throws -> AddressAutocompleteResponse
     func resolveAddressDetails(jurisdiction: String, request: AddressDetailsRequest, accessToken: String) async throws -> AddressDetailsResponse
 }
@@ -150,6 +152,14 @@ struct DocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
 
     func confirmDocumentSigning(documentId: String, request: DocumentSignConfirmRequest, accessToken: String) async throws -> DocumentAPIMessageResponse {
         try await authClient.post(path: "/documents/\(documentId)/sign", body: request, accessToken: accessToken)
+    }
+
+    func listAvailableNotaries(documentId: String, accessToken: String) async throws -> AvailableNotariesResponse {
+        try await authClient.get(path: "/documents/\(documentId)/available-notaries", accessToken: accessToken)
+    }
+
+    func submitNotarization(documentId: String, request: SubmitNotarizationRequest, accessToken: String) async throws -> SubmitNotarizationResponse {
+        try await authClient.post(path: "/documents/\(documentId)/submit-notarization", body: request, accessToken: accessToken)
     }
 
     func autocompleteAddress(jurisdiction: String, request: AddressAutocompleteRequest, accessToken: String) async throws -> AddressAutocompleteResponse {
@@ -465,6 +475,27 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
 
     func confirmDocumentSigning(documentId: String, request: DocumentSignConfirmRequest, accessToken: String) async throws -> DocumentAPIMessageResponse {
         DocumentAPIMessageResponse(message: nil)
+    }
+
+    func listAvailableNotaries(documentId: String, accessToken: String) async throws -> AvailableNotariesResponse {
+        AvailableNotariesResponse(
+            document: AvailableNotariesDocument(id: documentId, status: "pending_notary", jurisdiction: "US-CA", normalizedJurisdiction: "US-CA", productFlowMode: "poa_only"),
+            notarization: AvailableNotarizationState(activeRequestId: nil, activeRequestStatus: nil, assignedNotaryUserId: nil, submittedAt: nil),
+            notaries: [
+                AvailableNotary(userId: "notary-1", displayName: "Adam Eberts", jurisdiction: "US-CA", serviceAreaKind: "county", serviceAreaName: "Sonoma County", commissionExpiresAt: "2027-01-01T00:00:00.000Z")
+            ],
+            message: nil
+        )
+    }
+
+    func submitNotarization(documentId: String, request: SubmitNotarizationRequest, accessToken: String) async throws -> SubmitNotarizationResponse {
+        SubmitNotarizationResponse(
+            request: SubmittedNotarizationRequest(id: "request-1", documentId: documentId, workflowId: "workflow-1", status: "submitted", submittedAt: "2026-06-05T12:30:00.000Z"),
+            document: SubmittedNotarizationDocument(id: documentId, status: "pending_notary"),
+            code: SubmittedNotarizationCode(id: "code-1", code: "NTR-12345678", status: "active", expiresAt: "2026-06-05T13:00:00.000Z"),
+            workflow: SubmittedNotarizationWorkflow(id: "workflow-1", status: "code_delivered", workflowKind: nil, selectedNotaryUserId: request.selectedNotaryUserId, assignedNotaryUserId: nil, currentLegacyRequestId: "request-1"),
+            message: nil
+        )
     }
 
     func autocompleteAddress(jurisdiction: String, request: AddressAutocompleteRequest, accessToken: String) async throws -> AddressAutocompleteResponse {

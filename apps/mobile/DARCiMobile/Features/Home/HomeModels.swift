@@ -155,7 +155,7 @@ struct HomeProfileContent: Equatable, Sendable {
         case "notary":
             return "Notary"
         case "admin":
-            return "Admin"
+            return "Member"
         default:
             return "Member"
         }

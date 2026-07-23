@@ -106,6 +106,15 @@ Stream app logs:
 xcrun simctl spawn vet log stream --predicate 'process == "DARCiMobile"' --style compact
 ```
 
+Stream staging API logs:
+
+```sh
+LOG_GROUP=$(aws ecs describe-task-definition --region us-east-1 --task-definition "$(aws ecs describe-services --region us-east-1 --cluster darci-staging --services darci-staging-api --query 'services[0].taskDefinition' --output text)" --query 'taskDefinition.containerDefinitions[0].logConfiguration.options.awslogs-group' --output text)
+aws logs tail "$LOG_GROUP" --region us-east-1 --since 15m --follow --format short
+```
+
+Draft-save mobile logs use the `document-intake` category and include document id, step, revision, autosave flag, and the API error/status when available.
+
 ## Destination Syntax
 
 This is valid:

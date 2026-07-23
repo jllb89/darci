@@ -6,13 +6,20 @@ private let intakeRootCoordinateSpace = "intake-root"
 
 struct ProductIntakeRoute: Identifiable, Hashable {
     let modeKey: String
+    let draftDocumentId: String?
 
-    var id: String { modeKey }
+    init(modeKey: String, draftDocumentId: String? = nil) {
+        self.modeKey = modeKey
+        self.draftDocumentId = draftDocumentId
+    }
+
+    var id: String { "\(modeKey):\(draftDocumentId ?? "new")" }
 }
 
 struct ProductIntakeFlowView: View {
     private let session: AuthSession?
     private let productModeKey: String
+    private let draftDocumentId: String?
     private let onSubmittedToReview: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -30,11 +37,13 @@ struct ProductIntakeFlowView: View {
     init(
         session: AuthSession?,
         productModeKey: String,
+        draftDocumentId: String? = nil,
         apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient(),
         onSubmittedToReview: @escaping (String) -> Void = { _ in }
     ) {
         self.session = session
         self.productModeKey = productModeKey
+        self.draftDocumentId = draftDocumentId
         self.onSubmittedToReview = onSubmittedToReview
         _viewModel = StateObject(wrappedValue: DocumentIntakeViewModel(apiClient: apiClient))
     }
@@ -102,14 +111,6 @@ struct ProductIntakeFlowView: View {
                 .allowsHitTesting(true)
                 .zIndex(100)
 
-                if usesInlineContinueButton == false {
-                    continueButton(in: proxy)
-                        .padding(.horizontal, scaled(22, in: proxy))
-                        .padding(.bottom, scaled(28, in: proxy))
-                        .opacity(hasAppeared ? 1 : 0)
-                        .offset(y: hasAppeared ? 0 : 20)
-                }
-
                 tooltipOverlay(in: proxy)
                     .zIndex(240)
 
@@ -123,8 +124,8 @@ struct ProductIntakeFlowView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: session?.accessToken) {
-            await viewModel.start(modeKey: productModeKey, session: session)
+        .task(id: startTaskID) {
+            await viewModel.start(modeKey: productModeKey, resumingDocumentId: draftDocumentId, session: session)
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.42)) {
@@ -159,11 +160,8 @@ struct ProductIntakeFlowView: View {
         }
     }
 
-    private var usesInlineContinueButton: Bool {
-        viewModel.step == .authority
-            || viewModel.step == .trustPeople
-            || viewModel.step == .trustAuthority
-            || viewModel.step == .trustDocuments
+    private var startTaskID: String {
+        "\(session?.accessToken ?? "signed-out"): \(productModeKey):\(draftDocumentId ?? "new")"
     }
 
     private func header(in proxy: GeometryProxy) -> some View {
@@ -231,11 +229,8 @@ struct ProductIntakeFlowView: View {
                 case .notarization:
                     notarizationStep(in: proxy)
                 }
-            }
-            .overlay(alignment: .bottomLeading) {
-                statusMessages
-                    .offset(y: 24)
-                    .zIndex(30)
+
+                formFooter(in: proxy)
             }
             .id(viewModel.step)
             .transition(.opacity)
@@ -472,8 +467,6 @@ struct ProductIntakeFlowView: View {
                 viewModel.removeSuccessorTrustee(at: index)
             }
 
-            continueButton(in: proxy)
-                .padding(.top, scaled(8, in: proxy))
         }
     }
 
@@ -739,8 +732,6 @@ struct ProductIntakeFlowView: View {
                 }
             }
 
-            continueButton(in: proxy)
-                .padding(.top, scaled(8, in: proxy))
         }
     }
 
@@ -812,8 +803,6 @@ struct ProductIntakeFlowView: View {
                 }
             }
 
-            continueButton(in: proxy)
-                .padding(.top, scaled(8, in: proxy))
         }
         .fileImporter(
             isPresented: $isPriorDocumentFileImporterPresented,
@@ -1019,8 +1008,6 @@ struct ProductIntakeFlowView: View {
                 }
             }
 
-            continueButton(in: proxy)
-                .padding(.top, scaled(8, in: proxy))
         }
     }
 
@@ -1282,21 +1269,33 @@ struct ProductIntakeFlowView: View {
 
     @ViewBuilder
     private var statusMessages: some View {
-        if let errorMessage = viewModel.errorMessage {
-            Text(errorMessage)
-                .font(DARCiFont.maisonNeue(.light, size: 12))
-                .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("poa-intake-error")
-        }
+        VStack(alignment: .leading, spacing: 6) {
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(DARCiFont.maisonNeue(.light, size: 12))
+                    .foregroundStyle(Color(red: 1.0, green: 0.45, blue: 0.45))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("poa-intake-error")
+            }
 
-        if let draftNotice = viewModel.draftNotice {
-            Text(draftNotice)
-                .font(DARCiFont.maisonNeue(.light, size: 12))
-                .foregroundStyle(.white.opacity(0.68))
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("poa-intake-draft-notice")
+            if let draftNotice = viewModel.draftNotice {
+                Text(draftNotice)
+                    .font(DARCiFont.maisonNeue(.light, size: 12))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("poa-intake-draft-notice")
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func formFooter(in proxy: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
+            statusMessages
+
+            continueButton(in: proxy)
+        }
+        .padding(.top, scaled(10, in: proxy))
     }
 
     private var jurisdictionMenu: some View {
@@ -1304,7 +1303,7 @@ struct ProductIntakeFlowView: View {
             key: "jurisdiction",
             selectedText: viewModel.selectedJurisdictionLabel,
             placeholder: "Select jurisdiction",
-            options: viewModel.jurisdictions.map { CustomSelectOption(id: $0.id, label: $0.label) },
+            options: viewModel.jurisdictions.map { CustomSelectOption(id: $0.id, label: viewModel.jurisdictionOptionLabel($0)) },
             expandedKey: $expandedSelectKey,
             isDisabled: viewModel.jurisdictions.isEmpty
         ) { selectedId in
@@ -1350,7 +1349,7 @@ struct ProductIntakeFlowView: View {
             return SelectDropdownPresentation(
                 key: expandedSelectKey,
                 selectedText: viewModel.selectedJurisdictionLabel,
-                options: viewModel.jurisdictions.map { CustomSelectOption(id: $0.id, label: $0.label) }
+                options: viewModel.jurisdictions.map { CustomSelectOption(id: $0.id, label: viewModel.jurisdictionOptionLabel($0)) }
             ) { selectedId in
                 guard let jurisdiction = viewModel.jurisdictions.first(where: { $0.id == selectedId }) else {
                     return

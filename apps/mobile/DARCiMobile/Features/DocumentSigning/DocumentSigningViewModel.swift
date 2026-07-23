@@ -7,8 +7,14 @@ final class DocumentSigningViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSavingCapture = false
     @Published private(set) var isConfirming = false
+    @Published private(set) var isLoadingAvailableNotaries = false
+    @Published private(set) var isSubmittingNotarization = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var availableNotaryErrorMessage: String?
     @Published private(set) var inviteDispatchSummary: SigningInviteDispatchSummary?
+    @Published private(set) var availableNotariesPayload: AvailableNotariesResponse?
+    @Published var selectedNotaryUserId: String?
+    @Published var isSkippingSignatureForNotarization = false
 
     let documentId: String
 
@@ -58,6 +64,59 @@ final class DocumentSigningViewModel: ObservableObject {
         signing?.completion.canConfirm == true && isConfirming == false
     }
 
+    var isReadyForSignatureMutations: Bool {
+        payload?.document?.status == "pending_signature" && signing?.state != "confirmed"
+    }
+
+    var hasPendingVisibleRequiredSignatures: Bool {
+        visibleSignatures.contains { $0.isRequired && $0.status != "captured" }
+    }
+
+    var shouldShowCaptureControls: Bool {
+        isReadyForSignatureMutations && hasPendingVisibleRequiredSignatures
+    }
+
+    var shouldShowCompletionActions: Bool {
+        isReadyForSignatureMutations && signing?.completion.canConfirm == true
+    }
+
+    var shouldShowNotarySelection: Bool {
+        signing?.viewerAccess?.kind != "invited_signer"
+            && (payload?.document?.status == "pending_notary" || canContinueWithoutSignature)
+    }
+
+    var canContinueWithoutSignature: Bool {
+        isSkippingSignatureForNotarization
+            && isDocumentNotarization
+            && payload?.document?.status == "pending_signature"
+            && signing?.state != "confirmed"
+    }
+
+    private var isDocumentNotarization: Bool {
+        payload?.document?.productFlowMode == "notarize_document"
+            || payload?.document?.documentType == "notarize_document"
+            || payload?.document?.documentType == "uploaded_document"
+    }
+
+    var availableNotaries: [AvailableNotary] {
+        availableNotariesPayload?.notaries ?? []
+    }
+
+    var activeNotarizationRequestId: String? {
+        availableNotariesPayload?.notarization?.activeRequestId
+    }
+
+    var selectedAvailableNotary: AvailableNotary? {
+        availableNotaries.first { $0.userId == selectedNotaryUserId }
+    }
+
+    var canSubmitSelectedNotary: Bool {
+        selectedAvailableNotary != nil
+            && activeNotarizationRequestId == nil
+            && isLoadingAvailableNotaries == false
+            && isSubmittingNotarization == false
+    }
+
     func load(session: AuthSession?) async {
         await fetchSigning(session: session, silent: false)
     }
@@ -79,6 +138,31 @@ final class DocumentSigningViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Failed to load saved signatures.")
+        }
+    }
+
+    func fetchAvailableNotaries(session: AuthSession?) async {
+        guard let accessToken = session?.accessToken else {
+            availableNotaryErrorMessage = "Sign in again to load available notaries."
+            return
+        }
+
+        isLoadingAvailableNotaries = true
+        defer { isLoadingAvailableNotaries = false }
+
+        do {
+            let response = try await apiClient.listAvailableNotaries(documentId: documentId, accessToken: accessToken)
+            availableNotariesPayload = response
+            availableNotaryErrorMessage = nil
+            if let selectedNotaryUserId, (response.notaries ?? []).contains(where: { $0.userId == selectedNotaryUserId }) == false {
+                self.selectedNotaryUserId = nil
+            }
+            if self.selectedNotaryUserId == nil, let firstNotary = response.notaries?.first {
+                self.selectedNotaryUserId = firstNotary.userId
+            }
+        } catch {
+            availableNotariesPayload = nil
+            availableNotaryErrorMessage = displayMessage(for: error, fallback: "Failed to load available notaries.")
         }
     }
 
@@ -398,6 +482,45 @@ final class DocumentSigningViewModel: ObservableObject {
         }
     }
 
+    func submitToSelectedNotary(session: AuthSession?) async -> Bool {
+        guard let accessToken = session?.accessToken else {
+            errorMessage = "Sign in again to send this document to a notary."
+            return false
+        }
+
+        guard let selectedAvailableNotary else {
+            errorMessage = "Choose a notary before sending the document."
+            return false
+        }
+
+        guard activeNotarizationRequestId == nil else {
+            errorMessage = "This document already has a notarization request."
+            return false
+        }
+
+        isSubmittingNotarization = true
+        defer { isSubmittingNotarization = false }
+
+        do {
+            _ = try await apiClient.submitNotarization(
+                documentId: documentId,
+                request: SubmitNotarizationRequest(
+                    selectedNotaryUserId: selectedAvailableNotary.userId,
+                    signatureSkipped: canContinueWithoutSignature ? true : nil,
+                    signatureSkipReason: canContinueWithoutSignature ? "member_selected_no_signature" : nil
+                ),
+                accessToken: accessToken
+            )
+            await fetchSigning(session: session, silent: true)
+            await fetchAvailableNotaries(session: session)
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = displayMessage(for: error, fallback: "Failed to send document to the selected notary.")
+            return false
+        }
+    }
+
     private func fetchSigning(session: AuthSession?, silent: Bool) async {
         guard let accessToken = session?.accessToken else {
             errorMessage = "Sign in again to load signing workspace."
@@ -461,6 +584,11 @@ final class DocumentSigningViewModel: ObservableObject {
         fallback: String,
         makeRequest: (DocumentSigningSignature) -> DocumentSignatureCaptureRequest
     ) async -> Bool {
+        guard isReadyForSignatureMutations else {
+            errorMessage = nil
+            return false
+        }
+
         guard let accessToken = session?.accessToken else {
             errorMessage = "Sign in again to save this signature."
             return false

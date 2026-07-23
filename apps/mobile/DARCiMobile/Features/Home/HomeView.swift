@@ -8,6 +8,7 @@ struct HomeView: View {
 
     @StateObject private var viewModel: HomeViewModel
     @Binding private var selectedProductModeKey: String?
+    @Binding private var selectedTab: AppTab
     @State private var visibleGroupCount = 0
     @State private var entranceAnimationID = UUID()
 
@@ -15,6 +16,7 @@ struct HomeView: View {
         session: AuthSession? = nil,
         viewModel: HomeViewModel = HomeViewModel(),
         selectedProductModeKey: Binding<String?> = .constant(nil),
+        selectedTab: Binding<AppTab> = .constant(.home),
         onProductSelected: @escaping (HomeProductCard) -> Void = { _ in },
         onProfileAction: @escaping () -> Void = {}
     ) {
@@ -23,6 +25,7 @@ struct HomeView: View {
         self.onProfileAction = onProfileAction
         _viewModel = StateObject(wrappedValue: viewModel)
         _selectedProductModeKey = selectedProductModeKey
+        _selectedTab = selectedTab
     }
 
     var body: some View {
@@ -161,7 +164,7 @@ struct HomeView: View {
     }
 
     private func bottomToolbar(in proxy: GeometryProxy) -> some View {
-        HomeBottomToolbar()
+        HomeBottomToolbar(selectedTab: $selectedTab)
             .frame(width: scaled(241, in: proxy), height: scaled(25, in: proxy))
             .frame(maxWidth: .infinity)
             .padding(.top, scaled(10, in: proxy))
@@ -302,25 +305,28 @@ private struct HomeProductCardView: View {
 }
 
 private struct HomeBottomToolbar: View {
+    @Binding var selectedTab: AppTab
+
     var body: some View {
-        ZStack {
-            HomeResourceIconGlyph(icon: .home)
-                .stroke(DARCiTheme.onboardingGreen, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
-                .frame(width: 25, height: 25)
-                .offset(x: -108, y: 0)
-
-            HomeResourceIconGlyph(icon: .file)
-                .stroke(.black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
-                .frame(width: 25, height: 25)
-
-            HomeResourceIconGlyph(icon: .mail)
-                .stroke(.black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
-                .frame(width: 25, height: 25)
-                .offset(x: 108, y: 0)
+        HStack(spacing: 83) {
+            toolbarButton(tab: .home, icon: .home)
+            toolbarButton(tab: .documents, icon: .file)
+            toolbarButton(tab: .requests, icon: .mail)
         }
         .frame(width: 241, height: 25)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Home toolbar")
+        .accessibilityElement(children: .contain)
+    }
+
+    private func toolbarButton(tab: AppTab, icon: HomeProductIcon) -> some View {
+        Button {
+            selectedTab = tab
+        } label: {
+            HomeResourceIconGlyph(icon: icon)
+                .stroke(selectedTab == tab ? DARCiTheme.onboardingGreen : .black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
+                .frame(width: 25, height: 25)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(tab.title)
     }
 }
 

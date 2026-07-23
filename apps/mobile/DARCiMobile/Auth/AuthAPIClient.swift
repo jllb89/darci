@@ -19,6 +19,7 @@ protocol AuthAPIProviding: Sendable {
     func verifyPhoneOTP(phone: String, token: String, returnTo: String?) async throws -> AuthVerifyResponse
     func refresh(refreshToken: String) async throws -> AuthRefreshResponse
     func completeProfile(_ profile: AuthProfileCompletionRequest, accessToken: String) async throws -> AuthUserResponse
+    func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse
 }
 
 struct AuthAPIClient: Sendable {
@@ -80,6 +81,15 @@ struct AuthAPIClient: Sendable {
             path: "/users/me",
             method: "PATCH",
             body: profile,
+            accessToken: accessToken
+        )
+    }
+
+    func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse {
+        try await send(
+            path: "/users/me/active-role",
+            method: "PATCH",
+            body: AuthActiveRoleRequest(role: role),
             accessToken: accessToken
         )
     }

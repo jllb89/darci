@@ -509,6 +509,88 @@ struct DocumentSignConfirmRequest: Encodable, Equatable, Sendable {
     let confirmed: Bool
 }
 
+struct AvailableNotary: Decodable, Identifiable, Equatable, Sendable {
+    let userId: String
+    let displayName: String
+    let jurisdiction: String
+    let serviceAreaKind: String?
+    let serviceAreaName: String?
+    let commissionExpiresAt: String?
+
+    var id: String { userId }
+}
+
+struct AvailableNotariesDocument: Decodable, Equatable, Sendable {
+    let id: String
+    let status: String?
+    let jurisdiction: String?
+    let normalizedJurisdiction: String
+    let productFlowMode: String?
+}
+
+struct AvailableNotarizationState: Decodable, Equatable, Sendable {
+    let activeRequestId: String?
+    let activeRequestStatus: String?
+    let assignedNotaryUserId: String?
+    let submittedAt: String?
+}
+
+struct AvailableNotariesResponse: Decodable, Equatable, Sendable {
+    let document: AvailableNotariesDocument?
+    let notarization: AvailableNotarizationState?
+    let notaries: [AvailableNotary]?
+    let message: String?
+}
+
+struct SubmitNotarizationRequest: Encodable, Equatable, Sendable {
+    let selectedNotaryUserId: String
+    let signatureSkipped: Bool?
+    let signatureSkipReason: String?
+
+    init(selectedNotaryUserId: String, signatureSkipped: Bool? = nil, signatureSkipReason: String? = nil) {
+        self.selectedNotaryUserId = selectedNotaryUserId
+        self.signatureSkipped = signatureSkipped
+        self.signatureSkipReason = signatureSkipReason
+    }
+}
+
+struct SubmitNotarizationResponse: Decodable, Equatable, Sendable {
+    let request: SubmittedNotarizationRequest?
+    let document: SubmittedNotarizationDocument?
+    let code: SubmittedNotarizationCode?
+    let workflow: SubmittedNotarizationWorkflow?
+    let message: String?
+}
+
+struct SubmittedNotarizationRequest: Decodable, Equatable, Sendable {
+    let id: String
+    let documentId: String
+    let workflowId: String?
+    let status: String?
+    let submittedAt: String?
+}
+
+struct SubmittedNotarizationDocument: Decodable, Equatable, Sendable {
+    let id: String
+    let status: String?
+}
+
+struct SubmittedNotarizationCode: Decodable, Equatable, Sendable {
+    let id: String
+    let code: String?
+    let status: String?
+    let expiresAt: String?
+}
+
+struct SubmittedNotarizationWorkflow: Decodable, Equatable, Sendable {
+    let id: String
+    let status: String?
+    let workflowKind: String?
+    let selectedNotaryUserId: String?
+    let assignedNotaryUserId: String?
+    let currentLegacyRequestId: String?
+}
+
 struct DocumentIntakeDraft: Decodable, Equatable, Sendable {
     let documentId: String
     let ownerId: String?

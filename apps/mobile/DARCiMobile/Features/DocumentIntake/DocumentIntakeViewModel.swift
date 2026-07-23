@@ -1,9 +1,11 @@
 import Foundation
+import OSLog
 
 @MainActor
 final class DocumentIntakeViewModel: ObservableObject {
     static let rulesSnapshotVersion = "member_form_rules_contract_v1"
     private static let notarizationMaxUploadBytes = 25 * 1024 * 1024
+    private static let logger = Logger(subsystem: "dev.mobile.darci", category: "document-intake")
 
     @Published private(set) var step: POAIntakeStep = .productInfo
     @Published private(set) var jurisdictions: [IntakeJurisdictionOption] = []
@@ -55,6 +57,7 @@ final class DocumentIntakeViewModel: ObservableObject {
 
     private let apiClient: DocumentIntakeAPIProviding
     private var productModeKey: String?
+    private var resumedDocumentId: String?
     private var memberForm: MemberFormRulesContract?
     private var fieldsByKey: [String: MemberFacingField] = [:]
     private var documentId: String?
@@ -68,7 +71,13 @@ final class DocumentIntakeViewModel: ObservableObject {
     }
 
     var selectedJurisdictionLabel: String {
-        jurisdictions.first { $0.code == selectedJurisdiction }?.label ?? selectedJurisdiction
+        jurisdictionOptionLabel(jurisdictions.first { $0.code == selectedJurisdiction })
+    }
+
+    func jurisdictionOptionLabel(_ jurisdiction: IntakeJurisdictionOption?) -> String {
+        let rawCode = jurisdiction?.code ?? selectedJurisdiction
+        let compactCode = rawCode.replacingOccurrences(of: "US-", with: "")
+        return compactCode.isEmpty ? rawCode : compactCode
     }
 
     var agentSignatureAuthorityOptions: [IntakeOption] {
@@ -406,12 +415,14 @@ final class DocumentIntakeViewModel: ObservableObject {
         }
     }
 
-    func start(modeKey: String, session: AuthSession?) async {
-        if productModeKey == modeKey, memberForm != nil {
+    func start(modeKey: String, resumingDocumentId: String? = nil, session: AuthSession?) async {
+        let draftDocumentId = resumingDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        if productModeKey == modeKey, resumedDocumentId == draftDocumentId, memberForm != nil {
             return
         }
 
         productModeKey = modeKey
+        resumedDocumentId = draftDocumentId
         step = initialStep(for: modeKey)
         resetTrustmakerPrincipalProgress()
         isSubmitted = false
@@ -429,20 +440,24 @@ final class DocumentIntakeViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let jurisdictionResponse = try await apiClient.listMemberFormJurisdictions(modeKey: modeKey, accessToken: accessToken)
-            let nextJurisdictions = jurisdictionResponse.jurisdictions ?? []
-            jurisdictions = nextJurisdictions
-            selectedJurisdiction = preferredJurisdiction(from: nextJurisdictions)
-
-            guard selectedJurisdiction.isEmpty == false else {
-                throw IntakeError.missingJurisdiction
-            }
-
-            if modeKey == "notarize_document" {
-                memberForm = nil
-                fieldsByKey = [:]
+            if let draftDocumentId {
+                try await loadExistingDraft(documentId: draftDocumentId, fallbackModeKey: modeKey, accessToken: accessToken)
             } else {
-                try await loadContractAndBootstrap(modeKey: modeKey, accessToken: accessToken)
+                let jurisdictionResponse = try await apiClient.listMemberFormJurisdictions(modeKey: modeKey, accessToken: accessToken)
+                let nextJurisdictions = jurisdictionResponse.jurisdictions ?? []
+                jurisdictions = nextJurisdictions
+                selectedJurisdiction = preferredJurisdiction(from: nextJurisdictions)
+
+                guard selectedJurisdiction.isEmpty == false else {
+                    throw IntakeError.missingJurisdiction
+                }
+
+                if modeKey == "notarize_document" {
+                    memberForm = nil
+                    fieldsByKey = [:]
+                } else {
+                    try await loadContract(modeKey: modeKey, accessToken: accessToken)
+                }
             }
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Failed to start document intake.")
@@ -475,7 +490,7 @@ final class DocumentIntakeViewModel: ObservableObject {
                 memberForm = nil
                 fieldsByKey = [:]
             } else {
-                try await loadContractAndBootstrap(modeKey: modeKey, accessToken: accessToken)
+                try await loadContract(modeKey: modeKey, accessToken: accessToken)
             }
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Failed to load jurisdiction requirements.")
@@ -525,7 +540,9 @@ final class DocumentIntakeViewModel: ObservableObject {
             return
         }
 
-        await saveCurrentDraft(accessToken: accessToken)
+        if hasMeaningfulDraftInput {
+            await saveCurrentDraft(accessToken: accessToken)
+        }
 
         if errorMessage == nil, productModeKey == "trust_bundle", step == .principal, advanceTrustmakerPrincipal() {
             return
@@ -816,7 +833,51 @@ final class DocumentIntakeViewModel: ObservableObject {
         addressAutocompleteError = nil
     }
 
-    private func loadContractAndBootstrap(modeKey: String, accessToken: String) async throws {
+    private func loadExistingDraft(documentId: String, fallbackModeKey: String, accessToken: String) async throws {
+        let draftResponse = try await apiClient.getDocumentIntakeDraft(documentId: documentId, accessToken: accessToken)
+        guard let draft = draftResponse.draft else {
+            throw IntakeError.missingDraft
+        }
+
+        let modeKey = draft.productFlowMode.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? fallbackModeKey
+        productModeKey = modeKey
+        step = initialStep(for: modeKey)
+        resetTrustmakerPrincipalProgress()
+
+        let jurisdictionResponse = try await apiClient.listMemberFormJurisdictions(modeKey: modeKey, accessToken: accessToken)
+        jurisdictions = jurisdictionResponse.jurisdictions ?? []
+        selectedJurisdiction = draft.jurisdiction.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? preferredJurisdiction(from: jurisdictions)
+
+        guard selectedJurisdiction.isEmpty == false else {
+            throw IntakeError.missingJurisdiction
+        }
+
+        if modeKey == "notarize_document" {
+            memberForm = nil
+            fieldsByKey = [:]
+        } else {
+            let formResponse = try await apiClient.getMemberForm(
+                jurisdiction: selectedJurisdiction,
+                modeKey: modeKey,
+                accessToken: accessToken
+            )
+
+            guard let memberForm = formResponse.memberForm else {
+                throw IntakeError.missingMemberForm
+            }
+
+            self.memberForm = memberForm
+            fieldsByKey = Dictionary(
+                uniqueKeysWithValues: memberForm.aggregatedForm.sections
+                    .flatMap(\.fields)
+                    .map { ($0.canonicalKey, $0) }
+            )
+        }
+
+        applyDraft(draft, restoreStep: true)
+    }
+
+    private func loadContract(modeKey: String, accessToken: String) async throws {
         let formResponse = try await apiClient.getMemberForm(
             jurisdiction: selectedJurisdiction,
             modeKey: modeKey,
@@ -833,19 +894,6 @@ final class DocumentIntakeViewModel: ObservableObject {
                 .flatMap(\.fields)
                 .map { ($0.canonicalKey, $0) }
         )
-
-        let bootstrapResponse = try await apiClient.bootstrapDocumentIntake(
-            DocumentIntakeBootstrapRequest(
-                productFlowMode: modeKey,
-                jurisdiction: selectedJurisdiction,
-                rulesSnapshotVersion: Self.rulesSnapshotVersion,
-                resumeLatestDraft: true
-            ),
-            accessToken: accessToken
-        )
-
-        documentId = bootstrapResponse.document?.id ?? bootstrapResponse.draft?.documentId
-        applyDraft(bootstrapResponse.draft, restoreStep: true)
     }
 
     private static func isAddressSuggestion(_ suggestion: AddressAutocompleteSuggestion) -> Bool {
@@ -871,8 +919,12 @@ final class DocumentIntakeViewModel: ObservableObject {
         return suggestion.description.contains(",")
     }
 
-    private func saveCurrentDraft(accessToken: String, retryingAfterConflict: Bool = false) async {
-        guard let documentId else {
+    private func saveCurrentDraft(accessToken: String, retryingAfterConflict: Bool = false, isAutosave: Bool = false) async {
+        guard hasMeaningfulDraftInput else {
+            return
+        }
+
+        guard let modeKey = productModeKey else {
             errorMessage = "Document draft is not ready yet."
             return
         }
@@ -884,7 +936,11 @@ final class DocumentIntakeViewModel: ObservableObject {
         isSaving = true
         defer { isSaving = false }
 
+        let existingDocumentId = documentId ?? "pending"
+        Self.logger.debug("Saving intake draft documentId=\(existingDocumentId, privacy: .public) step=\(draftStep.persistedStepKey, privacy: .public) revision=\(String(describing: self.draftRevision), privacy: .public) autosave=\(isAutosave, privacy: .public)")
+
         do {
+            let documentId = try await ensureDraftDocument(modeKey: modeKey, accessToken: accessToken)
             let response = try await apiClient.saveDocumentIntakeDraft(
                 documentId: documentId,
                 request: DocumentIntakeDraftUpsertRequest(
@@ -897,23 +953,40 @@ final class DocumentIntakeViewModel: ObservableObject {
             )
             applyDraft(response.draft, restoreStep: false)
             lastServerDraftSignature = signature
+            errorMessage = nil
+            if isAutosave {
+                draftNotice = nil
+            }
+            Self.logger.info("Saved intake draft documentId=\(documentId, privacy: .public) step=\(draftStep.persistedStepKey, privacy: .public) revision=\(String(describing: self.draftRevision), privacy: .public) autosave=\(isAutosave, privacy: .public)")
         } catch AuthAPIError.unexpectedStatus(let statusCode, _) where statusCode == 409 {
-            await reloadDraftAfterConflict(
-                documentId: documentId,
-                accessToken: accessToken,
-                preservingAnswers: draftAnswers,
-                preferredStep: draftStep
-            )
+            let conflictDocumentId = documentId ?? existingDocumentId
+            Self.logger.warning("Intake draft revision conflict documentId=\(conflictDocumentId, privacy: .public) step=\(draftStep.persistedStepKey, privacy: .public) revision=\(String(describing: self.draftRevision), privacy: .public) autosave=\(isAutosave, privacy: .public) status=\(statusCode, privacy: .public)")
+            if let documentId {
+                await reloadDraftAfterConflict(
+                    documentId: documentId,
+                    accessToken: accessToken,
+                    preservingAnswers: draftAnswers,
+                    preferredStep: draftStep,
+                    showsNotice: isAutosave == false
+                )
+            }
             if retryingAfterConflict == false, errorMessage == nil, isSubmitted == false {
-                await saveCurrentDraft(accessToken: accessToken, retryingAfterConflict: true)
+                await saveCurrentDraft(accessToken: accessToken, retryingAfterConflict: true, isAutosave: isAutosave)
             }
         } catch {
-            errorMessage = displayMessage(for: error, fallback: "Failed to save this draft.")
+            let message = displayMessage(for: error, fallback: "Failed to save this draft.")
+            Self.logger.error("Intake draft save failed documentId=\(self.documentId ?? existingDocumentId, privacy: .public) step=\(draftStep.persistedStepKey, privacy: .public) revision=\(String(describing: self.draftRevision), privacy: .public) autosave=\(isAutosave, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            if isAutosave {
+                errorMessage = nil
+                draftNotice = nil
+            } else {
+                errorMessage = message
+            }
         }
     }
 
     private func submit(accessToken: String) async {
-        guard let documentId else {
+        guard let modeKey = productModeKey else {
             errorMessage = "Document draft is not ready yet."
             return
         }
@@ -927,6 +1000,7 @@ final class DocumentIntakeViewModel: ObservableObject {
         defer { isSaving = false }
 
         do {
+            let documentId = try await ensureDraftDocument(modeKey: modeKey, accessToken: accessToken)
             let response = try await apiClient.submitDocumentIntakeDraft(
                 documentId: documentId,
                 request: DocumentIntakeSubmitRequest(
@@ -943,7 +1017,11 @@ final class DocumentIntakeViewModel: ObservableObject {
             submittedDocumentId = documentId
             draftNotice = "Intake submitted. Review is next."
         } catch AuthAPIError.unexpectedStatus(let statusCode, _) where statusCode == 409 {
-            await reloadDraftAfterConflict(documentId: documentId, accessToken: accessToken)
+            if let documentId {
+                await reloadDraftAfterConflict(documentId: documentId, accessToken: accessToken)
+            } else {
+                errorMessage = "Draft changed elsewhere. Try continuing again."
+            }
         } catch {
             errorMessage = displayMessage(for: error, fallback: "Failed to submit this intake.")
         }
@@ -953,7 +1031,8 @@ final class DocumentIntakeViewModel: ObservableObject {
         documentId: String,
         accessToken: String,
         preservingAnswers: [String: JSONValue]? = nil,
-        preferredStep: POAIntakeStep? = nil
+        preferredStep: POAIntakeStep? = nil,
+        showsNotice: Bool = true
     ) async {
         do {
             let response = try await apiClient.getDocumentIntakeDraft(documentId: documentId, accessToken: accessToken)
@@ -969,12 +1048,27 @@ final class DocumentIntakeViewModel: ObservableObject {
                     step = preferredStep
                 }
                 lastServerDraftSignature = draftSignature()
-                draftNotice = "Draft changed elsewhere. Synced latest draft without overriding your current edits."
+                if showsNotice {
+                    draftNotice = "Synced latest draft without overriding your current edits."
+                } else {
+                    draftNotice = nil
+                }
             } else {
-                draftNotice = "Draft changed elsewhere. Synced the latest saved draft."
+                if showsNotice {
+                    draftNotice = "Synced the latest saved draft."
+                } else {
+                    draftNotice = nil
+                }
             }
         } catch {
-            errorMessage = displayMessage(for: error, fallback: "Draft changed elsewhere and could not be reloaded.")
+            let message = displayMessage(for: error, fallback: "Draft changed elsewhere and could not be reloaded.")
+            Self.logger.error("Intake draft reload after conflict failed documentId=\(documentId, privacy: .public) preferredStep=\(preferredStep?.persistedStepKey ?? "none", privacy: .public) showsNotice=\(showsNotice, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            if showsNotice {
+                errorMessage = message
+            } else {
+                errorMessage = nil
+                draftNotice = nil
+            }
         }
     }
 
@@ -1064,9 +1158,30 @@ final class DocumentIntakeViewModel: ObservableObject {
     private var canAutosaveDraft: Bool {
         productModeKey != "notarize_document"
             && memberForm != nil
-            && documentId != nil
             && isLoading == false
             && isSubmitted == false
+            && hasMeaningfulDraftInput
+    }
+
+    private var hasMeaningfulDraftInput: Bool {
+        buildAnswers().values.contains(where: Self.isMeaningfulDraftValue)
+    }
+
+    private static func isMeaningfulDraftValue(_ value: JSONValue) -> Bool {
+        switch value {
+        case .string(let string):
+            return string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        case .number:
+            return true
+        case .bool(let bool):
+            return bool
+        case .object(let object):
+            return object.values.contains(where: isMeaningfulDraftValue)
+        case .array(let array):
+            return array.contains(where: isMeaningfulDraftValue)
+        case .null:
+            return false
+        }
     }
 
     private struct DraftSignaturePayload: Encodable {
@@ -1096,7 +1211,32 @@ final class DocumentIntakeViewModel: ObservableObject {
             return
         }
 
-        await saveCurrentDraft(accessToken: accessToken)
+        await saveCurrentDraft(accessToken: accessToken, isAutosave: true)
+    }
+
+    private func ensureDraftDocument(modeKey: String, accessToken: String) async throws -> String {
+        if let documentId {
+            return documentId
+        }
+
+        let bootstrapResponse = try await apiClient.bootstrapDocumentIntake(
+            DocumentIntakeBootstrapRequest(
+                productFlowMode: modeKey,
+                jurisdiction: selectedJurisdiction,
+                rulesSnapshotVersion: Self.rulesSnapshotVersion,
+                resumeLatestDraft: false
+            ),
+            accessToken: accessToken
+        )
+
+        guard let nextDocumentId = bootstrapResponse.document?.id ?? bootstrapResponse.draft?.documentId else {
+            throw IntakeError.missingDraft
+        }
+
+        documentId = nextDocumentId
+        draftRevision = bootstrapResponse.draft?.revision
+        draftUpdatedAt = bootstrapResponse.draft?.updatedAt
+        return nextDocumentId
     }
 
     private func cancelPendingAutosave() {
@@ -1706,6 +1846,7 @@ final class DocumentIntakeViewModel: ObservableObject {
 private enum IntakeError: Error {
     case missingJurisdiction
     case missingMemberForm
+    case missingDraft
     case missingUploadTarget
 }
 

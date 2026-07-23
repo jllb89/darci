@@ -133,36 +133,50 @@ export const listRecentAuditEventsForDocumentIds = async (
     return [] as AuditEventRecord[];
   }
 
-  let query = supabaseAdmin
-    .from("audit_events")
-    .select(
-      "id, actor_id, entity_type, entity_id, action, metadata, created_at"
-    )
-    .or(buildAuditEventFilter(documentIds, actorId));
+  try {
+    let query = supabaseAdmin
+      .from("audit_events")
+      .select(
+        "id, actor_id, entity_type, entity_id, action, metadata, created_at"
+      )
+      .or(buildAuditEventFilter(documentIds, actorId));
 
-  if (sinceIso) {
-    query = query.gte("created_at", sinceIso);
+    if (sinceIso) {
+      query = query.gte("created_at", sinceIso);
+    }
+
+    if (options?.includeActions?.length) {
+      query = query.in("action", options.includeActions);
+    }
+
+    for (const entityType of options?.excludeEntityTypes ?? []) {
+      query = query.neq("entity_type", entityType);
+    }
+
+    for (const actionPattern of options?.excludeActionLike ?? []) {
+      query = query.not("action", "like", actionPattern);
+    }
+
+    const { data, error } = await query
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.warn("Recent document audit lookup failed", {
+        documentCount: documentIds.length,
+        limit,
+        error: error.message,
+      });
+      return [] as AuditEventRecord[];
+    }
+
+    return (data ?? []) as AuditEventRecord[];
+  } catch (error) {
+    console.warn("Recent document audit lookup failed", {
+      documentCount: documentIds.length,
+      limit,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
+    return [] as AuditEventRecord[];
   }
-
-  if (options?.includeActions?.length) {
-    query = query.in("action", options.includeActions);
-  }
-
-  for (const entityType of options?.excludeEntityTypes ?? []) {
-    query = query.neq("entity_type", entityType);
-  }
-
-  for (const actionPattern of options?.excludeActionLike ?? []) {
-    query = query.not("action", "like", actionPattern);
-  }
-
-  const { data, error } = await query
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data ?? []) as AuditEventRecord[];
 };

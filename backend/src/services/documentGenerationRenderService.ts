@@ -2891,11 +2891,11 @@ const coverSignatureFieldInterior = (
   const converted = toPdfLibRect(page.getHeight(), rect);
 
   page.drawRectangle({
-    x: converted.x + 2,
-    y: converted.y + 2,
-    width: Math.max(converted.width - 4, 0),
-    height: Math.max(converted.height - 4, 0),
-    color: rgb(0.96, 0.96, 0.96),
+    x: converted.x,
+    y: converted.y,
+    width: converted.width,
+    height: converted.height,
+    color: rgb(1, 1, 1),
   });
 
   return converted;
@@ -2906,12 +2906,13 @@ const clearSignatureField = (
   rect: SignatureFieldRect,
 ) => {
   const converted = toPdfLibRect(page.getHeight(), rect);
+  const bleed = 10;
 
   page.drawRectangle({
-    x: converted.x,
-    y: converted.y,
-    width: converted.width,
-    height: converted.height,
+    x: converted.x - bleed,
+    y: converted.y - bleed,
+    width: converted.width + bleed * 2,
+    height: converted.height + bleed * 2,
     color: rgb(1, 1, 1),
   });
 
@@ -3112,12 +3113,13 @@ const stampSignatureOnPdf = async (input: {
 
   if (signatureMethod === "type" && input.signatureRecord.typed_value) {
     const typedFont = await pdf.embedFont(StandardFonts.TimesRomanItalic);
+    const typedScale = 1.5;
     const fontSize = fitTextToRect({
       text: input.signatureRecord.typed_value,
       font: typedFont,
       width: signatureBox.width,
-      height: signatureBox.height,
-      maxSize: 26,
+      height: signatureBox.height * typedScale,
+      maxSize: 39,
     });
     const textHeight = typedFont.heightAtSize(fontSize);
 
@@ -3133,14 +3135,15 @@ const stampSignatureOnPdf = async (input: {
     const embeddedImage = input.signatureRecord.mime_type === "image/jpeg"
       ? await pdf.embedJpg(assetBytes)
       : await pdf.embedPng(assetBytes);
-    const imageInsetX = signatureMethod === "draw" ? 2 : 6;
-    const imageInsetY = signatureMethod === "draw" ? 2 : 5;
+    const imageScale = 1.5;
+    const imageInsetX = signatureMethod === "draw" ? -4 : -2;
+    const imageInsetY = signatureMethod === "draw" ? -4 : -2;
     const maxWidth = Math.max(signatureBox.width - imageInsetX * 2, 1);
     const maxHeight = Math.max(signatureBox.height - imageInsetY * 2, 1);
     const scale = Math.min(
       maxWidth / embeddedImage.width,
       maxHeight / embeddedImage.height,
-    );
+    ) * imageScale;
     const imageWidth = embeddedImage.width * scale;
     const imageHeight = embeddedImage.height * scale;
 

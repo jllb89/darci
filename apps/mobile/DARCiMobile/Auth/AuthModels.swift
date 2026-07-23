@@ -38,6 +38,10 @@ struct AuthProfileCompletionRequest: Encodable, Equatable, Sendable {
     let phone: String
 }
 
+struct AuthActiveRoleRequest: Encodable, Equatable, Sendable {
+    let role: String
+}
+
 struct AuthOTPStartResponse: Decodable, Equatable, Sendable {
     let status: String?
     let message: String?
