@@ -26,16 +26,18 @@ struct NotaryRequestReviewView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.top, scaled(48, in: proxy))
-                    .padding(.horizontal, scaled(25, in: proxy))
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: reviewSectionSpacing(in: proxy)) {
+                    header
 
-                VStack(alignment: .leading, spacing: scaled(44, in: proxy)) {
                     instructionCopy
 
                     if let errorMessage = viewModel.errorMessage {
                         statusMessage(errorMessage)
+                    }
+
+                    if let decisionNotice = viewModel.decisionNotice {
+                        statusMessage(decisionNotice, tone: .neutral)
                     }
 
                     if viewModel.reviewDocuments.count > 1 {
@@ -45,9 +47,10 @@ struct NotaryRequestReviewView: View {
                     reviewPreview(proxy: proxy)
                         .layoutPriority(1)
                 }
-                .padding(.top, scaled(74, in: proxy))
                 .padding(.horizontal, scaled(25, in: proxy))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, reviewTopPadding(in: proxy))
+                .padding(.bottom, scaled(10, in: proxy))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                 actionBar(proxy: proxy)
             }
@@ -61,7 +64,7 @@ struct NotaryRequestReviewView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 20) {
             Button {
                 dismiss()
             } label: {
@@ -74,23 +77,21 @@ struct NotaryRequestReviewView: View {
 
             Text(viewModel.screenTitle.uppercased())
                 .font(DARCiFont.maisonNeue(.medium, size: 15))
-                .lineSpacing(0)
-                .foregroundStyle(.black)
                 .lineLimit(1)
-                .minimumScaleFactor(0.76)
+                .minimumScaleFactor(0.78)
+                .foregroundStyle(.black)
         }
     }
 
     private var instructionCopy: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 7) {
             Text("Review documents")
-                .font(DARCiFont.maisonNeue(.demi, size: 14))
-                .lineSpacing(7)
+                .font(DARCiFont.maisonNeue(.demi, size: 12))
                 .foregroundStyle(.black)
 
             Text("Approve: DARCi will share contact details with both parties for the in-person session.\nReject: Member will be notified and asked to select a different illuminotary.")
-                .font(DARCiFont.maisonNeue(.book, size: 14))
-                .lineSpacing(7)
+                .font(DARCiFont.maisonNeue(.book, size: 12))
+                .lineSpacing(5)
                 .foregroundStyle(.black)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -261,23 +262,31 @@ struct NotaryRequestReviewView: View {
         }
     }
 
-    private func statusMessage(_ text: String) -> some View {
+    private func statusMessage(_ text: String, tone: NotaryReviewStatusTone = .error) -> some View {
         Text(text)
             .font(DARCiFont.maisonNeue(.book, size: 12))
             .lineSpacing(5)
-            .foregroundStyle(Color(red: 0.68, green: 0.10, blue: 0.10))
+            .foregroundStyle(tone.foreground)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(Color(red: 0.99, green: 0.94, blue: 0.94))
+            .background(tone.background)
             .overlay {
                 Rectangle()
-                    .stroke(Color(red: 0.88, green: 0.66, blue: 0.66), lineWidth: 1)
+                    .stroke(tone.border, lineWidth: 1)
             }
     }
 
     private func scaled(_ value: CGFloat, in proxy: GeometryProxy) -> CGFloat {
         let widthScale = min(max(proxy.size.width / 440, 0.86), 1.08)
         return value * widthScale
+    }
+
+    private func reviewTopPadding(in proxy: GeometryProxy) -> CGFloat {
+        scaled(proxy.size.height < 720 ? 20 : 30, in: proxy)
+    }
+
+    private func reviewSectionSpacing(in proxy: GeometryProxy) -> CGFloat {
+        scaled(proxy.size.height < 720 ? 12 : 16, in: proxy)
     }
 }
 
@@ -314,8 +323,16 @@ final class NotaryRequestReviewViewModel: ObservableObject {
 
     var canSubmitDecision: Bool {
         guard submittingDecision == nil else { return false }
-        guard context?.capabilities?.canReviewRequest != false else { return false }
-        return selectedDocument?.downloadUrl?.isEmpty == false
+        guard isLoading == false else { return false }
+        return context?.capabilities?.canReviewRequest == true
+    }
+
+    var decisionNotice: String? {
+        guard isLoading == false, context != nil, canSubmitDecision == false, submittingDecision == nil else {
+            return nil
+        }
+
+        return "This request is not ready for a review decision yet."
     }
 
     var previewMessage: String {
@@ -378,6 +395,7 @@ final class NotaryRequestReviewViewModel: ObservableObject {
         }
 
         guard canSubmitDecision else {
+            errorMessage = "This request is not ready for a review decision yet."
             return false
         }
 
@@ -437,6 +455,38 @@ final class NotaryRequestReviewViewModel: ObservableObject {
             return "Document"
         default:
             return normalized.isEmpty ? "Document" : normalized.split(separator: "_").map { $0.uppercased() }.joined(separator: " ")
+        }
+    }
+}
+
+private enum NotaryReviewStatusTone {
+    case error
+    case neutral
+
+    var foreground: Color {
+        switch self {
+        case .error:
+            Color(red: 0.68, green: 0.10, blue: 0.10)
+        case .neutral:
+            .black.opacity(0.62)
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .error:
+            Color(red: 0.99, green: 0.94, blue: 0.94)
+        case .neutral:
+            Color.black.opacity(0.05)
+        }
+    }
+
+    var border: Color {
+        switch self {
+        case .error:
+            Color(red: 0.88, green: 0.66, blue: 0.66)
+        case .neutral:
+            Color.black.opacity(0.12)
         }
     }
 }

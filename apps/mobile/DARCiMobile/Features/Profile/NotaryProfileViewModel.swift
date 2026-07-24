@@ -77,6 +77,7 @@ final class NotaryProfileViewModel: ObservableObject {
                 return resolveQueueStatus(request) == "completed" || request.document.summary?.finalization?.isAnchored == true || request.finalization.isAnchored == true
             }
         }
+        .sorted(by: isMoreRecent)
     }
 
     func resolveQueueStatus(_ request: NotaryQueueRequestSummary) -> String {
@@ -156,8 +157,53 @@ final class NotaryProfileViewModel: ObservableObject {
             result.append(request)
         }
 
-        return Array(result.prefix(maximumLoadedRequests))
+        return Array(result.sorted(by: isMoreRecent).prefix(maximumLoadedRequests))
     }
+
+    private func isMoreRecent(_ left: NotaryQueueRequestSummary, than right: NotaryQueueRequestSummary) -> Bool {
+        sortTimestamp(for: left) > sortTimestamp(for: right)
+    }
+
+    private func sortTimestamp(for request: NotaryQueueRequestSummary) -> TimeInterval {
+        let candidates = [
+            request.request.submittedAt,
+            request.workflow?.latestStatusAt,
+            request.meeting?.scheduledAt,
+            request.finalization.latestStatusAt,
+            request.finalization.anchoredAt,
+            request.document.createdAt
+        ]
+
+        for value in candidates {
+            guard let value, let date = date(from: value) else {
+                continue
+            }
+
+            return date.timeIntervalSince1970
+        }
+
+        return 0
+    }
+
+    private func date(from value: String) -> Date? {
+        if let date = fractionalFormatter.date(from: value) {
+            return date
+        }
+
+        return internetFormatter.date(from: value)
+    }
+
+    private let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private let internetFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     private func normalizedValue(_ value: String?) -> String {
         value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""

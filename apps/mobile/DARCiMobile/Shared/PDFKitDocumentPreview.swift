@@ -26,6 +26,8 @@ struct PDFKitDocumentPreview: UIViewRepresentable {
     func updateUIView(_ uiView: PDFView, context: Context) {
         if context.coordinator.data != data {
             context.coordinator.data = data
+            context.coordinator.didUserAdjustZoom = false
+            context.coordinator.lastBoundsSize = .zero
             let document = PDFDocument(data: data)
             uiView.document = document
             uiView.autoScales = false
@@ -38,13 +40,24 @@ struct PDFKitDocumentPreview: UIViewRepresentable {
             }
         }
 
+        if context.coordinator.lastBoundsSize != uiView.bounds.size {
+            context.coordinator.lastBoundsSize = uiView.bounds.size
+            if context.coordinator.didUserAdjustZoom == false {
+                DispatchQueue.main.async {
+                    Self.fitToWidth(uiView)
+                }
+            }
+        }
+
         if context.coordinator.zoomInTrigger != zoomInTrigger {
             context.coordinator.zoomInTrigger = zoomInTrigger
+            context.coordinator.didUserAdjustZoom = true
             uiView.scaleFactor = min(uiView.scaleFactor * 1.2, uiView.maxScaleFactor)
         }
 
         if context.coordinator.zoomOutTrigger != zoomOutTrigger {
             context.coordinator.zoomOutTrigger = zoomOutTrigger
+            context.coordinator.didUserAdjustZoom = true
             uiView.scaleFactor = max(uiView.scaleFactor / 1.2, uiView.minScaleFactor)
         }
     }
@@ -76,6 +89,8 @@ struct PDFKitDocumentPreview: UIViewRepresentable {
         var data: Data?
         var zoomInTrigger = 0
         var zoomOutTrigger = 0
+        var lastBoundsSize: CGSize = .zero
+        var didUserAdjustZoom = false
 
         init(pageCount: Binding<Int>, currentPage: Binding<Int>) {
             _pageCount = pageCount

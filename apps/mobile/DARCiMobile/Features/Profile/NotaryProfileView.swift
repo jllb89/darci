@@ -260,12 +260,10 @@ private struct NotaryQueueRequestCard: View {
                     .font(DARCiFont.maisonNeue(.mono, size: 10))
                     .lineSpacing(13)
                     .foregroundStyle(.white)
+                } else if tab == .ready {
+                    NotaryCardActionButton(title: "START IN-PERSON SESSION", action: {})
                 } else {
                     NotaryCardActionButton(title: "REVIEW", action: onReview)
-
-                    if tab == .ready {
-                        NotaryCardActionButton(title: "START IN-PERSON SESSION", action: {})
-                    }
                 }
             }
         }

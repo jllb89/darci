@@ -854,7 +854,7 @@ describe("notaryWorkspaceReadModelService", () => {
     }
   });
 
-  it("lists selected-notary requests for the selected notary before assignment", async () => {
+  it("excludes selected-notary requests from the queue before assignment", async () => {
     mocks.listNotarizationRequestsMock.mockResolvedValue([
       {
         id: "req-1",
@@ -910,16 +910,8 @@ describe("notaryWorkspaceReadModelService", () => {
       offset: 0,
     });
 
-    expect(queue.counts.total).toBe(1);
-    expect(queue.requests[0]).toMatchObject({
-      request: {
-        id: "req-1",
-      },
-      workflow: {
-        selectedNotaryUserId: "notary-db-1",
-        assignedNotaryUserId: null,
-      },
-    });
+    expect(queue.counts.total).toBe(0);
+    expect(queue.requests).toEqual([]);
   });
 
   it("excludes unsigned selected-notary requests from the notary queue", async () => {
@@ -982,7 +974,67 @@ describe("notaryWorkspaceReadModelService", () => {
     expect(queue.requests).toEqual([]);
   });
 
-  it("allows selected notary to open context before assignment", async () => {
+  it("excludes assigned notary requests when the document is not ready for review", async () => {
+    mocks.listNotarizationRequestsMock.mockResolvedValue([
+      {
+        id: "req-1",
+        document_id: "doc-1",
+        workflow_id: "wf-1",
+        assigned_notary_id: "notary-db-1",
+        status: "in_review",
+        submitted_at: "2026-04-22T10:00:00.000Z",
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
+    ]);
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "pending_signature",
+      document_type: "uploaded_document",
+      jurisdiction: "US-CA",
+      product_flow_mode: "notarize_document",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getIlluminotarizationWorkflowByIdMock.mockResolvedValue({
+      id: "wf-1",
+      owner_user_id: "member-db-1",
+      created_by_user_id: "member-db-1",
+      primary_document_id: "doc-1",
+      workflow_kind: "single_document",
+      status: "in_review",
+      selected_notary_user_id: "notary-db-1",
+      assigned_notary_user_id: "notary-db-1",
+      current_legacy_request_id: "req-1",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      last_code_generated_at: "2026-04-22T10:05:00.000Z",
+      review_started_at: "2026-04-22T10:06:00.000Z",
+      closed_at: null,
+      context_json: {},
+      metadata: {},
+      created_at: "2026-04-22T10:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+
+    const queue = await listNotaryQueue({
+      role: "notary",
+      viewerUserId: "notary-db-1",
+      limit: 25,
+      offset: 0,
+    });
+
+    expect(queue.counts.total).toBe(0);
+    expect(queue.requests).toEqual([]);
+  });
+
+  it("denies selected notary context before assignment", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",
       document_id: "doc-1",
@@ -1036,12 +1088,7 @@ describe("notaryWorkspaceReadModelService", () => {
       viewerUserId: "notary-db-1",
     });
 
-    expect(context).not.toBeNull();
-    expect(context?.request.id).toBe("req-1");
-    expect(context?.workflow).toMatchObject({
-      selectedNotaryUserId: "notary-db-1",
-      assignedNotaryUserId: null,
-    });
+    expect(context).toBeNull();
   });
 
   it("denies context for unsigned selected-notary requests", async () => {

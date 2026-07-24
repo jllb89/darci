@@ -485,7 +485,6 @@ const canAccessRequest = (input: {
   return [
     input.request.assigned_notary_id,
     input.workflow?.assigned_notary_user_id ?? null,
-    input.workflow?.selected_notary_user_id ?? null,
   ].includes(viewerUserId);
 };
 
