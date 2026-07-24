@@ -61,6 +61,10 @@ const isOpenMeetingRequest = (request: NotaryQueueRequestSummary) => {
   );
 };
 
+const getDocumentTypeLabel = (request: NotaryQueueRequestSummary) => {
+  return request.document.documentTypeLabel ?? formatStatusLabel(request.document.documentType);
+};
+
 const splitRequests = (requests: NotaryQueueRequestSummary[]) => {
   return {
     review: requests.filter((request) => {
@@ -110,7 +114,7 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
       </div>
       <div className="min-w-0 lg:text-right">
         <div className="truncate font-mono font-medium text-Color-Scheme-1-Text">{request.document.idn ?? "Pending"}</div>
-        <div className="mt-1 text-xs text-Color-Neutral">{formatStatusLabel(request.document.documentType)}</div>
+        <div className="mt-1 text-xs text-Color-Neutral">{getDocumentTypeLabel(request)}</div>
       </div>
       <div className="min-w-0 lg:text-right">
         <div className="truncate text-xs text-Color-Neutral">Submitted {formatDateTime(request.request.submittedAt)}</div>

@@ -35,13 +35,68 @@ enum NotaryQueueTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct NotaryQueueResponse: Decodable, Equatable, Sendable {
+struct NotaryQueueResponse: Codable, Equatable, Sendable {
     let requests: [NotaryQueueRequestSummary]
     let meetings: [NotaryMeetingSummary]
     let counts: NotaryQueueCounts
+
+    func replacingRequests(_ requests: [NotaryQueueRequestSummary]) -> NotaryQueueResponse {
+        NotaryQueueResponse(requests: requests, meetings: meetings, counts: counts)
+    }
 }
 
-struct NotaryQueueCounts: Decodable, Equatable, Sendable {
+struct NotaryRequestContextResponse: Decodable, Equatable, Sendable {
+    let context: NotaryRequestReviewContext?
+}
+
+struct NotaryRequestReviewContext: Decodable, Equatable, Sendable {
+    let request: NotaryRequestSummary
+    let document: NotaryRequestReviewDocument
+    let capabilities: NotaryContextCapabilities?
+}
+
+struct NotaryRequestReviewDocument: Decodable, Equatable, Sendable {
+    let id: String
+    let idn: String?
+    let status: String?
+    let documentType: String?
+    let documentTypeLabel: String?
+    let jurisdiction: String?
+    let createdAt: String?
+    let reviewDocuments: [NotaryReviewDocumentFile]
+}
+
+struct NotaryReviewDocumentFile: Decodable, Identifiable, Equatable, Sendable {
+    let id: String
+    let versionId: String
+    let label: String
+    let fileName: String?
+    let mimeType: String?
+    let sizeBytes: Int?
+    let isFinal: Bool
+    let downloadUrl: String?
+    let createdAt: String
+}
+
+struct NotaryContextCapabilities: Decodable, Equatable, Sendable {
+    let canReviewRequest: Bool?
+    let canManageMeeting: Bool?
+    let canRecordEvidence: Bool?
+    let canFinalizeDocument: Bool?
+    let canOpenVerification: Bool?
+}
+
+struct NotaryReviewDecisionRequest: Encodable, Equatable, Sendable {
+    let decision: String
+    let summary: String?
+    let decisionNotes: String?
+}
+
+struct NotaryReviewDecisionResponse: Decodable, Equatable, Sendable {
+    let message: String?
+}
+
+struct NotaryQueueCounts: Codable, Equatable, Sendable {
     let pending: Int?
     let scheduled: Int?
     let readyForInPerson: Int?
@@ -49,7 +104,7 @@ struct NotaryQueueCounts: Decodable, Equatable, Sendable {
     let total: Int?
 }
 
-struct NotaryQueueRequestSummary: Decodable, Identifiable, Equatable, Sendable {
+struct NotaryQueueRequestSummary: Codable, Identifiable, Equatable, Sendable {
     let request: NotaryRequestSummary
     let document: NotaryDocumentSummary
     let owner: NotaryIdentitySummary?
@@ -62,7 +117,7 @@ struct NotaryQueueRequestSummary: Decodable, Identifiable, Equatable, Sendable {
     var id: String { request.id }
 }
 
-struct NotaryRequestSummary: Decodable, Equatable, Sendable {
+struct NotaryRequestSummary: Codable, Equatable, Sendable {
     let id: String
     let documentId: String
     let workflowId: String?
@@ -71,22 +126,23 @@ struct NotaryRequestSummary: Decodable, Equatable, Sendable {
     let submittedAt: String?
 }
 
-struct NotaryDocumentSummary: Decodable, Equatable, Sendable {
+struct NotaryDocumentSummary: Codable, Equatable, Sendable {
     let id: String
     let idn: String?
     let status: String?
     let documentType: String?
+    let documentTypeLabel: String?
     let jurisdiction: String?
     let createdAt: String?
     let summary: NotaryDocumentWorkspaceSummary?
 }
 
-struct NotaryDocumentWorkspaceSummary: Decodable, Equatable, Sendable {
+struct NotaryDocumentWorkspaceSummary: Codable, Equatable, Sendable {
     let finalization: NotaryDocumentFinalizationSummary?
     let verification: NotaryDocumentVerificationSummary?
 }
 
-struct NotaryDocumentFinalizationSummary: Decodable, Equatable, Sendable {
+struct NotaryDocumentFinalizationSummary: Codable, Equatable, Sendable {
     let latestStatus: String?
     let latestStatusAt: String?
     let isAnchored: Bool?
@@ -96,13 +152,13 @@ struct NotaryDocumentFinalizationSummary: Decodable, Equatable, Sendable {
     let anchoredAt: String?
 }
 
-struct NotaryDocumentVerificationSummary: Decodable, Equatable, Sendable {
+struct NotaryDocumentVerificationSummary: Codable, Equatable, Sendable {
     let status: String?
     let idn: String?
     let verifyPath: String?
 }
 
-struct NotaryIdentitySummary: Decodable, Equatable, Sendable {
+struct NotaryIdentitySummary: Codable, Equatable, Sendable {
     let userId: String
     let supabaseUserId: String?
     let displayName: String?
@@ -112,7 +168,7 @@ struct NotaryIdentitySummary: Decodable, Equatable, Sendable {
     let status: String?
 }
 
-struct NotaryWorkflowSummary: Decodable, Equatable, Sendable {
+struct NotaryWorkflowSummary: Codable, Equatable, Sendable {
     let id: String?
     let status: String?
     let latestStatus: String?
@@ -124,7 +180,7 @@ struct NotaryWorkflowSummary: Decodable, Equatable, Sendable {
     let lastCodeGeneratedAt: String?
 }
 
-struct NotaryCodeDeliverySummary: Decodable, Equatable, Sendable {
+struct NotaryCodeDeliverySummary: Codable, Equatable, Sendable {
     let id: String
     let channel: String?
     let deliveryMethod: String?
@@ -137,7 +193,7 @@ struct NotaryCodeDeliverySummary: Decodable, Equatable, Sendable {
     let createdAt: String?
 }
 
-struct NotaryMeetingSummary: Decodable, Equatable, Sendable {
+struct NotaryMeetingSummary: Codable, Equatable, Sendable {
     let id: String
     let requestId: String
     let documentId: String
@@ -149,7 +205,7 @@ struct NotaryMeetingSummary: Decodable, Equatable, Sendable {
     let status: String?
 }
 
-struct NotaryFinalizationSummary: Decodable, Equatable, Sendable {
+struct NotaryFinalizationSummary: Codable, Equatable, Sendable {
     let latestStatus: String?
     let latestStatusAt: String?
     let isAnchored: Bool?

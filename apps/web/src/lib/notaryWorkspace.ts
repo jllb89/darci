@@ -27,6 +27,7 @@ export type NotaryQueueRequestSummary = {
     idn: string | null;
     status: string | null;
     documentType: string | null;
+    documentTypeLabel?: string | null;
     jurisdiction: string | null;
     createdAt: string;
     summary: {
@@ -93,6 +94,7 @@ export type NotaryQueueRequestSummary = {
     requestId: string;
     documentId: string;
     documentType: string | null;
+    documentTypeLabel?: string | null;
     ownerName: string | null;
     scheduledAt: string | null;
     timezone: string | null;

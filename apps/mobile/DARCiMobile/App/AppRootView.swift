@@ -16,6 +16,7 @@ struct AppRootView: View {
     @State private var intakeRoute: ProductIntakeRoute?
     @State private var reviewRoute: DocumentReviewRoute?
     @State private var signingRoute: DocumentSigningRoute?
+    @State private var notaryReviewRoute: NotaryRequestReviewRoute?
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
 
@@ -146,6 +147,17 @@ struct AppRootView: View {
                         intakeRoute = nil
                     }
             }
+            .navigationDestination(item: $notaryReviewRoute) { route in
+                NotaryRequestReviewView(
+                    session: sessionCoordinator.currentSession,
+                    requestId: route.requestId,
+                    apiClient: notaryProfileAPIClient,
+                    onDecisionRecorded: {
+                        selectedTab = .home
+                        notaryReviewRoute = nil
+                    }
+                )
+            }
             .navigationDestination(item: $signingRoute) { route in
                 DocumentSigningView(
                     session: sessionCoordinator.currentSession,
@@ -171,7 +183,8 @@ struct AppRootView: View {
                     session: sessionCoordinator.currentSession,
                     viewModel: NotaryProfileViewModel(apiClient: notaryProfileAPIClient),
                     onProfileAction: showProfileSelection,
-                    onSettingsAction: showUserSettings
+                    onSettingsAction: showUserSettings,
+                    onReviewRequest: openNotaryReview
                 )
             } else {
                 HomeView(
@@ -207,7 +220,8 @@ struct AppRootView: View {
                 session: sessionCoordinator.currentSession,
                 viewModel: NotaryProfileViewModel(apiClient: notaryProfileAPIClient),
                 onProfileAction: showProfileSelection,
-                onSettingsAction: showUserSettings
+                onSettingsAction: showUserSettings,
+                onReviewRequest: openNotaryReview
             )
         }
     }
@@ -243,6 +257,7 @@ struct AppRootView: View {
             intakeRoute = nil
             reviewRoute = nil
             signingRoute = nil
+            notaryReviewRoute = nil
             isProfileSelectionPresented = false
             isUserSettingsPresented = false
 
@@ -294,6 +309,7 @@ struct AppRootView: View {
             intakeRoute = nil
             reviewRoute = nil
             signingRoute = nil
+            notaryReviewRoute = nil
             isProfileSelectionPresented = false
         }
     }
@@ -308,6 +324,7 @@ struct AppRootView: View {
         intakeRoute = nil
         reviewRoute = nil
         signingRoute = nil
+        notaryReviewRoute = nil
 
         let targetPath = document.nextAction?.targetPath.lowercased() ?? ""
         let status = document.status?.lowercased() ?? ""
@@ -330,6 +347,14 @@ struct AppRootView: View {
         } else {
             reviewRoute = DocumentReviewRoute(documentId: document.id)
         }
+    }
+
+    private func openNotaryReview(_ request: NotaryQueueRequestSummary) {
+        selectedProductModeKey = nil
+        intakeRoute = nil
+        reviewRoute = nil
+        signingRoute = nil
+        notaryReviewRoute = NotaryRequestReviewRoute(requestId: request.request.id)
     }
 
     private func intakeModeKey(for document: DocumentsListItem) -> String {
@@ -387,6 +412,12 @@ struct DocumentSigningRoute: Identifiable, Hashable {
     var skipSignatureForNotarization = false
 
     var id: String { "\(documentId)-\(skipSignatureForNotarization)" }
+}
+
+struct NotaryRequestReviewRoute: Identifiable, Hashable {
+    let requestId: String
+
+    var id: String { requestId }
 }
 
 private struct PlaceholderScreen: View {

@@ -51,6 +51,7 @@ import {
   type ProximityEvaluationRecord,
 } from "./meetingService";
 import type { RequestRole } from "./userRoleService";
+import { resolveDocumentTypeLabel } from "./documentActionService";
 import {
   getWorkspaceIdentitySummaryByUserId,
   type WorkspaceIdentitySummary,
@@ -71,6 +72,7 @@ export type NotaryQueueRequestSummary = {
     idn: string | null;
     status: string | null;
     documentType: string | null;
+    documentTypeLabel: string;
     jurisdiction: string | null;
     createdAt: string;
     summary: DocumentWorkspaceSummary;
@@ -104,6 +106,7 @@ export type NotaryQueueRequestSummary = {
     requestId: string;
     documentId: string;
     documentType: string | null;
+    documentTypeLabel: string;
     ownerName: string | null;
     scheduledAt: string | null;
     timezone: string | null;
@@ -132,6 +135,7 @@ export type NotaryQueueResponse = {
     requestId: string;
     documentId: string;
     documentType: string | null;
+    documentTypeLabel: string;
     ownerName: string | null;
     scheduledAt: string | null;
     timezone: string | null;
@@ -587,6 +591,7 @@ const mapMeetingSummary = (input: {
     requestId: input.request.id,
     documentId: input.document.id,
     documentType: input.document.document_type,
+    documentTypeLabel: resolveDocumentTypeLabel(input.document),
     ownerName: input.owner?.displayName ?? null,
     scheduledAt: input.meeting.scheduled_at,
     timezone: input.meeting.timezone,
@@ -609,6 +614,7 @@ const mapDocumentResponse = (input: {
     }),
     status: input.document.status,
     documentType: input.document.document_type,
+    documentTypeLabel: resolveDocumentTypeLabel(input.document),
     jurisdiction: input.document.jurisdiction,
     createdAt: input.document.created_at,
     summary: input.summary,

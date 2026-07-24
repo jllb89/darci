@@ -173,6 +173,60 @@ struct TestAuthAPIClient: AuthAPIProviding {
     }
 }
 
+struct FailingNotaryProfileAPIClient: NotaryProfileAPIProviding {
+    func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
+        throw URLError(.notConnectedToInternet)
+    }
+
+    func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
+        throw URLError(.notConnectedToInternet)
+    }
+
+    func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
+        throw URLError(.notConnectedToInternet)
+    }
+}
+
+actor TestNotaryProfileCacheStore: NotaryProfileCacheStoring {
+    private let entry: NotaryProfileCacheEntry?
+
+    init(entry: NotaryProfileCacheEntry?) {
+        self.entry = entry
+    }
+
+    func read(cacheKey: NotaryProfileCacheKey) async -> NotaryProfileCacheEntry? {
+        entry
+    }
+
+    func write(_ response: NotaryQueueResponse, cacheKey: NotaryProfileCacheKey) async {}
+}
+
+actor PagingNotaryProfileAPIClient: NotaryProfileAPIProviding {
+    private let responsesByOffset: [Int: NotaryQueueResponse]
+    private var calls: [String] = []
+
+    init(responsesByOffset: [Int: NotaryQueueResponse]) {
+        self.responsesByOffset = responsesByOffset
+    }
+
+    func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
+        calls.append("\(limit):\(offset)")
+        return responsesByOffset[offset] ?? .empty
+    }
+
+    func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
+        NotaryRequestContextResponse(context: nil)
+    }
+
+    func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
+        NotaryReviewDecisionResponse(message: nil)
+    }
+
+    func recordedCalls() -> [String] {
+        calls
+    }
+}
+
 final class DARCiMobileTests: XCTestCase {
     func testLaunchStartsAtOnboarding() {
         XCTAssertEqual(AppLaunchPhase.initial, .onboarding)
@@ -376,6 +430,87 @@ final class DARCiMobileTests: XCTestCase {
 
         XCTAssertEqual(response.modes?.first?.modeKey, "poa_only")
         XCTAssertEqual(response.modes?.first?.displayName, "Power of Attorney")
+    }
+
+    func testNotaryProfileAPIClientLoadsFirstPageWithLimitAndOffset() async throws {
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/notary/requests")
+            let queryItems = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+            XCTAssertEqual(queryItems?.first(where: { $0.name == "limit" })?.value, "20")
+            XCTAssertEqual(queryItems?.first(where: { $0.name == "offset" })?.value, "0")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )),
+                Data(#"{"requests":[],"meetings":[],"counts":{"pending":0,"scheduled":0,"readyForInPerson":0,"completed":0,"total":0}}"#.utf8)
+            )
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = NotaryProfileAPIClient(authClient: authClient)
+
+        let response = try await client.listNotaryRequests(limit: 20, offset: 0, accessToken: "access-token")
+
+        XCTAssertTrue(response.requests.isEmpty)
+        XCTAssertEqual(response.counts.total, 0)
+    }
+
+    @MainActor
+    func testNotaryProfileViewModelKeepsCachedRequestsWhenRefreshFails() async throws {
+        let cachedResponse = try JSONDecoder().decode(
+            NotaryQueueResponse.self,
+            from: Data(#"{"requests":[{"request":{"id":"request-1","documentId":"document-1","workflowId":null,"status":"submitted","queueStatus":"submitted","submittedAt":"2026-07-24T12:00:00.000Z"},"document":{"id":"document-1","idn":"IDN-1","status":"pending","documentType":"affidavit","jurisdiction":"US-OH","createdAt":"2026-07-24T12:00:00.000Z","summary":null},"owner":null,"workflow":null,"latestCodeDelivery":null,"meeting":null,"finalization":{"latestStatus":null,"latestStatusAt":null,"isAnchored":false,"isVerificationChecked":false,"isWatermarked":false,"isHashRecorded":false,"verificationStatus":null,"anchoredAt":null,"lastCheckedAt":null,"publicVerifyPath":null},"nextAction":null}],"meetings":[],"counts":{"pending":1,"scheduled":0,"readyForInPerson":0,"completed":0,"total":1}}"#.utf8)
+        )
+        let cacheStore = TestNotaryProfileCacheStore(
+            entry: NotaryProfileCacheEntry(response: cachedResponse)
+        )
+        let viewModel = NotaryProfileViewModel(
+            apiClient: FailingNotaryProfileAPIClient(),
+            cacheStore: cacheStore
+        )
+
+        await viewModel.load(session: makeAuthSession())
+
+        XCTAssertEqual(viewModel.requests.map(\.id), ["request-1"])
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    @MainActor
+    func testNotaryProfileViewModelPrefetchesRemainingRequestsInTwentyRowPages() async {
+        let apiClient = PagingNotaryProfileAPIClient(
+            responsesByOffset: [
+                0: makeNotaryQueueResponse(start: 0, count: 20, total: 65),
+                20: makeNotaryQueueResponse(start: 20, count: 20, total: 65),
+                40: makeNotaryQueueResponse(start: 40, count: 20, total: 65),
+                60: makeNotaryQueueResponse(start: 60, count: 5, total: 65)
+            ]
+        )
+        let viewModel = NotaryProfileViewModel(
+            apiClient: apiClient,
+            cacheStore: TestNotaryProfileCacheStore(entry: nil)
+        )
+
+        await viewModel.load(session: makeAuthSession())
+
+        for _ in 0..<100 {
+            let callCount = await apiClient.recordedCalls().count
+            if callCount >= 4 {
+                break
+            }
+            await Task.yield()
+        }
+
+        let recordedCalls = await apiClient.recordedCalls()
+        XCTAssertEqual(recordedCalls, ["20:0", "20:20", "20:40", "5:60"])
+        XCTAssertEqual(viewModel.requests.count, 65)
     }
 
     func testDocumentIntakeAPIClientLoadsJurisdictionsWithModeQuery() async throws {
@@ -1281,6 +1416,59 @@ final class DARCiMobileTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AuthURLProtocolStub.self]
         return URLSession(configuration: configuration)
+    }
+
+    private func makeNotaryQueueResponse(start: Int, count: Int, total: Int) -> NotaryQueueResponse {
+        let requests = (start..<(start + count)).map { index in
+            NotaryQueueRequestSummary(
+                request: NotaryRequestSummary(
+                    id: "request-\(index)",
+                    documentId: "document-\(index)",
+                    workflowId: nil,
+                    status: "submitted",
+                    queueStatus: "submitted",
+                    submittedAt: "2026-07-24T12:00:00.000Z"
+                ),
+                document: NotaryDocumentSummary(
+                    id: "document-\(index)",
+                    idn: "IDN-\(index)",
+                    status: "pending",
+                    documentType: "affidavit",
+                    jurisdiction: "US-OH",
+                    createdAt: "2026-07-24T12:00:00.000Z",
+                    summary: nil
+                ),
+                owner: nil,
+                workflow: nil,
+                latestCodeDelivery: nil,
+                meeting: nil,
+                finalization: NotaryFinalizationSummary(
+                    latestStatus: nil,
+                    latestStatusAt: nil,
+                    isAnchored: false,
+                    isVerificationChecked: false,
+                    isWatermarked: false,
+                    isHashRecorded: false,
+                    verificationStatus: nil,
+                    anchoredAt: nil,
+                    lastCheckedAt: nil,
+                    publicVerifyPath: nil
+                ),
+                nextAction: nil
+            )
+        }
+
+        return NotaryQueueResponse(
+            requests: requests,
+            meetings: [],
+            counts: NotaryQueueCounts(
+                pending: total,
+                scheduled: 0,
+                readyForInPerson: 0,
+                completed: 0,
+                total: total
+            )
+        )
     }
 
     private func requestBodyData(for request: URLRequest) throws -> Data {

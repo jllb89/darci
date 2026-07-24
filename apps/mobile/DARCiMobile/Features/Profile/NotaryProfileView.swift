@@ -5,6 +5,7 @@ struct NotaryProfileView: View {
     private let session: AuthSession?
     private let onProfileAction: () -> Void
     private let onSettingsAction: () -> Void
+    private let onReviewRequest: (NotaryQueueRequestSummary) -> Void
 
     @StateObject private var viewModel: NotaryProfileViewModel
     @State private var selectedTab: NotaryQueueTab = .review
@@ -13,32 +14,36 @@ struct NotaryProfileView: View {
         session: AuthSession?,
         viewModel: NotaryProfileViewModel = NotaryProfileViewModel(),
         onProfileAction: @escaping () -> Void,
-        onSettingsAction: @escaping () -> Void
+        onSettingsAction: @escaping () -> Void,
+        onReviewRequest: @escaping (NotaryQueueRequestSummary) -> Void = { _ in }
     ) {
         self.session = session
         self.onProfileAction = onProfileAction
         self.onSettingsAction = onSettingsAction
+        self.onReviewRequest = onReviewRequest
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
     var body: some View {
         GeometryReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    header(in: proxy)
-                        .padding(.top, scaled(74, in: proxy))
-                        .padding(.horizontal, scaled(33, in: proxy))
+            VStack(alignment: .leading, spacing: 0) {
+                header(in: proxy)
+                    .padding(.top, scaled(74, in: proxy))
+                    .padding(.horizontal, scaled(33, in: proxy))
 
-                    queueTabs(in: proxy)
-                        .padding(.top, scaled(71, in: proxy))
-                        .padding(.horizontal, scaled(24, in: proxy))
+                queueTabs(in: proxy)
+                    .padding(.top, scaled(71, in: proxy))
+                    .padding(.horizontal, scaled(24, in: proxy))
 
+                ScrollView(showsIndicators: false) {
                     queueContent(in: proxy)
                         .padding(.top, scaled(35, in: proxy))
                         .padding(.horizontal, scaled(26, in: proxy))
+                        .padding(.bottom, scaled(96, in: proxy))
                 }
-                .padding(.bottom, scaled(96, in: proxy))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .refreshable {
+                    await viewModel.load(session: session)
+                }
             }
             .background(Color.white.ignoresSafeArea())
         }
@@ -46,9 +51,6 @@ struct NotaryProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .task(id: session?.accessToken) {
-            await viewModel.load(session: session)
-        }
-        .refreshable {
             await viewModel.load(session: session)
         }
     }
@@ -106,11 +108,12 @@ struct NotaryProfileView: View {
                         }
                     } label: {
                         Text(tab.title)
-                            .font(DARCiFont.maisonNeue(.mono, size: scaled(10, in: proxy)))
-                            .lineSpacing(scaled(10, in: proxy))
+                            .font(DARCiFont.maisonNeue(.mono, size: scaled(11, in: proxy)))
+                            .lineSpacing(scaled(11, in: proxy))
                             .foregroundStyle(selectedTab == tab ? .black : Color(red: 0.72, green: 0.72, blue: 0.72))
                             .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .minimumScaleFactor(0.9)
+                            .allowsTightening(true)
                             .frame(width: tabWidth(for: tab, in: proxy), alignment: tab == .completed ? .trailing : .leading)
                             .frame(height: scaled(31, in: proxy), alignment: .topLeading)
                     }
@@ -148,7 +151,11 @@ struct NotaryProfileView: View {
         } else {
             VStack(spacing: scaled(20, in: proxy)) {
                 ForEach(requests) { request in
-                    NotaryQueueRequestCard(request: request, tab: selectedTab)
+                    NotaryQueueRequestCard(
+                        request: request,
+                        tab: selectedTab,
+                        onReview: { onReviewRequest(request) }
+                    )
                 }
             }
         }
@@ -213,6 +220,7 @@ struct NotaryProfileView: View {
 private struct NotaryQueueRequestCard: View {
     let request: NotaryQueueRequestSummary
     let tab: NotaryQueueTab
+    let onReview: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -253,10 +261,10 @@ private struct NotaryQueueRequestCard: View {
                     .lineSpacing(13)
                     .foregroundStyle(.white)
                 } else {
-                    NotaryCardActionButton(title: "REVIEW")
+                    NotaryCardActionButton(title: "REVIEW", action: onReview)
 
                     if tab == .ready {
-                        NotaryCardActionButton(title: "START IN-PERSON SESSION")
+                        NotaryCardActionButton(title: "START IN-PERSON SESSION", action: {})
                     }
                 }
             }
@@ -270,7 +278,7 @@ private struct NotaryQueueRequestCard: View {
     }
 
     private var documentTitle: String {
-        let type = displayDocumentType(request.document.documentType)
+        let type = displayDocumentType(request.document.documentTypeLabel ?? request.document.documentType)
         let jurisdiction = displayJurisdiction(request.document.jurisdiction)
         return [type, jurisdiction]
             .filter { $0.isEmpty == false }
@@ -313,12 +321,12 @@ private struct NotaryQueueRequestCard: View {
     private func displayDocumentType(_ value: String?) -> String {
         let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         switch normalized {
-        case "notarize_document", "document_notarization":
+        case "notarize_document", "document_notarization", "document notarization":
             return "Document Notarization"
-        case "poa", "poa_only", "power_of_attorney":
+        case "poa", "poa_only", "power_of_attorney", "power of attorney":
             return "POA"
-        case "trust", "trust_bundle", "trust_registration":
-            return "Trust Registration"
+        case "trust", "trust_bundle", "trust_registration", "trust registration":
+            return "Trust"
         default:
             return normalized.isEmpty ? "Document" : normalized.split(separator: "_").map { $0.capitalized }.joined(separator: " ")
         }
@@ -339,9 +347,10 @@ private struct NotaryQueueRequestCard: View {
 
 private struct NotaryCardActionButton: View {
     let title: String
+    let action: () -> Void
 
     var body: some View {
-        Button(action: {}) {
+        Button(action: action) {
             HStack(spacing: 5) {
                 Text(title)
                     .underline()

@@ -122,7 +122,7 @@ import {
   buildDocumentWorkspaceSummaries,
   buildDocumentWorkspaceSummary,
 } from "../services/documentWorkspaceReadModelService";
-import { buildDocumentActionEnrichment } from "../services/documentActionService";
+import { buildDocumentActionEnrichment, resolveDocumentTypeLabel } from "../services/documentActionService";
 import {
   previewSignatureReminders,
   sendSignatureReminders,
@@ -1476,11 +1476,7 @@ const sendDocumentFinalizationError = (res: Response, error: unknown) => {
 };
 
 const resolveIdnTitle = (
-  document: {
-    document_type: string | null;
-    product_flow_mode?: string | null;
-    output_bundle?: Array<Record<string, unknown>> | null;
-  },
+  document: Pick<DocumentRecord, "document_type" | "product_flow_mode" | "selected_families" | "output_bundle">,
   latestRenderedOutputKey: string | null,
 ) => {
   const outputBundle = parseOutputBundle(document.output_bundle);
@@ -1496,15 +1492,7 @@ const resolveIdnTitle = (
     return outputBundle[0]?.outputLabel ?? "Document";
   }
 
-  if (typeof document.document_type === "string" && document.document_type.trim()) {
-    return document.document_type.trim();
-  }
-
-  if (typeof document.product_flow_mode === "string" && document.product_flow_mode.trim()) {
-    return document.product_flow_mode.trim();
-  }
-
-  return "Document";
+  return resolveDocumentTypeLabel(document);
 };
 
 const parseReviewApprovalValue = (value: unknown): ReviewApprovalValue | null => {
@@ -1806,7 +1794,7 @@ const ensureUploadedDocumentSigningPreparation = async (input: {
   const parsedOutputBundle = parseOutputBundle(document.output_bundle);
   const outputLabel =
     parsedOutputBundle.find((output) => output.outputKey === UPLOADED_DOCUMENT_OUTPUT_KEY)
-      ?.outputLabel ?? resolveIdnTitle(document, null);
+      ?.outputLabel ?? resolveDocumentTypeLabel(document);
 
   if (!parsedOutputBundle.some((output) => output.outputKey === UPLOADED_DOCUMENT_OUTPUT_KEY)) {
     document = await updateDocument(document.id, {

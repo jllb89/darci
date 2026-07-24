@@ -7,30 +7,61 @@ final class NotaryProfileViewModel: ObservableObject {
     @Published private(set) var errorMessage: String?
 
     private let apiClient: NotaryProfileAPIProviding
-    private let limit = 80
+    private let cacheStore: NotaryProfileCacheStoring
+    private let pageSize = 20
+    private let legacyLimit = 80
+    private let maximumLoadedRequests = 80
+    private var prefetchTask: Task<Void, Never>?
 
-    init(apiClient: NotaryProfileAPIProviding = NotaryProfileAPIClient()) {
+    init(
+        apiClient: NotaryProfileAPIProviding = NotaryProfileAPIClient(),
+        cacheStore: NotaryProfileCacheStoring = NotaryProfileCacheStore()
+    ) {
         self.apiClient = apiClient
+        self.cacheStore = cacheStore
     }
 
     func load(session: AuthSession?) async {
-        guard let accessToken = session?.accessToken, accessToken.isEmpty == false else {
+        guard let session, session.accessToken.isEmpty == false else {
             requests = []
             errorMessage = "Sign in again to view notary requests."
             return
         }
 
-        isLoading = true
-        errorMessage = nil
+        prefetchTask?.cancel()
 
-        do {
-            let response = try await apiClient.listNotaryRequests(limit: limit, accessToken: accessToken)
-            requests = response.requests
-        } catch {
-            errorMessage = displayMessage(for: error, fallback: "Unable to load notary requests.")
+        let cacheKey = NotaryProfileCacheKey(userId: session.user.id, role: session.user.role, limit: pageSize)
+        let legacyCacheKey = NotaryProfileCacheKey(userId: session.user.id, role: session.user.role, limit: legacyLimit)
+        let cachedEntry: NotaryProfileCacheEntry?
+        if let currentCacheEntry = await cacheStore.read(cacheKey: cacheKey) {
+            cachedEntry = currentCacheEntry
+        } else {
+            cachedEntry = await cacheStore.read(cacheKey: legacyCacheKey)
+        }
+        if let cachedEntry {
+            requests = cachedEntry.response.requests
+            errorMessage = nil
         }
 
-        isLoading = false
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let response = try await apiClient.listNotaryRequests(
+                limit: pageSize,
+                offset: 0,
+                accessToken: session.accessToken
+            )
+            let refreshedRequests = mergedRequests(primary: response.requests, fallback: requests)
+            requests = refreshedRequests
+            await cacheStore.write(response.replacingRequests(refreshedRequests), cacheKey: cacheKey)
+            errorMessage = nil
+            startPrefetch(after: response, cacheKey: cacheKey, accessToken: session.accessToken)
+        } catch {
+            if requests.isEmpty {
+                errorMessage = displayMessage(for: error, fallback: "Unable to load notary requests.")
+            }
+        }
     }
 
     func requests(for tab: NotaryQueueTab) -> [NotaryQueueRequestSummary] {
@@ -58,6 +89,74 @@ final class NotaryProfileViewModel: ObservableObject {
         }
 
         return ["completed", "cancelled", "canceled", "no_show"].contains(status) == false
+    }
+
+    private func startPrefetch(
+        after initialResponse: NotaryQueueResponse,
+        cacheKey: NotaryProfileCacheKey,
+        accessToken: String
+    ) {
+        let total = min(initialResponse.counts.total ?? initialResponse.requests.count, maximumLoadedRequests)
+        guard initialResponse.requests.count == pageSize, total > pageSize else { return }
+
+        prefetchTask = Task { [weak self] in
+            await self?.prefetchRemainingRequests(
+                after: initialResponse,
+                total: total,
+                cacheKey: cacheKey,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func prefetchRemainingRequests(
+        after initialResponse: NotaryQueueResponse,
+        total: Int,
+        cacheKey: NotaryProfileCacheKey,
+        accessToken: String
+    ) async {
+        var prefetchedRequests = initialResponse.requests
+        var latestResponse = initialResponse
+
+        for offset in stride(from: pageSize, to: total, by: pageSize) {
+            guard Task.isCancelled == false else { return }
+
+            do {
+                let response = try await apiClient.listNotaryRequests(
+                    limit: min(pageSize, total - offset),
+                    offset: offset,
+                    accessToken: accessToken
+                )
+                latestResponse = response
+                prefetchedRequests = mergedRequests(primary: prefetchedRequests + response.requests, fallback: [])
+                requests = mergedRequests(primary: prefetchedRequests, fallback: requests)
+                await cacheStore.write(latestResponse.replacingRequests(requests), cacheKey: cacheKey)
+
+                if response.requests.count < min(pageSize, total - offset) {
+                    break
+                }
+            } catch {
+                return
+            }
+        }
+
+        guard Task.isCancelled == false else { return }
+        requests = Array(prefetchedRequests.prefix(maximumLoadedRequests))
+        await cacheStore.write(latestResponse.replacingRequests(requests), cacheKey: cacheKey)
+    }
+
+    private func mergedRequests(
+        primary: [NotaryQueueRequestSummary],
+        fallback: [NotaryQueueRequestSummary]
+    ) -> [NotaryQueueRequestSummary] {
+        var seen = Set<String>()
+        var result: [NotaryQueueRequestSummary] = []
+
+        for request in primary + fallback where seen.insert(request.id).inserted {
+            result.append(request)
+        }
+
+        return Array(result.prefix(maximumLoadedRequests))
     }
 
     private func normalizedValue(_ value: String?) -> String {
