@@ -4,6 +4,7 @@ struct NotaryProfileView: View {
     private let designSize = CGSize(width: 440, height: 956)
     private let session: AuthSession?
     private let onProfileAction: () -> Void
+    private let onSettingsAction: () -> Void
 
     @StateObject private var viewModel: NotaryProfileViewModel
     @State private var selectedTab: NotaryQueueTab = .review
@@ -11,10 +12,12 @@ struct NotaryProfileView: View {
     init(
         session: AuthSession?,
         viewModel: NotaryProfileViewModel = NotaryProfileViewModel(),
-        onProfileAction: @escaping () -> Void
+        onProfileAction: @escaping () -> Void,
+        onSettingsAction: @escaping () -> Void
     ) {
         self.session = session
         self.onProfileAction = onProfileAction
+        self.onSettingsAction = onSettingsAction
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
@@ -54,16 +57,20 @@ struct NotaryProfileView: View {
         let profile = HomeProfileContent(user: session?.user)
 
         return HStack(alignment: .center, spacing: 0) {
-            ZStack {
-                Circle()
-                    .fill(DARCiTheme.onboardingGreen)
-                    .frame(width: scaled(45, in: proxy), height: scaled(45, in: proxy))
+            Button(action: onSettingsAction) {
+                ZStack {
+                    Circle()
+                        .fill(DARCiTheme.onboardingGreen)
+                        .frame(width: scaled(45, in: proxy), height: scaled(45, in: proxy))
 
-                Text(profile.initials)
-                    .font(DARCiFont.maisonNeue(.medium, size: 20))
-                    .lineSpacing(26)
-                    .foregroundStyle(.black)
+                    Text(profile.initials)
+                        .font(DARCiFont.maisonNeue(.medium, size: 20))
+                        .lineSpacing(26)
+                        .foregroundStyle(.black)
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open user settings")
 
             NotarySearchIcon()
                 .stroke(.black, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))

@@ -17,6 +17,7 @@ struct AppRootView: View {
     @State private var reviewRoute: DocumentReviewRoute?
     @State private var signingRoute: DocumentSigningRoute?
     @State private var isProfileSelectionPresented = false
+    @State private var isUserSettingsPresented = false
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     private let authenticationViewModel: AuthenticationViewModel
@@ -96,8 +97,20 @@ struct AppRootView: View {
                     ))
                     .zIndex(10)
                 }
+
+                if isUserSettingsPresented {
+                    UserSettingsView(
+                        session: sessionCoordinator.currentSession,
+                        onBack: hideUserSettings,
+                        onSignOut: signOut,
+                        onSavePersonalInfo: savePersonalInfo
+                    )
+                    .transition(.opacity)
+                    .zIndex(20)
+                }
             }
             .animation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.42), value: isProfileSelectionPresented)
+            .animation(.easeInOut(duration: 0.32), value: isUserSettingsPresented)
             .navigationDestination(item: $intakeRoute) { route in
                 ProductIntakeFlowView(
                     session: sessionCoordinator.currentSession,
@@ -157,7 +170,8 @@ struct AppRootView: View {
                 NotaryProfileView(
                     session: sessionCoordinator.currentSession,
                     viewModel: NotaryProfileViewModel(apiClient: notaryProfileAPIClient),
-                    onProfileAction: showProfileSelection
+                    onProfileAction: showProfileSelection,
+                    onSettingsAction: showUserSettings
                 )
             } else {
                 HomeView(
@@ -166,7 +180,8 @@ struct AppRootView: View {
                     selectedProductModeKey: $selectedProductModeKey,
                     selectedTab: $selectedTab,
                     onProductSelected: beginProductIntake,
-                    onProfileAction: showProfileSelection
+                    onProfileAction: showProfileSelection,
+                    onSettingsAction: showUserSettings
                 )
             }
         case .documents:
@@ -191,7 +206,8 @@ struct AppRootView: View {
             NotaryProfileView(
                 session: sessionCoordinator.currentSession,
                 viewModel: NotaryProfileViewModel(apiClient: notaryProfileAPIClient),
-                onProfileAction: showProfileSelection
+                onProfileAction: showProfileSelection,
+                onSettingsAction: showUserSettings
             )
         }
     }
@@ -219,18 +235,42 @@ struct AppRootView: View {
     }
 
     private func signOut() {
-        _ = sessionCoordinator.signOut()
-        authenticationViewModel.clearChallenge()
-        selectedTab = .home
-        selectedProductModeKey = nil
-        intakeRoute = nil
-        reviewRoute = nil
-        signingRoute = nil
-        isProfileSelectionPresented = false
+        Task {
+            _ = await sessionCoordinator.signOut()
+            authenticationViewModel.clearChallenge()
+            selectedTab = .home
+            selectedProductModeKey = nil
+            intakeRoute = nil
+            reviewRoute = nil
+            signingRoute = nil
+            isProfileSelectionPresented = false
+            isUserSettingsPresented = false
 
-        withAnimation(.easeInOut(duration: 0.25)) {
-            launchPhase = .authentication
+            withAnimation(.easeInOut(duration: 0.25)) {
+                launchPhase = .authentication
+            }
         }
+    }
+
+    private func showUserSettings() {
+        isUserSettingsPresented = true
+    }
+
+    private func hideUserSettings() {
+        isUserSettingsPresented = false
+    }
+
+    private func savePersonalInfo(_ input: PersonalInfoSaveInput) async throws {
+        try await sessionCoordinator.updatePersonalInfo(
+            AuthPersonalInfoUpdateRequest(
+                firstName: input.firstName,
+                lastName: input.lastName,
+                email: input.email,
+                phone: input.phone,
+                address: input.address
+            ),
+            password: input.password
+        )
     }
 
     private func showProfileSelection() {

@@ -39,6 +39,8 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
         )
     }
 
+    func logout(refreshToken: String, accessToken: String) async throws {}
+
     func completeProfile(_ profile: AuthProfileCompletionRequest, accessToken: String) async throws -> AuthUserResponse {
         AuthUserResponse(
             user: AuthenticatedUser(
@@ -55,6 +57,34 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
                 lastSignInAt: "2026-06-26T00:00:00.000Z",
                 lastAuthSyncedAt: "2026-06-26T00:00:00.000Z"
             )
+        )
+    }
+
+    func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, accessToken: String) async throws -> AuthUserResponse {
+        AuthUserResponse(
+            user: AuthenticatedUser(
+                id: "mock-user",
+                email: profile.email,
+                phone: profile.phone,
+                address: profile.address,
+                role: "member",
+                availableRoles: ["member"],
+                status: "active",
+                firstName: profile.firstName,
+                lastName: profile.lastName,
+                emailConfirmedAt: "2026-06-26T00:00:00.000Z",
+                phoneConfirmedAt: "2026-06-26T00:00:00.000Z",
+                lastSignInAt: "2026-06-26T00:00:00.000Z",
+                lastAuthSyncedAt: "2026-06-26T00:00:00.000Z"
+            )
+        )
+    }
+
+    func resetPassword(_ password: String, refreshToken: String, accessToken: String) async throws -> AuthRefreshResponse {
+        AuthRefreshResponse(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            user: Self.mockUser(email: "member@example.com", phone: "+12025550147")
         )
     }
 

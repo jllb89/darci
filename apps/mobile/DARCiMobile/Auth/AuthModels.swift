@@ -31,11 +31,28 @@ struct AuthRefreshRequest: Encodable, Equatable, Sendable {
     let refreshToken: String
 }
 
+struct AuthLogoutRequest: Encodable, Equatable, Sendable {
+    let refreshToken: String
+}
+
+struct AuthPasswordResetRequest: Encodable, Equatable, Sendable {
+    let refreshToken: String
+    let password: String
+}
+
 struct AuthProfileCompletionRequest: Encodable, Equatable, Sendable {
     let firstName: String
     let lastName: String
     let email: String
     let phone: String
+}
+
+struct AuthPersonalInfoUpdateRequest: Encodable, Equatable, Sendable {
+    let firstName: String
+    let lastName: String
+    let email: String
+    let phone: String
+    let address: String?
 }
 
 struct AuthActiveRoleRequest: Encodable, Equatable, Sendable {
@@ -53,6 +70,7 @@ struct AuthenticatedUser: Codable, Equatable, Sendable {
     let id: String
     let email: String
     let phone: String?
+    let address: String?
     let role: String?
     let availableRoles: [String]?
     let status: String?
@@ -62,6 +80,36 @@ struct AuthenticatedUser: Codable, Equatable, Sendable {
     let phoneConfirmedAt: String?
     let lastSignInAt: String?
     let lastAuthSyncedAt: String?
+
+    init(
+        id: String,
+        email: String,
+        phone: String?,
+        address: String? = nil,
+        role: String?,
+        availableRoles: [String]?,
+        status: String?,
+        firstName: String?,
+        lastName: String?,
+        emailConfirmedAt: String?,
+        phoneConfirmedAt: String?,
+        lastSignInAt: String?,
+        lastAuthSyncedAt: String?
+    ) {
+        self.id = id
+        self.email = email
+        self.phone = phone
+        self.address = address
+        self.role = role
+        self.availableRoles = availableRoles
+        self.status = status
+        self.firstName = firstName
+        self.lastName = lastName
+        self.emailConfirmedAt = emailConfirmedAt
+        self.phoneConfirmedAt = phoneConfirmedAt
+        self.lastSignInAt = lastSignInAt
+        self.lastAuthSyncedAt = lastAuthSyncedAt
+    }
 }
 
 struct AuthSession: Codable, Equatable, Sendable {

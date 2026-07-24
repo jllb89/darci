@@ -142,9 +142,27 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["New document notarization."].waitForExistence(timeout: 5))
         app.buttons["Back"].tap()
 
-        let profileButton = app.buttons["Member"]
-        XCTAssertTrue(profileButton.waitForExistence(timeout: 5))
-        profileButton.tap()
+        let settingsButton = app.buttons["home-settings-button"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 5))
+        settingsButton.tap()
+
+        let personalInfoButton = app.buttons["settings-personal-info-button"]
+        XCTAssertTrue(personalInfoButton.waitForExistence(timeout: 5))
+        personalInfoButton.tap()
+
+        XCTAssertTrue(app.staticTexts["Personal Info"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Name"].exists)
+        XCTAssertTrue(app.staticTexts["Email"].exists)
+        XCTAssertTrue(app.staticTexts["Password"].exists)
+        XCTAssertTrue(app.staticTexts["Phone number"].exists)
+        XCTAssertTrue(app.staticTexts["Address"].exists)
+        XCTAssertFalse(app.buttons["personal-info-save-button"].isEnabled)
+
+        app.buttons["Back to user settings"].tap()
+
+        let signOutButton = app.buttons["settings-sign-out-button"]
+        XCTAssertTrue(signOutButton.waitForExistence(timeout: 5))
+        signOutButton.tap()
 
         XCTAssertTrue(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))

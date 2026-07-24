@@ -5,6 +5,7 @@ struct HomeView: View {
     private let session: AuthSession?
     private let onProductSelected: (HomeProductCard) -> Void
     private let onProfileAction: () -> Void
+    private let onSettingsAction: () -> Void
 
     @StateObject private var viewModel: HomeViewModel
     @Binding private var selectedProductModeKey: String?
@@ -18,11 +19,13 @@ struct HomeView: View {
         selectedProductModeKey: Binding<String?> = .constant(nil),
         selectedTab: Binding<AppTab> = .constant(.home),
         onProductSelected: @escaping (HomeProductCard) -> Void = { _ in },
-        onProfileAction: @escaping () -> Void = {}
+        onProfileAction: @escaping () -> Void = {},
+        onSettingsAction: @escaping () -> Void = {}
     ) {
         self.session = session
         self.onProductSelected = onProductSelected
         self.onProfileAction = onProfileAction
+        self.onSettingsAction = onSettingsAction
         _viewModel = StateObject(wrappedValue: viewModel)
         _selectedProductModeKey = selectedProductModeKey
         _selectedTab = selectedTab
@@ -74,17 +77,21 @@ struct HomeView: View {
         let profile = HomeProfileContent(user: session?.user)
 
         return HStack(alignment: .center, spacing: 0) {
-            ZStack {
-                Circle()
-                    .fill(DARCiTheme.onboardingGreen)
-                    .frame(width: scaled(45, in: proxy), height: scaled(45, in: proxy))
+            Button(action: onSettingsAction) {
+                ZStack {
+                    Circle()
+                        .fill(DARCiTheme.onboardingGreen)
+                        .frame(width: scaled(45, in: proxy), height: scaled(45, in: proxy))
 
-                Text(profile.initials)
-                    .font(DARCiFont.maisonNeue(.medium, size: 20))
-                    .lineSpacing(26)
-                    .foregroundStyle(.black)
+                    Text(profile.initials)
+                        .font(DARCiFont.maisonNeue(.medium, size: 20))
+                        .lineSpacing(26)
+                        .foregroundStyle(.black)
+                }
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("Profile initials \(profile.initials)")
+            .accessibilityIdentifier("home-settings-button")
 
             HomeResourceIconGlyph(icon: .search)
                 .stroke(.black, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))

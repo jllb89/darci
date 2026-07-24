@@ -9383,6 +9383,9 @@ components:
         phone:
           type: string
           nullable: true
+        address:
+          type: string
+          nullable: true
         firstName:
           type: string
           nullable: true
@@ -9443,6 +9446,9 @@ components:
           format: email
         phone:
           type: string
+        address:
+          type: string
+          nullable: true
     NotaryServiceAreaKind:
       type: string
       enum:

@@ -22,6 +22,7 @@ const updateMyProfileSchema = z.object({
   lastName: z.string().trim().min(1).max(120),
   email: z.string().trim().email(),
   phone: z.string().trim().min(7).max(40),
+  address: z.string().trim().max(500).nullable().optional(),
 });
 
 export const getMe = async (req: Request, res: Response) => {
@@ -93,6 +94,7 @@ export const updateMe = async (req: Request, res: Response) => {
       supabaseUserId: req.user.id,
       email,
       phone,
+      address: parsed.data.address?.trim() || null,
       ...(req.user.role ? { role: req.user.role } : {}),
       firstName: parsed.data.firstName,
       lastName: parsed.data.lastName,

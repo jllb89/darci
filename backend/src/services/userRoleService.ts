@@ -23,6 +23,7 @@ type UserRow = {
   supabase_user_id: string;
   email: string | null;
   phone: string | null;
+  address: string | null;
   role: string | null;
   status: string | null;
   first_name: string | null;
@@ -63,6 +64,7 @@ export type UserIdentityContext = {
   supabaseUserId: string;
   email: string | null;
   phone: string | null;
+  address: string | null;
   role: RuntimeRole;
   status: string;
   firstName: string | null;
@@ -147,6 +149,7 @@ const mapRoleAssignments = (rows: UserRoleRow[]): UserRoleAssignment[] => {
 const baseUserSelect = "id, supabase_user_id, email, role, status, first_name, last_name";
 const authMirrorColumns = [
   "phone",
+  "address",
   "email_confirmed_at",
   "phone_confirmed_at",
   "last_sign_in_at",
@@ -165,9 +168,9 @@ const isMissingAuthMirrorColumnError = (error: SupabaseErrorLike | null | undefi
   return (
     error.code === "42703" ||
     error.code === "PGRST204" ||
-    /users\.(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)/i.test(message) ||
-    /(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at).*does not exist/i.test(message) ||
-    /Could not find.*['"]?(phone|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)['"]?.*column.*['"]users['"]/i.test(message)
+    /users\.(phone|address|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)/i.test(message) ||
+    /(phone|address|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at).*does not exist/i.test(message) ||
+    /Could not find.*['"]?(phone|address|email_confirmed_at|phone_confirmed_at|last_sign_in_at|last_auth_synced_at)['"]?.*column.*['"]users['"]/i.test(message)
   );
 };
 
@@ -216,6 +219,7 @@ const normalizeUserRow = (row: Partial<UserRow> | null | undefined) => {
   return {
     ...row,
     phone: row.phone ?? null,
+    address: row.address ?? null,
     email_confirmed_at: row.email_confirmed_at ?? null,
     phone_confirmed_at: row.phone_confirmed_at ?? null,
     last_sign_in_at: row.last_sign_in_at ?? null,
@@ -378,6 +382,7 @@ const buildIdentityContext = async (userRow: UserRow) => {
     supabaseUserId: userRow.supabase_user_id,
     email: userRow.email,
     phone: userRow.phone,
+    address: userRow.address,
     role: activeRole,
     status: userRow.status ?? "active",
     firstName: userRow.first_name,
@@ -413,6 +418,7 @@ export const ensureUserIdentityFromAuth = async (input: {
   supabaseUserId: string;
   email: string | null;
   phone?: string | null;
+  address?: string | null;
   role?: string | null;
   firstName?: string | null;
   lastName?: string | null;
@@ -435,6 +441,7 @@ export const ensureUserIdentityFromAuth = async (input: {
         email: input.email ?? null,
         role: inputRole,
         ...(isAuthMirrorColumnAvailable("phone") && normalizedInputPhone !== undefined ? { phone: normalizedInputPhone } : {}),
+        ...(isAuthMirrorColumnAvailable("address") && input.address !== undefined ? { address: input.address } : {}),
         ...(input.firstName !== undefined ? { first_name: input.firstName } : {}),
         ...(input.lastName !== undefined ? { last_name: input.lastName } : {}),
         ...(isAuthMirrorColumnAvailable("email_confirmed_at") && input.emailConfirmedAt !== undefined
@@ -476,6 +483,7 @@ export const ensureUserIdentityFromAuth = async (input: {
 
   const nextEmail = input.email ?? existingUser.email;
   const nextPhone = normalizedInputPhone === undefined ? existingUser.phone : normalizedInputPhone;
+  const nextAddress = input.address === undefined ? existingUser.address : input.address;
   const nextFirstName = input.firstName ?? existingUser.first_name;
   const nextLastName = input.lastName ?? existingUser.last_name;
   const nextEmailConfirmedAt =
@@ -499,6 +507,7 @@ export const ensureUserIdentityFromAuth = async (input: {
   const shouldUpdateUser =
     nextEmail !== existingUser.email ||
     (isAuthMirrorColumnAvailable("phone") && nextPhone !== existingUser.phone) ||
+    (isAuthMirrorColumnAvailable("address") && nextAddress !== existingUser.address) ||
     nextFirstName !== existingUser.first_name ||
     nextLastName !== existingUser.last_name ||
     (isAuthMirrorColumnAvailable("email_confirmed_at") && nextEmailConfirmedAt !== existingUser.email_confirmed_at) ||
@@ -512,6 +521,7 @@ export const ensureUserIdentityFromAuth = async (input: {
       email: nextEmail,
       role: existingRole,
       ...(isAuthMirrorColumnAvailable("phone") && nextPhone !== undefined ? { phone: nextPhone } : {}),
+      ...(isAuthMirrorColumnAvailable("address") && nextAddress !== undefined ? { address: nextAddress } : {}),
       ...(nextFirstName !== undefined ? { first_name: nextFirstName } : {}),
       ...(nextLastName !== undefined ? { last_name: nextLastName } : {}),
       ...(isAuthMirrorColumnAvailable("email_confirmed_at") && nextEmailConfirmedAt !== undefined
@@ -781,6 +791,7 @@ export const toUserResponse = (context: UserIdentityContext) => {
     id: context.id,
     email: context.email ?? "",
     phone: context.phone,
+    address: context.address,
     role: context.role,
     availableRoles: context.availableRoles,
     status: context.status,

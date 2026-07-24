@@ -18,7 +18,10 @@ protocol AuthAPIProviding: Sendable {
     func verifyEmailOTP(email: String, token: String, returnTo: String?) async throws -> AuthVerifyResponse
     func verifyPhoneOTP(phone: String, token: String, returnTo: String?) async throws -> AuthVerifyResponse
     func refresh(refreshToken: String) async throws -> AuthRefreshResponse
+    func logout(refreshToken: String, accessToken: String) async throws
     func completeProfile(_ profile: AuthProfileCompletionRequest, accessToken: String) async throws -> AuthUserResponse
+    func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, accessToken: String) async throws -> AuthUserResponse
+    func resetPassword(_ password: String, refreshToken: String, accessToken: String) async throws -> AuthRefreshResponse
     func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse
 }
 
@@ -76,11 +79,47 @@ struct AuthAPIClient: Sendable {
         )
     }
 
+    func logout(refreshToken: String, accessToken: String) async throws {
+        let request = try makeJSONRequest(
+            path: "/auth/logout",
+            body: AuthLogoutRequest(refreshToken: refreshToken),
+            accessToken: accessToken
+        )
+        let (data, response) = try await urlSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthAPIError.invalidResponse
+        }
+
+        if httpResponse.statusCode == 401 {
+            return
+        }
+
+        try validateEmptyResponse(data: data, response: response)
+    }
+
     func completeProfile(_ profile: AuthProfileCompletionRequest, accessToken: String) async throws -> AuthUserResponse {
         try await send(
             path: "/users/me",
             method: "PATCH",
             body: profile,
+            accessToken: accessToken
+        )
+    }
+
+    func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, accessToken: String) async throws -> AuthUserResponse {
+        try await send(
+            path: "/users/me",
+            method: "PATCH",
+            body: profile,
+            accessToken: accessToken
+        )
+    }
+
+    func resetPassword(_ password: String, refreshToken: String, accessToken: String) async throws -> AuthRefreshResponse {
+        try await send(
+            path: "/auth/password/reset",
+            body: AuthPasswordResetRequest(refreshToken: refreshToken, password: password),
             accessToken: accessToken
         )
     }

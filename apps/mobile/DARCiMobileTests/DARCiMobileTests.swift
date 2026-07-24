@@ -147,6 +147,8 @@ struct TestAuthAPIClient: AuthAPIProviding {
         return refreshResponse
     }
 
+    func logout(refreshToken: String, accessToken: String) async throws {}
+
     func completeProfile(_ profile: AuthProfileCompletionRequest, accessToken: String) async throws -> AuthUserResponse {
         Self.completedProfiles.append(profile)
         Self.profileAccessTokens.append(accessToken)
@@ -156,6 +158,18 @@ struct TestAuthAPIClient: AuthAPIProviding {
         }
 
         return profileResponse
+    }
+
+    func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, accessToken: String) async throws -> AuthUserResponse {
+        profileResponse
+    }
+
+    func resetPassword(_ password: String, refreshToken: String, accessToken: String) async throws -> AuthRefreshResponse {
+        refreshResponse
+    }
+
+    func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse {
+        profileResponse
     }
 }
 
@@ -1217,11 +1231,43 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     @MainActor
-    func testAppSessionCoordinatorSignOutClearsLocalSession() throws {
+    func testAppSessionCoordinatorPersistsPersonalInfoUpdate() async throws {
+        let originalSession = makeAuthSession()
+        let updatedUser = makeAuthenticatedUser(
+            firstName: "Grace",
+            lastName: "Hopper",
+            address: "5 Prince St. Soho, NY."
+        )
+        let store = InMemoryAuthSessionStore(session: originalSession)
+        let coordinator = AppSessionCoordinator(
+            apiClient: TestAuthAPIClient(profileResponse: AuthUserResponse(user: updatedUser)),
+            sessionStore: store
+        )
+        XCTAssertTrue(coordinator.acceptAuthenticatedSession(originalSession))
+
+        try await coordinator.updatePersonalInfo(
+            AuthPersonalInfoUpdateRequest(
+                firstName: "Grace",
+                lastName: "Hopper",
+                email: updatedUser.email,
+                phone: updatedUser.phone ?? "",
+                address: updatedUser.address
+            ),
+            password: nil
+        )
+
+        XCTAssertEqual(coordinator.currentSession?.user, updatedUser)
+        XCTAssertEqual(try store.load()?.user.address, "5 Prince St. Soho, NY.")
+    }
+
+    @MainActor
+    func testAppSessionCoordinatorSignOutClearsLocalSession() async throws {
         let store = InMemoryAuthSessionStore(session: makeAuthSession())
         let coordinator = AppSessionCoordinator(apiClient: TestAuthAPIClient(), sessionStore: store)
 
-        XCTAssertTrue(coordinator.signOut())
+        let didSignOut = await coordinator.signOut()
+
+        XCTAssertTrue(didSignOut)
 
         XCTAssertNil(coordinator.currentSession)
         XCTAssertNil(try store.load())
@@ -1278,12 +1324,14 @@ final class DARCiMobileTests: XCTestCase {
         email: String = "member@example.com",
         phone: String? = "+15555550123",
         firstName: String? = nil,
-        lastName: String? = nil
+        lastName: String? = nil,
+        address: String? = nil
     ) -> AuthenticatedUser {
         AuthenticatedUser(
             id: "user-1",
             email: email,
             phone: phone,
+            address: address,
             role: "member",
             availableRoles: ["member"],
             status: "active",

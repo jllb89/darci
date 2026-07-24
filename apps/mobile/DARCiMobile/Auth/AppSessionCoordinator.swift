@@ -88,8 +88,43 @@ final class AppSessionCoordinator: ObservableObject {
         }
     }
 
+    func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, password: String?) async throws {
+        guard let currentSession else {
+            throw AuthAPIError.unauthorized(message: "Your session has expired. Sign in again.")
+        }
+
+        let profileResponse = try await apiClient.updatePersonalInfo(
+            profile,
+            accessToken: currentSession.accessToken
+        )
+        var updatedSession = AuthSession(
+            accessToken: currentSession.accessToken,
+            refreshToken: currentSession.refreshToken,
+            user: profileResponse.user
+        ).normalizedForMobileProfile()
+        try sessionStore.save(updatedSession)
+        self.currentSession = updatedSession
+
+        if let password, password.isEmpty == false {
+            let passwordResponse = try await apiClient.resetPassword(
+                password,
+                refreshToken: updatedSession.refreshToken,
+                accessToken: updatedSession.accessToken
+            )
+            updatedSession = passwordResponse.session.normalizedForMobileProfile()
+            try sessionStore.save(updatedSession)
+            self.currentSession = updatedSession
+        }
+    }
+
     @discardableResult
-    func signOut() -> Bool {
+    func signOut() async -> Bool {
+        let session = currentSession
+
+        if let session {
+            try? await apiClient.logout(refreshToken: session.refreshToken, accessToken: session.accessToken)
+        }
+
         currentSession = nil
 
         do {
