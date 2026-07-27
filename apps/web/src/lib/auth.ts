@@ -257,6 +257,10 @@ export const syncStoredAuthFromSession = async (input: {
       | null;
 
     if (!response.ok || !payload?.accessToken || !payload.user) {
+      if (response.status === 400 || response.status === 401) {
+        clearStoredAuth();
+      }
+
       throw new Error(payload?.message || "Failed to sync session");
     }
 

@@ -39,7 +39,7 @@ final class NotaryProfileViewModel: ObservableObject {
             cachedEntry = await cacheStore.read(cacheKey: legacyCacheKey)
         }
         if let cachedEntry {
-            requests = cachedEntry.response.requests
+            requests = visibleRequests(from: cachedEntry.response.requests)
             errorMessage = nil
         }
 
@@ -153,11 +153,28 @@ final class NotaryProfileViewModel: ObservableObject {
         var seen = Set<String>()
         var result: [NotaryQueueRequestSummary] = []
 
-        for request in primary + fallback where seen.insert(request.id).inserted {
+        for request in visibleRequests(from: primary + fallback) where seen.insert(request.id).inserted {
             result.append(request)
         }
 
         return Array(result.sorted(by: isMoreRecent).prefix(maximumLoadedRequests))
+    }
+
+    private func visibleRequests(from requests: [NotaryQueueRequestSummary]) -> [NotaryQueueRequestSummary] {
+        requests.filter(isVisibleRequest)
+    }
+
+    private func isVisibleRequest(_ request: NotaryQueueRequestSummary) -> Bool {
+        let documentStatus = normalizedValue(request.document.status)
+        guard ["pending_notary", "completed"].contains(documentStatus) else {
+            return false
+        }
+
+        if request.workflow?.selectedNotaryUserId != nil, request.workflow?.assignedNotaryUserId == nil {
+            return false
+        }
+
+        return true
     }
 
     private func isMoreRecent(_ left: NotaryQueueRequestSummary, than right: NotaryQueueRequestSummary) -> Bool {

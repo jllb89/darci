@@ -2276,6 +2276,16 @@ export const syncSession = async (req: Request, res: Response) => {
 
   const { data, error } = await supabasePublic.auth.getUser(accessToken);
   if (error || !data.user) {
+    console.warn("[auth.session_sync]", {
+      component: "auth.session_sync",
+      event: "get_user_failed",
+      error: getErrorLogDetails(error ?? new Error("Missing auth user")),
+      hasRefreshToken: Boolean(parsed.data.refreshToken),
+      intent: parsed.data.intent ?? null,
+      origin: req.headers.origin ?? null,
+      userAgent: req.headers["user-agent"] ?? null,
+    });
+
     return res.status(401).json({
       error: "unauthorized",
       message: error?.message ?? "Invalid or expired token",
