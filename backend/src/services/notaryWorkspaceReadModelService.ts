@@ -750,8 +750,22 @@ const isReviewableDocumentVersion = (version: DocumentVersionRecord) => {
   );
 };
 
+const isUploadedDocumentReviewSource = (input: {
+  document: Pick<DocumentRecord, "document_type" | "product_flow_mode">;
+  version: DocumentVersionRecord;
+}) => {
+  const documentType = input.document.document_type?.trim().toLowerCase() ?? "";
+  const productFlowMode = input.document.product_flow_mode?.trim().toLowerCase() ?? "";
+  const storagePath = input.version.storage_path?.trim().toLowerCase() ?? "";
+
+  return Boolean(
+    (documentType === "notarize_document" || productFlowMode === "notarize_document") &&
+      storagePath.endsWith("/source.pdf"),
+  );
+};
+
 const buildReviewDocuments = async (input: {
-  document: Pick<DocumentRecord, "output_bundle">;
+  document: Pick<DocumentRecord, "document_type" | "output_bundle" | "product_flow_mode">;
   versions: DocumentVersionRecord[];
   generationRuns: DocumentGenerationRunRecord[];
 }) => {
@@ -760,7 +774,11 @@ const buildReviewDocuments = async (input: {
     generationRuns: input.generationRuns,
   });
   const pdfVersions = input.versions
-    .filter((version) => isPdfDocumentVersion(version) && isReviewableDocumentVersion(version))
+    .filter((version) =>
+      isPdfDocumentVersion(version) &&
+        (isReviewableDocumentVersion(version) ||
+          isUploadedDocumentReviewSource({ document: input.document, version })),
+    )
     .sort((left, right) => right.version - left.version);
   const latestByOutput = new Map<string, DocumentVersionRecord>();
 

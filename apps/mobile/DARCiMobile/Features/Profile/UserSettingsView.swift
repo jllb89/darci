@@ -21,6 +21,9 @@ struct UserSettingsView: View {
 
     var body: some View {
         ZStack {
+            Color.black
+                .ignoresSafeArea()
+
             if isPersonalInfoPresented {
                 PersonalInfoView(
                     session: session,
@@ -33,7 +36,9 @@ struct UserSettingsView: View {
                     .transition(.opacity)
             }
         }
+        .background(Color.black.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.24), value: isPersonalInfoPresented)
+        .toolbarBackground(.black, for: .navigationBar)
     }
 
     private var settingsMenu: some View {
@@ -105,9 +110,9 @@ struct UserSettingsView: View {
             .padding(.top, scaled(24, in: proxy))
             .padding(.horizontal, scaled(25, in: proxy))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color.black.ignoresSafeArea())
             .clipped()
         }
+        .background(Color.black.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)

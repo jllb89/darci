@@ -1303,4 +1303,96 @@ describe("notaryWorkspaceReadModelService", () => {
       },
     ]);
   });
+
+  it("includes uploaded document source PDFs for notary review", async () => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: "wf-1",
+      assigned_notary_id: "notary-db-1",
+      status: "in_review",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-1234567890",
+      status: "pending_notary",
+      document_type: "notarize_document",
+      jurisdiction: "US-CA",
+      product_flow_mode: "notarize_document",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "ver-source-1",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "owner-1/doc-1/v1/source.pdf",
+        file_name: "member-upload.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1234,
+        is_final: false,
+        generation_run_id: "run-uploaded-document",
+        created_by: null,
+        created_at: "2026-04-22T09:30:00.000Z",
+      },
+    ]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-uploaded-document",
+        document_id: "doc-1",
+        intake_revision: 1,
+        output_key: "uploaded_document",
+        document_key: "uploaded_document",
+        template_key: "uploaded_pdf",
+        template_version: "uploaded_pdf",
+        template_hash: "uploaded_pdf",
+        template_artifact_id: null,
+        payload_json: {},
+        coverage_json: {},
+        render_context_json: {},
+        blocking_requirements_json: [],
+        resolved_sources_json: {},
+        status: "rendered",
+        renderer_job_id: null,
+        document_version_id: "ver-source-1",
+        blocked_at: null,
+        started_at: "2026-04-22T09:29:00.000Z",
+        rendered_at: "2026-04-22T09:30:00.000Z",
+        failed_at: null,
+        canceled_at: null,
+        failure_code: null,
+        failure_details_json: {},
+        cancellation_reason: null,
+        error_message: null,
+        created_at: "2026-04-22T09:29:00.000Z",
+      },
+    ]);
+
+    const context = await getNotaryRequestContext({
+      requestId: "req-1",
+      role: "notary",
+      viewerUserId: "notary-db-1",
+    });
+
+    expect(context).not.toBeNull();
+    expect(context?.document.reviewDocuments).toMatchObject([
+      {
+        id: "ver-source-1",
+        versionId: "ver-source-1",
+        fileName: "member-upload.pdf",
+        mimeType: "application/pdf",
+        isFinal: false,
+      },
+    ]);
+  });
 });

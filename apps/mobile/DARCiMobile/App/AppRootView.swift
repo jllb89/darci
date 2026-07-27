@@ -106,6 +106,8 @@ struct AppRootView: View {
                         onSignOut: signOut,
                         onSavePersonalInfo: savePersonalInfo
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.ignoresSafeArea())
                     .transition(.opacity)
                     .zIndex(20)
                 }
