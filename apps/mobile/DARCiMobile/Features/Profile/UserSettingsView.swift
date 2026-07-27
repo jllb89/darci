@@ -6,8 +6,10 @@ struct UserSettingsView: View {
     let onBack: () -> Void
     let onSignOut: () -> Void
     let onSavePersonalInfo: (PersonalInfoSaveInput) async throws -> Void
+    let notaryProfileAPIClient: NotaryProfileAPIProviding
 
     @State private var isPersonalInfoPresented = false
+    @State private var isNotaryInformationPresented = false
 
     private var displayName: String {
         HomeProfileContent(user: session?.user).displayName
@@ -17,6 +19,10 @@ struct UserSettingsView: View {
         let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "DARCi v\(version?.isEmpty == false ? version ?? "1.0" : "1.0")"
+    }
+
+    private var showsNotaryInformation: Bool {
+        MobileProfileRole.availableRoles(for: session?.user).contains(.notary)
     }
 
     var body: some View {
@@ -31,6 +37,13 @@ struct UserSettingsView: View {
                     onSave: onSavePersonalInfo
                 )
                 .transition(.opacity)
+            } else if isNotaryInformationPresented {
+                NotaryInformationSettingsView(
+                    session: session,
+                    apiClient: notaryProfileAPIClient,
+                    onBack: { isNotaryInformationPresented = false }
+                )
+                .transition(.opacity)
             } else {
                 settingsMenu
                     .transition(.opacity)
@@ -38,6 +51,7 @@ struct UserSettingsView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.24), value: isPersonalInfoPresented)
+        .animation(.easeInOut(duration: 0.24), value: isNotaryInformationPresented)
         .toolbarBackground(.black, for: .navigationBar)
     }
 
@@ -63,7 +77,7 @@ struct UserSettingsView: View {
 
                 settingsSection(
                     title: "Profile",
-                    rows: ["Personal Info", "Membership & Billing", "Illuminotary Information", "Delete my account"],
+                    rows: profileRows,
                     proxy: proxy
                 )
                 .padding(.top, scaled(43, in: proxy))
@@ -118,6 +132,15 @@ struct UserSettingsView: View {
         .toolbar(.hidden, for: .navigationBar)
     }
 
+    private var profileRows: [String] {
+        var rows = ["Personal Info", "Membership & Billing"]
+        if showsNotaryInformation {
+            rows.append("Illuminotary Information")
+        }
+        rows.append("Delete my account")
+        return rows
+    }
+
     private func settingsSection(title: String, rows: [String], proxy: GeometryProxy) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
@@ -156,6 +179,17 @@ struct UserSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-personal-info-button")
+                } else if title == "Illuminotary Information" {
+                    Button {
+                        isNotaryInformationPresented = true
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-notary-information-button")
                 } else {
                     row
                 }

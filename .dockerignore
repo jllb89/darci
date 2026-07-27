@@ -34,6 +34,7 @@ pnpm-debug.log*
 # Workspace areas not needed by API/worker/web Docker builds
 docs/*
 mobile
+apps/mobile
 linear
 supabase
 scripts

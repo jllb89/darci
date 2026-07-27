@@ -16,6 +16,9 @@ mobile/.dart_tool/
 mobile/.pub-cache/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
+apps/mobile/.DerivedData/
+apps/mobile/DerivedData/
+apps/mobile/build/
 
 # Logs
 npm-debug.log*

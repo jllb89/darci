@@ -96,6 +96,50 @@ struct NotaryReviewDecisionResponse: Decodable, Equatable, Sendable {
     let message: String?
 }
 
+struct MyNotaryProfileResponse: Decodable, Equatable, Sendable {
+    let profile: EditableNotaryProfile?
+}
+
+struct EditableNotaryProfile: Decodable, Equatable, Sendable {
+    let id: String?
+    let userId: String?
+    let jurisdiction: String?
+    let serviceAreaKind: String?
+    let serviceAreaName: String?
+    let commissionNumber: String?
+    let commissionExpiresAt: String?
+    let sealStoragePath: String?
+    let signatureDataUrl: String?
+    let sealDataUrl: String?
+    let createdAt: String?
+    let updatedAt: String?
+}
+
+struct NotaryProfileUpdateRequest: Encodable, Equatable, Sendable {
+    let jurisdiction: String
+    let serviceAreaKind: String
+    let serviceAreaName: String
+    let commissionNumber: String
+    let commissionExpiresAt: String
+    let signatureDataUrl: String?
+    let sealDataUrl: String?
+}
+
+struct NotaryServiceAreaOption: Decodable, Identifiable, Equatable, Sendable {
+    let label: String
+    let value: String
+
+    var id: String { value }
+}
+
+struct NotaryServiceAreasResponse: Decodable, Equatable, Sendable {
+    let jurisdiction: String?
+    let abbreviation: String?
+    let options: [NotaryServiceAreaOption]?
+    let source: String?
+    let message: String?
+}
+
 struct NotaryQueueCounts: Codable, Equatable, Sendable {
     let pending: Int?
     let scheduled: Int?

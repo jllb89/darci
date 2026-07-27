@@ -165,6 +165,14 @@ struct AuthAPIClient: Sendable {
         try await send(path: path, method: "PUT", body: body, accessToken: accessToken)
     }
 
+    func patch<Response: Decodable, Body: Encodable>(
+        path: String,
+        body: Body,
+        accessToken: String? = nil
+    ) async throws -> Response {
+        try await send(path: path, method: "PATCH", body: body, accessToken: accessToken)
+    }
+
     func delete<Response: Decodable>(
         path: String,
         accessToken: String? = nil

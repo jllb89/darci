@@ -104,7 +104,8 @@ struct AppRootView: View {
                         session: sessionCoordinator.currentSession,
                         onBack: hideUserSettings,
                         onSignOut: signOut,
-                        onSavePersonalInfo: savePersonalInfo
+                        onSavePersonalInfo: savePersonalInfo,
+                        notaryProfileAPIClient: notaryProfileAPIClient
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.ignoresSafeArea())

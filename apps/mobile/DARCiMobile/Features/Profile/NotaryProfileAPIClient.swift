@@ -4,6 +4,10 @@ protocol NotaryProfileAPIProviding: Sendable {
     func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse
     func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse
+    func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse
+    func updateMyNotaryProfile(_ request: NotaryProfileUpdateRequest, accessToken: String) async throws -> MyNotaryProfileResponse
+    func listNotaryProfileJurisdictions(accessToken: String) async throws -> MemberFormJurisdictionsResponse
+    func listServiceAreas(jurisdiction: String, accessToken: String) async throws -> NotaryServiceAreasResponse
 }
 
 struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
@@ -39,6 +43,29 @@ struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
         )
     }
 
+    func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse {
+        try await authClient.get(path: "/users/me/notary-profile", accessToken: accessToken)
+    }
+
+    func updateMyNotaryProfile(_ request: NotaryProfileUpdateRequest, accessToken: String) async throws -> MyNotaryProfileResponse {
+        try await authClient.patch(path: "/users/me/notary-profile", body: request, accessToken: accessToken)
+    }
+
+    func listNotaryProfileJurisdictions(accessToken: String) async throws -> MemberFormJurisdictionsResponse {
+        try await authClient.get(
+            path: "/rules/member-form",
+            queryItems: [URLQueryItem(name: "mode", value: "notarize_document")],
+            accessToken: accessToken
+        )
+    }
+
+    func listServiceAreas(jurisdiction: String, accessToken: String) async throws -> NotaryServiceAreasResponse {
+        try await authClient.get(
+            path: "/rules/service-areas/\(Self.encodedPathComponent(jurisdiction))",
+            accessToken: accessToken
+        )
+    }
+
     private static func encodedPathComponent(_ value: String) -> String {
         var allowedCharacters = CharacterSet.urlPathAllowed
         allowedCharacters.remove(charactersIn: "/")
@@ -59,6 +86,22 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
 
     func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
         NotaryReviewDecisionResponse(message: nil)
+    }
+
+    func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse {
+        MyNotaryProfileResponse(profile: nil)
+    }
+
+    func updateMyNotaryProfile(_ request: NotaryProfileUpdateRequest, accessToken: String) async throws -> MyNotaryProfileResponse {
+        MyNotaryProfileResponse(profile: nil)
+    }
+
+    func listNotaryProfileJurisdictions(accessToken: String) async throws -> MemberFormJurisdictionsResponse {
+        MemberFormJurisdictionsResponse(mode: nil, jurisdictions: [], message: nil)
+    }
+
+    func listServiceAreas(jurisdiction: String, accessToken: String) async throws -> NotaryServiceAreasResponse {
+        NotaryServiceAreasResponse(jurisdiction: jurisdiction, abbreviation: nil, options: [], source: nil, message: nil)
     }
 }
 

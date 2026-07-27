@@ -1,0 +1,19 @@
+# Dockerfile-specific context for apps/web/Dockerfile.
+# The workflow builds from the repo root, so apps/web/.dockerignore is not used.
+
+**
+
+!apps/
+!apps/web/
+!apps/web/**
+
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/.turbo/
+apps/web/coverage/
+apps/web/.env
+apps/web/.env.*
+
+.git/
+.DS_Store

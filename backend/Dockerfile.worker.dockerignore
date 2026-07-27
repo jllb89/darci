@@ -1,0 +1,31 @@
+# Dockerfile-specific context for backend/Dockerfile.worker.
+# Keep only backend sources, shared types, and runtime PDF templates.
+
+**
+
+!backend/
+!backend/**
+!packages/
+!packages/types/
+!packages/types/**
+!docs/
+
+docs/*
+!docs/CA DDPOA.md
+!docs/OH DDPOA 1.0.docx.md
+!docs/OH*DDPOA*.md
+!docs/CA - DARCi Trust Registration Amendment (APE 260305) (1).md
+!docs/CA - DARCi Trust Certification (APE 260305).md
+!docs/OH - DARCi Trust Certification .md
+!docs/OH - DARCi Trust Registration Amendment .md
+
+backend/node_modules/
+backend/dist/
+backend/.turbo/
+packages/types/node_modules/
+packages/types/dist/
+
+.git/
+.DS_Store
+.env
+.env.*
