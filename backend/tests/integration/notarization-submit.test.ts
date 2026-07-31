@@ -847,12 +847,26 @@ describe("submit notarization", () => {
 
     expect(response.status).toBe(201);
     expect(mocks.createIlluminotarizationWorkflowMock).toHaveBeenCalledWith(
-      expect.objectContaining({ selectedNotaryUserId: "notary-1" }),
+      expect.objectContaining({
+        selectedNotaryUserId: "notary-1",
+        assignedNotaryUserId: "notary-1",
+      }),
+    );
+    expect(mocks.createNotarizationRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ assignedNotaryId: "notary-1" }),
     );
     expect(mocks.upsertIlluminotarizationWorkflowAssignmentMock).toHaveBeenCalledWith(
       expect.objectContaining({
         workflowId: "workflow-1",
         assignmentKind: "selected_notary",
+        userId: "notary-1",
+        assignmentSource: "member_selection",
+      }),
+    );
+    expect(mocks.upsertIlluminotarizationWorkflowAssignmentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: "workflow-1",
+        assignmentKind: "assigned_notary",
         userId: "notary-1",
         assignmentSource: "member_selection",
       }),

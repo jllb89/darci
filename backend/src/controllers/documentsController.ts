@@ -7818,6 +7818,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
     primaryDocumentId: documentId,
     status: "submitted",
     selectedNotaryUserId,
+    assignedNotaryUserId: selectedNotaryUserId,
     submittedAt,
     contextJson: {
       compatibilityMode: "legacy_request_bridge",
@@ -7836,12 +7837,24 @@ export const submitNotarization = async (req: Request, res: Response) => {
     documentId,
     submittedAt,
     workflowId: workflow.id,
+    assignedNotaryId: selectedNotaryUserId,
   });
 
   if (selectedNotaryUserId) {
     await upsertIlluminotarizationWorkflowAssignment({
       workflowId: workflow.id,
       assignmentKind: "selected_notary",
+      userId: selectedNotaryUserId,
+      assignedByUserId: actorUserId,
+      assignmentSource: "member_selection",
+      metadata: {
+        requestId: request.id,
+        documentId,
+      },
+    });
+    await upsertIlluminotarizationWorkflowAssignment({
+      workflowId: workflow.id,
+      assignmentKind: "assigned_notary",
       userId: selectedNotaryUserId,
       assignedByUserId: actorUserId,
       assignmentSource: "member_selection",

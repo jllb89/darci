@@ -1798,12 +1798,14 @@ export const createNotarizationRequest = async (input: {
   documentId: string;
   submittedAt: string;
   workflowId?: string | null | undefined;
+  assignedNotaryId?: string | null | undefined;
 }) => {
   const { data, error } = await supabaseAdmin
     .from("notarization_requests")
     .insert({
       document_id: input.documentId,
       workflow_id: input.workflowId ?? null,
+      assigned_notary_id: input.assignedNotaryId ?? null,
       status: "pending",
       submitted_at: input.submittedAt,
     })
