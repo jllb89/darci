@@ -32,23 +32,81 @@ env:
   STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL }}
 
 jobs:
-  build-images:
-    name: Build and Push ${{ matrix.service }} Image
+  changes:
+    name: Detect Changed Services
     runs-on: ubuntu-latest
+    outputs:
+      build_api: ${{ steps.matrix.outputs.build_api }}
+      build_worker: ${{ steps.matrix.outputs.build_worker }}
+      build_web: ${{ steps.matrix.outputs.build_web }}
+      any_build: ${{ steps.matrix.outputs.any_build }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'packages/**'
+              - 'api/**'
+            web:
+              - 'apps/web/**'
+              - 'packages/**'
+            infra:
+              - '.github/workflows/deploy-staging.yml'
+              - '.dockerignore'
+
+      - name: Build matrix
+        id: matrix
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const isManualRun = process.env.GITHUB_EVENT_NAME === "workflow_dispatch";
+          const backendChanged = isManualRun || process.env.BACKEND_CHANGED === "true" || process.env.INFRA_CHANGED === "true";
+          const webChanged = isManualRun || process.env.WEB_CHANGED === "true" || process.env.INFRA_CHANGED === "true";
+
+          const include = [];
+          if (backendChanged) {
+            include.push(
+              { service: "API", repository: "darci-api", dockerfile: "backend/Dockerfile" },
+              { service: "worker", repository: "darci-worker", dockerfile: "backend/Dockerfile.worker" },
+            );
+          }
+
+          if (webChanged) {
+            include.push({ service: "web", repository: "darci-web", dockerfile: "apps/web/Dockerfile" });
+          }
+
+          const buildApi = include.some((entry) => entry.repository === "darci-api");
+          const buildWorker = include.some((entry) => entry.repository === "darci-worker");
+          const buildWeb = include.some((entry) => entry.repository === "darci-web");
+          const anyBuild = include.length > 0;
+
+          console.log(`build_api=${buildApi}`);
+          console.log(`build_worker=${buildWorker}`);
+          console.log(`build_web=${buildWeb}`);
+          console.log(`any_build=${anyBuild}`);
+          console.log(`matrix=${JSON.stringify({ include })}`);
+          NODE
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
+          WEB_CHANGED: ${{ steps.filter.outputs.web }}
+          INFRA_CHANGED: ${{ steps.filter.outputs.infra }}
+
+  build-images:
+    needs: changes
+    if: needs.changes.outputs.any_build == 'true'
+    name: Build and Push ${{ matrix.service }} Image
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - service: API
-            repository: darci-api
-            dockerfile: backend/Dockerfile
-          - service: worker
-            repository: darci-worker
-            dockerfile: backend/Dockerfile.worker
-          - service: web
-            repository: darci-web
-            dockerfile: apps/web/Dockerfile
+      matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
 
     steps:
       - name: Check required configuration
@@ -112,11 +170,6 @@ jobs:
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -150,7 +203,10 @@ jobs:
 
   deploy:
     name: Deploy Staging
-    needs: build-images
+    needs:
+      - changes
+      - build-images
+    if: needs.changes.outputs.any_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -178,6 +234,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Load web public config
+        if: needs.changes.outputs.build_web == 'true'
         run: |
           secret_json="$(aws secretsmanager get-secret-value --secret-id /darci/staging/app --query SecretString --output text)"
           node - "$secret_json" >> "$GITHUB_ENV" <<'NODE'
@@ -210,6 +267,7 @@ jobs:
           NODE
 
       - name: Register API task definition
+        if: needs.changes.outputs.build_api == 'true'
         run: |
           current_task_definition="$(aws ecs describe-services \
             --cluster "$ECS_CLUSTER" \
@@ -288,6 +346,7 @@ jobs:
           echo "API_TASK_DEFINITION=$next_task_definition" >> "$GITHUB_ENV"
 
       - name: Register worker task definition
+        if: needs.changes.outputs.build_worker == 'true'
         run: |
           current_task_definition="$(aws ecs describe-services \
             --cluster "$ECS_CLUSTER" \
@@ -348,6 +407,7 @@ jobs:
           echo "WORKER_TASK_DEFINITION=$next_task_definition" >> "$GITHUB_ENV"
 
       - name: Register web task definition
+        if: needs.changes.outputs.build_web == 'true'
         run: |
           current_task_definition="$(aws ecs describe-services \
             --cluster "$ECS_CLUSTER" \
@@ -399,15 +459,32 @@ jobs:
 
       - name: Force ECS deployments
         run: |
-          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$API_SERVICE" --task-definition "$API_TASK_DEFINITION" >/dev/null
-          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WORKER_SERVICE" --task-definition "$WORKER_TASK_DEFINITION" >/dev/null
-          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WEB_SERVICE" --task-definition "$WEB_TASK_DEFINITION" >/dev/null
+          if [ "${{ needs.changes.outputs.build_api }}" = "true" ]; then
+            aws ecs update-service --cluster "$ECS_CLUSTER" --service "$API_SERVICE" --task-definition "$API_TASK_DEFINITION" >/dev/null
+          fi
+          if [ "${{ needs.changes.outputs.build_worker }}" = "true" ]; then
+            aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WORKER_SERVICE" --task-definition "$WORKER_TASK_DEFINITION" >/dev/null
+          fi
+          if [ "${{ needs.changes.outputs.build_web }}" = "true" ]; then
+            aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WEB_SERVICE" --task-definition "$WEB_TASK_DEFINITION" >/dev/null
+          fi
 
       - name: Wait for ECS stability
         run: |
+          services=()
+          if [ "${{ needs.changes.outputs.build_api }}" = "true" ]; then
+            services+=("$API_SERVICE")
+          fi
+          if [ "${{ needs.changes.outputs.build_worker }}" = "true" ]; then
+            services+=("$WORKER_SERVICE")
+          fi
+          if [ "${{ needs.changes.outputs.build_web }}" = "true" ]; then
+            services+=("$WEB_SERVICE")
+          fi
+
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
-            --services "$API_SERVICE" "$WORKER_SERVICE" "$WEB_SERVICE"
+            --services "${services[@]}"
 
       - name: Smoke test API health
         run: |
