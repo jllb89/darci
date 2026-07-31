@@ -173,6 +173,64 @@ struct TestAuthAPIClient: AuthAPIProviding {
     }
 }
 
+extension NotaryProfileAPIProviding {
+    func getIdentityDocumentSchema(documentType: String, accessToken: String) async throws -> NotaryIdentityDocumentSchemaResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func startInPersonSession(requestId: String, request: NotarySessionStartRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func recordNotaryCheckIn(requestId: String, request: NotaryMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func recordProximityEvaluation(requestId: String, request: NotaryProximityEvaluationRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func recordIdentityVerification(requestId: String, request: NotaryIdentityVerificationRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func reverseGeocodeVenue(requestId: String, request: NotaryReverseGeocodeRequest, accessToken: String) async throws -> NotaryReverseGeocodeResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func recordVenue(requestId: String, request: NotaryVenueCaptureRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func signAcknowledgment(requestId: String, request: NotarySignRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func advanceSession(requestId: String, request: NotarySessionAdvanceRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func submitFinalPackage(requestId: String, request: NotaryFinalPackageSubmitRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func updateMyNotaryProfile(_ request: NotaryProfileUpdateRequest, accessToken: String) async throws -> MyNotaryProfileResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func listNotaryProfileJurisdictions(accessToken: String) async throws -> MemberFormJurisdictionsResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func listServiceAreas(jurisdiction: String, accessToken: String) async throws -> NotaryServiceAreasResponse {
+        throw URLError(.unsupportedURL)
+    }
+}
+
 struct FailingNotaryProfileAPIClient: NotaryProfileAPIProviding {
     func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
         throw URLError(.notConnectedToInternet)
@@ -224,6 +282,37 @@ actor PagingNotaryProfileAPIClient: NotaryProfileAPIProviding {
 
     func recordedCalls() -> [String] {
         calls
+    }
+}
+
+actor RecoveringNotarySessionAPIClient: NotaryProfileAPIProviding {
+    private let contexts: [NotaryRequestReviewContext]
+    private var contextIndex = 0
+
+    init(contexts: [NotaryRequestReviewContext]) {
+        self.contexts = contexts
+    }
+
+    func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
+        .empty
+    }
+
+    func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
+        let index = min(contextIndex, max(contexts.count - 1, 0))
+        contextIndex += 1
+        return NotaryRequestContextResponse(context: contexts[index])
+    }
+
+    func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
+        NotaryReviewDecisionResponse(message: nil)
+    }
+
+    func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse {
+        MyNotaryProfileResponse(profile: nil)
+    }
+
+    func advanceSession(requestId: String, request: NotarySessionAdvanceRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw AuthAPIError.unexpectedStatus(statusCode: 409, message: "Ledger provider unavailable")
     }
 }
 
@@ -462,11 +551,179 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(response.counts.total, 0)
     }
 
+    func testNotaryProfileAPIClientStartsSessionWithActorCorrectGeolocation() async throws {
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/notary/requests/request-1/meeting/start")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            let body = try JSONSerialization.jsonObject(with: self.requestBodyData(for: request)) as? [String: Any]
+            let geolocation = body?["geolocation"] as? [String: Any]
+            XCTAssertEqual(body?["participantRole"] as? String, "notary")
+            XCTAssertEqual(body?["recordedAt"] as? String, "2026-07-31T15:00:00Z")
+            XCTAssertEqual(geolocation?["latitude"] as? Double, 41.4993)
+            XCTAssertEqual(geolocation?["longitude"] as? Double, -81.6944)
+            XCTAssertEqual(geolocation?["accuracyMeters"] as? Double, 8)
+            XCTAssertEqual(geolocation?["sampleKind"] as? String, "device_gps")
+            XCTAssertEqual(geolocation?["captureStage"] as? String, "meeting_start")
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 201,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )),
+                Data(#"{"status":"ok"}"#.utf8)
+            )
+        }
+        let client = NotaryProfileAPIClient(
+            authClient: AuthAPIClient(
+                config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+                urlSession: urlSession
+            )
+        )
+
+        let response = try await client.startInPersonSession(
+            requestId: "request-1",
+            request: NotarySessionStartRequest(
+                recordedAt: "2026-07-31T15:00:00Z",
+                notes: nil,
+                geolocation: NotaryGeolocationPayload(
+                    latitude: 41.4993,
+                    longitude: -81.6944,
+                    accuracyMeters: 8,
+                    altitudeMeters: nil,
+                    sampleKind: "device_gps",
+                    captureStage: "meeting_start"
+                )
+            ),
+            accessToken: "access-token"
+        )
+
+        XCTAssertEqual(response.status, "ok")
+    }
+
+    func testNotaryInPersonSessionStepFollowsCanonicalEvidenceOrder() {
+        XCTAssertEqual(NotaryInPersonSessionViewModel.resolveStep(context: makeNotarySessionContext()), .start)
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(meetingStatus: "in_progress")
+            ),
+            .samePlace
+        )
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(meetingStatus: "in_progress", hasPassedSamePlace: true)
+            ),
+            .identity
+        )
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(
+                    meetingStatus: "in_progress",
+                    hasPassedSamePlace: true,
+                    hasVerifiedIdentity: true
+                )
+            ),
+            .venue
+        )
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(
+                    meetingStatus: "in_progress",
+                    hasPassedSamePlace: true,
+                    hasVerifiedIdentity: true,
+                    hasVenue: true
+                )
+            ),
+            .seal
+        )
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(
+                    meetingStatus: "in_progress",
+                    hasPassedSamePlace: true,
+                    hasVerifiedIdentity: true,
+                    hasVenue: true,
+                    hasAcknowledgment: true
+                )
+            ),
+            .complete
+        )
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(
+                    meetingStatus: "completed",
+                    hasPassedSamePlace: true,
+                    hasVerifiedIdentity: true,
+                    hasVenue: true,
+                    hasAcknowledgment: true
+                )
+            ),
+            .finalize
+        )
+        XCTAssertEqual(
+            NotaryInPersonSessionViewModel.resolveStep(
+                context: makeNotarySessionContext(
+                    meetingStatus: "completed",
+                    hasPassedSamePlace: true,
+                    hasVerifiedIdentity: true,
+                    hasVenue: true,
+                    hasAcknowledgment: true,
+                    isAnchored: true
+                )
+            ),
+            .done
+        )
+    }
+
+    func testNotaryIdentitySelectContentMatchesWebCatalogs() {
+        XCTAssertEqual(NotaryIdentitySelectContent.usStates.count, 51)
+        XCTAssertEqual(NotaryIdentitySelectContent.usStates.first, "Alabama")
+        XCTAssertEqual(NotaryIdentitySelectContent.usStates.last, "Wyoming")
+        XCTAssertTrue(NotaryIdentitySelectContent.countries.contains("United States"))
+        XCTAssertTrue(NotaryIdentitySelectContent.countries.contains("Palestine, State of"))
+        XCTAssertEqual(NotaryIdentitySelectContent.countries.first, "Afghanistan")
+        XCTAssertEqual(NotaryIdentitySelectContent.countries.last, "Zimbabwe")
+    }
+
+    @MainActor
+    func testNotarySessionRefreshesAfterRecoverableLedgerFailure() async {
+        let inProgressContext = makeNotarySessionContext(
+            meetingStatus: "in_progress",
+            hasPassedSamePlace: true,
+            hasVerifiedIdentity: true,
+            hasVenue: true,
+            hasAcknowledgment: true
+        )
+        let completedContext = makeNotarySessionContext(
+            meetingStatus: "completed",
+            hasPassedSamePlace: true,
+            hasVerifiedIdentity: true,
+            hasVenue: true,
+            hasAcknowledgment: true
+        )
+        let viewModel = NotaryInPersonSessionViewModel(
+            requestId: "request-1",
+            apiClient: RecoveringNotarySessionAPIClient(contexts: [inProgressContext, completedContext])
+        )
+
+        await viewModel.load(session: makeAuthSession())
+        XCTAssertEqual(viewModel.step, .complete)
+
+        await viewModel.completeSession(session: makeAuthSession())
+
+        XCTAssertEqual(viewModel.step, .finalize)
+        XCTAssertEqual(viewModel.errorMessage, "Ledger provider unavailable")
+        viewModel.stop()
+    }
+
     @MainActor
     func testNotaryProfileViewModelKeepsCachedRequestsWhenRefreshFails() async throws {
         let cachedResponse = try JSONDecoder().decode(
             NotaryQueueResponse.self,
-            from: Data(#"{"requests":[{"request":{"id":"request-1","documentId":"document-1","workflowId":null,"status":"submitted","queueStatus":"submitted","submittedAt":"2026-07-24T12:00:00.000Z"},"document":{"id":"document-1","idn":"IDN-1","status":"pending","documentType":"affidavit","jurisdiction":"US-OH","createdAt":"2026-07-24T12:00:00.000Z","summary":null},"owner":null,"workflow":null,"latestCodeDelivery":null,"meeting":null,"finalization":{"latestStatus":null,"latestStatusAt":null,"isAnchored":false,"isVerificationChecked":false,"isWatermarked":false,"isHashRecorded":false,"verificationStatus":null,"anchoredAt":null,"lastCheckedAt":null,"publicVerifyPath":null},"nextAction":null}],"meetings":[],"counts":{"pending":1,"scheduled":0,"readyForInPerson":0,"completed":0,"total":1}}"#.utf8)
+            from: Data(#"{"requests":[{"request":{"id":"request-1","documentId":"document-1","workflowId":null,"status":"submitted","queueStatus":"submitted","submittedAt":"2026-07-24T12:00:00.000Z"},"document":{"id":"document-1","idn":"IDN-1","status":"pending_notary","documentType":"affidavit","jurisdiction":"US-OH","createdAt":"2026-07-24T12:00:00.000Z","summary":null},"owner":null,"workflow":null,"latestCodeDelivery":null,"meeting":null,"finalization":{"latestStatus":null,"latestStatusAt":null,"isAnchored":false,"isVerificationChecked":false,"isWatermarked":false,"isHashRecorded":false,"verificationStatus":null,"anchoredAt":null,"lastCheckedAt":null,"publicVerifyPath":null},"nextAction":null}],"meetings":[],"counts":{"pending":1,"scheduled":0,"readyForInPerson":0,"completed":0,"total":1}}"#.utf8)
         )
         let cacheStore = TestNotaryProfileCacheStore(
             entry: NotaryProfileCacheEntry(response: cachedResponse)
@@ -1432,8 +1689,9 @@ final class DARCiMobileTests: XCTestCase {
                 document: NotaryDocumentSummary(
                     id: "document-\(index)",
                     idn: "IDN-\(index)",
-                    status: "pending",
+                    status: "pending_notary",
                     documentType: "affidavit",
+                    documentTypeLabel: "Affidavit",
                     jurisdiction: "US-OH",
                     createdAt: "2026-07-24T12:00:00.000Z",
                     summary: nil
@@ -1468,6 +1726,140 @@ final class DARCiMobileTests: XCTestCase {
                 completed: 0,
                 total: total
             )
+        )
+    }
+
+    private func makeNotarySessionContext(
+        meetingStatus: String? = nil,
+        hasPassedSamePlace: Bool = false,
+        hasVerifiedIdentity: Bool = false,
+        hasVenue: Bool = false,
+        hasAcknowledgment: Bool = false,
+        isAnchored: Bool = false
+    ) -> NotaryRequestReviewContext {
+        let meeting = meetingStatus.map { status in
+            NotarySessionMeeting(
+                meetingId: "meeting-1",
+                requestId: "request-1",
+                workflowId: "workflow-1",
+                scheduledAt: nil,
+                timezone: nil,
+                location: nil,
+                status: status,
+                samePlaceRequired: true,
+                samePlaceStatus: hasPassedSamePlace ? "passed" : "pending",
+                proposedSlots: [],
+                participants: []
+            )
+        }
+        let proximityEvaluations = hasPassedSamePlace
+            ? [
+                NotaryProximityEvaluation(
+                    id: "proximity-1",
+                    meetingId: "meeting-1",
+                    evaluationKind: "same_place",
+                    status: "passed",
+                    thresholdMeters: 100,
+                    observedDistanceMeters: 2.4,
+                    evaluatedAt: "2026-07-31T15:01:00Z",
+                    notes: nil,
+                    memberSample: nil,
+                    notarySample: nil
+                )
+            ]
+            : []
+        let identityVerifications = hasVerifiedIdentity
+            ? [NotaryIdentityVerification(id: "identity-1", status: "verified", subjectName: "Member User")]
+            : []
+        let artifacts = hasVenue
+            ? [
+                NotarySessionArtifact(
+                    id: "venue-1",
+                    artifactKind: "venue_capture",
+                    status: "active",
+                    capturedAt: "2026-07-31T15:02:00Z",
+                    metadata: NotarySessionArtifactMetadata(
+                        captureSource: "gps_reverse_geocode",
+                        venue: NotaryVenue(
+                            state: "Ohio",
+                            county: "Cuyahoga",
+                            city: "Cleveland",
+                            addressLine1: "200 Public Square",
+                            locationLabel: nil,
+                            completedAt: "2026-07-31T15:02:00Z"
+                        )
+                    )
+                )
+            ]
+            : []
+        let history = hasAcknowledgment
+            ? [
+                NotaryFinalizationHistoryEvent(
+                    id: "history-1",
+                    status: "acknowledgment_appended",
+                    changeSource: "documents.append-acknowledgment",
+                    changeReason: nil,
+                    createdAt: "2026-07-31T15:03:00Z"
+                )
+            ]
+            : []
+
+        return NotaryRequestReviewContext(
+            request: NotaryRequestSummary(
+                id: "request-1",
+                documentId: "document-1",
+                workflowId: "workflow-1",
+                status: "approved",
+                queueStatus: "approved",
+                submittedAt: "2026-07-31T14:00:00Z"
+            ),
+            document: NotaryRequestReviewDocument(
+                id: "document-1",
+                idn: "IDN-1",
+                status: "pending_notary",
+                documentType: "power_of_attorney",
+                documentTypeLabel: "Power of Attorney",
+                jurisdiction: "US-OH",
+                createdAt: "2026-07-31T14:00:00Z",
+                reviewDocuments: []
+            ),
+            owner: nil,
+            notary: nil,
+            workflow: nil,
+            latestCodeDelivery: nil,
+            meeting: meeting,
+            evidence: NotarySessionEvidence(
+                checkins: [],
+                geolocationSamples: [],
+                identityVerifications: identityVerifications,
+                proximityEvaluations: proximityEvaluations,
+                artifacts: artifacts
+            ),
+            finalization: NotarySessionFinalization(
+                latestStatus: isAnchored ? "ledger_anchored" : nil,
+                latestStatusAt: nil,
+                isAnchored: isAnchored,
+                isVerificationChecked: false,
+                isWatermarked: isAnchored,
+                isHashRecorded: isAnchored,
+                verificationStatus: isAnchored ? "verified" : nil,
+                anchoredAt: isAnchored ? "2026-07-31T15:05:00Z" : nil,
+                lastCheckedAt: nil,
+                publicVerifyPath: isAnchored ? "/verify/IDN-1" : nil,
+                hash: isAnchored ? String(repeating: "a", count: 64) : nil,
+                ledgerTxId: isAnchored ? "ledger_IDN-1" : nil,
+                anchorAttempt: nil,
+                history: history
+            ),
+            capabilities: NotaryContextCapabilities(
+                canReviewRequest: false,
+                canManageMeeting: true,
+                canRecordEvidence: meeting != nil,
+                canFinalizeDocument: meetingStatus == "completed",
+                canOpenVerification: isAnchored
+            ),
+            warnings: [],
+            nextAction: nil
         )
     }
 

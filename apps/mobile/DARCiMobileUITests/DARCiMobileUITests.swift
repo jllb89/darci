@@ -6,11 +6,14 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
-    private func makeApp(restoreSession: Bool = false) -> XCUIApplication {
+    private func makeApp(restoreSession: Bool = false, notarySession: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["DARCI_MOCK_AUTH"] = "1"
         if restoreSession {
             app.launchEnvironment["DARCI_MOCK_AUTH_RESTORE"] = "1"
+        }
+        if notarySession {
+            app.launchEnvironment["DARCI_MOCK_NOTARY_SESSION"] = "1"
         }
         return app
     }
@@ -166,6 +169,30 @@ final class DARCiMobileUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testReadyNotaryRequestOpensInPersonSessionWorkspace() throws {
+        let app = makeApp(restoreSession: true, notarySession: true)
+        app.launch()
+
+        let readyTab = app.buttons["READY FOR IN-PERSON"]
+        XCTAssertTrue(readyTab.waitForExistence(timeout: 5))
+        readyTab.tap()
+
+        let readyRequest = app.buttons["notary-ready-start-mock-session-request"]
+        XCTAssertTrue(readyRequest.waitForExistence(timeout: 5))
+        readyRequest.tap()
+
+        XCTAssertTrue(app.staticTexts["Complete in-person session"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["START SESSION"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["notary-session-start-button"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The session PDF will appear here when it is ready."].exists)
+
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "notary-in-person-session-start"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor

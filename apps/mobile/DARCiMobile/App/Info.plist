@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>DARCI_API_BASE_URL</key>
 	<string>$(DARCI_API_BASE_URL)</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>MaisonNeue-Bold.ttf</string>

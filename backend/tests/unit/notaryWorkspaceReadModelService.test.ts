@@ -454,6 +454,11 @@ describe("notaryWorkspaceReadModelService", () => {
     });
 
     expect(queue.counts.total).toBe(1);
+    expect(mocks.listNotarizationRequestsMock).toHaveBeenCalledWith({
+      assignedNotaryId: "notary-db-1",
+      limit: 500,
+      offset: 0,
+    });
     expect(queue.requests[0]).toMatchObject({
       request: {
         id: "req-1",
@@ -472,6 +477,49 @@ describe("notaryWorkspaceReadModelService", () => {
         verificationStatus: "verified",
       },
     });
+  });
+
+  it("keeps the assigned notary queue available when owner identity enrichment fails", async () => {
+    mocks.listNotarizationRequestsMock.mockResolvedValue([
+      {
+        id: "req-1",
+        document_id: "doc-1",
+        workflow_id: "wf-1",
+        assigned_notary_id: "notary-db-1",
+        status: "in_review",
+        submitted_at: "2026-04-22T10:00:00.000Z",
+        created_at: "2026-04-22T10:00:00.000Z",
+      },
+    ]);
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "stale-member-id",
+      idn: "IDN-1234567890",
+      status: "pending_notary",
+      document_type: "power_of_attorney",
+      jurisdiction: "US-CA",
+      product_flow_mode: "poa_only",
+      selected_families: null,
+      output_bundle: [],
+      intake_status: null,
+      intake_schema_version: null,
+      intake_last_saved_at: null,
+      intake_submitted_at: null,
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getWorkspaceIdentitySummaryByUserIdMock.mockRejectedValue(new Error("null"));
+
+    const queue = await listNotaryQueue({
+      role: "notary",
+      viewerUserId: "notary-db-1",
+      limit: 25,
+      offset: 0,
+    });
+
+    expect(queue.counts.total).toBe(1);
+    expect(queue.requests[0]?.request.id).toBe("req-1");
+    expect(queue.requests[0]?.owner).toBeNull();
   });
 
   it("returns a degraded queue when document lookup temporarily fails", async () => {

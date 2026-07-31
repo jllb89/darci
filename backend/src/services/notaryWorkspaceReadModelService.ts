@@ -419,6 +419,23 @@ const safelyListDocumentsByIds = (documentIds: string[]) => {
   });
 };
 
+const safelyGetWorkspaceIdentitySummaryByUserId = (input: {
+  userId?: string | null | undefined;
+  requestId: string;
+  identityKind: "owner" | "notary";
+}) => {
+  return readModelFallback<WorkspaceIdentitySummary | null>({
+    operation: "workspace_identity_lookup",
+    fallback: null,
+    details: {
+      requestId: input.requestId,
+      userId: input.userId ?? null,
+      identityKind: input.identityKind,
+    },
+    run: () => getWorkspaceIdentitySummaryByUserId(input.userId),
+  });
+};
+
 const isPrivilegedRole = (role: RequestRole) => role === "admin" || role === "service_role";
 
 const requireViewerUserId = (input: {
@@ -1069,7 +1086,11 @@ const buildBaseQueueSummary = async (input: {
     buildDocumentWorkspaceSummary({ document: input.document, viewerRole: input.role }),
     getLatestCodeDeliveryForRequest(input.request.id),
     getMeetingByRequestId(input.request.id),
-    getWorkspaceIdentitySummaryByUserId(input.document.owner_id),
+    safelyGetWorkspaceIdentitySummaryByUserId({
+      userId: input.document.owner_id,
+      requestId: input.request.id,
+      identityKind: "owner",
+    }),
   ]);
   const visibleIdn = getVisibleDocumentIdn({
     idn: input.document.idn,
@@ -1178,6 +1199,19 @@ const compareMeetingsByScheduledAt = (
   return leftTime - rightTime;
 };
 
+const mapInBatches = async <Input, Output>(
+  items: Input[],
+  batchSize: number,
+  mapItem: (item: Input) => Promise<Output>,
+) => {
+  const results: Output[] = [];
+  for (let index = 0; index < items.length; index += batchSize) {
+    const batch = await Promise.all(items.slice(index, index + batchSize).map(mapItem));
+    results.push(...batch);
+  }
+  return results;
+};
+
 const getAuthorizedRequestResource = async (input: {
   requestId: string;
   role: RequestRole;
@@ -1223,18 +1257,19 @@ export const listNotaryQueue = async (input: {
   limit: number;
   offset: number;
 }) => {
-  if (!isPrivilegedRole(input.role)) {
-    requireViewerUserId(input);
-  }
+  const viewerUserId = !isPrivilegedRole(input.role) ? requireViewerUserId(input) : null;
 
   const requests = await listNotarizationRequests({
+    ...(input.role === "notary" && viewerUserId ? { assignedNotaryId: viewerUserId } : {}),
     limit: 500,
     offset: 0,
   });
   const documents = await safelyListDocumentsByIds(requests.map((request) => request.document_id));
   const documentsById = new Map(documents.map((document) => [document.id, document]));
-  const summaries: Array<NotaryQueueRequestSummary | null> = await Promise.all(
-    requests.map(async (request): Promise<NotaryQueueRequestSummary | null> => {
+  const summaries = await mapInBatches<NotarizationRequestRecord, NotaryQueueRequestSummary | null>(
+    requests,
+    10,
+    async (request) => {
       const document = documentsById.get(request.document_id) ?? null;
       if (!document) {
         return null;
@@ -1274,7 +1309,7 @@ export const listNotaryQueue = async (input: {
         finalization: summary.finalization,
         nextAction: summary.nextAction,
       } satisfies NotaryQueueRequestSummary;
-    }),
+    },
   );
 
   const normalizedStatus = input.status?.trim() ?? "";
@@ -1321,11 +1356,14 @@ export const getNotaryRequestContext = async (input: {
   const [versions, generationRuns, notary, finalizationHistory, participants] = await Promise.all([
     listDocumentVersions(resource.document.id),
     listDocumentGenerationRuns(resource.document.id),
-    getWorkspaceIdentitySummaryByUserId(
-      resource.workflow?.assigned_notary_user_id ??
+    safelyGetWorkspaceIdentitySummaryByUserId({
+      userId:
+        resource.workflow?.assigned_notary_user_id ??
         resource.workflow?.selected_notary_user_id ??
         resource.request.assigned_notary_id,
-    ),
+      requestId: resource.request.id,
+      identityKind: "notary",
+    }),
     safelyListFinalizationStatusHistory({
       documentId: resource.document.id,
       requestId: resource.request.id,

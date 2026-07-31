@@ -4,6 +4,16 @@ protocol NotaryProfileAPIProviding: Sendable {
     func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse
     func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse
+    func getIdentityDocumentSchema(documentType: String, accessToken: String) async throws -> NotaryIdentityDocumentSchemaResponse
+    func startInPersonSession(requestId: String, request: NotarySessionStartRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func recordNotaryCheckIn(requestId: String, request: NotaryMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func recordProximityEvaluation(requestId: String, request: NotaryProximityEvaluationRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func recordIdentityVerification(requestId: String, request: NotaryIdentityVerificationRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func reverseGeocodeVenue(requestId: String, request: NotaryReverseGeocodeRequest, accessToken: String) async throws -> NotaryReverseGeocodeResponse
+    func recordVenue(requestId: String, request: NotaryVenueCaptureRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func signAcknowledgment(requestId: String, request: NotarySignRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func advanceSession(requestId: String, request: NotarySessionAdvanceRequest, accessToken: String) async throws -> NotarySessionActionResponse
+    func submitFinalPackage(requestId: String, request: NotaryFinalPackageSubmitRequest, accessToken: String) async throws -> NotarySessionActionResponse
     func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse
     func updateMyNotaryProfile(_ request: NotaryProfileUpdateRequest, accessToken: String) async throws -> MyNotaryProfileResponse
     func listNotaryProfileJurisdictions(accessToken: String) async throws -> MemberFormJurisdictionsResponse
@@ -43,6 +53,50 @@ struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
         )
     }
 
+    func getIdentityDocumentSchema(documentType: String, accessToken: String) async throws -> NotaryIdentityDocumentSchemaResponse {
+        try await authClient.get(
+            path: "/notary/identity-document-types",
+            queryItems: [URLQueryItem(name: "documentType", value: documentType)],
+            accessToken: accessToken
+        )
+    }
+
+    func startInPersonSession(requestId: String, request: NotarySessionStartRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/meeting/start", body: request, accessToken: accessToken)
+    }
+
+    func recordNotaryCheckIn(requestId: String, request: NotaryMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/meeting/check-in", body: request, accessToken: accessToken)
+    }
+
+    func recordProximityEvaluation(requestId: String, request: NotaryProximityEvaluationRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/meeting/proximity-evaluation", body: request, accessToken: accessToken)
+    }
+
+    func recordIdentityVerification(requestId: String, request: NotaryIdentityVerificationRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/meeting/identity-verification", body: request, accessToken: accessToken)
+    }
+
+    func reverseGeocodeVenue(requestId: String, request: NotaryReverseGeocodeRequest, accessToken: String) async throws -> NotaryReverseGeocodeResponse {
+        try await postSessionAction(requestId: requestId, path: "/meeting/reverse-geocode", body: request, accessToken: accessToken)
+    }
+
+    func recordVenue(requestId: String, request: NotaryVenueCaptureRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/meeting/venue-capture", body: request, accessToken: accessToken)
+    }
+
+    func signAcknowledgment(requestId: String, request: NotarySignRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/sign", body: request, accessToken: accessToken)
+    }
+
+    func advanceSession(requestId: String, request: NotarySessionAdvanceRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/session/advance", body: request, accessToken: accessToken)
+    }
+
+    func submitFinalPackage(requestId: String, request: NotaryFinalPackageSubmitRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await postSessionAction(requestId: requestId, path: "/submit", body: request, accessToken: accessToken)
+    }
+
     func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse {
         try await authClient.get(path: "/users/me/notary-profile", accessToken: accessToken)
     }
@@ -66,6 +120,19 @@ struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
         )
     }
 
+    private func postSessionAction<Response: Decodable, Body: Encodable>(
+        requestId: String,
+        path: String,
+        body: Body,
+        accessToken: String
+    ) async throws -> Response {
+        try await authClient.post(
+            path: "/notary/requests/\(Self.encodedPathComponent(requestId))\(path)",
+            body: body,
+            accessToken: accessToken
+        )
+    }
+
     private static func encodedPathComponent(_ value: String) -> String {
         var allowedCharacters = CharacterSet.urlPathAllowed
         allowedCharacters.remove(charactersIn: "/")
@@ -76,20 +143,91 @@ struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
 struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
     var response = NotaryQueueResponse.empty
 
+    private var usesSessionFixture: Bool {
+        ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_SESSION"] == "1"
+    }
+
     func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
-        response
+        usesSessionFixture ? Self.sessionQueueFixture : response
     }
 
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
-        NotaryRequestContextResponse(context: nil)
+        usesSessionFixture ? Self.sessionContextFixture : NotaryRequestContextResponse(context: nil)
     }
 
     func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
         NotaryReviewDecisionResponse(message: nil)
     }
 
+    func getIdentityDocumentSchema(documentType: String, accessToken: String) async throws -> NotaryIdentityDocumentSchemaResponse {
+        NotaryIdentityDocumentSchemaResponse(
+            documentTypes: [NotaryIdentityDocumentTypeOption(value: "state_identification_card", label: "State identification card", sortOrder: 10)],
+            selectedType: NotaryIdentityDocumentTypeSchema(
+                value: "state_identification_card",
+                label: "State identification card",
+                sortOrder: 10,
+                fields: []
+            )
+        )
+    }
+
+    func startInPersonSession(requestId: String, request: NotarySessionStartRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: nil, nextAction: nil, message: nil)
+    }
+
+    func recordNotaryCheckIn(requestId: String, request: NotaryMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: nil, nextAction: nil, message: nil)
+    }
+
+    func recordProximityEvaluation(requestId: String, request: NotaryProximityEvaluationRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: "same_place_evaluated", nextAction: nil, message: nil)
+    }
+
+    func recordIdentityVerification(requestId: String, request: NotaryIdentityVerificationRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: nil, nextAction: nil, message: nil)
+    }
+
+    func reverseGeocodeVenue(requestId: String, request: NotaryReverseGeocodeRequest, accessToken: String) async throws -> NotaryReverseGeocodeResponse {
+        NotaryReverseGeocodeResponse(venue: nil, formattedAddress: nil)
+    }
+
+    func recordVenue(requestId: String, request: NotaryVenueCaptureRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: nil, nextAction: nil, message: nil)
+    }
+
+    func signAcknowledgment(requestId: String, request: NotarySignRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: "acknowledgment_sealed", nextAction: nil, message: nil)
+    }
+
+    func advanceSession(requestId: String, request: NotarySessionAdvanceRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: "final_package_submitted", nextAction: nil, message: nil)
+    }
+
+    func submitFinalPackage(requestId: String, request: NotaryFinalPackageSubmitRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "ok", advancedStep: "final_package_submitted", nextAction: nil, message: nil)
+    }
+
     func getMyNotaryProfile(accessToken: String) async throws -> MyNotaryProfileResponse {
-        MyNotaryProfileResponse(profile: nil)
+        guard usesSessionFixture else {
+            return MyNotaryProfileResponse(profile: nil)
+        }
+
+        return MyNotaryProfileResponse(
+            profile: EditableNotaryProfile(
+                id: "mock-profile",
+                userId: "mock-user",
+                jurisdiction: "US-OH",
+                serviceAreaKind: "county",
+                serviceAreaName: "Cuyahoga County",
+                commissionNumber: "OH-12345",
+                commissionExpiresAt: "2028-12-31",
+                sealStoragePath: nil,
+                signatureDataUrl: "data:image/png;base64,bW9jaw==",
+                sealDataUrl: "data:image/png;base64,bW9jaw==",
+                createdAt: "2026-07-31T12:00:00Z",
+                updatedAt: "2026-07-31T12:00:00Z"
+            )
+        )
     }
 
     func updateMyNotaryProfile(_ request: NotaryProfileUpdateRequest, accessToken: String) async throws -> MyNotaryProfileResponse {
@@ -103,6 +241,141 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
     func listServiceAreas(jurisdiction: String, accessToken: String) async throws -> NotaryServiceAreasResponse {
         NotaryServiceAreasResponse(jurisdiction: jurisdiction, abbreviation: nil, options: [], source: nil, message: nil)
     }
+
+    private static let sessionQueueFixture = NotaryQueueResponse(
+        requests: [
+            NotaryQueueRequestSummary(
+                request: NotaryRequestSummary(
+                    id: "mock-session-request",
+                    documentId: "mock-session-document",
+                    workflowId: "mock-session-workflow",
+                    status: "approved",
+                    queueStatus: "approved",
+                    submittedAt: "2026-07-31T12:00:00Z"
+                ),
+                document: NotaryDocumentSummary(
+                    id: "mock-session-document",
+                    idn: "OH26MOCKSESSION",
+                    status: "pending_notary",
+                    documentType: "power_of_attorney",
+                    documentTypeLabel: "Power of Attorney",
+                    jurisdiction: "US-OH",
+                    createdAt: "2026-07-31T11:30:00Z",
+                    summary: nil
+                ),
+                owner: NotaryIdentitySummary(
+                    userId: "mock-member",
+                    supabaseUserId: "mock-member-auth",
+                    displayName: "Morgan Member",
+                    fullName: "Morgan Member",
+                    email: "member@example.com",
+                    role: "member",
+                    status: "active"
+                ),
+                workflow: NotaryWorkflowSummary(
+                    id: "mock-session-workflow",
+                    status: "approved",
+                    latestStatus: "approved",
+                    latestStatusAt: "2026-07-31T12:00:00Z",
+                    reviewStartedAt: "2026-07-31T11:45:00Z",
+                    closedAt: nil,
+                    selectedNotaryUserId: "mock-user",
+                    assignedNotaryUserId: "mock-user",
+                    lastCodeGeneratedAt: nil
+                ),
+                latestCodeDelivery: nil,
+                meeting: nil,
+                finalization: NotaryFinalizationSummary(
+                    latestStatus: nil,
+                    latestStatusAt: nil,
+                    isAnchored: false,
+                    isVerificationChecked: false,
+                    isWatermarked: false,
+                    isHashRecorded: false,
+                    verificationStatus: nil,
+                    anchoredAt: nil,
+                    lastCheckedAt: nil,
+                    publicVerifyPath: nil
+                ),
+                nextAction: "start_session"
+            )
+        ],
+        meetings: [],
+        counts: NotaryQueueCounts(pending: 0, scheduled: 0, readyForInPerson: 1, completed: 0, total: 1)
+    )
+
+    private static let sessionContextFixture = NotaryRequestContextResponse(
+        context: NotaryRequestReviewContext(
+            request: sessionQueueFixture.requests[0].request,
+            document: NotaryRequestReviewDocument(
+                id: "mock-session-document",
+                idn: "OH26MOCKSESSION",
+                status: "pending_notary",
+                documentType: "power_of_attorney",
+                documentTypeLabel: "Power of Attorney",
+                jurisdiction: "US-OH",
+                createdAt: "2026-07-31T11:30:00Z",
+                reviewDocuments: [
+                    NotaryReviewDocumentFile(
+                        id: "mock-session-pdf",
+                        versionId: "mock-session-version",
+                        label: "Power of Attorney",
+                        fileName: "power-of-attorney.pdf",
+                        mimeType: "application/pdf",
+                        sizeBytes: 2048,
+                        isFinal: false,
+                        downloadUrl: nil,
+                        createdAt: "2026-07-31T11:30:00Z"
+                    )
+                ]
+            ),
+            owner: sessionQueueFixture.requests[0].owner,
+            notary: NotaryIdentitySummary(
+                userId: "mock-user",
+                supabaseUserId: "mock-notary-auth",
+                displayName: "Nora Notary",
+                fullName: "Nora Notary",
+                email: "notary@example.com",
+                role: "notary",
+                status: "active"
+            ),
+            workflow: sessionQueueFixture.requests[0].workflow,
+            latestCodeDelivery: nil,
+            meeting: nil,
+            evidence: NotarySessionEvidence(
+                checkins: [],
+                geolocationSamples: [],
+                identityVerifications: [],
+                proximityEvaluations: [],
+                artifacts: []
+            ),
+            finalization: NotarySessionFinalization(
+                latestStatus: nil,
+                latestStatusAt: nil,
+                isAnchored: false,
+                isVerificationChecked: false,
+                isWatermarked: false,
+                isHashRecorded: false,
+                verificationStatus: nil,
+                anchoredAt: nil,
+                lastCheckedAt: nil,
+                publicVerifyPath: nil,
+                hash: nil,
+                ledgerTxId: nil,
+                anchorAttempt: nil,
+                history: []
+            ),
+            capabilities: NotaryContextCapabilities(
+                canReviewRequest: false,
+                canManageMeeting: true,
+                canRecordEvidence: false,
+                canFinalizeDocument: false,
+                canOpenVerification: false
+            ),
+            warnings: [],
+            nextAction: "start_session"
+        )
+    )
 }
 
 protocol NotaryProfileCacheStoring: Sendable {

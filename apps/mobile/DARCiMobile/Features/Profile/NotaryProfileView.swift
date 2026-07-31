@@ -6,6 +6,7 @@ struct NotaryProfileView: View {
     private let onProfileAction: () -> Void
     private let onSettingsAction: () -> Void
     private let onReviewRequest: (NotaryQueueRequestSummary) -> Void
+    private let onStartSession: (NotaryQueueRequestSummary) -> Void
 
     @StateObject private var viewModel: NotaryProfileViewModel
     @State private var selectedTab: NotaryQueueTab = .review
@@ -15,12 +16,14 @@ struct NotaryProfileView: View {
         viewModel: NotaryProfileViewModel = NotaryProfileViewModel(),
         onProfileAction: @escaping () -> Void,
         onSettingsAction: @escaping () -> Void,
-        onReviewRequest: @escaping (NotaryQueueRequestSummary) -> Void = { _ in }
+        onReviewRequest: @escaping (NotaryQueueRequestSummary) -> Void = { _ in },
+        onStartSession: @escaping (NotaryQueueRequestSummary) -> Void = { _ in }
     ) {
         self.session = session
         self.onProfileAction = onProfileAction
         self.onSettingsAction = onSettingsAction
         self.onReviewRequest = onReviewRequest
+        self.onStartSession = onStartSession
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
@@ -154,7 +157,8 @@ struct NotaryProfileView: View {
                     NotaryQueueRequestCard(
                         request: request,
                         tab: selectedTab,
-                        onReview: { onReviewRequest(request) }
+                        onReview: { onReviewRequest(request) },
+                        onStartSession: { onStartSession(request) }
                     )
                 }
             }
@@ -221,6 +225,7 @@ private struct NotaryQueueRequestCard: View {
     let request: NotaryQueueRequestSummary
     let tab: NotaryQueueTab
     let onReview: () -> Void
+    let onStartSession: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -261,7 +266,8 @@ private struct NotaryQueueRequestCard: View {
                     .lineSpacing(13)
                     .foregroundStyle(.white)
                 } else if tab == .ready {
-                    NotaryCardActionButton(title: "START IN-PERSON SESSION", action: {})
+                    NotaryCardActionButton(title: "START IN-PERSON SESSION", action: onStartSession)
+                        .accessibilityIdentifier("notary-ready-start-\(request.id)")
                 } else {
                     NotaryCardActionButton(title: "REVIEW", action: onReview)
                 }

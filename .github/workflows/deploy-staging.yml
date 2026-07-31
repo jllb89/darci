@@ -32,10 +32,23 @@ env:
   STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL }}
 
 jobs:
-  deploy:
-    name: Build, Push, and Deploy
+  build-images:
+    name: Build and Push ${{ matrix.service }} Image
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: API
+            repository: darci-api
+            dockerfile: backend/Dockerfile
+          - service: worker
+            repository: darci-worker
+            dockerfile: backend/Dockerfile.worker
+          - service: web
+            repository: darci-web
+            dockerfile: apps/web/Dockerfile
 
     steps:
       - name: Check required configuration
@@ -51,6 +64,107 @@ jobs:
 
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set image tags
+        run: |
+          echo "ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=staging-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Load web public config
+        if: matrix.repository == 'darci-web'
+        run: |
+          secret_json="$(aws secretsmanager get-secret-value --secret-id /darci/staging/app --query SecretString --output text)"
+          node - "$secret_json" >> "$GITHUB_ENV" <<'NODE'
+          const secret = JSON.parse(process.argv[2] ?? "{}");
+          const supabaseUrl = secret.NEXT_PUBLIC_SUPABASE_URL || secret.SUPABASE_URL || "";
+          const supabaseAnonKey = secret.NEXT_PUBLIC_SUPABASE_ANON_KEY || secret.SUPABASE_ANON_KEY || "";
+          const sentryDsn = secret.NEXT_PUBLIC_SENTRY_DSN || secret.SENTRY_DSN || "";
+          const sentryTracesSampleRate = secret.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE || secret.SENTRY_TRACES_SAMPLE_RATE || "0.05";
+          const mapsApiKey = secret.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+          const mapsLibraries = secret.NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES || "places";
+          const mapsAutocompleteEnabled = secret.NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED || "true";
+          const mapsServerApiKey = secret.GOOGLE_MAPS_SERVER_API_KEY || "";
+          const mapsServerGeocodeEnabled = secret.GOOGLE_MAPS_GEOCODE_USE_SERVER || "true";
+
+          if (!supabaseUrl || !supabaseAnonKey || !sentryDsn || !mapsApiKey || !mapsServerApiKey) {
+            console.error("/darci/staging/app must contain NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SENTRY_DSN, NEXT_PUBLIC_GOOGLE_MAPS_API_KEY, and GOOGLE_MAPS_SERVER_API_KEY.");
+            process.exit(1);
+          }
+
+          console.log(`STAGING_NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl}`);
+          console.log(`STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY=${supabaseAnonKey}`);
+          console.log(`STAGING_NEXT_PUBLIC_SENTRY_DSN=${sentryDsn}`);
+          console.log("STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging");
+          console.log(`STAGING_NEXT_PUBLIC_SENTRY_RELEASE=${process.env.GITHUB_SHA || ""}`);
+          console.log(`STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=${sentryTracesSampleRate}`);
+          console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${mapsApiKey}`);
+          console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES=${mapsLibraries}`);
+          console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED=${mapsAutocompleteEnabled}`);
+          console.log(`STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER=${mapsServerGeocodeEnabled}`);
+          NODE
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        run: |
+          build_args=()
+          if [ "${{ matrix.repository }}" = "darci-web" ]; then
+            build_args+=(--build-arg "NEXT_PUBLIC_API_BASE_URL=$STAGING_NEXT_PUBLIC_API_BASE_URL")
+            build_args+=(--build-arg "NEXT_PUBLIC_SUPABASE_URL=$STAGING_NEXT_PUBLIC_SUPABASE_URL")
+            build_args+=(--build-arg "NEXT_PUBLIC_SUPABASE_ANON_KEY=$STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY")
+            build_args+=(--build-arg "NEXT_PUBLIC_SENTRY_DSN=$STAGING_NEXT_PUBLIC_SENTRY_DSN")
+            build_args+=(--build-arg "NEXT_PUBLIC_SENTRY_ENVIRONMENT=$STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT")
+            build_args+=(--build-arg "NEXT_PUBLIC_SENTRY_RELEASE=$STAGING_NEXT_PUBLIC_SENTRY_RELEASE")
+            build_args+=(--build-arg "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE")
+            build_args+=(--build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY")
+            build_args+=(--build-arg "NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES=$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES")
+            build_args+=(--build-arg "NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED=$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED")
+          fi
+
+          docker buildx build \
+            --progress=plain \
+            --platform linux/arm64 \
+            -f "${{ matrix.dockerfile }}" \
+            --cache-from type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache" \
+            --cache-to type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache",mode=max \
+            "${build_args[@]}" \
+            -t "$ECR_REGISTRY/${{ matrix.repository }}:staging-latest" \
+            -t "$ECR_REGISTRY/${{ matrix.repository }}:$IMAGE_TAG" \
+            --push \
+            .
+
+  deploy:
+    name: Deploy Staging
+    needs: build-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check required configuration
+        run: |
+          missing=0
+          for name in AWS_ACCOUNT_ID AWS_REGION AWS_DEPLOY_ROLE_ARN STAGING_NEXT_PUBLIC_API_BASE_URL STAGING_HEALTH_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name repository variable is required"
+              missing=1
+            fi
+          done
+          exit "$missing"
 
       - name: Set image tags
         run: |
@@ -94,69 +208,6 @@ jobs:
           console.log(`STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED=${mapsAutocompleteEnabled}`);
           console.log(`STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER=${mapsServerGeocodeEnabled}`);
           NODE
-
-      - name: Log in to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push API image
-        timeout-minutes: 20
-        run: |
-          docker buildx build \
-            --progress=plain \
-            --platform linux/arm64 \
-            -f backend/Dockerfile \
-            --cache-from type=registry,ref="$ECR_REGISTRY/darci-api:staging-buildcache" \
-            --cache-to type=registry,ref="$ECR_REGISTRY/darci-api:staging-buildcache",mode=max \
-            -t "$ECR_REGISTRY/darci-api:staging-latest" \
-            -t "$ECR_REGISTRY/darci-api:$IMAGE_TAG" \
-            --push \
-            .
-
-      - name: Build and push worker image
-        timeout-minutes: 15
-        run: |
-          docker buildx build \
-            --progress=plain \
-            --platform linux/arm64 \
-            -f backend/Dockerfile.worker \
-            --cache-from type=registry,ref="$ECR_REGISTRY/darci-worker:staging-buildcache" \
-            --cache-to type=registry,ref="$ECR_REGISTRY/darci-worker:staging-buildcache",mode=max \
-            -t "$ECR_REGISTRY/darci-worker:staging-latest" \
-            -t "$ECR_REGISTRY/darci-worker:$IMAGE_TAG" \
-            --push \
-            .
-
-      - name: Build and push web image
-        timeout-minutes: 25
-        run: |
-          docker buildx build \
-            --progress=plain \
-            --platform linux/arm64 \
-            -f apps/web/Dockerfile \
-            --cache-from type=registry,ref="$ECR_REGISTRY/darci-web:staging-buildcache" \
-            --cache-to type=registry,ref="$ECR_REGISTRY/darci-web:staging-buildcache",mode=max \
-            --build-arg NEXT_PUBLIC_API_BASE_URL="$STAGING_NEXT_PUBLIC_API_BASE_URL" \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL="$STAGING_NEXT_PUBLIC_SUPABASE_URL" \
-            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY" \
-            --build-arg NEXT_PUBLIC_SENTRY_DSN="$STAGING_NEXT_PUBLIC_SENTRY_DSN" \
-            --build-arg NEXT_PUBLIC_SENTRY_ENVIRONMENT="$STAGING_NEXT_PUBLIC_SENTRY_ENVIRONMENT" \
-            --build-arg NEXT_PUBLIC_SENTRY_RELEASE="$STAGING_NEXT_PUBLIC_SENTRY_RELEASE" \
-            --build-arg NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE="$STAGING_NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE" \
-            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_API_KEY" \
-            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES="$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_LIBRARIES" \
-            --build-arg NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED="$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED" \
-            -t "$ECR_REGISTRY/darci-web:staging-latest" \
-            -t "$ECR_REGISTRY/darci-web:$IMAGE_TAG" \
-            --push \
-            .
 
       - name: Register API task definition
         run: |

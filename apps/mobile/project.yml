@@ -29,6 +29,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         DARCI_API_BASE_URL: $(DARCI_API_BASE_URL)
+        NSLocationWhenInUseUsageDescription: DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.
         UILaunchScreen: {}
         UIAppFonts:
           - MaisonNeue-Bold.ttf

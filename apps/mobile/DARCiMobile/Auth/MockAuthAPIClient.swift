@@ -101,7 +101,7 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
     }
 
     private static func mockUser(email: String, phone: String?) -> AuthenticatedUser {
-        AuthenticatedUser(
+        let user = AuthenticatedUser(
             id: "mock-user",
             email: email,
             phone: phone,
@@ -115,6 +115,10 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
             lastSignInAt: "2026-06-26T00:00:00.000Z",
             lastAuthSyncedAt: "2026-06-26T00:00:00.000Z"
         )
+
+        return ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_SESSION"] == "1"
+            ? user.withMockRole("notary")
+            : user
     }
 }
 

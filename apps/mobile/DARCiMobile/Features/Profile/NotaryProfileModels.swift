@@ -52,7 +52,16 @@ struct NotaryRequestContextResponse: Decodable, Equatable, Sendable {
 struct NotaryRequestReviewContext: Decodable, Equatable, Sendable {
     let request: NotaryRequestSummary
     let document: NotaryRequestReviewDocument
+    let owner: NotaryIdentitySummary?
+    let notary: NotaryIdentitySummary?
+    let workflow: NotaryWorkflowSummary?
+    let latestCodeDelivery: NotaryCodeDeliverySummary?
+    let meeting: NotarySessionMeeting?
+    let evidence: NotarySessionEvidence?
+    let finalization: NotarySessionFinalization?
     let capabilities: NotaryContextCapabilities?
+    let warnings: [NotaryContextWarning]?
+    let nextAction: String?
 }
 
 struct NotaryRequestReviewDocument: Decodable, Equatable, Sendable {
@@ -86,6 +95,147 @@ struct NotaryContextCapabilities: Decodable, Equatable, Sendable {
     let canOpenVerification: Bool?
 }
 
+struct NotaryContextWarning: Decodable, Equatable, Sendable {
+    let code: String
+    let severity: String
+    let message: String
+}
+
+struct NotarySessionMeeting: Decodable, Equatable, Sendable {
+    let meetingId: String
+    let requestId: String
+    let workflowId: String?
+    let scheduledAt: String?
+    let timezone: String?
+    let location: String?
+    let status: String?
+    let samePlaceRequired: Bool
+    let samePlaceStatus: String?
+    let proposedSlots: [String]
+    let participants: [NotarySessionParticipant]
+}
+
+struct NotarySessionParticipant: Decodable, Equatable, Sendable {
+    let id: String
+    let userId: String?
+    let participantRole: String
+    let status: String
+    let presenceRequired: Bool
+    let participantLabel: String?
+    let arrivedAt: String?
+    let departedAt: String?
+}
+
+struct NotarySessionEvidence: Decodable, Equatable, Sendable {
+    let checkins: [NotarySessionCheckin]
+    let geolocationSamples: [NotaryGeolocationSample]
+    let identityVerifications: [NotaryIdentityVerification]
+    let proximityEvaluations: [NotaryProximityEvaluation]
+    let artifacts: [NotarySessionArtifact]
+}
+
+struct NotarySessionCheckin: Decodable, Equatable, Sendable {
+    let id: String
+    let meetingId: String
+    let meetingParticipantId: String
+    let participantRole: String
+    let checkinKind: String
+    let status: String
+    let recordedAt: String
+    let notes: String?
+    let geolocation: NotaryGeolocationSample?
+}
+
+struct NotaryGeolocationSample: Decodable, Equatable, Sendable {
+    let id: String
+    let meetingParticipantId: String?
+    let capturedByUserId: String?
+    let latitude: Double
+    let longitude: Double
+    let accuracyMeters: Double?
+    let altitudeMeters: Double?
+    let sampleKind: String
+    let captureStage: String
+    let capturedAt: String
+    let expiresAt: String?
+}
+
+struct NotaryIdentityVerification: Decodable, Equatable, Sendable {
+    let id: String
+    let status: String
+    let subjectName: String?
+}
+
+struct NotaryProximityEvaluation: Decodable, Equatable, Sendable {
+    let id: String
+    let meetingId: String
+    let evaluationKind: String
+    let status: String
+    let thresholdMeters: Double
+    let observedDistanceMeters: Double?
+    let evaluatedAt: String
+    let notes: String?
+    let memberSample: NotaryGeolocationSample?
+    let notarySample: NotaryGeolocationSample?
+}
+
+struct NotarySessionArtifact: Decodable, Equatable, Sendable {
+    let id: String
+    let artifactKind: String
+    let status: String
+    let capturedAt: String?
+    let metadata: NotarySessionArtifactMetadata?
+}
+
+struct NotarySessionArtifactMetadata: Decodable, Equatable, Sendable {
+    let captureSource: String?
+    let venue: NotaryVenue?
+}
+
+struct NotaryVenue: Codable, Equatable, Sendable {
+    let state: String
+    let county: String
+    let city: String?
+    let addressLine1: String?
+    let locationLabel: String?
+    let completedAt: String?
+}
+
+struct NotarySessionFinalization: Decodable, Equatable, Sendable {
+    let latestStatus: String?
+    let latestStatusAt: String?
+    let isAnchored: Bool
+    let isVerificationChecked: Bool
+    let isWatermarked: Bool
+    let isHashRecorded: Bool
+    let verificationStatus: String?
+    let anchoredAt: String?
+    let lastCheckedAt: String?
+    let publicVerifyPath: String?
+    let hash: String?
+    let ledgerTxId: String?
+    let anchorAttempt: NotaryLedgerAnchorAttempt?
+    let history: [NotaryFinalizationHistoryEvent]
+}
+
+struct NotaryLedgerAnchorAttempt: Decodable, Equatable, Sendable {
+    let id: String
+    let status: String
+    let attemptNumber: Int
+    let requestedAt: String
+    let completedAt: String?
+    let failedAt: String?
+    let errorMessage: String?
+}
+
+struct NotaryFinalizationHistoryEvent: Decodable, Equatable, Sendable {
+    let id: String
+    let status: String
+    let changeSource: String
+    let changeReason: String?
+    let createdAt: String
+}
+
 struct NotaryReviewDecisionRequest: Encodable, Equatable, Sendable {
     let decision: String
     let summary: String?
@@ -93,6 +243,136 @@ struct NotaryReviewDecisionRequest: Encodable, Equatable, Sendable {
 }
 
 struct NotaryReviewDecisionResponse: Decodable, Equatable, Sendable {
+    let message: String?
+}
+
+struct NotaryIdentityDocumentSchemaResponse: Decodable, Equatable, Sendable {
+    let documentTypes: [NotaryIdentityDocumentTypeOption]
+    let selectedType: NotaryIdentityDocumentTypeSchema
+}
+
+struct NotaryIdentityDocumentTypeOption: Decodable, Identifiable, Equatable, Sendable {
+    let value: String
+    let label: String
+    let sortOrder: Int
+
+    var id: String { value }
+}
+
+struct NotaryIdentityDocumentTypeSchema: Decodable, Equatable, Sendable {
+    let value: String
+    let label: String
+    let sortOrder: Int
+    let fields: [NotaryIdentityDocumentField]
+}
+
+struct NotaryIdentityDocumentField: Decodable, Identifiable, Equatable, Sendable {
+    let fieldKey: String
+    let label: String
+    let placeholder: String?
+    let inputKind: String
+    let required: Bool
+    let minLength: Int?
+    let maxLength: Int?
+    let pattern: String?
+    let sortOrder: Int
+
+    var id: String { fieldKey }
+}
+
+struct NotaryGeolocationPayload: Encodable, Equatable, Sendable {
+    let latitude: Double
+    let longitude: Double
+    let accuracyMeters: Double?
+    let altitudeMeters: Double?
+    let sampleKind: String
+    let captureStage: String?
+}
+
+struct NotarySessionStartRequest: Encodable, Equatable, Sendable {
+    let participantRole = "notary"
+    let recordedAt: String
+    let notes: String?
+    let geolocation: NotaryGeolocationPayload
+}
+
+struct NotaryMeetingCheckInRequest: Encodable, Equatable, Sendable {
+    let participantRole = "notary"
+    let checkinKind: String
+    let recordedAt: String
+    let notes: String?
+    let geolocation: NotaryGeolocationPayload
+}
+
+struct NotaryProximityEvaluationRequest: Encodable, Equatable, Sendable {
+    let thresholdMeters: Double
+    let evaluatedAt: String
+    let notes: String?
+}
+
+struct NotaryIdentityVerificationRequest: Encodable, Equatable, Sendable {
+    let participantRole = "member"
+    let verificationMethod = "in_person_document"
+    let status = "verified"
+    let verifiedAt: String
+    let subjectName: String?
+    let documentType: String
+    let issuingJurisdiction: String
+    let documentExpirationDate: String
+    let documentNumberTail: String?
+    let maskedIdentifier: String?
+}
+
+struct NotaryReverseGeocodeRequest: Encodable, Equatable, Sendable {
+    let latitude: Double
+    let longitude: Double
+}
+
+struct NotaryReverseGeocodeResponse: Decodable, Equatable, Sendable {
+    let venue: NotaryVenue?
+    let formattedAddress: String?
+}
+
+struct NotaryVenuePrefillMetadata: Encodable, Equatable, Sendable {
+    let prefillSource: String
+    let formattedAddress: String?
+    let prefillLat: Double?
+    let prefillLng: Double?
+}
+
+struct NotaryVenueCaptureRequest: Encodable, Equatable, Sendable {
+    let participantRole = "notary"
+    let venue: NotaryVenue
+    let capturedAt: String
+    let notes: String?
+    let prefillMetadata: NotaryVenuePrefillMetadata
+}
+
+struct NotaryAcknowledgmentConfirmation: Encodable, Equatable, Sendable {
+    let signerAppeared: Bool
+    let signerAcknowledged: Bool
+}
+
+struct NotarySignRequest: Encodable, Equatable, Sendable {
+    let acknowledgment: NotaryAcknowledgmentConfirmation
+    let sealLabel: String
+    let signatureLabel: String
+    let notes: String?
+}
+
+struct NotarySessionAdvanceRequest: Encodable, Equatable, Sendable {
+    let advancedAt: String
+    let notes: String?
+}
+
+struct NotaryFinalPackageSubmitRequest: Encodable, Equatable, Sendable {
+    let notes: String?
+}
+
+struct NotarySessionActionResponse: Decodable, Equatable, Sendable {
+    let status: String?
+    let advancedStep: String?
+    let nextAction: String?
     let message: String?
 }
 

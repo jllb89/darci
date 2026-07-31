@@ -45,8 +45,10 @@ type UserRoleRow = {
 };
 
 type SupabaseErrorLike = {
-  code?: string;
-  message?: string;
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
 };
 
 export type UserRoleAssignment = {
@@ -211,6 +213,18 @@ const runWithAuthMirrorColumnFallback = async <T extends { error: SupabaseErrorL
   return result;
 };
 
+const describeSupabaseError = (error: SupabaseErrorLike, operation: string) => {
+  const message = error.message?.trim();
+  const context = [
+    error.code?.trim() ? `code=${error.code.trim()}` : null,
+    error.details?.trim() ? `details=${error.details.trim()}` : null,
+    error.hint?.trim() ? `hint=${error.hint.trim()}` : null,
+  ].filter((value): value is string => Boolean(value));
+  const summary = message || `${operation} failed`;
+
+  return context.length > 0 ? `${summary} (${context.join(", ")})` : summary;
+};
+
 const normalizeUserRow = (row: Partial<UserRow> | null | undefined) => {
   if (!row) {
     return null;
@@ -243,7 +257,7 @@ const selectUserRowBySupabaseId = async (supabaseUserId: string) => {
   const { data, error } = await runWithAuthMirrorColumnFallback(() => runSelect(getUserSelect()));
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(describeSupabaseError(error, "User lookup by Supabase id"));
   }
 
   return normalizeUserRow(data as Partial<UserRow> | null);
@@ -260,7 +274,7 @@ const selectUserRowById = async (userId: string) => {
   const { data, error } = await runWithAuthMirrorColumnFallback(() => runSelect(getUserSelect()));
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(describeSupabaseError(error, "User lookup by id"));
   }
 
   return normalizeUserRow(data as Partial<UserRow> | null);
