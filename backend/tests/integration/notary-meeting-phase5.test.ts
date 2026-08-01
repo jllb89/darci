@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   queueInPersonSessionStartedNotificationMock: vi.fn(),
   runDueNotificationJobsMock: vi.fn(),
   getNotaryProfileByUserIdMock: vi.fn(),
+  broadcastRequestRealtimeInvalidationMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -97,7 +98,16 @@ vi.mock("../../src/services/notaryProfileService", async (importOriginal) => {
   };
 });
 
+vi.mock("../../src/services/realtimeBroadcastService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/services/realtimeBroadcastService")>();
+  return {
+    ...actual,
+    broadcastRequestRealtimeInvalidation: mocks.broadcastRequestRealtimeInvalidationMock,
+  };
+});
+
 import { app } from "../../src/index";
+import { resolveMissingNotarySessionProfileFields } from "../../src/controllers/notaryController";
 
 type TokenPayload = {
   sub: string;
@@ -278,6 +288,44 @@ describe("Phase 5 meeting runtime slice", () => {
       createdAt: "2026-05-27T14:00:00.000Z",
       updatedAt: "2026-05-27T14:00:00.000Z",
     });
+  });
+
+  it("requires complete current notary profile fields before session start", () => {
+    expect(resolveMissingNotarySessionProfileFields({
+      id: "profile-1",
+      userId: "notary-1",
+      jurisdiction: "US-CA",
+      serviceAreaKind: "county",
+      serviceAreaName: "Orange County",
+      commissionNumber: "CA-456345",
+      commissionExpiresAt: "2093-05-06T23:59:59.999Z",
+      sealStoragePath: null,
+      signatureDataUrl: "data:image/png;base64,AAAA",
+      sealDataUrl: "data:image/png;base64,AAAA",
+      createdAt: "2026-06-29T21:20:16.000Z",
+      updatedAt: "2026-06-29T21:20:16.000Z",
+    })).toEqual([]);
+
+    expect(resolveMissingNotarySessionProfileFields({
+      id: "profile-2",
+      userId: "notary-2",
+      jurisdiction: "US-CA",
+      serviceAreaKind: "county",
+      serviceAreaName: null,
+      commissionNumber: "",
+      commissionExpiresAt: "2025-05-06T23:59:59.999Z",
+      sealStoragePath: null,
+      signatureDataUrl: null,
+      sealDataUrl: null,
+      createdAt: "2026-06-29T21:20:16.000Z",
+      updatedAt: "2026-06-29T21:20:16.000Z",
+    })).toEqual([
+      "service area",
+      "commission number",
+      "current commission expiration",
+      "signature",
+      "seal",
+    ]);
   });
 
   it("creates a meeting proposal and seeds default participants", async () => {
@@ -831,6 +879,95 @@ describe("Phase 5 meeting runtime slice", () => {
     expect(response.body.autoProximityEvaluation).toBeUndefined();
     expect(mocks.createProximityEvaluationMock).not.toHaveBeenCalled();
     expect(mocks.updateMeetingMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps check-in successful and broadcasts when automatic proximity persistence fails", async () => {
+    setupProximityScenario();
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({
+      id: "owner-4",
+      supabaseUserId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      email: "member@example.com",
+      role: "member",
+      status: "active",
+      firstName: "Mina",
+      lastName: "Member",
+      availableRoles: ["member"],
+      roleAssignments: [],
+    });
+    const participants = proximityParticipants.map((participant) =>
+      participant.participant_role === "member"
+        ? { ...participant, status: "expected", arrived_at: null }
+        : participant,
+    );
+    mocks.listMeetingParticipantsMock.mockResolvedValue(participants);
+    mocks.updateMeetingParticipantMock.mockResolvedValue({
+      ...proximityParticipants[0],
+      status: "checked_in",
+      arrived_at: "2026-08-01T19:38:00.055Z",
+      updated_at: "2026-08-01T19:38:00.055Z",
+    });
+    mocks.createMeetingCheckinMock.mockResolvedValue({
+      id: "checkin-member-overflow",
+      meeting_id: "meeting-4",
+      meeting_participant_id: "participant-member-4",
+      recorded_by_user_id: "owner-4",
+      checkin_kind: "arrival",
+      status: "recorded",
+      recorded_at: "2026-08-01T19:38:00.055Z",
+      notes: null,
+      metadata: {},
+      created_at: "2026-08-01T19:38:00.055Z",
+      updated_at: "2026-08-01T19:38:00.055Z",
+    });
+    mocks.createGeolocationSampleMock.mockResolvedValue(
+      buildProximitySample({
+        id: "geo-member-overflow",
+        latitude: 20.696899758457597,
+        longitude: -103.3768016973687,
+        captured_at: "2026-08-01T19:38:00.055Z",
+        created_at: "2026-08-01T19:38:00.055Z",
+      }),
+    );
+    mocks.listMeetingGeolocationSamplesMock.mockResolvedValueOnce([
+      buildProximitySample({
+        id: "geo-notary-overflow",
+        meeting_participant_id: "participant-notary-4",
+        meeting_checkin_id: "checkin-notary-4",
+        captured_by_user_id: "notary-4",
+        capture_stage: "meeting_start",
+        latitude: 39.9612,
+        longitude: -82.9988,
+        captured_at: "2026-08-01T19:37:30.000Z",
+        created_at: "2026-08-01T19:37:30.000Z",
+      }),
+    ]);
+    mocks.createProximityEvaluationMock.mockRejectedValue(new Error("numeric field overflow"));
+    const consoleErrorMock = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await request(app)
+      .post("/notary/requests/req-4/meeting/check-in")
+      .set(
+        "Authorization",
+        `Bearer ${signToken({ sub: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", app_metadata: { role: "member" } })}`,
+      )
+      .send({
+        participantRole: "member",
+        checkinKind: "arrival",
+        recordedAt: "2026-08-01T19:38:00.055Z",
+        geolocation: {
+          latitude: 20.696899758457597,
+          longitude: -103.3768016973687,
+          accuracyMeters: 94,
+        },
+      });
+
+    consoleErrorMock.mockRestore();
+    expect(response.status).toBe(201);
+    expect(response.body.checkin.id).toBe("checkin-member-overflow");
+    expect(response.body.autoProximityEvaluation).toBeUndefined();
+    expect(mocks.broadcastRequestRealtimeInvalidationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-4", reason: "meeting_checkin_recorded" }),
+    );
   });
 
   it("rejects notary-created member geolocation check-ins", async () => {

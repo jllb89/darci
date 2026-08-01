@@ -20,6 +20,7 @@ import {
 import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import {
   getNotaryProfileByUserId,
+  isNotaryCommissionCurrent,
   type NotaryProfileRecord,
 } from "../services/notaryProfileService";
 import { getUserIdentityContextByUserId } from "../services/userRoleService";
@@ -95,6 +96,7 @@ import {
   broadcastRequestRealtimeInvalidation,
   type RequestRealtimeBroadcastReason,
 } from "../services/realtimeBroadcastService";
+import { captureException } from "../utils/sentry";
 
 const resolveCodeSchema = z.object({
   code: z.string().min(1),
@@ -1125,18 +1127,34 @@ const deriveGeolocationCaptureStage = (checkinKind: MeetingCheckinKind): Geoloca
   return "checkin";
 };
 
-const resolveMissingNotarySessionAssets = (profile: NotaryProfileRecord | null) => {
-  const missingAssets: string[] = [];
+export const resolveMissingNotarySessionProfileFields = (profile: NotaryProfileRecord | null) => {
+  const missingFields: string[] = [];
+
+  if (!profile?.jurisdiction?.trim()) {
+    missingFields.push("jurisdiction");
+  }
+
+  if (!profile?.serviceAreaName?.trim()) {
+    missingFields.push("service area");
+  }
+
+  if (!profile?.commissionNumber?.trim()) {
+    missingFields.push("commission number");
+  }
+
+  if (!isNotaryCommissionCurrent(profile?.commissionExpiresAt)) {
+    missingFields.push("current commission expiration");
+  }
 
   if (!profile?.signatureDataUrl?.trim()) {
-    missingAssets.push("signature");
+    missingFields.push("signature");
   }
 
   if (!profile?.sealDataUrl?.trim()) {
-    missingAssets.push("seal");
+    missingFields.push("seal");
   }
 
-  return missingAssets;
+  return missingFields;
 };
 
 const ensureNotarySessionAssetsReady = async (input: {
@@ -1144,18 +1162,18 @@ const ensureNotarySessionAssetsReady = async (input: {
   res: Response;
 }) => {
   const notaryProfile = await getNotaryProfileByUserId(input.assignedNotaryUserId);
-  const missingAssets = resolveMissingNotarySessionAssets(notaryProfile);
+  const missingFields = resolveMissingNotarySessionProfileFields(notaryProfile);
 
-  if (missingAssets.length === 0) {
+  if (missingFields.length === 0) {
     return true;
   }
 
   input.res.status(409).json({
     error: "conflict",
-    code: "notary_assets_required",
-    message: "Your illuminotary signature and seal must be set before starting an in-person session.",
+    code: "notary_profile_required",
+    message: `Complete your illuminotary profile before starting an in-person session: ${missingFields.join(", ")}.`,
     details: {
-      missingAssets,
+      missingFields,
     },
   });
   return false;
@@ -3468,12 +3486,15 @@ export const recordMeetingCheckin = async (req: Request, res: Response) => {
     nextParticipant,
   ];
   const meetingAfterCheckin = refreshedMeeting ?? meeting;
-  const autoProximityEvaluation =
+  let autoProximityEvaluation: Awaited<ReturnType<typeof evaluateSamePlaceEvidence>> | null = null;
+  if (
     geolocation &&
     meetingAfterCheckin.status === "in_progress" &&
     meetingAfterCheckin.same_place_status !== "passed" &&
     ["arrival", "proximity", "meeting_start"].includes(parsed.data.checkinKind)
-      ? await evaluateSamePlaceEvidence({
+  ) {
+    try {
+      autoProximityEvaluation = await evaluateSamePlaceEvidence({
           requestId: request.id,
           document,
           assignedNotaryUserId: request.assigned_notary_id,
@@ -3484,8 +3505,31 @@ export const recordMeetingCheckin = async (req: Request, res: Response) => {
           notes: "Same-place evaluation automatically recorded after participant location check-in.",
           trigger: "automatic_checkin",
           preferredSamples: [geolocation],
-        })
-      : null;
+        });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Automatic same-place proximity evaluation failed", {
+        requestId: request.id,
+        meetingId: meetingAfterCheckin.id,
+        checkinId: checkin.id,
+        error: errorMessage,
+      });
+      captureException(error, {
+        tags: {
+          feature: "automatic_same_place_evaluation",
+          request_id: request.id,
+          meeting_id: meetingAfterCheckin.id,
+        },
+        contexts: {
+          meeting_checkin: {
+            checkinId: checkin.id,
+            checkinKind: parsed.data.checkinKind,
+            participantRole,
+          },
+        },
+      });
+    }
+  }
   const responseMeeting = autoProximityEvaluation?.ok
     ? autoProximityEvaluation.value.updatedMeeting
     : meetingAfterCheckin;

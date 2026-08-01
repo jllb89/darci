@@ -10,6 +10,11 @@ configs:
   Debug: debug
   Release: release
 
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift.git
+    exactVersion: 2.54.1
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -29,6 +34,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         DARCI_API_BASE_URL: $(DARCI_API_BASE_URL)
+        DARCI_SUPABASE_URL: $(DARCI_SUPABASE_URL)
+        DARCI_SUPABASE_ANON_KEY: $(DARCI_SUPABASE_ANON_KEY)
         NSLocationWhenInUseUsageDescription: DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.
         UILaunchScreen: {}
         UIAppFonts:
@@ -53,6 +60,8 @@ targets:
         excludes:
           - README.md
           - "**/.gitkeep"
+    dependencies:
+      - package: Supabase
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci

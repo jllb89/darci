@@ -49,6 +49,15 @@ struct NotaryRequestContextResponse: Decodable, Equatable, Sendable {
     let context: NotaryRequestReviewContext?
 }
 
+struct NotaryIdnResolveRequest: Encodable, Equatable, Sendable {
+    let idn: String
+}
+
+struct NotaryIdnResolveResponse: Decodable, Equatable, Sendable {
+    let requestId: String
+    let context: NotaryRequestReviewContext?
+}
+
 struct NotaryRequestReviewContext: Decodable, Equatable, Sendable {
     let request: NotaryRequestSummary
     let document: NotaryRequestReviewDocument

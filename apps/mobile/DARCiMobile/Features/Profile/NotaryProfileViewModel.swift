@@ -12,6 +12,7 @@ final class NotaryProfileViewModel: ObservableObject {
     private let legacyLimit = 80
     private let maximumLoadedRequests = 80
     private var prefetchTask: Task<Void, Never>?
+    private var activeCacheKey: NotaryProfileCacheKey?
 
     init(
         apiClient: NotaryProfileAPIProviding = NotaryProfileAPIClient(),
@@ -23,7 +24,10 @@ final class NotaryProfileViewModel: ObservableObject {
 
     func load(session: AuthSession?) async {
         guard let session, session.accessToken.isEmpty == false else {
+            prefetchTask?.cancel()
+            activeCacheKey = nil
             requests = []
+            isLoading = false
             errorMessage = "Sign in again to view notary requests."
             return
         }
@@ -32,19 +36,24 @@ final class NotaryProfileViewModel: ObservableObject {
 
         let cacheKey = NotaryProfileCacheKey(userId: session.user.id, role: session.user.role, limit: pageSize)
         let legacyCacheKey = NotaryProfileCacheKey(userId: session.user.id, role: session.user.role, limit: legacyLimit)
+        if activeCacheKey != cacheKey {
+            requests = []
+        }
+        activeCacheKey = cacheKey
+
         let cachedEntry: NotaryProfileCacheEntry?
         if let currentCacheEntry = await cacheStore.read(cacheKey: cacheKey) {
             cachedEntry = currentCacheEntry
         } else {
             cachedEntry = await cacheStore.read(cacheKey: legacyCacheKey)
         }
+        guard activeCacheKey == cacheKey else { return }
         if let cachedEntry {
             requests = visibleRequests(from: cachedEntry.response.requests)
             errorMessage = nil
         }
 
         isLoading = true
-        defer { isLoading = false }
 
         do {
             let response = try await apiClient.listNotaryRequests(
@@ -52,15 +61,20 @@ final class NotaryProfileViewModel: ObservableObject {
                 offset: 0,
                 accessToken: session.accessToken
             )
-            let refreshedRequests = mergedRequests(primary: response.requests, fallback: requests)
+            guard activeCacheKey == cacheKey else { return }
+            let refreshedRequests = visibleRequests(from: response.requests)
             requests = refreshedRequests
             await cacheStore.write(response.replacingRequests(refreshedRequests), cacheKey: cacheKey)
+            guard activeCacheKey == cacheKey else { return }
             errorMessage = nil
+            isLoading = false
             startPrefetch(after: response, cacheKey: cacheKey, accessToken: session.accessToken)
         } catch {
+            guard activeCacheKey == cacheKey else { return }
             if requests.isEmpty {
                 errorMessage = displayMessage(for: error, fallback: "Unable to load notary requests.")
             }
+            isLoading = false
         }
     }
 
@@ -120,7 +134,7 @@ final class NotaryProfileViewModel: ObservableObject {
         var latestResponse = initialResponse
 
         for offset in stride(from: pageSize, to: total, by: pageSize) {
-            guard Task.isCancelled == false else { return }
+            guard Task.isCancelled == false, activeCacheKey == cacheKey else { return }
 
             do {
                 let response = try await apiClient.listNotaryRequests(
@@ -128,9 +142,10 @@ final class NotaryProfileViewModel: ObservableObject {
                     offset: offset,
                     accessToken: accessToken
                 )
+                guard Task.isCancelled == false, activeCacheKey == cacheKey else { return }
                 latestResponse = response
                 prefetchedRequests = mergedRequests(primary: prefetchedRequests + response.requests, fallback: [])
-                requests = mergedRequests(primary: prefetchedRequests, fallback: requests)
+                requests = prefetchedRequests
                 await cacheStore.write(latestResponse.replacingRequests(requests), cacheKey: cacheKey)
 
                 if response.requests.count < min(pageSize, total - offset) {
@@ -141,7 +156,7 @@ final class NotaryProfileViewModel: ObservableObject {
             }
         }
 
-        guard Task.isCancelled == false else { return }
+        guard Task.isCancelled == false, activeCacheKey == cacheKey else { return }
         requests = Array(prefetchedRequests.prefix(maximumLoadedRequests))
         await cacheStore.write(latestResponse.replacingRequests(requests), cacheKey: cacheKey)
     }
@@ -168,6 +183,19 @@ final class NotaryProfileViewModel: ObservableObject {
         let documentStatus = normalizedValue(request.document.status)
         guard ["pending_notary", "completed"].contains(documentStatus) else {
             return false
+        }
+
+        if let viewerUserId = activeCacheKey?.userId {
+            if let assignedNotaryUserId = request.workflow?.assignedNotaryUserId,
+               assignedNotaryUserId != viewerUserId {
+                return false
+            }
+
+            if request.workflow?.assignedNotaryUserId == nil,
+               let selectedNotaryUserId = request.workflow?.selectedNotaryUserId,
+               selectedNotaryUserId != viewerUserId {
+                return false
+            }
         }
 
         if request.workflow?.selectedNotaryUserId != nil, request.workflow?.assignedNotaryUserId == nil {

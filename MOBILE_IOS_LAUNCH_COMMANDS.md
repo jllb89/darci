@@ -10,11 +10,11 @@ Simulator: `vet` (`D344C088-92BE-4393-B3A5-3E786FD17498`)
 This is the exact command used to build, install, and launch the app on `vet` with real staging auth:
 
 ```sh
-cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
+cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && set -a && source ../../.env.staging && set +a && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev DARCI_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" DARCI_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
 ```
 
 For a backend running locally on port `4000`, use the localhost build instead:
-
+w
 ```sh
 cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
 ```
@@ -25,9 +25,12 @@ Same thing, easier to read:
 cd /Users/jorge/Desktop/darci/apps/mobile
 set -e
 set -o pipefail
+set -a
+source ../../.env.staging
+set +a
 rm -rf .DerivedData
 xcodegen generate
-xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev build
+xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev DARCI_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" DARCI_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" build
 xcrun simctl boot vet >/dev/null 2>&1 || true
 open -a Simulator
 xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app"

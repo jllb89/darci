@@ -3,6 +3,7 @@ import Foundation
 protocol NotaryProfileAPIProviding: Sendable {
     func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse
+    func resolveNotaryRequest(idn: String, accessToken: String) async throws -> NotaryIdnResolveResponse
     func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse
     func getIdentityDocumentSchema(documentType: String, accessToken: String) async throws -> NotaryIdentityDocumentSchemaResponse
     func startInPersonSession(requestId: String, request: NotarySessionStartRequest, accessToken: String) async throws -> NotarySessionActionResponse
@@ -41,6 +42,14 @@ struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
         try await authClient.get(
             path: "/notary/requests/\(Self.encodedPathComponent(requestId))/context",
+            accessToken: accessToken
+        )
+    }
+
+    func resolveNotaryRequest(idn: String, accessToken: String) async throws -> NotaryIdnResolveResponse {
+        try await authClient.post(
+            path: "/notary/idn/resolve",
+            body: NotaryIdnResolveRequest(idn: idn),
             accessToken: accessToken
         )
     }
@@ -153,6 +162,13 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
 
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
         usesSessionFixture ? Self.sessionContextFixture : NotaryRequestContextResponse(context: nil)
+    }
+
+    func resolveNotaryRequest(idn: String, accessToken: String) async throws -> NotaryIdnResolveResponse {
+        NotaryIdnResolveResponse(
+            requestId: Self.sessionContextFixture.context?.request.id ?? "mock-session-request",
+            context: Self.sessionContextFixture.context
+        )
     }
 
     func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
@@ -396,7 +412,7 @@ struct NotaryProfileCacheKey: Equatable, Sendable {
 }
 
 struct NotaryProfileCacheEntry: Codable, Equatable, Sendable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     let version: Int
     let cachedAt: Date

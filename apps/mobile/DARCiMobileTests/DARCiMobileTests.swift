@@ -174,6 +174,10 @@ struct TestAuthAPIClient: AuthAPIProviding {
 }
 
 extension NotaryProfileAPIProviding {
+    func resolveNotaryRequest(idn: String, accessToken: String) async throws -> NotaryIdnResolveResponse {
+        throw URLError(.unsupportedURL)
+    }
+
     func getIdentityDocumentSchema(documentType: String, accessToken: String) async throws -> NotaryIdentityDocumentSchemaResponse {
         throw URLError(.unsupportedURL)
     }
@@ -285,6 +289,59 @@ actor PagingNotaryProfileAPIClient: NotaryProfileAPIProviding {
     }
 }
 
+actor SequentialNotaryProfileAPIClient: NotaryProfileAPIProviding {
+    private var responses: [NotaryQueueResponse]
+
+    init(responses: [NotaryQueueResponse]) {
+        self.responses = responses
+    }
+
+    func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
+        guard responses.isEmpty == false else { return .empty }
+        return responses.removeFirst()
+    }
+
+    func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
+        NotaryRequestContextResponse(context: nil)
+    }
+
+    func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
+        NotaryReviewDecisionResponse(message: nil)
+    }
+}
+
+actor OpeningNotaryReviewAPIClient: NotaryProfileAPIProviding {
+    private let initialContext: NotaryRequestReviewContext
+    private let resolvedContext: NotaryRequestReviewContext
+    private var resolvedIdns: [String] = []
+
+    init(initialContext: NotaryRequestReviewContext, resolvedContext: NotaryRequestReviewContext) {
+        self.initialContext = initialContext
+        self.resolvedContext = resolvedContext
+    }
+
+    func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
+        .empty
+    }
+
+    func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
+        NotaryRequestContextResponse(context: initialContext)
+    }
+
+    func resolveNotaryRequest(idn: String, accessToken: String) async throws -> NotaryIdnResolveResponse {
+        resolvedIdns.append(idn)
+        return NotaryIdnResolveResponse(requestId: resolvedContext.request.id, context: resolvedContext)
+    }
+
+    func submitReviewDecision(requestId: String, request: NotaryReviewDecisionRequest, accessToken: String) async throws -> NotaryReviewDecisionResponse {
+        NotaryReviewDecisionResponse(message: nil)
+    }
+
+    func recordedResolvedIdns() -> [String] {
+        resolvedIdns
+    }
+}
+
 actor RecoveringNotarySessionAPIClient: NotaryProfileAPIProviding {
     private let contexts: [NotaryRequestReviewContext]
     private var contextIndex = 0
@@ -313,6 +370,47 @@ actor RecoveringNotarySessionAPIClient: NotaryProfileAPIProviding {
 
     func advanceSession(requestId: String, request: NotarySessionAdvanceRequest, accessToken: String) async throws -> NotarySessionActionResponse {
         throw AuthAPIError.unexpectedStatus(statusCode: 409, message: "Ledger provider unavailable")
+    }
+
+    func recordedContextCallCount() -> Int {
+        contextIndex
+    }
+}
+
+@MainActor
+final class TestNotarySessionRealtimeClient: NotarySessionRealtimeProviding {
+    private(set) var startedRequestId: String?
+    private(set) var startedAccessToken: String?
+    private(set) var stopCallCount = 0
+    private var onStateChange: (@MainActor @Sendable (NotarySessionRealtimeState) -> Void)?
+    private var onInvalidate: (@MainActor @Sendable () async -> Void)?
+
+    func start(
+        requestId: String,
+        accessToken: String,
+        onStateChange: @escaping @MainActor @Sendable (NotarySessionRealtimeState) -> Void,
+        onInvalidate: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        startedRequestId = requestId
+        startedAccessToken = accessToken
+        self.onStateChange = onStateChange
+        self.onInvalidate = onInvalidate
+        onStateChange(.connecting)
+    }
+
+    func stop() {
+        stopCallCount += 1
+        onStateChange?(.idle)
+        onStateChange = nil
+        onInvalidate = nil
+    }
+
+    func emitState(_ state: NotarySessionRealtimeState) {
+        onStateChange?(state)
+    }
+
+    func emitInvalidation() async {
+        await onInvalidate?()
     }
 }
 
@@ -551,6 +649,38 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(response.counts.total, 0)
     }
 
+    func testNotaryProfileAPIClientResolvesAssignedRequestByIDN() async throws {
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/notary/idn/resolve")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            let body = try JSONSerialization.jsonObject(with: self.requestBodyData(for: request)) as? [String: Any]
+            XCTAssertEqual(body?["idn"] as? String, "IDN-123")
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )),
+                Data(#"{"requestId":"request-1","context":null}"#.utf8)
+            )
+        }
+        let client = NotaryProfileAPIClient(
+            authClient: AuthAPIClient(
+                config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+                urlSession: urlSession
+            )
+        )
+
+        let response = try await client.resolveNotaryRequest(idn: "IDN-123", accessToken: "access-token")
+
+        XCTAssertEqual(response.requestId, "request-1")
+        XCTAssertNil(response.context)
+    }
+
     func testNotaryProfileAPIClientStartsSessionWithActorCorrectGeolocation() async throws {
         let urlSession = makeStubbedURLSession { request in
             XCTAssertEqual(request.url?.path, "/notary/requests/request-1/meeting/start")
@@ -719,6 +849,132 @@ final class DARCiMobileTests: XCTestCase {
         viewModel.stop()
     }
 
+    func testSupabaseRealtimeConfigurationUsesInjectedBuildValues() {
+        let configuration = DARCiSupabaseConfiguration.current(
+            environment: [
+                "DARCI_SUPABASE_URL": "https://project-ref.supabase.co/",
+                "DARCI_SUPABASE_ANON_KEY": "publishable-key",
+            ]
+        )
+
+        XCTAssertEqual(configuration?.url.absoluteString, "https://project-ref.supabase.co/")
+        XCTAssertEqual(configuration?.anonKey, "publishable-key")
+        XCTAssertNil(
+            DARCiSupabaseConfiguration.current(
+                environment: [
+                    "DARCI_SUPABASE_URL": "$(DARCI_SUPABASE_URL)",
+                    "DARCI_SUPABASE_ANON_KEY": "$(DARCI_SUPABASE_ANON_KEY)",
+                ]
+            )
+        )
+    }
+
+    func testNotaryCommissionParserAcceptsFractionalSecondAPITimestamp() {
+        XCTAssertTrue(
+            NotaryInPersonSessionViewModel.isCurrentCommission(
+                "2093-05-06T23:59:59.999+00:00",
+                now: Date(timeIntervalSince1970: 1_786_000_000)
+            )
+        )
+        XCTAssertFalse(
+            NotaryInPersonSessionViewModel.isCurrentCommission(
+                "2025-05-06T23:59:59.999+00:00",
+                now: Date(timeIntervalSince1970: 1_786_000_000)
+            )
+        )
+    }
+
+    @MainActor
+    func testNotarySessionRealtimeInvalidationRefetchesCanonicalContext() async {
+        let initialContext = makeNotarySessionContext(meetingStatus: "in_progress")
+        let updatedContext = makeNotarySessionContext(
+            meetingStatus: "in_progress",
+            hasPassedSamePlace: true
+        )
+        let apiClient = RecoveringNotarySessionAPIClient(contexts: [initialContext, updatedContext])
+        let realtimeClient = TestNotarySessionRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = NotaryInPersonSessionViewModel(
+            requestId: "request-1",
+            apiClient: apiClient,
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+
+        XCTAssertEqual(viewModel.step, .samePlace)
+        XCTAssertEqual(viewModel.realtimeState, .connecting)
+        XCTAssertEqual(realtimeClient.startedRequestId, "request-1")
+        XCTAssertEqual(realtimeClient.startedAccessToken, session.accessToken)
+
+        realtimeClient.emitState(.live)
+        await realtimeClient.emitInvalidation()
+
+        XCTAssertEqual(viewModel.realtimeState, .live)
+        XCTAssertEqual(viewModel.step, .identity)
+        let contextCallCount = await apiClient.recordedContextCallCount()
+        XCTAssertEqual(contextCallCount, 2)
+
+        viewModel.stop()
+        XCTAssertEqual(realtimeClient.stopCallCount, 1)
+        XCTAssertEqual(viewModel.realtimeState, .idle)
+    }
+
+    @MainActor
+    func testNotarySessionForegroundRefreshRecoversMissedRealtimeEvent() async {
+        let initialContext = makeNotarySessionContext(meetingStatus: "in_progress")
+        let updatedContext = makeNotarySessionContext(
+            meetingStatus: "in_progress",
+            hasPassedSamePlace: true
+        )
+        let apiClient = RecoveringNotarySessionAPIClient(contexts: [initialContext, updatedContext])
+        let realtimeClient = TestNotarySessionRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = NotaryInPersonSessionViewModel(
+            requestId: "request-1",
+            apiClient: apiClient,
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+        XCTAssertEqual(viewModel.step, .samePlace)
+
+        await viewModel.refreshFromForeground(session: session)
+
+        XCTAssertEqual(viewModel.step, .identity)
+        let contextCallCount = await apiClient.recordedContextCallCount()
+        XCTAssertEqual(contextCallCount, 2)
+    }
+
+    @MainActor
+    func testNotaryReviewOpensAssignedPendingRequestBeforeEnablingDecision() async {
+        let initialContext = makeNotarySessionContext(
+            requestStatus: "code_delivered",
+            canReviewRequest: false
+        )
+        let resolvedContext = makeNotarySessionContext(
+            requestStatus: "in_review",
+            canReviewRequest: true
+        )
+        let apiClient = OpeningNotaryReviewAPIClient(
+            initialContext: initialContext,
+            resolvedContext: resolvedContext
+        )
+        let viewModel = NotaryRequestReviewViewModel(
+            requestId: "request-1",
+            apiClient: apiClient
+        )
+
+        await viewModel.load(session: makeAuthSession())
+
+        let resolvedIdns = await apiClient.recordedResolvedIdns()
+        XCTAssertEqual(resolvedIdns, ["IDN-1"])
+        XCTAssertEqual(viewModel.context?.request.queueStatus, "in_review")
+        XCTAssertTrue(viewModel.canSubmitDecision)
+        XCTAssertNil(viewModel.decisionNotice)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     @MainActor
     func testNotaryProfileViewModelKeepsCachedRequestsWhenRefreshFails() async throws {
         let cachedResponse = try JSONDecoder().decode(
@@ -738,6 +994,87 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(viewModel.requests.map(\.id), ["request-1"])
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertFalse(viewModel.isLoading)
+    }
+
+    @MainActor
+    func testNotaryProfileViewModelRemovesCachedRequestsMissingFromSuccessfulRefresh() async {
+        let cachedResponse = makeNotaryQueueResponse(start: 0, count: 1, total: 1)
+        let cacheStore = TestNotaryProfileCacheStore(
+            entry: NotaryProfileCacheEntry(response: cachedResponse)
+        )
+        let apiClient = PagingNotaryProfileAPIClient(responsesByOffset: [0: .empty])
+        let viewModel = NotaryProfileViewModel(apiClient: apiClient, cacheStore: cacheStore)
+
+        await viewModel.load(session: makeAuthSession())
+
+        XCTAssertTrue(viewModel.requests.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    @MainActor
+    func testNotaryProfileViewModelDoesNotRetainPreviousUsersRequests() async {
+        let apiClient = SequentialNotaryProfileAPIClient(
+            responses: [makeNotaryQueueResponse(start: 0, count: 1, total: 1), .empty]
+        )
+        let viewModel = NotaryProfileViewModel(
+            apiClient: apiClient,
+            cacheStore: TestNotaryProfileCacheStore(entry: nil)
+        )
+
+        await viewModel.load(session: makeAuthSession())
+        XCTAssertEqual(viewModel.requests.map(\.id), ["request-0"])
+
+        let nextSession = AuthSession(
+            accessToken: "next-access-token",
+            refreshToken: "next-refresh-token",
+            user: makeAuthenticatedUser(id: "user-2", email: "other-notary@example.com")
+        )
+        await viewModel.load(session: nextSession)
+
+        XCTAssertTrue(viewModel.requests.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testNotaryProfileViewModelDoesNotShowForeignAssignedCachedRequestOffline() async {
+        let baseRequest = makeNotaryQueueResponse(start: 0, count: 1, total: 1).requests[0]
+        let foreignRequest = NotaryQueueRequestSummary(
+            request: baseRequest.request,
+            document: baseRequest.document,
+            owner: baseRequest.owner,
+            workflow: NotaryWorkflowSummary(
+                id: "workflow-1",
+                status: "code_delivered",
+                latestStatus: "code_delivered",
+                latestStatusAt: "2026-07-24T12:00:00.000Z",
+                reviewStartedAt: nil,
+                closedAt: nil,
+                selectedNotaryUserId: "other-user",
+                assignedNotaryUserId: "other-user",
+                lastCodeGeneratedAt: nil
+            ),
+            latestCodeDelivery: baseRequest.latestCodeDelivery,
+            meeting: baseRequest.meeting,
+            finalization: baseRequest.finalization,
+            nextAction: baseRequest.nextAction
+        )
+        let cachedResponse = NotaryQueueResponse(
+            requests: [foreignRequest],
+            meetings: [],
+            counts: NotaryQueueCounts(pending: 1, scheduled: 0, readyForInPerson: 0, completed: 0, total: 1)
+        )
+        let viewModel = NotaryProfileViewModel(
+            apiClient: FailingNotaryProfileAPIClient(),
+            cacheStore: TestNotaryProfileCacheStore(
+                entry: NotaryProfileCacheEntry(response: cachedResponse)
+            )
+        )
+
+        await viewModel.load(session: makeAuthSession())
+
+        XCTAssertTrue(viewModel.requests.isEmpty)
+        XCTAssertEqual(viewModel.errorMessage, "Unable to load notary requests.")
     }
 
     @MainActor
@@ -1730,6 +2067,8 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     private func makeNotarySessionContext(
+        requestStatus: String = "approved",
+        canReviewRequest: Bool = false,
         meetingStatus: String? = nil,
         hasPassedSamePlace: Bool = false,
         hasVerifiedIdentity: Bool = false,
@@ -1809,8 +2148,8 @@ final class DARCiMobileTests: XCTestCase {
                 id: "request-1",
                 documentId: "document-1",
                 workflowId: "workflow-1",
-                status: "approved",
-                queueStatus: "approved",
+                status: requestStatus,
+                queueStatus: requestStatus,
                 submittedAt: "2026-07-31T14:00:00Z"
             ),
             document: NotaryRequestReviewDocument(
@@ -1852,7 +2191,7 @@ final class DARCiMobileTests: XCTestCase {
                 history: history
             ),
             capabilities: NotaryContextCapabilities(
-                canReviewRequest: false,
+                canReviewRequest: canReviewRequest,
                 canManageMeeting: true,
                 canRecordEvidence: meeting != nil,
                 canFinalizeDocument: meetingStatus == "completed",
@@ -1901,6 +2240,7 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     private func makeAuthenticatedUser(
+        id: String = "user-1",
         email: String = "member@example.com",
         phone: String? = "+15555550123",
         firstName: String? = nil,
@@ -1908,7 +2248,7 @@ final class DARCiMobileTests: XCTestCase {
         address: String? = nil
     ) -> AuthenticatedUser {
         AuthenticatedUser(
-            id: "user-1",
+            id: id,
             email: email,
             phone: phone,
             address: address,

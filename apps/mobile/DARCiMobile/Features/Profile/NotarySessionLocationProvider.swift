@@ -75,7 +75,11 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        finish(with: .failure(error))
+        if (error as? CLError)?.code == .denied {
+            finish(with: .failure(NotarySessionLocationError.permissionDenied))
+        } else {
+            finish(with: .failure(NotarySessionLocationError.unavailable))
+        }
     }
 
     private func finish(with result: Result<CLLocation, Error>) {

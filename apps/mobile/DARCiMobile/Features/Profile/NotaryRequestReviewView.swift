@@ -354,8 +354,17 @@ final class NotaryRequestReviewViewModel: ObservableObject {
 
         do {
             let response = try await apiClient.getNotaryRequestContext(requestId: requestId, accessToken: accessToken)
-            guard let context = response.context else {
+            guard var context = response.context else {
                 throw NotaryRequestReviewError.missingContext
+            }
+
+            if Self.unopenedReviewStatuses.contains(Self.workspaceStatus(context)),
+               let idn = context.document.idn?.trimmingCharacters(in: .whitespacesAndNewlines),
+               idn.isEmpty == false {
+                let resolved = try await apiClient.resolveNotaryRequest(idn: idn, accessToken: accessToken)
+                if let resolvedContext = resolved.context {
+                    context = resolvedContext
+                }
             }
 
             self.context = context
@@ -422,6 +431,17 @@ final class NotaryRequestReviewViewModel: ObservableObject {
             errorMessage = displayMessage(for: error, fallback: "Unable to record review decision.")
             return false
         }
+    }
+
+    private static let unopenedReviewStatuses = Set(["pending", "submitted", "code_delivered"])
+
+    private static func workspaceStatus(_ context: NotaryRequestReviewContext) -> String {
+        let status = context.request.queueStatus
+            ?? context.workflow?.latestStatus
+            ?? context.workflow?.status
+            ?? context.request.status
+            ?? ""
+        return status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func loadPreview(from url: URL) async {

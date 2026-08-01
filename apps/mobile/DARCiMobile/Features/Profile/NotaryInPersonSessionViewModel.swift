@@ -49,6 +49,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
     @Published private(set) var activeAction: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var noticeMessage: String?
+    @Published private(set) var realtimeState: NotarySessionRealtimeState = .idle
     @Published private(set) var identityDocumentTypes: [NotaryIdentityDocumentTypeOption] = []
     @Published private(set) var identityFields: [NotaryIdentityDocumentField] = []
     @Published private(set) var isLoadingIdentitySchema = false
@@ -70,6 +71,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
 
     private let apiClient: NotaryProfileAPIProviding
     private let locationProvider: NotarySessionLocationProviding
+    private let realtimeClient: NotarySessionRealtimeProviding
     private let urlSession: URLSession
     private var previewTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
@@ -81,16 +83,19 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
     private var venuePrefillFormattedAddress: String?
     private var venuePrefillSource = "manual"
     private var preferLatestDocumentOnNextRefresh = false
+    private var didStartRealtime = false
 
     init(
         requestId: String,
         apiClient: NotaryProfileAPIProviding = NotaryProfileAPIClient(),
         locationProvider: NotarySessionLocationProviding = CoreLocationNotarySessionProvider(),
+        realtimeClient: NotarySessionRealtimeProviding = NotarySessionRealtimeCoordinator(),
         urlSession: URLSession = .shared
     ) {
         self.requestId = requestId
         self.apiClient = apiClient
         self.locationProvider = locationProvider
+        self.realtimeClient = realtimeClient
         self.urlSession = urlSession
     }
 
@@ -130,7 +135,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
 
     var canStartSession: Bool {
         context?.capabilities?.canManageMeeting == true
-            && missingSessionAssets.isEmpty
+            && missingCompletionProfileFields.isEmpty
             && hasRunningAction == false
     }
 
@@ -315,9 +320,17 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
 
     func load(session: AuthSession?) async {
         await refresh(session: session, silent: false)
+        startRealtimeIfNeeded(session: session)
+    }
+
+    func refreshFromForeground(session: AuthSession?) async {
+        guard context != nil else { return }
+        await refresh(session: session, silent: true)
     }
 
     func stop() {
+        realtimeClient.stop()
+        didStartRealtime = false
         pollTask?.cancel()
         pollTask = nil
         previewTask?.cancel()
@@ -645,7 +658,35 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
     }
 
     private var shouldPoll: Bool {
-        context != nil && step != .done
+        context != nil && step != .done && realtimeState == .degraded
+    }
+
+    private func startRealtimeIfNeeded(session: AuthSession?) {
+        guard didStartRealtime == false, let accessToken = session?.accessToken else {
+            return
+        }
+
+        didStartRealtime = true
+        realtimeClient.start(
+            requestId: requestId,
+            accessToken: accessToken,
+            onStateChange: { [weak self] state in
+                guard let self else { return }
+                realtimeState = state
+                switch state {
+                case .degraded:
+                    schedulePoll(session: session)
+                case .live, .idle:
+                    pollTask?.cancel()
+                    pollTask = nil
+                case .connecting:
+                    break
+                }
+            },
+            onInvalidate: { [weak self] in
+                await self?.refresh(session: session, silent: true)
+            }
+        )
     }
 
     private func refresh(session: AuthSession?, silent: Bool) async {
@@ -823,7 +864,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         ISO8601DateFormatter().string(from: Date())
     }
 
-    private static func isISODate(_ value: String) -> Bool {
+    nonisolated private static func isISODate(_ value: String) -> Bool {
         guard value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
             return false
         }
@@ -835,7 +876,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         return formatter.date(from: value) != nil
     }
 
-    private static func isCurrentCommission(_ value: String?) -> Bool {
+    nonisolated static func isCurrentCommission(_ value: String?, now: Date = Date()) -> Bool {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard trimmed.isEmpty == false else { return false }
 
@@ -846,11 +887,13 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
             formatter.timeZone = TimeZone(secondsFromGMT: 0)
             formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
             guard let expiration = formatter.date(from: "\(trimmed) 23:59:59") else { return false }
-            return expiration >= Date()
+            return expiration >= now
         }
 
-        guard let expiration = ISO8601DateFormatter().date(from: trimmed) else { return false }
-        return expiration >= Date()
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let expiration = fractionalFormatter.date(from: trimmed) ?? ISO8601DateFormatter().date(from: trimmed)
+        return expiration.map { $0 >= now } ?? false
     }
 
     private static func firstNonempty(_ values: [String?]) -> String? {

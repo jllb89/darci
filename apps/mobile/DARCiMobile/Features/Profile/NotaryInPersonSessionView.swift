@@ -13,6 +13,7 @@ struct NotaryInPersonSessionView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: NotaryInPersonSessionViewModel
     @State private var pageCount = 1
     @State private var currentPage = 1
@@ -38,50 +39,44 @@ struct NotaryInPersonSessionView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: scaled(18, in: proxy)) {
-                    header
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, scaled(24, in: proxy))
+                    .padding(.top, scaled(18, in: proxy))
+                    .padding(.bottom, scaled(14, in: proxy))
+                    .background(Color.white)
 
-                    sessionHeading
+                if viewModel.step == .start {
+                    startScreen(in: proxy)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: scaled(18, in: proxy)) {
+                            sessionHeading
+                            sessionMessages
+                            progressCard
 
-                    if let errorMessage = viewModel.errorMessage {
-                        statusMessage(errorMessage, tone: .error)
+                            if viewModel.reviewDocuments.count > 1 {
+                                documentSelector
+                            }
+
+                            documentPreview(in: proxy)
+                            operatorPanel
+
+                            if viewModel.step == .finalize || viewModel.step == .done {
+                                finalizationPanel
+                            }
+                        }
+                        .padding(.horizontal, scaled(24, in: proxy))
+                        .padding(.top, scaled(10, in: proxy))
+                        .padding(.bottom, scaled(48, in: proxy))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-
-                    if let noticeMessage = viewModel.noticeMessage {
-                        statusMessage(noticeMessage, tone: .success)
-                    }
-
-                    NotarySessionProgressCard(
-                        documentType: viewModel.documentTypeLabel,
-                        jurisdiction: viewModel.jurisdictionLabel,
-                        documentCode: viewModel.documentCode,
-                        memberName: viewModel.memberName,
-                        step: viewModel.step,
-                        timeline: viewModel.timeline
-                    )
-
-                    if viewModel.reviewDocuments.count > 1 {
-                        documentSelector
-                    }
-
-                    documentPreview(in: proxy)
-
-                    operatorPanel
-
-                    if viewModel.step == .finalize || viewModel.step == .done {
-                        finalizationPanel
+                    .refreshable {
+                        await viewModel.load(session: session)
                     }
                 }
-                .padding(.horizontal, scaled(24, in: proxy))
-                .padding(.top, scaled(24, in: proxy))
-                .padding(.bottom, scaled(48, in: proxy))
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color.white.ignoresSafeArea())
-            .refreshable {
-                await viewModel.load(session: session)
-            }
             .overlay {
                 if viewModel.isLoading && viewModel.context == nil {
                     ZStack {
@@ -97,6 +92,10 @@ struct NotaryInPersonSessionView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await viewModel.load(session: session)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await viewModel.refreshFromForeground(session: session) }
         }
         .onDisappear {
             viewModel.stop()
@@ -118,6 +117,56 @@ struct NotaryInPersonSessionView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private func startScreen(in proxy: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
+            sessionHeading
+            sessionMessages
+            progressCard
+
+            if viewModel.reviewDocuments.count > 1 {
+                documentSelector
+            }
+
+            documentPreview(in: proxy, fillsAvailableSpace: true)
+                .layoutPriority(1)
+
+            if viewModel.missingCompletionProfileFields.isEmpty == false {
+                statusMessage(
+                    "Complete your notary profile before starting: \(viewModel.missingCompletionProfileFields.joined(separator: ", ")).",
+                    tone: .warning
+                )
+            }
+
+            startStep
+        }
+        .padding(.horizontal, scaled(24, in: proxy))
+        .padding(.top, scaled(8, in: proxy))
+        .padding(.bottom, scaled(18, in: proxy))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var sessionMessages: some View {
+        if let errorMessage = viewModel.errorMessage {
+            statusMessage(errorMessage, tone: .error)
+        }
+
+        if let noticeMessage = viewModel.noticeMessage {
+            statusMessage(noticeMessage, tone: .success)
+        }
+    }
+
+    private var progressCard: some View {
+        NotarySessionProgressCard(
+            documentType: viewModel.documentTypeLabel,
+            jurisdiction: viewModel.jurisdictionLabel,
+            documentCode: viewModel.documentCode,
+            memberName: viewModel.memberName,
+            step: viewModel.step,
+            timeline: viewModel.timeline
+        )
     }
 
     private var header: some View {
@@ -186,7 +235,7 @@ struct NotaryInPersonSessionView: View {
         }
     }
 
-    private func documentPreview(in proxy: GeometryProxy) -> some View {
+    private func documentPreview(in proxy: GeometryProxy, fillsAvailableSpace: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 22) {
                 Text("\(min(currentPage, max(pageCount, 1)))/\(max(pageCount, 1))")
@@ -254,87 +303,78 @@ struct NotaryInPersonSessionView: View {
                         .padding(24)
                 }
             }
-            .frame(height: scaled(360, in: proxy))
+            .frame(height: fillsAvailableSpace ? nil : scaled(360, in: proxy))
+            .frame(maxHeight: fillsAvailableSpace ? .infinity : nil)
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
         }
+        .frame(maxHeight: fillsAvailableSpace ? .infinity : nil)
         .background(Color(red: 0.88, green: 0.88, blue: 0.88))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.black.opacity(0.16), lineWidth: 0.5)
         }
     }
 
     private var operatorPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("CURRENT STEP")
-                        .font(DARCiFont.maisonNeue(.mono, size: 9))
-                        .foregroundStyle(.black.opacity(0.48))
+        Group {
+            if viewModel.step == .start {
+                startStep
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("CURRENT STEP")
+                                .font(DARCiFont.maisonNeue(.mono, size: 9))
+                                .foregroundStyle(.black.opacity(0.48))
 
-                    Text(viewModel.step.title)
-                        .font(DARCiFont.maisonNeue(.medium, size: 20))
-                        .foregroundStyle(.black)
+                            Text(viewModel.step.title)
+                                .font(DARCiFont.maisonNeue(.medium, size: 20))
+                                .foregroundStyle(.black)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        if viewModel.hasRunningAction {
+                            ProgressView()
+                                .tint(.black)
+                        }
+                    }
+
+                    Group {
+                        switch viewModel.step {
+                        case .start:
+                            EmptyView()
+                        case .samePlace:
+                            samePlaceStep
+                        case .identity:
+                            identityStep
+                        case .venue:
+                            venueStep
+                        case .seal:
+                            sealStep
+                        case .complete:
+                            completeStep
+                        case .finalize:
+                            finalizeStep
+                        case .done:
+                            doneStep
+                        }
+                    }
                 }
-
-                Spacer(minLength: 12)
-
-                if viewModel.hasRunningAction {
-                    ProgressView()
-                        .tint(.black)
-                }
+                .padding(22)
+                .background(Color(red: 0.90, green: 0.90, blue: 0.90))
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
-
-            Group {
-                switch viewModel.step {
-                case .start:
-                    startStep
-                case .samePlace:
-                    samePlaceStep
-                case .identity:
-                    identityStep
-                case .venue:
-                    venueStep
-                case .seal:
-                    sealStep
-                case .complete:
-                    completeStep
-                case .finalize:
-                    finalizeStep
-                case .done:
-                    doneStep
-                }
-            }
-        }
-        .padding(16)
-        .background(Color(red: 0.965, green: 0.969, blue: 0.972))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
         }
     }
 
     private var startStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sessionInfoBand(
-                icon: "location.fill",
-                title: "Location required",
-                detail: "Starting captures your location and emails the member a secure link to sign in and share theirs."
-            )
-
-            if viewModel.missingSessionAssets.isEmpty == false {
-                statusMessage(
-                    "Add your \(viewModel.missingSessionAssets.joined(separator: " and ")) in Illuminotary Information before starting.",
-                    tone: .warning
-                )
-            }
-
+        VStack(spacing: 0) {
             NotarySessionPrimaryButton(
                 title: viewModel.activeAction == "start" ? "Starting session" : "Start in-person session",
-                systemImage: "play.fill",
+                systemImage: nil,
                 isEnabled: viewModel.canStartSession
             ) {
                 Task { await viewModel.startSession(session: session) }
@@ -354,9 +394,14 @@ struct NotaryInPersonSessionView: View {
 
             HStack(spacing: 8) {
                 sessionMetric(title: "MEMBER", value: viewModel.hasMemberCheckIn ? "CHECKED IN" : "WAITING")
+                Divider().frame(height: 34)
                 sessionMetric(title: "NOTARY", value: viewModel.hasSessionStart ? "ONLINE" : "WAITING")
+                Divider().frame(height: 34)
                 sessionMetric(title: "DISTANCE", value: viewModel.latestDistanceLabel.uppercased())
             }
+            .padding(.horizontal, 12)
+            .background(Color.white.opacity(0.58))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             NotarySessionSecondaryButton(
                 title: viewModel.activeAction == "same-place" ? "Refreshing location" : "Refresh my location",
@@ -514,17 +559,8 @@ struct NotaryInPersonSessionView: View {
                 Divider()
                 acknowledgmentFact(title: "Notary assets", value: notaryAssetsSummary)
             }
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             NotarySessionNotesField(text: $viewModel.notarialNotes)
-
-            if viewModel.missingCompletionProfileFields.isEmpty == false {
-                statusMessage(
-                    "Complete your notary profile: \(viewModel.missingCompletionProfileFields.joined(separator: ", ")).",
-                    tone: .warning
-                )
-            }
 
             NotarySessionPrimaryButton(
                 title: viewModel.activeAction == "seal" ? "Appending acknowledgment" : "Seal acknowledgment",
@@ -624,13 +660,9 @@ struct NotaryInPersonSessionView: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color.white)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.14), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(22)
+        .background(Color(red: 0.90, green: 0.90, blue: 0.90))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func completionCell(title: String, done: Bool) -> some View {
@@ -644,10 +676,7 @@ struct NotaryInPersonSessionView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
         .frame(height: 38)
-        .background(Color.black.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
     private func finalizationValue(title: String, value: String?) -> some View {
@@ -704,8 +733,6 @@ struct NotaryInPersonSessionView: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
     private enum InfoTone {
@@ -732,10 +759,9 @@ struct NotaryInPersonSessionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
+        .padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(infoBackground(tone))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func infoForeground(_ tone: InfoTone) -> Color {
@@ -747,11 +773,7 @@ struct NotaryInPersonSessionView: View {
     }
 
     private func infoBackground(_ tone: InfoTone) -> Color {
-        switch tone {
-        case .neutral: Color.white
-        case .success: Color(red: 0.90, green: 0.98, blue: 0.91)
-        case .warning: Color(red: 1.0, green: 0.96, blue: 0.86)
-        }
+        Color.clear
     }
 
     private func statusMessage(_ text: String, tone: NotarySessionMessageTone) -> some View {
@@ -763,10 +785,10 @@ struct NotaryInPersonSessionView: View {
             .padding(12)
             .background(tone.background)
             .overlay {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 14)
                     .stroke(tone.border, lineWidth: 1)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private var identityDocumentTypeLabel: String {
@@ -884,7 +906,7 @@ private struct NotarySessionProgressCard: View {
     private func animate() {
         activeProgress = 0
         withAnimation(.timingCurve(0.12, 0.88, 0.25, 1, duration: 0.7)) {
-            activeProgress = 0.58
+            activeProgress = 1
         }
     }
 }
@@ -899,7 +921,7 @@ private struct NotarySessionTextField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(DARCiFont.maisonNeue(.book, size: 10))
+                .font(DARCiFont.maisonNeue(.book, size: 11))
                 .foregroundStyle(.black.opacity(0.58))
 
             TextField(placeholder, text: $text)
@@ -909,14 +931,10 @@ private struct NotarySessionTextField: View {
                 .keyboardType(keyboardType)
                 .textInputAutocapitalization(capitalization)
                 .autocorrectionDisabled()
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background(Color.white)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -931,7 +949,7 @@ private struct NotarySessionSelectField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(DARCiFont.maisonNeue(.book, size: 10))
+                .font(DARCiFont.maisonNeue(.book, size: 11))
                 .foregroundStyle(.black.opacity(0.58))
 
             Button(action: action) {
@@ -945,14 +963,10 @@ private struct NotarySessionSelectField: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.black)
                 }
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background(Color.white)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -972,21 +986,17 @@ private struct NotarySessionNotesField: View {
                 .font(DARCiFont.maisonNeue(.book, size: 13))
                 .foregroundStyle(.black)
                 .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 88)
+                .padding(12)
+                .frame(minHeight: 104)
                 .background(Color.white)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 }
 
 private struct NotarySessionPrimaryButton: View {
     let title: String
-    let systemImage: String
+    let systemImage: String?
     let isEnabled: Bool
     let action: () -> Void
 
@@ -996,8 +1006,14 @@ private struct NotarySessionPrimaryButton: View {
                 Text(title)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .medium))
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14, weight: .medium))
+                } else {
+                    DARCiArrowCornerIcon()
+                        .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .square, lineJoin: .miter))
+                        .frame(width: 14, height: 14)
+                }
             }
             .font(DARCiFont.maisonNeue(.medium, size: 14))
             .foregroundStyle(isEnabled ? Color.black : Color.white.opacity(0.62))
@@ -1027,10 +1043,8 @@ private struct NotarySessionSecondaryButton: View {
             .font(DARCiFont.maisonNeue(.book, size: 13))
             .foregroundStyle(.black.opacity(isEnabled ? 1 : 0.34))
             .frame(maxWidth: .infinity, minHeight: 46)
-            .overlay {
-                Rectangle()
-                    .stroke(Color.black.opacity(isEnabled ? 0.38 : 0.14), lineWidth: 1)
-            }
+            .background(Color.white.opacity(isEnabled ? 0.72 : 0.34))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isEnabled == false)

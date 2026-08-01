@@ -1,6 +1,6 @@
 # In-Person Session Realtime Roadmap
 
-Last updated: 2026-06-15
+Last updated: 2026-08-01
 
 ## Current Audit
 
@@ -186,3 +186,22 @@ Implemented behavior:
 ## Open Decisions
 
 - When staging telemetry shows explicit broadcasts are reliable across every mutation path, remove the table-change subscription fallback and keep polling as the only non-realtime recovery path.
+
+## Native iOS Parity Audit
+
+Status: complete locally on 2026-08-01.
+
+The web notary workspace and native iOS workspace now use the same request-scoped invalidation contract:
+
+- Subscribe with the signed-in user's Supabase access token to private channel `request:{requestId}`.
+- Listen for `request_changed`; do not use its payload as application state.
+- Debounce event bursts and refetch `GET /notary/requests/:id/context` as the canonical aggregate.
+- Stop fallback polling while the channel is live. Start the existing four-second native poll only when configuration or subscription is degraded.
+- Let Supabase Swift handle background and foreground reconnection, and remove the channel when the session workspace disappears.
+- Keep progress writes on authenticated DARCi API endpoints. The backend emits the server-authoritative broadcast to both request participants and the notary queue after each durable mutation.
+
+Native dependencies and configuration:
+
+- Official `supabase-swift` `2.54.1`, pinned through XcodeGen.
+- Build settings `DARCI_SUPABASE_URL` and `DARCI_SUPABASE_ANON_KEY`, sourced from the same staging values used by the web app.
+- Private-channel authorization continues to use `20260615150000_add_realtime_broadcast_channel_policies.sql`; no mobile-specific policy or server mutation is required.
