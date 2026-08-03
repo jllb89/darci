@@ -1173,6 +1173,14 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(viewModel.requests.map(\.id), updatedResponse.requests.map(\.id))
     }
 
+    func testNotaryProfileDegradedPollingBacksOffAndCapsAtTenMinutes() {
+        XCTAssertEqual(NotaryProfileViewModel.degradedPollDelay(for: 0), .seconds(45))
+        XCTAssertEqual(NotaryProfileViewModel.degradedPollDelay(for: 1), .seconds(120))
+        XCTAssertEqual(NotaryProfileViewModel.degradedPollDelay(for: 2), .seconds(300))
+        XCTAssertEqual(NotaryProfileViewModel.degradedPollDelay(for: 3), .seconds(600))
+        XCTAssertEqual(NotaryProfileViewModel.degradedPollDelay(for: 20), .seconds(600))
+    }
+
     @MainActor
     func testNotaryProfileViewModelPrefetchesRemainingRequestsInTwentyRowPages() async {
         let apiClient = PagingNotaryProfileAPIClient(

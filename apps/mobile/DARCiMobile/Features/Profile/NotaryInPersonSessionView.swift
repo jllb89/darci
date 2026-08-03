@@ -20,6 +20,7 @@ struct NotaryInPersonSessionView: View {
     @State private var zoomInTrigger = 0
     @State private var zoomOutTrigger = 0
     @State private var activePicker: ActivePicker?
+    @State private var isStepCardMinimized = false
 
     init(
         session: AuthSession?,
@@ -39,44 +40,56 @@ struct NotaryInPersonSessionView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(spacing: 0) {
-                header
-                    .padding(.horizontal, scaled(24, in: proxy))
-                    .padding(.top, scaled(18, in: proxy))
-                    .padding(.bottom, scaled(14, in: proxy))
-                    .background(Color.white)
-
-                if viewModel.step == .start {
-                    startScreen(in: proxy)
-                } else {
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: scaled(18, in: proxy)) {
-                            sessionHeading
-                            sessionMessages
-                            progressCard
-
-                            if viewModel.reviewDocuments.count > 1 {
-                                documentSelector
-                            }
-
-                            documentPreview(in: proxy)
-                            operatorPanel
-
-                            if viewModel.step == .finalize || viewModel.step == .done {
-                                finalizationPanel
-                            }
-                        }
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    header
                         .padding(.horizontal, scaled(24, in: proxy))
-                        .padding(.top, scaled(10, in: proxy))
-                        .padding(.bottom, scaled(48, in: proxy))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .refreshable {
-                        await viewModel.load(session: session)
+                        .padding(.top, scaled(18, in: proxy))
+                        .padding(.bottom, scaled(14, in: proxy))
+                        .background(Color.white)
+
+                    if viewModel.step == .start {
+                        startScreen(in: proxy)
+                    } else {
+                        ScrollView(showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: scaled(18, in: proxy)) {
+                                sessionHeading
+                                sessionMessages
+                                progressCard
+
+                                if viewModel.reviewDocuments.count > 1 {
+                                    documentSelector
+                                }
+
+                                documentPreview(in: proxy)
+                            }
+                            .padding(.horizontal, scaled(24, in: proxy))
+                            .padding(.top, scaled(10, in: proxy))
+                            .padding(.bottom, scaled(48, in: proxy))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .refreshable {
+                            await viewModel.load(session: session)
+                        }
                     }
                 }
+                .background(Color.white.ignoresSafeArea())
+
+                if viewModel.context != nil {
+                    stepCardBackground(in: proxy)
+
+                    Group {
+                        if isStepCardMinimized {
+                            minimizedStepCard(in: proxy)
+                        } else {
+                            expandedStepCard(in: proxy)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    .animation(.easeInOut(duration: 0.24), value: isStepCardMinimized)
+                }
             }
-            .background(Color.white.ignoresSafeArea())
             .overlay {
                 if viewModel.isLoading && viewModel.context == nil {
                     ZStack {
@@ -96,6 +109,9 @@ struct NotaryInPersonSessionView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await viewModel.refreshFromForeground(session: session) }
+        }
+        .onChange(of: viewModel.step) { _, _ in
+            isStepCardMinimized = false
         }
         .onDisappear {
             viewModel.stop()
@@ -129,22 +145,135 @@ struct NotaryInPersonSessionView: View {
                 documentSelector
             }
 
-            documentPreview(in: proxy, fillsAvailableSpace: true)
-                .layoutPriority(1)
-
-            if viewModel.missingCompletionProfileFields.isEmpty == false {
-                statusMessage(
-                    "Complete your notary profile before starting: \(viewModel.missingCompletionProfileFields.joined(separator: ", ")).",
-                    tone: .warning
-                )
-            }
-
-            startStep
+            documentPreview(in: proxy, fixedHeight: startDocumentPreviewHeight(in: proxy))
         }
         .padding(.horizontal, scaled(24, in: proxy))
         .padding(.top, scaled(8, in: proxy))
         .padding(.bottom, scaled(18, in: proxy))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func expandedStepCard(in proxy: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: scaled(16, in: proxy)) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("IN-PERSON SESSION")
+                        .font(DARCiFont.maisonNeue(.mono, size: 9))
+                        .foregroundStyle(.black.opacity(0.48))
+
+                    Text(viewModel.step.title)
+                        .font(DARCiFont.maisonNeue(.demi, size: 14))
+                        .foregroundStyle(.black)
+                }
+
+                Spacer(minLength: 16)
+
+                Button {
+                    isStepCardMinimized = true
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Minimize current session step")
+                .accessibilityIdentifier("notary-session-step-card-minimize")
+            }
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
+                    if viewModel.step == .start,
+                       viewModel.missingCompletionProfileFields.isEmpty == false {
+                        statusMessage(
+                            "Complete your notary profile before starting: \(viewModel.missingCompletionProfileFields.joined(separator: ", ")).",
+                            tone: .warning
+                        )
+                    }
+
+                    operatorPanel
+
+                    if viewModel.step == .finalize || viewModel.step == .done {
+                        finalizationPanel
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, scaled(24, in: proxy))
+        .padding(.top, scaled(24, in: proxy))
+        .padding(.bottom, scaled(20, in: proxy) + proxy.safeAreaInsets.bottom)
+        .frame(maxWidth: .infinity)
+        .frame(height: expandedStepCardHeight(in: proxy) + proxy.safeAreaInsets.bottom, alignment: .top)
+        .background(Color(red: 0.90, green: 0.90, blue: 0.90))
+        .clipShape(.rect(topLeadingRadius: 36, topTrailingRadius: 36))
+        .shadow(color: .black.opacity(0.06), radius: 16, y: -4)
+    }
+
+    private func minimizedStepCard(in proxy: GeometryProxy) -> some View {
+        Button {
+            isStepCardMinimized = false
+        } label: {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.step.title)
+                        .font(DARCiFont.maisonNeue(.demi, size: 14))
+                        .foregroundStyle(.black)
+
+                    Text("Tap to continue the in-person session")
+                        .font(DARCiFont.maisonNeue(.book, size: 11))
+                        .foregroundStyle(.black.opacity(0.56))
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(.black)
+                    .frame(width: 28, height: 28)
+            }
+            .padding(.horizontal, scaled(24, in: proxy))
+            .padding(.top, scaled(18, in: proxy))
+            .padding(.bottom, scaled(18, in: proxy) + proxy.safeAreaInsets.bottom)
+            .frame(maxWidth: .infinity)
+            .background(Color(red: 0.90, green: 0.90, blue: 0.90))
+            .clipShape(.rect(topLeadingRadius: 28, topTrailingRadius: 28))
+            .shadow(color: .black.opacity(0.06), radius: 16, y: -4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Expand current session step")
+        .accessibilityIdentifier("notary-session-step-card-expand")
+    }
+
+    private func stepCardBackground(in proxy: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            Spacer()
+            Color(red: 0.90, green: 0.90, blue: 0.90)
+                .frame(height: max(proxy.safeAreaInsets.bottom, 34))
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
+    }
+
+    private func expandedStepCardHeight(in proxy: GeometryProxy) -> CGFloat {
+        switch viewModel.step {
+        case .start:
+            return scaled(230, in: proxy)
+        case .samePlace, .complete:
+            return min(max(proxy.size.height * 0.48, 400), 500)
+        case .done:
+            return min(max(proxy.size.height * 0.52, 430), 540)
+        case .identity, .venue, .seal, .finalize:
+            return min(max(proxy.size.height * 0.66, 520), 680)
+        }
+    }
+
+    private func startDocumentPreviewHeight(in proxy: GeometryProxy) -> CGFloat {
+        let headerAndStartChrome = scaled(342, in: proxy) + proxy.safeAreaInsets.bottom
+        let selectorHeight = viewModel.reviewDocuments.count > 1 ? scaled(62, in: proxy) : 0
+        let messageCount = (viewModel.errorMessage == nil ? 0 : 1) + (viewModel.noticeMessage == nil ? 0 : 1)
+        let messageHeight = scaled(CGFloat(messageCount) * 58, in: proxy)
+        let availableHeight = proxy.size.height - headerAndStartChrome - selectorHeight - messageHeight
+        return min(max(availableHeight, scaled(320, in: proxy)), scaled(540, in: proxy))
     }
 
     @ViewBuilder
@@ -235,7 +364,7 @@ struct NotaryInPersonSessionView: View {
         }
     }
 
-    private func documentPreview(in proxy: GeometryProxy, fillsAvailableSpace: Bool = false) -> some View {
+    private func documentPreview(in proxy: GeometryProxy, fixedHeight: CGFloat? = nil) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 22) {
                 Text("\(min(currentPage, max(pageCount, 1)))/\(max(pageCount, 1))")
@@ -303,12 +432,11 @@ struct NotaryInPersonSessionView: View {
                         .padding(24)
                 }
             }
-            .frame(height: fillsAvailableSpace ? nil : scaled(360, in: proxy))
-            .frame(maxHeight: fillsAvailableSpace ? .infinity : nil)
+            .frame(height: fixedHeight.map { max($0 - scaled(66, in: proxy), scaled(220, in: proxy)) } ?? scaled(360, in: proxy))
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
         }
-        .frame(maxHeight: fillsAvailableSpace ? .infinity : nil)
+        .frame(height: fixedHeight)
         .background(Color(red: 0.88, green: 0.88, blue: 0.88))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {

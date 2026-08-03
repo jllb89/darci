@@ -18,6 +18,7 @@ final class NotaryProfileViewModel: ObservableObject {
     private var activeCacheKey: NotaryProfileCacheKey?
     private var didStartRealtime = false
     private var activeRealtimeQueueUserId: String?
+    private var degradedPollAttempt = 0
 
     init(
         apiClient: NotaryProfileAPIProviding = NotaryProfileAPIClient(),
@@ -103,6 +104,7 @@ final class NotaryProfileViewModel: ObservableObject {
         realtimeClient.stop()
         didStartRealtime = false
         activeRealtimeQueueUserId = nil
+        degradedPollAttempt = 0
         pollTask?.cancel()
         pollTask = nil
     }
@@ -161,6 +163,7 @@ final class NotaryProfileViewModel: ObservableObject {
                 case .live, .idle:
                     pollTask?.cancel()
                     pollTask = nil
+                    degradedPollAttempt = 0
                 case .connecting:
                     break
                 }
@@ -206,10 +209,21 @@ final class NotaryProfileViewModel: ObservableObject {
             return
         }
 
+        let delay = Self.degradedPollDelay(for: degradedPollAttempt)
+        degradedPollAttempt += 1
         pollTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(45))
+            try? await Task.sleep(for: delay)
             guard Task.isCancelled == false else { return }
             await self?.refreshQueue(session: session)
+        }
+    }
+
+    nonisolated static func degradedPollDelay(for attempt: Int) -> Duration {
+        switch attempt {
+        case ..<1: .seconds(45)
+        case 1: .seconds(120)
+        case 2: .seconds(300)
+        default: .seconds(600)
         }
     }
 
