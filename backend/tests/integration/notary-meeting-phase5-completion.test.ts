@@ -725,10 +725,10 @@ describe("Phase 5 meeting runtime completion", () => {
     expect(response.status).toBe(409);
     expect(response.body).toMatchObject({
       error: "conflict",
-      code: "notary_assets_required",
-      message: "Your illuminotary signature and seal must be set before starting an in-person session.",
+      code: "notary_profile_required",
+      message: "Complete your illuminotary profile before starting an in-person session: signature, seal.",
       details: {
-        missingAssets: ["signature", "seal"],
+        missingFields: ["signature", "seal"],
       },
     });
     expect(mocks.updateMeetingParticipantMock).not.toHaveBeenCalled();
@@ -764,9 +764,9 @@ describe("Phase 5 meeting runtime completion", () => {
     expect(response.status).toBe(409);
     expect(response.body).toMatchObject({
       error: "conflict",
-      code: "notary_assets_required",
+      code: "notary_profile_required",
       details: {
-        missingAssets: ["seal"],
+        missingFields: ["seal"],
       },
     });
     expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();

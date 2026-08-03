@@ -36,12 +36,18 @@ enum NotaryQueueTab: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct NotaryQueueResponse: Codable, Equatable, Sendable {
+    let realtimeQueueUserId: String?
     let requests: [NotaryQueueRequestSummary]
     let meetings: [NotaryMeetingSummary]
     let counts: NotaryQueueCounts
 
     func replacingRequests(_ requests: [NotaryQueueRequestSummary]) -> NotaryQueueResponse {
-        NotaryQueueResponse(requests: requests, meetings: meetings, counts: counts)
+        NotaryQueueResponse(
+            realtimeQueueUserId: realtimeQueueUserId,
+            requests: requests,
+            meetings: meetings,
+            counts: counts
+        )
     }
 }
 

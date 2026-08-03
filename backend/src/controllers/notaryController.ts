@@ -1054,6 +1054,7 @@ const broadcastNotaryRequestChange = async (input: {
 }) => {
   await broadcastRequestRealtimeInvalidation({
     requestId: input.request.id,
+    queueUserId: input.request.assigned_notary_id,
     documentId: input.request.document_id,
     workflowId: input.workflowId ?? input.request.workflow_id ?? null,
     reason: input.reason,

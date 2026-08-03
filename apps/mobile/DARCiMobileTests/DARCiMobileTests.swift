@@ -414,6 +414,43 @@ final class TestNotarySessionRealtimeClient: NotarySessionRealtimeProviding {
     }
 }
 
+@MainActor
+final class TestNotaryQueueRealtimeClient: NotaryQueueRealtimeProviding {
+    private(set) var startedQueueUserId: String?
+    private(set) var startedAccessToken: String?
+    private(set) var stopCallCount = 0
+    private var onStateChange: (@MainActor @Sendable (NotarySessionRealtimeState) -> Void)?
+    private var onInvalidate: (@MainActor @Sendable () async -> Void)?
+
+    func start(
+        queueUserId: String,
+        accessToken: String,
+        onStateChange: @escaping @MainActor @Sendable (NotarySessionRealtimeState) -> Void,
+        onInvalidate: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        startedQueueUserId = queueUserId
+        startedAccessToken = accessToken
+        self.onStateChange = onStateChange
+        self.onInvalidate = onInvalidate
+        onStateChange(.connecting)
+    }
+
+    func stop() {
+        stopCallCount += 1
+        onStateChange?(.idle)
+        onStateChange = nil
+        onInvalidate = nil
+    }
+
+    func emitState(_ state: NotarySessionRealtimeState) {
+        onStateChange?(state)
+    }
+
+    func emitInvalidation() async {
+        await onInvalidate?()
+    }
+}
+
 final class DARCiMobileTests: XCTestCase {
     func testLaunchStartsAtOnboarding() {
         XCTAssertEqual(AppLaunchPhase.initial, .onboarding)
@@ -1037,21 +1074,28 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     @MainActor
-    func testNotaryProfileViewModelDoesNotShowForeignAssignedCachedRequestOffline() async {
+    func testNotaryProfileViewModelShowsServerAuthorizedRequestWithDatabaseNotaryId() async {
         let baseRequest = makeNotaryQueueResponse(start: 0, count: 1, total: 1).requests[0]
-        let foreignRequest = NotaryQueueRequestSummary(
-            request: baseRequest.request,
+        let assignedRequest = NotaryQueueRequestSummary(
+            request: NotaryRequestSummary(
+                id: baseRequest.request.id,
+                documentId: baseRequest.request.documentId,
+                workflowId: baseRequest.request.workflowId,
+                status: "in_review",
+                queueStatus: "in_review",
+                submittedAt: baseRequest.request.submittedAt
+            ),
             document: baseRequest.document,
             owner: baseRequest.owner,
             workflow: NotaryWorkflowSummary(
                 id: "workflow-1",
-                status: "code_delivered",
-                latestStatus: "code_delivered",
+                status: "in_review",
+                latestStatus: "in_review",
                 latestStatusAt: "2026-07-24T12:00:00.000Z",
                 reviewStartedAt: nil,
                 closedAt: nil,
-                selectedNotaryUserId: "other-user",
-                assignedNotaryUserId: "other-user",
+                selectedNotaryUserId: "database-notary-id",
+                assignedNotaryUserId: "database-notary-id",
                 lastCodeGeneratedAt: nil
             ),
             latestCodeDelivery: baseRequest.latestCodeDelivery,
@@ -1060,7 +1104,8 @@ final class DARCiMobileTests: XCTestCase {
             nextAction: baseRequest.nextAction
         )
         let cachedResponse = NotaryQueueResponse(
-            requests: [foreignRequest],
+            realtimeQueueUserId: "database-notary-id",
+            requests: [assignedRequest],
             meetings: [],
             counts: NotaryQueueCounts(pending: 1, scheduled: 0, readyForInPerson: 0, completed: 0, total: 1)
         )
@@ -1073,8 +1118,59 @@ final class DARCiMobileTests: XCTestCase {
 
         await viewModel.load(session: makeAuthSession())
 
+        XCTAssertEqual(viewModel.requests.map(\.id), [assignedRequest.id])
+        XCTAssertEqual(viewModel.requests(for: .inReview).map(\.id), [assignedRequest.id])
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testNotaryProfileRealtimeInvalidationRefetchesCanonicalQueue() async {
+        let updatedResponse = makeNotaryQueueResponse(start: 0, count: 1, total: 1)
+        let apiClient = SequentialNotaryProfileAPIClient(responses: [.empty, updatedResponse])
+        let realtimeClient = TestNotaryQueueRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = NotaryProfileViewModel(
+            apiClient: apiClient,
+            cacheStore: TestNotaryProfileCacheStore(entry: nil),
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+
         XCTAssertTrue(viewModel.requests.isEmpty)
-        XCTAssertEqual(viewModel.errorMessage, "Unable to load notary requests.")
+        XCTAssertEqual(viewModel.realtimeState, .connecting)
+        XCTAssertEqual(realtimeClient.startedQueueUserId, "notary-db-user")
+        XCTAssertEqual(realtimeClient.startedAccessToken, session.accessToken)
+
+        realtimeClient.emitState(.live)
+        await realtimeClient.emitInvalidation()
+
+        XCTAssertEqual(viewModel.realtimeState, .live)
+        XCTAssertEqual(viewModel.requests.map(\.id), updatedResponse.requests.map(\.id))
+
+        viewModel.stop()
+        XCTAssertEqual(realtimeClient.stopCallCount, 1)
+        XCTAssertEqual(viewModel.realtimeState, .idle)
+    }
+
+    @MainActor
+    func testNotaryProfileForegroundRefreshRecoversMissedQueueEvent() async {
+        let updatedResponse = makeNotaryQueueResponse(start: 0, count: 1, total: 1)
+        let apiClient = SequentialNotaryProfileAPIClient(responses: [.empty, updatedResponse])
+        let realtimeClient = TestNotaryQueueRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = NotaryProfileViewModel(
+            apiClient: apiClient,
+            cacheStore: TestNotaryProfileCacheStore(entry: nil),
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+        XCTAssertTrue(viewModel.requests.isEmpty)
+
+        await viewModel.refreshFromForeground(session: session)
+
+        XCTAssertEqual(viewModel.requests.map(\.id), updatedResponse.requests.map(\.id))
     }
 
     @MainActor
@@ -2054,6 +2150,7 @@ final class DARCiMobileTests: XCTestCase {
         }
 
         return NotaryQueueResponse(
+            realtimeQueueUserId: "notary-db-user",
             requests: requests,
             meetings: [],
             counts: NotaryQueueCounts(

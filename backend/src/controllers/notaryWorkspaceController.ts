@@ -108,7 +108,10 @@ export const listNotaryRequests = async (req: Request, res: Response) => {
       offset: parsed.data.offset,
     });
 
-    return res.status(200).json(queue);
+    return res.status(200).json({
+      ...queue,
+      realtimeQueueUserId: req.user?.dbUserId ?? null,
+    });
   } catch (error) {
     return sendServiceError(res, error);
   }

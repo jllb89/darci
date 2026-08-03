@@ -159,6 +159,7 @@ import {
   watermarkWithNotice as finalizeDocumentWithWatermark,
 } from "../services/documentFinalizationService";
 import { runDueNotificationJobs } from "../services/notificationOutboxService";
+import { broadcastRequestRealtimeInvalidation } from "../services/realtimeBroadcastService";
 import { buildDocumentTimeline } from "../services/documentTimelineService";
 import { getUserIdentityContextByUserId, type RequestRole } from "../services/userRoleService";
 import { logDocumentTrace } from "../utils/documentTrace";
@@ -8074,6 +8075,16 @@ export const submitNotarization = async (req: Request, res: Response) => {
     requestId: request.id,
     requestedBySupabaseUserId: req.user?.id,
   });
+
+  if (selectedNotaryUserId) {
+    await broadcastRequestRealtimeInvalidation({
+      requestId: request.id,
+      queueUserId: selectedNotaryUserId,
+      documentId,
+      workflowId: workflow.id,
+      reason: "notarization_submitted",
+    });
+  }
 
   const { webhookUrl } = parsed.data;
   if (webhookUrl) {

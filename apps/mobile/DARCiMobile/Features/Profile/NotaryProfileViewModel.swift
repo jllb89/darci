@@ -5,26 +5,34 @@ final class NotaryProfileViewModel: ObservableObject {
     @Published private(set) var requests: [NotaryQueueRequestSummary] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var realtimeState: NotarySessionRealtimeState = .idle
 
     private let apiClient: NotaryProfileAPIProviding
     private let cacheStore: NotaryProfileCacheStoring
+    private let realtimeClient: NotaryQueueRealtimeProviding
     private let pageSize = 20
     private let legacyLimit = 80
     private let maximumLoadedRequests = 80
     private var prefetchTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
     private var activeCacheKey: NotaryProfileCacheKey?
+    private var didStartRealtime = false
+    private var activeRealtimeQueueUserId: String?
 
     init(
         apiClient: NotaryProfileAPIProviding = NotaryProfileAPIClient(),
-        cacheStore: NotaryProfileCacheStoring = NotaryProfileCacheStore()
+        cacheStore: NotaryProfileCacheStoring = NotaryProfileCacheStore(),
+        realtimeClient: NotaryQueueRealtimeProviding = NotaryQueueRealtimeCoordinator()
     ) {
         self.apiClient = apiClient
         self.cacheStore = cacheStore
+        self.realtimeClient = realtimeClient
     }
 
     func load(session: AuthSession?) async {
         guard let session, session.accessToken.isEmpty == false else {
             prefetchTask?.cancel()
+            stop()
             activeCacheKey = nil
             requests = []
             isLoading = false
@@ -37,6 +45,9 @@ final class NotaryProfileViewModel: ObservableObject {
         let cacheKey = NotaryProfileCacheKey(userId: session.user.id, role: session.user.role, limit: pageSize)
         let legacyCacheKey = NotaryProfileCacheKey(userId: session.user.id, role: session.user.role, limit: legacyLimit)
         if activeCacheKey != cacheKey {
+            if activeCacheKey != nil {
+                stop()
+            }
             requests = []
         }
         activeCacheKey = cacheKey
@@ -53,6 +64,8 @@ final class NotaryProfileViewModel: ObservableObject {
             errorMessage = nil
         }
 
+        var realtimeQueueUserId = cachedEntry?.response.realtimeQueueUserId
+
         isLoading = true
 
         do {
@@ -63,6 +76,7 @@ final class NotaryProfileViewModel: ObservableObject {
             )
             guard activeCacheKey == cacheKey else { return }
             let refreshedRequests = visibleRequests(from: response.requests)
+            realtimeQueueUserId = response.realtimeQueueUserId
             requests = refreshedRequests
             await cacheStore.write(response.replacingRequests(refreshedRequests), cacheKey: cacheKey)
             guard activeCacheKey == cacheKey else { return }
@@ -76,6 +90,21 @@ final class NotaryProfileViewModel: ObservableObject {
             }
             isLoading = false
         }
+
+        startRealtimeIfNeeded(session: session, queueUserId: realtimeQueueUserId)
+    }
+
+    func refreshFromForeground(session: AuthSession?) async {
+        guard let session, session.accessToken.isEmpty == false else { return }
+        await refreshQueue(session: session)
+    }
+
+    func stop() {
+        realtimeClient.stop()
+        didStartRealtime = false
+        activeRealtimeQueueUserId = nil
+        pollTask?.cancel()
+        pollTask = nil
     }
 
     func requests(for tab: NotaryQueueTab) -> [NotaryQueueRequestSummary] {
@@ -104,6 +133,84 @@ final class NotaryProfileViewModel: ObservableObject {
         }
 
         return ["completed", "cancelled", "canceled", "no_show"].contains(status) == false
+    }
+
+    private func startRealtimeIfNeeded(session: AuthSession, queueUserId: String?) {
+        guard let queueUserId = queueUserId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              queueUserId.isEmpty == false else {
+            realtimeState = .degraded
+            schedulePoll(session: session)
+            return
+        }
+        guard didStartRealtime == false || activeRealtimeQueueUserId != queueUserId else { return }
+        if didStartRealtime {
+            realtimeClient.stop()
+        }
+        didStartRealtime = true
+        activeRealtimeQueueUserId = queueUserId
+
+        realtimeClient.start(
+            queueUserId: queueUserId,
+            accessToken: session.accessToken,
+            onStateChange: { [weak self] state in
+                guard let self else { return }
+                realtimeState = state
+                switch state {
+                case .degraded:
+                    schedulePoll(session: session)
+                case .live, .idle:
+                    pollTask?.cancel()
+                    pollTask = nil
+                case .connecting:
+                    break
+                }
+            },
+            onInvalidate: { [weak self] in
+                await self?.refreshQueue(session: session)
+            }
+        )
+    }
+
+    private func refreshQueue(session: AuthSession) async {
+        guard let cacheKey = activeCacheKey else { return }
+        prefetchTask?.cancel()
+
+        do {
+            let response = try await apiClient.listNotaryRequests(
+                limit: pageSize,
+                offset: 0,
+                accessToken: session.accessToken
+            )
+            guard activeCacheKey == cacheKey else { return }
+            let refreshedRequests = visibleRequests(from: response.requests)
+            requests = refreshedRequests
+            await cacheStore.write(response.replacingRequests(refreshedRequests), cacheKey: cacheKey)
+            guard activeCacheKey == cacheKey else { return }
+            errorMessage = nil
+            startRealtimeIfNeeded(session: session, queueUserId: response.realtimeQueueUserId)
+            startPrefetch(after: response, cacheKey: cacheKey, accessToken: session.accessToken)
+        } catch {
+            guard activeCacheKey == cacheKey else { return }
+            if requests.isEmpty {
+                errorMessage = displayMessage(for: error, fallback: "Unable to load notary requests.")
+            }
+        }
+
+        schedulePoll(session: session)
+    }
+
+    private func schedulePoll(session: AuthSession) {
+        pollTask?.cancel()
+        guard realtimeState == .degraded else {
+            pollTask = nil
+            return
+        }
+
+        pollTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(45))
+            guard Task.isCancelled == false else { return }
+            await self?.refreshQueue(session: session)
+        }
     }
 
     private func startPrefetch(
@@ -183,19 +290,6 @@ final class NotaryProfileViewModel: ObservableObject {
         let documentStatus = normalizedValue(request.document.status)
         guard ["pending_notary", "completed"].contains(documentStatus) else {
             return false
-        }
-
-        if let viewerUserId = activeCacheKey?.userId {
-            if let assignedNotaryUserId = request.workflow?.assignedNotaryUserId,
-               assignedNotaryUserId != viewerUserId {
-                return false
-            }
-
-            if request.workflow?.assignedNotaryUserId == nil,
-               let selectedNotaryUserId = request.workflow?.selectedNotaryUserId,
-               selectedNotaryUserId != viewerUserId {
-                return false
-            }
         }
 
         if request.workflow?.selectedNotaryUserId != nil, request.workflow?.assignedNotaryUserId == nil {

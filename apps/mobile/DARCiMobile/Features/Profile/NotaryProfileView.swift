@@ -8,6 +8,7 @@ struct NotaryProfileView: View {
     private let onReviewRequest: (NotaryQueueRequestSummary) -> Void
     private let onStartSession: (NotaryQueueRequestSummary) -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: NotaryProfileViewModel
     @State private var selectedTab: NotaryQueueTab = .review
 
@@ -55,6 +56,13 @@ struct NotaryProfileView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: session?.accessToken) {
             await viewModel.load(session: session)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await viewModel.refreshFromForeground(session: session) }
+        }
+        .onDisappear {
+            viewModel.stop()
         }
     }
 

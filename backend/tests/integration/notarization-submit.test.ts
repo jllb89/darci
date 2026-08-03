@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   getUserIdentityContextByUserIdMock: vi.fn(),
   getNotaryProfileByUserIdMock: vi.fn(),
   listAvailableNotariesByJurisdictionMock: vi.fn(),
+  broadcastRequestRealtimeInvalidationMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -95,6 +96,10 @@ vi.mock("../../src/services/notificationOutboxService", async () => {
     runDueNotificationJobs: mocks.runDueNotificationJobsMock,
   };
 });
+
+vi.mock("../../src/services/realtimeBroadcastService", () => ({
+  broadcastRequestRealtimeInvalidation: mocks.broadcastRequestRealtimeInvalidationMock,
+}));
 
 vi.mock("../../src/services/userRoleService", async () => {
   const actual = await vi.importActual<typeof import("../../src/services/userRoleService")>(
@@ -250,6 +255,7 @@ describe("submit notarization", () => {
     mocks.getUserIdentityContextByUserIdMock.mockReset();
     mocks.getNotaryProfileByUserIdMock.mockReset();
     mocks.listAvailableNotariesByJurisdictionMock.mockReset();
+    mocks.broadcastRequestRealtimeInvalidationMock.mockReset();
     mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(null);
     mocks.getUserIdentityContextByUserIdMock.mockResolvedValue(null);
     mocks.getNotaryProfileByUserIdMock.mockResolvedValue(null);
@@ -297,6 +303,10 @@ describe("submit notarization", () => {
       claimedCount: 1,
       processedCount: 1,
       jobs: [],
+    });
+    mocks.broadcastRequestRealtimeInvalidationMock.mockResolvedValue({
+      status: "sent",
+      channels: ["request:req-1", "notary-queue:notary-1"],
     });
   });
 
@@ -890,6 +900,13 @@ describe("submit notarization", () => {
         }),
       }),
     );
+    expect(mocks.broadcastRequestRealtimeInvalidationMock).toHaveBeenCalledWith({
+      requestId: "req-1",
+      queueUserId: "notary-1",
+      documentId: "doc-1",
+      workflowId: "workflow-1",
+      reason: "notarization_submitted",
+    });
   });
 
   it("rejects a selected notary outside the document jurisdiction", async () => {

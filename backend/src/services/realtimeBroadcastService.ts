@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 
 export const requestRealtimeBroadcastEvent = "request_changed";
-export const notaryQueueRealtimeChannel = "notary-queue";
+export const notaryQueueRealtimeChannelPrefix = "notary-queue";
 
 export type RequestRealtimeBroadcastReason =
+  | "notarization_submitted"
   | "review_decision_recorded"
   | "session_started"
   | "meeting_checkin_recorded"
@@ -35,8 +36,18 @@ let realtimeClient: ReturnType<typeof createClient> | null = null;
 
 export const getRequestRealtimeChannel = (requestId: string) => `request:${requestId.trim()}`;
 
-export const buildRequestRealtimeBroadcastChannels = (requestId: string) => {
-  return Array.from(new Set([getRequestRealtimeChannel(requestId), notaryQueueRealtimeChannel]));
+export const getNotaryQueueRealtimeChannel = (userId: string) =>
+  `${notaryQueueRealtimeChannelPrefix}:${userId.trim()}`;
+
+export const buildRequestRealtimeBroadcastChannels = (
+  requestId: string,
+  queueUserId?: string | null,
+) => {
+  const channels = [getRequestRealtimeChannel(requestId)];
+  if (queueUserId?.trim()) {
+    channels.push(getNotaryQueueRealtimeChannel(queueUserId));
+  }
+  return Array.from(new Set(channels));
 };
 
 export const buildRequestRealtimeBroadcastPayload = (input: {
@@ -92,12 +103,13 @@ const getRealtimeClient = () => {
 
 export const broadcastRequestRealtimeInvalidation = async (input: {
   requestId: string;
+  queueUserId?: string | null;
   documentId?: string | null;
   workflowId?: string | null;
   reason: RequestRealtimeBroadcastReason;
   changedAt?: string;
 }): Promise<RequestRealtimeBroadcastResult> => {
-  const channels = buildRequestRealtimeBroadcastChannels(input.requestId);
+  const channels = buildRequestRealtimeBroadcastChannels(input.requestId, input.queueUserId);
   if (shouldSkipRealtimeBroadcasts()) {
     return { status: "skipped", channels };
   }

@@ -170,6 +170,7 @@ describe("GET /notary workspace routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.counts.total).toBe(1);
+    expect(response.body.realtimeQueueUserId).toBe("notary-db-1");
     expect(response.body.requests[0].workflow.selectedNotaryUserId).toBe("notary-db-1");
     expect(mocks.listNotaryQueueMock).toHaveBeenCalledWith({
       role: "notary",

@@ -16,7 +16,7 @@ import {
   broadcastRequestRealtimeInvalidation,
   buildRequestRealtimeBroadcastChannels,
   buildRequestRealtimeBroadcastPayload,
-  notaryQueueRealtimeChannel,
+  getNotaryQueueRealtimeChannel,
   requestRealtimeBroadcastEvent,
 } from "../../src/services/realtimeBroadcastService";
 
@@ -44,10 +44,12 @@ describe("realtime broadcast service", () => {
   });
 
   it("builds request and queue broadcast channels", () => {
-    expect(buildRequestRealtimeBroadcastChannels(" req-1 ")).toEqual([
+    expect(buildRequestRealtimeBroadcastChannels(" req-1 ", " notary-1 ")).toEqual([
       "request:req-1",
-      notaryQueueRealtimeChannel,
+      "notary-queue:notary-1",
     ]);
+    expect(buildRequestRealtimeBroadcastChannels("req-1")).toEqual(["request:req-1"]);
+    expect(getNotaryQueueRealtimeChannel(" notary-1 ")).toBe("notary-queue:notary-1");
   });
 
   it("builds a compact invalidation payload", () => {
@@ -72,6 +74,7 @@ describe("realtime broadcast service", () => {
   it("sends private request invalidations over REST broadcast", async () => {
     const result = await broadcastRequestRealtimeInvalidation({
       requestId: "req-1",
+      queueUserId: "notary-1",
       documentId: "doc-1",
       workflowId: "workflow-1",
       reason: "identity_verified",
@@ -80,7 +83,7 @@ describe("realtime broadcast service", () => {
 
     expect(result).toEqual({
       status: "sent",
-      channels: ["request:req-1", notaryQueueRealtimeChannel],
+      channels: ["request:req-1", "notary-queue:notary-1"],
     });
     expect(mocks.createClientMock).toHaveBeenCalledWith(
       "https://example.supabase.co",
@@ -103,7 +106,7 @@ describe("realtime broadcast service", () => {
       }),
     );
     expect(mocks.channelMock).toHaveBeenCalledWith(
-      notaryQueueRealtimeChannel,
+      "notary-queue:notary-1",
       expect.objectContaining({
         config: expect.objectContaining({
           private: true,

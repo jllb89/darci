@@ -259,6 +259,7 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
     }
 
     private static let sessionQueueFixture = NotaryQueueResponse(
+        realtimeQueueUserId: "mock-user",
         requests: [
             NotaryQueueRequestSummary(
                 request: NotaryRequestSummary(
@@ -470,6 +471,7 @@ actor NotaryProfileCacheStore: NotaryProfileCacheStoring {
 
 extension NotaryQueueResponse {
     static let empty = NotaryQueueResponse(
+        realtimeQueueUserId: "notary-db-user",
         requests: [],
         meetings: [],
         counts: NotaryQueueCounts(pending: 0, scheduled: 0, readyForInPerson: 0, completed: 0, total: 0)
