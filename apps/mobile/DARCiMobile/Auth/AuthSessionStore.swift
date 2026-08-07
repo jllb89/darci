@@ -21,7 +21,7 @@ final class KeychainAuthSessionStore: AuthSessionStore {
     private let decoder: JSONDecoder
 
     init(
-        service: String = Bundle.main.bundleIdentifier.map { "\($0).auth-session" } ?? "dev.mobile.darci.auth-session",
+        service: String = Bundle.main.bundleIdentifier.map { "\($0).auth-session" } ?? "com.illuminote.darci.auth-session",
         account: String = "current",
         encoder: JSONEncoder = JSONEncoder(),
         decoder: JSONDecoder = JSONDecoder()

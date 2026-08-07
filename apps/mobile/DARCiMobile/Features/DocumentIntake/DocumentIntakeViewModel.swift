@@ -5,7 +5,7 @@ import OSLog
 final class DocumentIntakeViewModel: ObservableObject {
     static let rulesSnapshotVersion = "member_form_rules_contract_v1"
     private static let notarizationMaxUploadBytes = 25 * 1024 * 1024
-    private static let logger = Logger(subsystem: "dev.mobile.darci", category: "document-intake")
+    private static let logger = Logger(subsystem: "com.illuminote.darci", category: "document-intake")
 
     @Published private(set) var step: POAIntakeStep = .productInfo
     @Published private(set) var jurisdictions: [IntakeJurisdictionOption] = []

@@ -451,7 +451,151 @@ final class TestNotaryQueueRealtimeClient: NotaryQueueRealtimeProviding {
     }
 }
 
+actor RecordingMemberSessionAPIClient: RequestsAPIProviding {
+    private var responses: [MemberInPersonSessionResponse]
+    private var contextCallCount = 0
+    private var checkIns: [MemberMeetingCheckInRequest] = []
+
+    init(responses: [MemberInPersonSessionResponse]) {
+        self.responses = responses
+    }
+
+    func listSigningRequests(limit: Int, accessToken: String) async throws -> SigningRequestsResponse {
+        .empty
+    }
+
+    func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func getMemberInPersonSession(requestId: String, accessToken: String) async throws -> MemberInPersonSessionResponse {
+        let index = min(contextCallCount, max(responses.count - 1, 0))
+        contextCallCount += 1
+        return responses[index]
+    }
+
+    func recordMemberCheckIn(requestId: String, request: MemberMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        checkIns.append(request)
+        return NotarySessionActionResponse(status: "recorded", advancedStep: nil, nextAction: nil, message: nil)
+    }
+
+    func recordedContextCallCount() -> Int {
+        contextCallCount
+    }
+
+    func recordedCheckIns() -> [MemberMeetingCheckInRequest] {
+        checkIns
+    }
+}
+
+@MainActor
+final class TestMemberSessionLocationProvider: NotarySessionLocationProviding {
+    private(set) var captureStages: [String] = []
+
+    func currentGeolocation(captureStage: String) async throws -> NotaryGeolocationPayload {
+        captureStages.append(captureStage)
+        return NotaryGeolocationPayload(
+            latitude: 41.4993,
+            longitude: -81.6944,
+            accuracyMeters: 8,
+            altitudeMeters: nil,
+            sampleKind: "device_gps",
+            captureStage: captureStage
+        )
+    }
+}
+
 final class DARCiMobileTests: XCTestCase {
+    func testMemberSessionDeepLinkParsesUniversalHandoff() throws {
+        let url = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/open/requests/request-123?intendedEmail=member%40example.com"))
+
+        XCTAssertEqual(MemberSessionDeepLink.requestId(from: url), "request-123")
+    }
+
+    func testMemberSessionDeepLinkParsesDirectAndLegacyRequestURLs() throws {
+        let directURL = try XCTUnwrap(URL(string: "https://app.darciregistry.dev/app/requests/request-456"))
+        let legacyURL = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/start?returnTo=%2Fapp%2Frequests%2Frequest-789"))
+
+        XCTAssertEqual(MemberSessionDeepLink.requestId(from: directURL), "request-456")
+        XCTAssertEqual(MemberSessionDeepLink.requestId(from: legacyURL), "request-789")
+    }
+
+    func testMemberSessionDeepLinkRejectsUntrustedOrUnrelatedURLs() throws {
+        let untrustedURL = try XCTUnwrap(URL(string: "https://example.com/open/requests/request-123"))
+        let unrelatedURL = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/open/documents/document-1"))
+
+        XCTAssertNil(MemberSessionDeepLink.requestId(from: untrustedURL))
+        XCTAssertNil(MemberSessionDeepLink.requestId(from: unrelatedURL))
+    }
+
+    @MainActor
+    func testMemberSessionRealtimeInvalidationRefetchesCanonicalContext() async {
+        let initial = MemberInPersonSessionResponse.mock
+        let updated = MemberInPersonSessionResponse(
+            request: initial.request,
+            document: initial.document,
+            workflow: initial.workflow,
+            owner: initial.owner,
+            notary: MemberSessionIdentity(displayName: "Updated Illuminotary"),
+            meeting: initial.meeting,
+            warnings: initial.warnings,
+            nextAction: initial.nextAction
+        )
+        let apiClient = RecordingMemberSessionAPIClient(responses: [initial, updated])
+        let realtimeClient = TestNotarySessionRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = MemberInPersonSessionViewModel(
+            requestId: "request-1",
+            apiClient: apiClient,
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+
+        XCTAssertEqual(viewModel.notaryName, "Illuminotary")
+        XCTAssertEqual(realtimeClient.startedRequestId, "request-1")
+        XCTAssertEqual(realtimeClient.startedAccessToken, session.accessToken)
+
+        realtimeClient.emitState(.live)
+        await realtimeClient.emitInvalidation()
+
+        XCTAssertEqual(viewModel.notaryName, "Updated Illuminotary")
+        XCTAssertEqual(viewModel.realtimeState, .live)
+        let contextCallCount = await apiClient.recordedContextCallCount()
+        XCTAssertEqual(contextCallCount, 2)
+        viewModel.stop()
+    }
+
+    @MainActor
+    func testMemberSessionLocationActionRecordsMemberCheckIn() async {
+        let apiClient = RecordingMemberSessionAPIClient(responses: [.mock])
+        let locationProvider = TestMemberSessionLocationProvider()
+        let realtimeClient = TestNotarySessionRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = MemberInPersonSessionViewModel(
+            requestId: "request-1",
+            apiClient: apiClient,
+            locationProvider: locationProvider,
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+        await viewModel.shareLocation(session: session)
+
+        let checkIns = await apiClient.recordedCheckIns()
+        XCTAssertEqual(checkIns.count, 1)
+        XCTAssertEqual(checkIns.first?.participantRole, "member")
+        XCTAssertEqual(checkIns.first?.checkinKind, "arrival")
+        XCTAssertEqual(checkIns.first?.geolocation.captureStage, "member_check_in")
+        XCTAssertEqual(locationProvider.captureStages, ["member_check_in"])
+        XCTAssertEqual(viewModel.noticeMessage, "Location shared. Your Illuminotary can continue the session.")
+        viewModel.stop()
+    }
+
     func testLaunchStartsAtOnboarding() {
         XCTAssertEqual(AppLaunchPhase.initial, .onboarding)
     }
@@ -1789,7 +1933,7 @@ final class DARCiMobileTests: XCTestCase {
 
     func testKeychainSessionStoreRoundTripsAndClears() throws {
         let store = KeychainAuthSessionStore(
-            service: "dev.mobile.darci.tests.\(UUID().uuidString)",
+            service: "com.illuminote.darci.tests.\(UUID().uuidString)",
             account: "current"
         )
         let session = makeAuthSession()

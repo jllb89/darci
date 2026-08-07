@@ -797,21 +797,36 @@ const createLedgerEntryRecord = async (input: {
 }) => {
   const { data, error } = await supabaseAdmin
     .from("ledger_entries")
-    .insert({
-      document_id: input.documentId,
-      idn: input.idn,
-      hash: input.hash,
-      ledger_tx_id: input.ledgerTxId,
-      anchored_at: input.anchoredAt,
-    })
+    .upsert(
+      {
+        document_id: input.documentId,
+        idn: input.idn,
+        hash: input.hash,
+        ledger_tx_id: input.ledgerTxId,
+        anchored_at: input.anchoredAt,
+      },
+      {
+        onConflict: "document_id,hash",
+        ignoreDuplicates: true,
+      },
+    )
     .select(ledgerEntrySelectColumns)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
     throw new Error(error?.message ?? "Failed to create ledger entry");
   }
 
-  return data as unknown as LedgerEntryRecord;
+  if (data) {
+    return data as unknown as LedgerEntryRecord;
+  }
+
+  const existingLedgerEntry = await getLatestLedgerEntryForHash(input);
+  if (!existingLedgerEntry) {
+    throw new Error("Failed to load existing ledger entry");
+  }
+
+  return existingLedgerEntry;
 };
 
 const getLedgerEntryById = async (ledgerEntryId: string) => {

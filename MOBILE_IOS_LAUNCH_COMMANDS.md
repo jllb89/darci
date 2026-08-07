@@ -2,7 +2,7 @@
 
 Native iOS app: `apps/mobile`  
 Scheme: `DARCiMobile`  
-Bundle id: `dev.mobile.darci`  
+Bundle id: `com.illuminote.darci`
 Simulator: `vet` (`D344C088-92BE-4393-B3A5-3E786FD17498`)
 
 ## Launch On vet
@@ -10,13 +10,13 @@ Simulator: `vet` (`D344C088-92BE-4393-B3A5-3E786FD17498`)
 This is the exact command used to build, install, and launch the app on `vet` with real staging auth:
 
 ```sh
-cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && set -a && source ../../.env.staging && set +a && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev DARCI_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" DARCI_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
+cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && set -a && source ../../.env.staging && set +a && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData DARCI_API_BASE_URL=https://api.staging.darciregistry.dev DARCI_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" DARCI_SUPABASE_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true && xcrun simctl launch vet com.illuminote.darci
 ```
 
 For a backend running locally on port `4000`, use the localhost build instead:
 w
 ```sh
-cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true && xcrun simctl launch vet dev.mobile.darci
+cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true && xcrun simctl launch vet com.illuminote.darci
 ```
 
 Same thing, easier to read:
@@ -34,8 +34,8 @@ xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=
 xcrun simctl boot vet >/dev/null 2>&1 || true
 open -a Simulator
 xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app"
-xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true
-xcrun simctl launch vet dev.mobile.darci
+xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true
+xcrun simctl launch vet com.illuminote.darci
 ```
 
 Local-backend version:
@@ -50,8 +50,8 @@ xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=
 xcrun simctl boot vet >/dev/null 2>&1 || true
 open -a Simulator
 xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app"
-xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true
-xcrun simctl launch vet dev.mobile.darci
+xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true
+xcrun simctl launch vet com.illuminote.darci
 ```
 
 ## Relaunch Only
@@ -61,8 +61,8 @@ Use this when the app is already installed and you just want to restart it:
 ```sh
 xcrun simctl boot vet >/dev/null 2>&1 || true
 open -a Simulator
-xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true
-xcrun simctl launch vet dev.mobile.darci
+xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true
+xcrun simctl launch vet com.illuminote.darci
 ```
 
 ## Run Tests
@@ -76,8 +76,8 @@ xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=
 If the simulator gets stuck during tests:
 
 ```sh
-xcrun simctl terminate vet dev.mobile.darci >/dev/null 2>&1 || true
-xcrun simctl terminate vet dev.mobile.darci.uitests.xctrunner >/dev/null 2>&1 || true
+xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true
+xcrun simctl terminate vet com.illuminote.darci.uitests.xctrunner >/dev/null 2>&1 || true
 ```
 
 ## Open In Xcode

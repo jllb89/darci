@@ -3,13 +3,16 @@ SCHEME ?= DARCiMobile
 DESTINATION ?= generic/platform=iOS Simulator
 TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17
 
-.PHONY: bootstrap generate build test open clean
+.PHONY: bootstrap generate release-config build test open clean
 
 bootstrap:
 	@command -v $(XCODEGEN) >/dev/null || { echo "XcodeGen is missing. Install it with: brew install xcodegen"; exit 1; }
 
 generate: bootstrap
 	$(XCODEGEN) generate
+
+release-config:
+	zsh ./scripts/generate-release-config.sh
 
 build: generate
 	xcodebuild -scheme $(SCHEME) -destination '$(DESTINATION)' build

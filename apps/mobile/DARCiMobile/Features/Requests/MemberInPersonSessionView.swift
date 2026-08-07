@@ -1,0 +1,329 @@
+import SwiftUI
+
+struct MemberInPersonSessionView: View {
+    private let session: AuthSession?
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var viewModel: MemberInPersonSessionViewModel
+    @State private var pageCount = 1
+    @State private var currentPage = 1
+    @State private var zoomInTrigger = 0
+    @State private var zoomOutTrigger = 0
+
+    init(
+        session: AuthSession?,
+        requestId: String,
+        apiClient: RequestsAPIProviding = RequestsAPIClient(),
+        locationProvider: NotarySessionLocationProviding = CoreLocationNotarySessionProvider()
+    ) {
+        self.session = session
+        _viewModel = StateObject(
+            wrappedValue: MemberInPersonSessionViewModel(
+                requestId: requestId,
+                apiClient: apiClient,
+                locationProvider: locationProvider
+            )
+        )
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                    .padding(.bottom, 14)
+                    .background(Color.white)
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        heading
+                        messages
+
+                        if viewModel.context != nil {
+                            MemberSessionStatusBar(
+                                documentType: viewModel.documentTypeLabel,
+                                jurisdiction: viewModel.jurisdictionLabel,
+                                documentCode: viewModel.documentCode,
+                                statusLabel: viewModel.statusLabel,
+                                timeline: viewModel.timeline
+                            )
+
+                            if viewModel.reviewDocuments.count > 1 {
+                                documentSelector
+                            }
+
+                            documentPreview(in: proxy)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .refreshable {
+                    await viewModel.refreshFromForeground(session: session)
+                }
+            }
+            .background(Color.white.ignoresSafeArea())
+            .overlay {
+                if viewModel.isLoading && viewModel.context == nil {
+                    ZStack {
+                        Color.white.opacity(0.9)
+                        ProgressView("Loading session")
+                            .font(DARCiFont.maisonNeue(.book, size: 12))
+                            .tint(.black)
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if viewModel.context?.meeting?.status == "in_progress" {
+                    Button {
+                        Task { await viewModel.shareLocation(session: session) }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: 14, weight: .medium))
+                            Text(viewModel.isSharingLocation ? "Sharing location..." : "Re-share location")
+                                .font(DARCiFont.maisonNeue(.medium, size: 14))
+                        }
+                        .foregroundStyle(viewModel.canShareLocation ? Color.black : Color.white.opacity(0.64))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(viewModel.canShareLocation ? DARCiTheme.onboardingGreen : Color.black.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.canShareLocation == false)
+                    .accessibilityIdentifier("member-session-share-location")
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, max(proxy.safeAreaInsets.bottom, 12))
+                    .background(.white)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.black.opacity(0.08)).frame(height: 0.5)
+                    }
+                }
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .task { await viewModel.load(session: session) }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await viewModel.refreshFromForeground(session: session) }
+        }
+        .onDisappear { viewModel.stop() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 18) {
+            Button { dismiss() } label: {
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 23, weight: .regular))
+                    .foregroundStyle(.black)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to requests")
+
+            Text(viewModel.screenTitle)
+                .font(DARCiFont.maisonNeue(.medium, size: 14))
+                .foregroundStyle(.black)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("In-person session")
+                .font(DARCiFont.maisonNeue(.demi, size: 17))
+                .foregroundStyle(.black)
+            Text("\(viewModel.notaryName) · Review the live document while your session is recorded.")
+                .font(DARCiFont.maisonNeue(.book, size: 12))
+                .lineSpacing(4)
+                .foregroundStyle(.black.opacity(0.66))
+        }
+    }
+
+    @ViewBuilder
+    private var messages: some View {
+        if let errorMessage = viewModel.errorMessage {
+            message(errorMessage, color: Color(red: 0.68, green: 0.10, blue: 0.10), background: Color(red: 0.99, green: 0.94, blue: 0.94))
+        }
+        if let noticeMessage = viewModel.noticeMessage {
+            message(noticeMessage, color: Color(red: 0.03, green: 0.34, blue: 0.12), background: Color(red: 0.90, green: 0.98, blue: 0.91))
+        }
+    }
+
+    private func message(_ text: String, color: Color, background: Color) -> some View {
+        Text(text)
+            .font(DARCiFont.maisonNeue(.book, size: 12))
+            .foregroundStyle(color)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var documentSelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.reviewDocuments) { document in
+                    let isSelected = document.id == viewModel.selectedDocument?.id
+                    Button { viewModel.selectDocument(document) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(document.label)
+                                .font(DARCiFont.maisonNeue(.book, size: 11))
+                                .lineLimit(1)
+                            Text(document.isFinal ? "FINAL PACKAGE" : "SESSION PDF")
+                                .font(DARCiFont.maisonNeue(.mono, size: 8))
+                        }
+                        .foregroundStyle(isSelected ? .white : .black)
+                        .frame(width: 156, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .frame(height: 48)
+                        .background(isSelected ? Color.black : Color.black.opacity(0.045))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.black.opacity(isSelected ? 0 : 0.14), lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func documentPreview(in proxy: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 22) {
+                Text("\(min(currentPage, max(pageCount, 1)))/\(max(pageCount, 1))")
+                    .font(DARCiFont.maisonNeue(.book, size: 12))
+                    .frame(minWidth: 42, alignment: .leading)
+
+                Button { zoomInTrigger += 1 } label: {
+                    Image(systemName: "plus.magnifyingglass").frame(width: 26, height: 26)
+                }
+                .disabled(viewModel.pdfData == nil)
+
+                Button { zoomOutTrigger += 1 } label: {
+                    Image(systemName: "minus.magnifyingglass").frame(width: 26, height: 26)
+                }
+                .disabled(viewModel.pdfData == nil)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    guard let path = viewModel.selectedDocument?.downloadUrl,
+                          let url = URL(string: path) else { return }
+                    openURL(url)
+                } label: {
+                    Image(systemName: "arrow.down.to.line").frame(width: 26, height: 26)
+                }
+                .disabled(viewModel.selectedDocument?.downloadUrl == nil)
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 14))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 15)
+            .frame(height: 52)
+
+            ZStack {
+                Color.white
+                if let pdfData = viewModel.pdfData {
+                    PDFKitDocumentPreview(
+                        data: pdfData,
+                        pageCount: $pageCount,
+                        currentPage: $currentPage,
+                        zoomInTrigger: zoomInTrigger,
+                        zoomOutTrigger: zoomOutTrigger
+                    )
+                } else if viewModel.isLoadingPreview {
+                    ProgressView().tint(.black)
+                } else {
+                    Text("The session PDF will appear here when it is ready.")
+                        .font(DARCiFont.maisonNeue(.book, size: 12))
+                        .foregroundStyle(.black.opacity(0.56))
+                        .multilineTextAlignment(.center)
+                        .padding(24)
+                }
+            }
+            .frame(height: min(max(proxy.size.height * 0.58, 420), 620))
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
+        }
+        .background(Color(red: 0.88, green: 0.88, blue: 0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.16), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct MemberSessionStatusBar: View {
+    let documentType: String
+    let jurisdiction: String
+    let documentCode: String
+    let statusLabel: String
+    let timeline: [MemberSessionTimelineItem]
+
+    private var currentIndex: Int {
+        timeline.firstIndex(where: { $0.isComplete == false }) ?? max(timeline.count - 1, 0)
+    }
+
+    private var completedCount: Int {
+        timeline.filter(\.isComplete).count
+    }
+
+    var body: some View {
+        let current = timeline.indices.contains(currentIndex) ? timeline[currentIndex] : nil
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(documentType.uppercased())\(jurisdiction.isEmpty ? "" : " – \(jurisdiction)")")
+                    .font(DARCiFont.maisonNeue(.book, size: 11))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(statusLabel.uppercased())
+                    .font(DARCiFont.maisonNeue(.mono, size: 8))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+
+            HStack(spacing: 4) {
+                ForEach(Array(timeline.enumerated()), id: \.element.id) { index, item in
+                    Capsule()
+                        .fill(item.isComplete || index == currentIndex ? DARCiTheme.onboardingGreen : Color.white.opacity(0.18))
+                        .frame(height: 4)
+                }
+            }
+
+            if let current {
+                Text(current.description)
+                    .font(DARCiFont.maisonNeue(.book, size: 10))
+                    .foregroundStyle(.white.opacity(0.76))
+                    .lineLimit(2)
+            }
+
+            HStack {
+                Text(documentCode.uppercased())
+                    .font(DARCiFont.maisonNeue(.mono, size: 8))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text("\(completedCount)/\(timeline.count)")
+                    .font(DARCiFont.maisonNeue(.mono, size: 8))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            .foregroundStyle(.white.opacity(0.82))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
+        .background(Color.black)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}

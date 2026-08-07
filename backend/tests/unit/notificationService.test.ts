@@ -16,6 +16,7 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 import {
+  queueInPersonSessionStartedNotification,
   queueNotaryApplicationApprovedNotification,
   queueNotaryApplicationRejectedNotification,
   queueNotaryApprovalReceivedNotification,
@@ -341,6 +342,78 @@ describe("notificationService notary application decision notifications", () => 
           requestId: "req-1",
           memberRequestPath: "/app/requests/req-1",
           contactExchange: true,
+        }),
+      }),
+    );
+  });
+
+  it("queues in-person session emails with the member universal-link handoff", async () => {
+    mocks.maybeSingleMock
+      .mockResolvedValueOnce({
+        data: {
+          id: "doc-1",
+          owner_id: "owner-1",
+          document_type: "generic",
+          product_flow_mode: "notarize_document",
+          jurisdiction: "US-OH",
+          idn: "IDN-123",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "owner-1",
+          email: "owner@example.test",
+          phone: null,
+          first_name: "Olivia",
+          last_name: "Owner",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "notary-1",
+          email: "notary@example.test",
+          phone: null,
+          first_name: "Nora",
+          last_name: "Tary",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-1",
+          template_key: "in_person_session_started_email",
+          channel: "email",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      });
+
+    const result = await queueInPersonSessionStartedNotification({
+      documentId: "doc-1",
+      requestId: "req-1",
+      notaryUserId: "notary-1",
+    });
+
+    expect(result).toEqual({ jobId: "job-1", deliveryCount: 1, existing: false });
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_jobs",
+      expect.objectContaining({
+        template_id: "template-1",
+        document_id: "doc-1",
+        notarization_request_id: "req-1",
+        dedupe_key: "in_person_session_started:req-1",
+        payload_json: expect.objectContaining({
+          sessionUrl:
+            "https://app.example.test/open/requests/req-1?intendedEmail=owner%40example.test",
+          dashboardUrl:
+            "https://app.example.test/open/requests/req-1?intendedEmail=owner%40example.test",
+        }),
+        metadata: expect.objectContaining({
+          requestId: "req-1",
+          memberRequestPath: "/app/requests/req-1",
         }),
       }),
     );

@@ -1800,8 +1800,7 @@ export const queueInPersonSessionStartedNotification = async (input: {
     }
 
     const memberRequestPath = `/app/requests/${encodeURIComponent(input.requestId)}`;
-    const sessionUrl = buildAppUrl("/start", {
-      returnTo: memberRequestPath,
+    const sessionUrl = buildAppUrl(`/open/requests/${encodeURIComponent(input.requestId)}`, {
       ...(owner.email ? { intendedEmail: owner.email } : {}),
     });
 

@@ -465,7 +465,11 @@ const NotarySelectControl = ({
   onOpenChange: (isOpen: boolean) => void;
 }) => {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [popoverPosition, setPopoverPosition] = useState<{ left: number; top: number } | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState<{
+    left: number;
+    top: number;
+    maxHeight: number;
+  } | null>(null);
   const selectedNotary = options.find((notary) => notary.userId === value) ?? null;
 
   const updatePopoverPosition = useCallback(() => {
@@ -475,11 +479,24 @@ const NotarySelectControl = ({
     }
 
     const popoverWidth = 360;
+    const desiredPopoverHeight = 320;
+    const viewportPadding = 16;
+    const triggerGap = 8;
     const leftBoundary = 16;
     const rightBoundary = window.innerWidth - popoverWidth - leftBoundary;
+    const availableBelow = window.innerHeight - triggerRect.bottom - viewportPadding;
+    const availableAbove = triggerRect.top - viewportPadding;
+    const opensUpward = availableBelow < 200 && availableAbove > availableBelow;
+    const maxHeight = Math.max(
+      120,
+      Math.min(desiredPopoverHeight, opensUpward ? availableAbove - triggerGap : availableBelow),
+    );
     setPopoverPosition({
       left: Math.max(leftBoundary, Math.min(triggerRect.left, rightBoundary)),
-      top: triggerRect.bottom + 8,
+      top: opensUpward
+        ? Math.max(viewportPadding, triggerRect.top - maxHeight - triggerGap)
+        : triggerRect.bottom + triggerGap,
+      maxHeight,
     });
   }, []);
 
@@ -504,8 +521,12 @@ const NotarySelectControl = ({
     isOpen && popoverPosition && portalTarget
       ? createPortal(
           <div
-            className="fixed z-[1000] max-h-80 w-[min(360px,calc(100vw-32px))] overflow-y-auto rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-2 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
-            style={{ left: popoverPosition.left, top: popoverPosition.top }}
+            className="fixed z-[1000] w-[min(360px,calc(100vw-32px))] overflow-y-auto rounded-xl border border-Color-Scheme-1-Border/60 bg-Color-Neutral-Lightest p-2 shadow-[0_20px_48px_rgba(0,0,0,0.14)]"
+            style={{
+              left: popoverPosition.left,
+              top: popoverPosition.top,
+              maxHeight: popoverPosition.maxHeight,
+            }}
           >
             {options.map((notary) => {
               const isSelected = notary.userId === value;
@@ -2195,75 +2216,79 @@ export default function SignPage() {
             className="relative z-0 space-y-6 overflow-visible lg:sticky lg:max-h-[calc(100vh-var(--darci-process-band-follow-offset,5rem)-1.5rem)] lg:self-start lg:overflow-y-auto lg:pr-2"
             style={{ top: "var(--darci-process-band-follow-offset, 5rem)" }}
           >
-            <div className="space-y-2 pb-2">
-              <div className="text-2xl font-medium">Sign documents</div>
-              <div className="text-sm text-Color-Neutral">
-                {isInvitedSigner
-                  ? "Complete the signature assigned to your invitation."
-                  : hiddenSignatures.length > 0
-                  ? "Complete your own signature step first. The remaining signers will follow separately."
-                  : "Complete your signature on the prepared document set."}
+            {!shouldShowNotarySelection ? (
+              <>
+                <div className="space-y-2 pb-2">
+                  <div className="text-2xl font-medium">Sign documents</div>
+                  <div className="text-sm text-Color-Neutral">
+                    {isInvitedSigner
+                      ? "Complete the signature assigned to your invitation."
+                      : hiddenSignatures.length > 0
+                        ? "Complete your own signature step first. The remaining signers will follow separately."
+                        : "Complete your signature on the prepared document set."}
+                  </div>
               </div>
-            </div>
 
-            <div className="space-y-3">
-              {visibleSignatures.map((signature) => {
-                const isActive = signature.outputSignerId === activeSignature?.outputSignerId;
+                <div className="space-y-3">
+                  {visibleSignatures.map((signature) => {
+                    const isActive = signature.outputSignerId === activeSignature?.outputSignerId;
 
-                return (
-                  <button
-                    key={signature.outputSignerId}
-                    className={`${signCardBaseClass} ${
-                      isActive
-                        ? "border-Color-Scheme-1-Text"
-                        : "bg-white hover:border-Color-Scheme-1-Text"
-                    }`}
-                    onClick={() => {
-                      setActiveSignerId(signature.outputSignerId);
-                      setActiveOutputKey(signature.outputKey);
-                    }}
-                    type="button"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                          {signature.outputLabel}
+                    return (
+                      <button
+                        key={signature.outputSignerId}
+                        className={`${signCardBaseClass} ${
+                          isActive
+                            ? "border-Color-Scheme-1-Text"
+                            : "bg-white hover:border-Color-Scheme-1-Text"
+                        }`}
+                        onClick={() => {
+                          setActiveSignerId(signature.outputSignerId);
+                          setActiveOutputKey(signature.outputKey);
+                        }}
+                        type="button"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                              {signature.outputLabel}
+                            </div>
+                            <div className="mt-1 text-xs tracking-[0.02em] text-Color-Neutral">
+                              {signature.partyName} · {signature.partyRole.replace(/_/g, " ")}
+                            </div>
+                          </div>
+                          <div className={`text-xs ${signature.status === "captured" ? "text-emerald-700" : "text-Color-Neutral"}`}>
+                            {getCaptureStatusLabel(signature)}
+                          </div>
                         </div>
-                        <div className="mt-1 text-xs tracking-[0.02em] text-Color-Neutral">
-                          {signature.partyName} · {signature.partyRole.replace(/_/g, " ")}
-                        </div>
+                        {signature.signingGroup && signature.groupMinimumRequired ? (
+                          <div className="mt-2 text-xs leading-5 text-Color-Neutral">
+                            {signature.groupSatisfied
+                              ? "Group requirement satisfied."
+                              : `${signature.groupMinimumRequired} signature${signature.groupMinimumRequired > 1 ? "s" : ""} still needed in ${signature.signingGroup.replace(/_/g, " ")}.`}
+                          </div>
+                        ) : null}
+                        {signature.capturedAt ? (
+                          <div className="mt-2 text-xs text-emerald-700">
+                            Captured {formatDateLabel(signature.capturedAt) ?? "just now"}
+                          </div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+
+                  {visibleSignatures.length === 0 ? (
+                    <div className={`${signCardBaseClass} cursor-default`}>
+                      <div className="text-sm font-medium text-Color-Scheme-1-Text">
+                        No signature is available in this step yet.
                       </div>
-                      <div className={`text-xs ${signature.status === "captured" ? "text-emerald-700" : "text-Color-Neutral"}`}>
-                        {getCaptureStatusLabel(signature)}
+                      <div className="mt-2 text-sm leading-6 text-Color-Neutral">
+                        DARCi has prepared the signing PDFs, but there is no member-facing signature obligation available to capture here.
                       </div>
                     </div>
-                    {signature.signingGroup && signature.groupMinimumRequired ? (
-                      <div className="mt-2 text-xs leading-5 text-Color-Neutral">
-                        {signature.groupSatisfied
-                          ? "Group requirement satisfied."
-                          : `${signature.groupMinimumRequired} signature${signature.groupMinimumRequired > 1 ? "s" : ""} still needed in ${signature.signingGroup.replace(/_/g, " ")}.`}
-                      </div>
-                    ) : null}
-                    {signature.capturedAt ? (
-                      <div className="mt-2 text-xs text-emerald-700">
-                        Captured {formatDateLabel(signature.capturedAt) ?? "just now"}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })}
-
-              {visibleSignatures.length === 0 ? (
-                <div className={`${signCardBaseClass} cursor-default`}>
-                  <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                    No signature is available in this step yet.
-                  </div>
-                  <div className="mt-2 text-sm leading-6 text-Color-Neutral">
-                    DARCi has prepared the signing PDFs, but there is no member-facing signature obligation available to capture here.
-                  </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </>
+            ) : null}
 
             {shouldShowCaptureContainer ? (
               <div className={signCardBaseClass}>

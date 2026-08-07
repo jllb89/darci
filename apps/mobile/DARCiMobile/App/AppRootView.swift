@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppLaunchPhase: Equatable {
     case onboarding
@@ -18,6 +19,8 @@ struct AppRootView: View {
     @State private var signingRoute: DocumentSigningRoute?
     @State private var notaryReviewRoute: NotaryRequestReviewRoute?
     @State private var notarySessionRoute: NotaryInPersonSessionRoute?
+    @State private var memberSessionRoute: MemberInPersonSessionRoute?
+    @State private var pendingMemberSessionRoute: MemberInPersonSessionRoute?
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
 
@@ -78,6 +81,25 @@ struct AppRootView: View {
         }
         .task {
             await restoreSessionOnLaunchIfNeeded()
+        }
+        .onOpenURL(perform: handleIncomingURL)
+        .onChange(of: launchPhase) { _, phase in
+            guard phase == .signedIn else { return }
+            openPendingMemberSessionIfPossible()
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+
+                Button("Done") {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
+                }
+            }
         }
     }
 
@@ -167,6 +189,13 @@ struct AppRootView: View {
                     session: sessionCoordinator.currentSession,
                     requestId: route.requestId,
                     apiClient: notaryProfileAPIClient
+                )
+            }
+            .navigationDestination(item: $memberSessionRoute) { route in
+                MemberInPersonSessionView(
+                    session: sessionCoordinator.currentSession,
+                    requestId: route.requestId,
+                    apiClient: requestsAPIClient
                 )
             }
             .navigationDestination(item: $signingRoute) { route in
@@ -272,6 +301,8 @@ struct AppRootView: View {
             signingRoute = nil
             notaryReviewRoute = nil
             notarySessionRoute = nil
+            memberSessionRoute = nil
+            pendingMemberSessionRoute = nil
             isProfileSelectionPresented = false
             isUserSettingsPresented = false
 
@@ -325,6 +356,8 @@ struct AppRootView: View {
             signingRoute = nil
             notaryReviewRoute = nil
             notarySessionRoute = nil
+            memberSessionRoute = nil
+            pendingMemberSessionRoute = nil
             isProfileSelectionPresented = false
         }
     }
@@ -380,6 +413,32 @@ struct AppRootView: View {
         signingRoute = nil
         notaryReviewRoute = nil
         notarySessionRoute = NotaryInPersonSessionRoute(requestId: request.request.id)
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        guard let requestId = MemberSessionDeepLink.requestId(from: url) else { return }
+        pendingMemberSessionRoute = MemberInPersonSessionRoute(requestId: requestId)
+        openPendingMemberSessionIfPossible()
+    }
+
+    private func openPendingMemberSessionIfPossible() {
+        guard launchPhase == .signedIn,
+              sessionCoordinator.currentSession != nil,
+              let route = pendingMemberSessionRoute else {
+            return
+        }
+
+        selectedTab = .requests
+        selectedProductModeKey = nil
+        intakeRoute = nil
+        reviewRoute = nil
+        signingRoute = nil
+        notaryReviewRoute = nil
+        notarySessionRoute = nil
+        memberSessionRoute = route
+        pendingMemberSessionRoute = nil
+        isProfileSelectionPresented = false
+        isUserSettingsPresented = false
     }
 
     private func intakeModeKey(for document: DocumentsListItem) -> String {
@@ -446,6 +505,12 @@ struct NotaryRequestReviewRoute: Identifiable, Hashable {
 }
 
 struct NotaryInPersonSessionRoute: Identifiable, Hashable {
+    let requestId: String
+
+    var id: String { requestId }
+}
+
+struct MemberInPersonSessionRoute: Identifiable, Hashable {
     let requestId: String
 
     var id: String { requestId }

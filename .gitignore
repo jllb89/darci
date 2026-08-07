@@ -17,8 +17,10 @@ mobile/.pub-cache/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
 apps/mobile/.DerivedData/
+apps/mobile/.ReleaseDerivedData/
 apps/mobile/DerivedData/
 apps/mobile/build/
+apps/mobile/Config/Release.local.xcconfig
 
 # Logs
 npm-debug.log*

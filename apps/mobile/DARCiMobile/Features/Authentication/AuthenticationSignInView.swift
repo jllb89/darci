@@ -249,15 +249,6 @@ struct AuthenticationSignInView: View {
                 otpCode = sanitized
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-
-                Button("Done") {
-                    focusedField = nil
-                }
-            }
-        }
     }
 
     private var isCompactInputActive: Bool {

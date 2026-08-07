@@ -1,7 +1,7 @@
 name: DARCiMobile
 
 options:
-  bundleIdPrefix: dev.mobile
+  bundleIdPrefix: com.illuminote
   deploymentTarget:
     iOS: "18.0"
   groupSortPosition: top
@@ -18,8 +18,10 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 38K3YA2857
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     IPHONEOS_DEPLOYMENT_TARGET: "18.0"
 
 targets:
@@ -27,6 +29,14 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "18.0"
+    entitlements:
+      path: DARCiMobile/App/DARCiMobile.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - applinks:app.staging.darciregistry.dev
+          - applinks:app.darciregistry.dev
+    configFiles:
+      Release: Config/Release.xcconfig
     info:
       path: DARCiMobile/App/Info.plist
       properties:
@@ -64,9 +74,8 @@ targets:
       - package: Supabase
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci
+        PRODUCT_BUNDLE_IDENTIFIER: com.illuminote.darci
         PRODUCT_NAME: DARCiMobile
-        DARCI_API_BASE_URL: $(DARCI_API_BASE_URL)
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -81,7 +90,7 @@ targets:
       - target: DARCiMobile
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.illuminote.darci.tests
         GENERATE_INFOPLIST_FILE: YES
 
   DARCiMobileUITests:
@@ -94,7 +103,7 @@ targets:
       - target: DARCiMobile
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.mobile.darci.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.illuminote.darci.uitests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:

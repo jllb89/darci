@@ -4,6 +4,8 @@ protocol RequestsAPIProviding: Sendable {
     func listSigningRequests(limit: Int, accessToken: String) async throws -> SigningRequestsResponse
     func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse
     func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse
+    func getMemberInPersonSession(requestId: String, accessToken: String) async throws -> MemberInPersonSessionResponse
+    func recordMemberCheckIn(requestId: String, request: MemberMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse
 }
 
 struct RequestsAPIClient: RequestsAPIProviding, Sendable {
@@ -36,6 +38,27 @@ struct RequestsAPIClient: RequestsAPIProviding, Sendable {
             accessToken: accessToken
         )
     }
+
+    func getMemberInPersonSession(requestId: String, accessToken: String) async throws -> MemberInPersonSessionResponse {
+        try await authClient.get(
+            path: "/requests/\(Self.encodedPathComponent(requestId))",
+            accessToken: accessToken
+        )
+    }
+
+    func recordMemberCheckIn(requestId: String, request: MemberMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        try await authClient.post(
+            path: "/notary/requests/\(Self.encodedPathComponent(requestId))/meeting/check-in",
+            body: request,
+            accessToken: accessToken
+        )
+    }
+
+    private static func encodedPathComponent(_ value: String) -> String {
+        var allowedCharacters = CharacterSet.urlPathAllowed
+        allowedCharacters.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? value
+    }
 }
 
 struct MockRequestsAPIClient: RequestsAPIProviding, Sendable {
@@ -52,6 +75,69 @@ struct MockRequestsAPIClient: RequestsAPIProviding, Sendable {
     func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse {
         InviteResendResponse(existing: false)
     }
+
+    func getMemberInPersonSession(requestId: String, accessToken: String) async throws -> MemberInPersonSessionResponse {
+        .mock
+    }
+
+    func recordMemberCheckIn(requestId: String, request: MemberMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        NotarySessionActionResponse(status: "recorded", advancedStep: nil, nextAction: nil, message: nil)
+    }
+}
+
+extension MemberInPersonSessionResponse {
+    static let mock = MemberInPersonSessionResponse(
+        request: MemberSessionRequest(
+            id: "mock-session-request",
+            documentId: "mock-session-document",
+            workflowId: "mock-session-workflow",
+            status: "in_review",
+            meetingStatus: "in_progress"
+        ),
+        document: MemberSessionDocument(
+            id: "mock-session-document",
+            idn: "AB12CD34EF56",
+            status: "pending_notary",
+            documentType: "trust_bundle",
+            jurisdiction: "US-CA",
+            reviewDocuments: [],
+            summary: MemberSessionDocumentSummary(
+                verification: NotaryDocumentVerificationSummary(status: "pending", idn: "AB12CD34EF56", verifyPath: nil),
+                finalization: NotarySessionFinalization(
+                    latestStatus: nil,
+                    latestStatusAt: nil,
+                    isAnchored: false,
+                    isVerificationChecked: false,
+                    isWatermarked: false,
+                    isHashRecorded: false,
+                    verificationStatus: nil,
+                    anchoredAt: nil,
+                    lastCheckedAt: nil,
+                    publicVerifyPath: nil,
+                    hash: nil,
+                    ledgerTxId: nil,
+                    anchorAttempt: nil,
+                    history: []
+                )
+            )
+        ),
+        workflow: MemberSessionWorkflow(latestStatus: "in_person_session_started", assignedNotaryUserId: "notary-1"),
+        owner: MemberSessionIdentity(displayName: "Member"),
+        notary: MemberSessionIdentity(displayName: "Illuminotary"),
+        meeting: MemberSessionMeeting(
+            meetingId: "meeting-1",
+            requestId: "mock-session-request",
+            status: "in_progress",
+            samePlaceRequired: true,
+            samePlaceStatus: "pending",
+            participants: [],
+            identityVerifications: [],
+            proximityEvaluations: [],
+            artifacts: []
+        ),
+        warnings: [],
+        nextAction: "member_check_in"
+    )
 }
 
 extension SigningRequestsResponse {

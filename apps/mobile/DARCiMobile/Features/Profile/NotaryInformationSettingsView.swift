@@ -60,8 +60,14 @@ struct NotaryInformationSettingsView: View {
 
                         profileTextField(title: "Commission expiration", field: .commissionExpiration, proxy: proxy) {
                             TextField("YYYY-MM-DD", text: $viewModel.commissionExpiresAt)
-                                .keyboardType(.numbersAndPunctuation)
+                                .keyboardType(.numberPad)
                                 .autocorrectionDisabled()
+                                .onChange(of: viewModel.commissionExpiresAt) { _, nextValue in
+                                    let formatted = IntakeDateFormatting.formatISODateInput(nextValue)
+                                    if formatted != nextValue {
+                                        viewModel.commissionExpiresAt = formatted
+                                    }
+                                }
                         }
 
                         VStack(alignment: .leading, spacing: scaled(12, in: proxy)) {

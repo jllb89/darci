@@ -6,6 +6,19 @@ const nextConfig: NextConfig = {
   output: "standalone",
   async headers() {
     return [
+      ...["/.well-known/apple-app-site-association", "/apple-app-site-association"].map((source) => ({
+        source,
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/json",
+          },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=3600",
+          },
+        ],
+      })),
       {
         source: "/images/:path*",
         headers: [

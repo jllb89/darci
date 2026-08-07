@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "38K3YA2857.com.illuminote.darci"
+        ],
+        "components": [
+          {
+            "/": "/open/requests/*",
+            "comment": "Open member request session links in DARCi on iOS."
+          }
+        ]
+      }
+    ]
+  }
+}
