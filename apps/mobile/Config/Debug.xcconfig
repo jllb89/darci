@@ -1,4 +1,4 @@
-APS_ENVIRONMENT = production
+APS_ENVIRONMENT = development
 DARCI_API_BASE_URL = https:/$()/api.staging.darciregistry.dev
 
-#include? "Release.local.xcconfig"
+#include? "Debug.local.xcconfig"

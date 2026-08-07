@@ -506,12 +506,45 @@ const getApiBaseUrl = () => {
 };
 
 const getAppBaseUrl = () => {
-  return (
-    process.env.APP_BASE_URL?.trim() ??
-    process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() ??
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ??
-    "http://localhost:3000"
-  ).replace(/\/$/, "");
+  const candidates = [
+    process.env.WEB_APP_URL,
+    process.env.NEXT_PUBLIC_WEB_BASE_URL,
+    process.env.APP_BASE_URL,
+    process.env.NEXT_PUBLIC_APP_BASE_URL,
+    process.env.NEXT_PUBLIC_SITE_URL,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizePublicAppBaseUrl(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "https://app.staging.darciregistry.dev";
+};
+
+const normalizePublicAppBaseUrl = (value: string | undefined) => {
+  const trimmedValue = value?.trim().replace(/\/+$/, "");
+  if (!trimmedValue) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmedValue);
+    const host = url.hostname.toLowerCase();
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return null;
+    }
+
+    if (["0.0.0.0", "localhost", "127.0.0.1", "::1"].includes(host)) {
+      return null;
+    }
+
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
 };
 
 const buildAppUrl = (pathname: string, searchParams?: Record<string, string>) => {
@@ -1679,8 +1712,7 @@ export const queueNotaryApprovalReceivedNotification = async (input: {
     }
 
     const memberRequestPath = `/app/requests/${encodeURIComponent(input.requestId)}`;
-    const ownerUrl = buildAppUrl("/start", {
-      returnTo: memberRequestPath,
+    const ownerUrl = buildAppUrl(`/open/requests/${encodeURIComponent(input.requestId)}`, {
       ...(owner.email ? { intendedEmail: owner.email } : {}),
     });
     const notaryRequestPath = `/app/notary/requests/${encodeURIComponent(input.requestId)}?role=notary`;

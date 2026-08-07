@@ -32,10 +32,12 @@ targets:
     entitlements:
       path: DARCiMobile/App/DARCiMobile.entitlements
       properties:
+        aps-environment: $(APS_ENVIRONMENT)
         com.apple.developer.associated-domains:
           - applinks:app.staging.darciregistry.dev
           - applinks:app.darciregistry.dev
     configFiles:
+      Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
     info:
       path: DARCiMobile/App/Info.plist

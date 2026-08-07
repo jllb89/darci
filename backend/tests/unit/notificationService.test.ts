@@ -333,9 +333,9 @@ describe("notificationService notary application decision notifications", () => 
         notarization_request_id: "req-1",
         payload_json: expect.objectContaining({
           nextStepUrl:
-            "https://app.example.test/start?returnTo=%2Fapp%2Frequests%2Freq-1&intendedEmail=owner%40example.test",
+            "https://app.example.test/open/requests/req-1?intendedEmail=owner%40example.test",
           dashboardUrl:
-            "https://app.example.test/start?returnTo=%2Fapp%2Frequests%2Freq-1&intendedEmail=owner%40example.test",
+            "https://app.example.test/open/requests/req-1?intendedEmail=owner%40example.test",
           documentName: "document notarization",
         }),
         metadata: expect.objectContaining({
@@ -414,6 +414,66 @@ describe("notificationService notary application decision notifications", () => 
         metadata: expect.objectContaining({
           requestId: "req-1",
           memberRequestPath: "/app/requests/req-1",
+        }),
+      }),
+    );
+  });
+
+  it("does not queue in-person session links with an unsafe local app host", async () => {
+    process.env.APP_BASE_URL = "https://0.0.0.0:3000";
+    delete process.env.WEB_APP_URL;
+    delete process.env.NEXT_PUBLIC_WEB_BASE_URL;
+    delete process.env.NEXT_PUBLIC_APP_BASE_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+
+    mocks.maybeSingleMock
+      .mockResolvedValueOnce({
+        data: {
+          id: "doc-1",
+          owner_id: "owner-1",
+          document_type: "generic",
+          product_flow_mode: "notarize_document",
+          jurisdiction: "US-OH",
+          idn: "IDN-123",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "owner-1",
+          email: "owner@example.test",
+          phone: null,
+          first_name: "Olivia",
+          last_name: "Owner",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-1",
+          template_key: "in_person_session_started_email",
+          channel: "email",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      });
+
+    await queueInPersonSessionStartedNotification({
+      documentId: "doc-1",
+      requestId: "req-1",
+      notaryUserId: "notary-1",
+    });
+
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_jobs",
+      expect.objectContaining({
+        payload_json: expect.objectContaining({
+          sessionUrl:
+            "https://app.staging.darciregistry.dev/open/requests/req-1?intendedEmail=owner%40example.test",
+          dashboardUrl:
+            "https://app.staging.darciregistry.dev/open/requests/req-1?intendedEmail=owner%40example.test",
         }),
       }),
     );
