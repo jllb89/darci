@@ -312,6 +312,7 @@ jobs:
             GOOGLE_MAPS_GEOCODE_USE_SERVER: process.env.STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER || "true",
             LEDGER_ANCHOR_MODE: "stub",
             LEDGER_ALLOW_STUB_PROVIDER: "true",
+            NOTIFICATION_PUSH_PROVIDER: "apns",
           };
 
           for (const container of nextDefinition.containerDefinitions) {
@@ -383,6 +384,7 @@ jobs:
           const workerEnv = {
             LEDGER_ANCHOR_MODE: "stub",
             LEDGER_ALLOW_STUB_PROVIDER: "true",
+            NOTIFICATION_PUSH_PROVIDER: "apns",
           };
 
           for (const container of nextDefinition.containerDefinitions) {
