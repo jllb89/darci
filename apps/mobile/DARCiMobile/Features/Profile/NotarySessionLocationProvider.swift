@@ -10,6 +10,10 @@ protocol NotarySessionLocationProviding: AnyObject {
 final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationProviding, @preconcurrency CLLocationManagerDelegate {
     private let manager: CLLocationManager
     private var pendingContinuation: CheckedContinuation<CLLocation, Error>?
+    private var pendingRetryTask: Task<Void, Never>?
+    private var pendingTimeoutTask: Task<Void, Never>?
+    private var pendingRetryCount = 0
+    private let maximumLocationUnknownRetries = 4
 
     override init() {
         manager = CLLocationManager()
@@ -25,6 +29,12 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
 
         let location = try await withCheckedThrowingContinuation { continuation in
             pendingContinuation = continuation
+            pendingRetryCount = 0
+            pendingTimeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(12))
+                guard Task.isCancelled == false else { return }
+                self?.finish(with: .failure(NotarySessionLocationError.unavailable))
+            }
 
             switch manager.authorizationStatus {
             case .authorizedAlways, .authorizedWhenInUse:
@@ -77,6 +87,17 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         if (error as? CLError)?.code == .denied {
             finish(with: .failure(NotarySessionLocationError.permissionDenied))
+        } else if (error as? CLError)?.code == .locationUnknown,
+                  pendingRetryCount < maximumLocationUnknownRetries {
+            pendingRetryCount += 1
+            pendingRetryTask?.cancel()
+            pendingRetryTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(750))
+                guard Task.isCancelled == false,
+                      let self,
+                      self.pendingContinuation != nil else { return }
+                self.manager.requestLocation()
+            }
         } else {
             finish(with: .failure(NotarySessionLocationError.unavailable))
         }
@@ -85,6 +106,11 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
     private func finish(with result: Result<CLLocation, Error>) {
         let continuation = pendingContinuation
         pendingContinuation = nil
+        pendingRetryTask?.cancel()
+        pendingRetryTask = nil
+        pendingTimeoutTask?.cancel()
+        pendingTimeoutTask = nil
+        pendingRetryCount = 0
         continuation?.resume(with: result)
     }
 }

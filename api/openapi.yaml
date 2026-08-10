@@ -1064,6 +1064,146 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /notifications/devices/{installationId}:
+    put:
+      summary: Register push notification device
+      description: Idempotently registers or rotates the authenticated user's iOS APNs token for a stable app installation. Ownership is derived from the bearer token; clients cannot supply a user id.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: installationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushDeviceRegistrationRequest"
+      responses:
+        "200":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDeviceResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Device token conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Deactivate push notification device
+      description: Deactivates token rows for the authenticated user's stable app installation. The endpoint is scoped by authenticated user and installation id.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: installationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDeviceDeactivationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /notifications/devices/{installationId}/permission:
+    patch:
+      summary: Update push notification permission status
+      description: Records the authenticated user's iOS notification permission state without accepting or returning an APNs token.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: installationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushDevicePermissionRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushDeviceResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /admin/notification-jobs:
     get:
       summary: List notification jobs
@@ -1094,6 +1234,7 @@ paths:
               - email
               - sms
               - in_app
+              - push
         - in: query
           name: limit
           schema:
@@ -1233,6 +1374,7 @@ paths:
               - email
               - sms
               - in_app
+              - push
         - in: query
           name: locale
           required: false
@@ -8288,6 +8430,7 @@ components:
             - sms
             - in_app
             - manual
+            - push
         deliveryMethod:
           type: string
           enum:
@@ -9907,6 +10050,7 @@ components:
             - email
             - sms
             - in_app
+            - push
         deliveryAddress:
           type: string
           nullable: true
@@ -10391,6 +10535,151 @@ components:
           $ref: "#/components/schemas/PublicInviteView"
         claim:
           $ref: "#/components/schemas/PublicInviteClaimSummary"
+    PushEnvironment:
+      type: string
+      enum:
+        - sandbox
+        - production
+    PushPermissionStatus:
+      type: string
+      enum:
+        - authorized
+        - provisional
+        - denied
+        - unknown
+    PushDeviceRegistrationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - environment
+        - deviceToken
+      properties:
+        environment:
+          $ref: "#/components/schemas/PushEnvironment"
+        deviceToken:
+          type: string
+          pattern: "^[0-9a-fA-F]{64,}$"
+          description: APNs token supplied by iOS. The API stores it but does not return it.
+        permissionStatus:
+          $ref: "#/components/schemas/PushPermissionStatus"
+        appBundleId:
+          type: string
+          enum:
+            - com.illuminote.darci
+          default: com.illuminote.darci
+        platform:
+          type: string
+          enum:
+            - ios
+          default: ios
+        provider:
+          type: string
+          enum:
+            - apns
+          default: apns
+        appVersion:
+          type: string
+        buildNumber:
+          type: string
+        deviceModel:
+          type: string
+        osVersion:
+          type: string
+    PushDevicePermissionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - environment
+        - permissionStatus
+      properties:
+        environment:
+          $ref: "#/components/schemas/PushEnvironment"
+        permissionStatus:
+          $ref: "#/components/schemas/PushPermissionStatus"
+        appBundleId:
+          type: string
+          enum:
+            - com.illuminote.darci
+          default: com.illuminote.darci
+        platform:
+          type: string
+          enum:
+            - ios
+          default: ios
+        provider:
+          type: string
+          enum:
+            - apns
+          default: apns
+        appVersion:
+          type: string
+        buildNumber:
+          type: string
+    PushDevice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        installationId:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum:
+            - ios
+        provider:
+          type: string
+          enum:
+            - apns
+        environment:
+          $ref: "#/components/schemas/PushEnvironment"
+        appBundleId:
+          type: string
+        permissionStatus:
+          $ref: "#/components/schemas/PushPermissionStatus"
+        appVersion:
+          type: string
+          nullable: true
+        buildNumber:
+          type: string
+          nullable: true
+        deviceModel:
+          type: string
+          nullable: true
+        osVersion:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        lastRegisteredAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+        invalidatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PushDeviceResponse:
+      type: object
+      properties:
+        device:
+          $ref: "#/components/schemas/PushDevice"
+    PushDeviceDeactivationResponse:
+      type: object
+      properties:
+        deactivated:
+          type: boolean
     NotificationJobDeliveryCounts:
       type: object
       properties:
@@ -10425,6 +10714,7 @@ components:
             - email
             - sms
             - in_app
+            - push
         status:
           type: string
           enum:
@@ -10529,6 +10819,7 @@ components:
             - email
             - sms
             - in_app
+            - push
         recipientAddress:
           type: string
           nullable: true
@@ -11073,6 +11364,7 @@ components:
             - email
             - sms
             - in_app
+            - push
         templateKind:
           type: string
         audienceScope:
@@ -11207,6 +11499,7 @@ components:
             - email
             - sms
             - in_app
+            - push
         from:
           type: string
         replyTo:

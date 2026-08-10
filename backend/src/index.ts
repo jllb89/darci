@@ -14,6 +14,7 @@ import documentsRoutes from "./routes/documents";
 import internalRoutes from "./routes/internal";
 import invitesRoutes from "./routes/invites";
 import notaryRoutes from "./routes/notary";
+import notificationsRoutes from "./routes/notifications";
 import ledgerRoutes from "./routes/ledger";
 import requestsRoutes from "./routes/requests";
 import verificationRoutes from "./routes/verification";
@@ -197,6 +198,7 @@ app.use("/documents", documentsRoutes);
 app.use("/requests", requestsRoutes);
 app.use("/verification", verificationRoutes);
 app.use("/notary", notaryRoutes);
+app.use("/notifications", notificationsRoutes);
 app.use("/ledger", ledgerRoutes);
 app.use("/verify", verifyRoutes);
 

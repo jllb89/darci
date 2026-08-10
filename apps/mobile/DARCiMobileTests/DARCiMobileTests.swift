@@ -532,6 +532,103 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertNil(MemberSessionDeepLink.requestId(from: unrelatedURL))
     }
 
+    func testPushNotificationRouteParsesAllowlistedRoutes() throws {
+        XCTAssertEqual(
+            PushNotificationRoute(userInfo: [
+                "aps": ["alert": ["title": "Ready"]],
+                "route": "notary_request_review",
+                "requestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "notificationId": "delivery-1",
+            ]),
+            .notaryRequestReview(requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", notificationId: "delivery-1")
+        )
+        XCTAssertEqual(
+            PushNotificationRoute(userInfo: [
+                "route": "document_signing",
+                "documentId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            ]),
+            .documentSigning(documentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", notificationId: nil)
+        )
+    }
+
+    func testPushNotificationRouteRejectsUnknownMissingOrSensitivePayloads() {
+        XCTAssertNil(PushNotificationRoute(userInfo: ["route": "unknown", "requestId": "request-1"]))
+        XCTAssertNil(PushNotificationRoute(userInfo: ["route": "member_session"]))
+        XCTAssertNil(PushNotificationRoute(userInfo: [
+            "route": "member_session",
+            "requestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "url": "https://example.test/sensitive",
+        ]))
+        XCTAssertNil(PushNotificationRoute(userInfo: [
+            "route": "member_session",
+            "requestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "accessToken": "secret",
+        ]))
+    }
+
+    func testInMemoryPushInstallationStorePersistsRandomInstallationIdUntilCleared() throws {
+        let store = InMemoryPushInstallationStore()
+        let first = try store.installationId()
+        let second = try store.installationId()
+
+        XCTAssertEqual(first, second)
+        XCTAssertNotNil(UUID(uuidString: first))
+
+        try store.clear()
+        XCTAssertNotEqual(first, try store.installationId())
+    }
+
+    func testPushDeviceAPIClientRegistersDeviceWithBearerToken() async throws {
+        let installationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/notifications/devices/\(installationId)")
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(self.requestBodyData(from: request))
+            let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            XCTAssertEqual(payload?["environment"] as? String, "sandbox")
+            XCTAssertEqual(payload?["deviceToken"] as? String, String(repeating: "a", count: 64))
+            XCTAssertEqual(payload?["permissionStatus"] as? String, "authorized")
+            XCTAssertEqual(payload?["appBundleId"] as? String, "com.illuminote.darci")
+            XCTAssertNil(payload?["userId"])
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )),
+                Data(#"{"device":{"id":"device-1","installationId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","platform":"ios","provider":"apns","environment":"sandbox","appBundleId":"com.illuminote.darci","permissionStatus":"authorized","appVersion":"0.1.0","buildNumber":"2","deviceModel":"iPhone","osVersion":"18.0","isActive":true,"lastRegisteredAt":"2026-08-10T12:00:00.000Z","lastSeenAt":"2026-08-10T12:00:00.000Z","invalidatedAt":null,"createdAt":"2026-08-10T12:00:00.000Z","updatedAt":"2026-08-10T12:00:00.000Z"}}"#.utf8)
+            )
+        }
+        let client = PushDeviceAPIClient(authClient: AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        ))
+
+        let response = try await client.registerDevice(
+            installationId: installationId,
+            request: PushDeviceRegistrationRequest(
+                environment: .sandbox,
+                deviceToken: String(repeating: "a", count: 64),
+                permissionStatus: .authorized,
+                appBundleId: "com.illuminote.darci",
+                appVersion: "0.1.0",
+                buildNumber: "2",
+                deviceModel: "iPhone",
+                osVersion: "18.0"
+            ),
+            accessToken: "access-token"
+        )
+
+        XCTAssertEqual(response.device.installationId, installationId)
+        XCTAssertEqual(response.device.environment, .sandbox)
+        XCTAssertEqual(response.device.permissionStatus, .authorized)
+    }
+
     @MainActor
     func testMemberSessionRealtimeInvalidationRefetchesCanonicalContext() async {
         let initial = MemberInPersonSessionResponse.mock
@@ -2258,6 +2355,32 @@ final class DARCiMobileTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AuthURLProtocolStub.self]
         return URLSession(configuration: configuration)
+    }
+
+    private func requestBodyData(from request: URLRequest) -> Data? {
+        if let httpBody = request.httpBody {
+            return httpBody
+        }
+
+        guard let stream = request.httpBodyStream else {
+            return nil
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+
+        return data
     }
 
     private func makeNotaryQueueResponse(start: Int, count: Int, total: Int) -> NotaryQueueResponse {

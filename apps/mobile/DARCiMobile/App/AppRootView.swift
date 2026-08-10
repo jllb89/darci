@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -10,6 +11,7 @@ enum AppLaunchPhase: Equatable {
 }
 
 struct AppRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var launchPhase = AppLaunchPhase.initial
     @State private var didAttemptSessionRestore = false
     @State private var selectedTab: AppTab = .home
@@ -21,10 +23,13 @@ struct AppRootView: View {
     @State private var notarySessionRoute: NotaryInPersonSessionRoute?
     @State private var memberSessionRoute: MemberInPersonSessionRoute?
     @State private var pendingMemberSessionRoute: MemberInPersonSessionRoute?
+    @State private var pendingPushRoute: PushNotificationRoute?
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
+    @State private var isPushPermissionPromptPresented = false
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
+    @ObservedObject private var pushCoordinator: PushNotificationCoordinator
     private let authenticationViewModel: AuthenticationViewModel
     private let homeAPIClient: HomeAPIProviding
     private let documentsAPIClient: DocumentsAPIProviding
@@ -35,6 +40,7 @@ struct AppRootView: View {
     init(
         authenticationViewModel: AuthenticationViewModel? = nil,
         sessionCoordinator: AppSessionCoordinator? = nil,
+        pushCoordinator: PushNotificationCoordinator = PushNotificationCoordinator(),
         homeAPIClient: HomeAPIProviding? = nil,
         documentsAPIClient: DocumentsAPIProviding? = nil,
         documentIntakeAPIClient: DocumentIntakeAPIProviding? = nil,
@@ -57,6 +63,7 @@ struct AppRootView: View {
                 sessionStore: dependencies.sessionStore
             )
         )
+        _pushCoordinator = ObservedObject(wrappedValue: pushCoordinator)
     }
 
     var body: some View {
@@ -71,6 +78,7 @@ struct AppRootView: View {
             case .authentication:
                 AuthenticationSignInView(content: .signIn, viewModel: authenticationViewModel) {
                     _ = sessionCoordinator.acceptAuthenticatedSession(authenticationViewModel.verifiedSession)
+                    pushCoordinator.activate(session: sessionCoordinator.currentSession)
                     withAnimation(.easeInOut(duration: 0.25)) {
                         launchPhase = .signedIn
                     }
@@ -83,9 +91,35 @@ struct AppRootView: View {
             await restoreSessionOnLaunchIfNeeded()
         }
         .onOpenURL(perform: handleIncomingURL)
+        .onReceive(pushCoordinator.$pendingRoute.compactMap { $0 }) { route in
+            handleIncomingPushRoute(route)
+            pushCoordinator.clearPendingRoute(route)
+        }
         .onChange(of: launchPhase) { _, phase in
             guard phase == .signedIn else { return }
+            pushCoordinator.activate(session: sessionCoordinator.currentSession)
             openPendingMemberSessionIfPossible()
+            openPendingPushRouteIfPossible()
+        }
+        .onChange(of: sessionCoordinator.currentSession) { _, session in
+            pushCoordinator.activate(session: session)
+            openPendingPushRouteIfPossible()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await pushCoordinator.refreshPermissionAndSync() }
+        }
+        .sheet(isPresented: $isPushPermissionPromptPresented) {
+            PushPermissionExplanationView(
+                onContinue: {
+                    isPushPermissionPromptPresented = false
+                    Task { await pushCoordinator.requestAuthorizationFromPrompt() }
+                },
+                onDismiss: {
+                    isPushPermissionPromptPresented = false
+                }
+            )
+            .presentationDetents([.medium])
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -146,6 +180,7 @@ struct AppRootView: View {
                     apiClient: documentIntakeAPIClient
                 ) { documentId in
                     reviewRoute = DocumentReviewRoute(documentId: documentId)
+                    presentPushPermissionPromptIfEligible()
                 }
                 .onDisappear {
                     selectedProductModeKey = nil
@@ -163,9 +198,11 @@ struct AppRootView: View {
                     },
                     onContinueToSign: { documentId in
                         signingRoute = DocumentSigningRoute(documentId: documentId)
+                        presentPushPermissionPromptIfEligible()
                     },
                     onContinueWithoutSignature: { documentId in
                         signingRoute = DocumentSigningRoute(documentId: documentId, skipSignatureForNotarization: true)
+                        presentPushPermissionPromptIfEligible()
                     }
                 )
                     .onDisappear {
@@ -181,6 +218,7 @@ struct AppRootView: View {
                     onDecisionRecorded: {
                         selectedTab = .home
                         notaryReviewRoute = nil
+                        presentPushPermissionPromptIfEligible()
                     }
                 )
             }
@@ -279,7 +317,8 @@ struct AppRootView: View {
         switch await sessionCoordinator.restoreSessionOnLaunch() {
         case .noStoredSession:
             break
-        case .restored:
+        case .restored(let session):
+            pushCoordinator.activate(session: session)
             withAnimation(.easeInOut(duration: 0.25)) {
                 launchPhase = .signedIn
             }
@@ -292,6 +331,7 @@ struct AppRootView: View {
 
     private func signOut() {
         Task {
+            await pushCoordinator.deactivateForSignOut()
             _ = await sessionCoordinator.signOut()
             authenticationViewModel.clearChallenge()
             selectedTab = .home
@@ -303,6 +343,7 @@ struct AppRootView: View {
             notarySessionRoute = nil
             memberSessionRoute = nil
             pendingMemberSessionRoute = nil
+            pendingPushRoute = nil
             isProfileSelectionPresented = false
             isUserSettingsPresented = false
 
@@ -421,6 +462,11 @@ struct AppRootView: View {
         openPendingMemberSessionIfPossible()
     }
 
+    private func handleIncomingPushRoute(_ route: PushNotificationRoute) {
+        pendingPushRoute = route
+        openPendingPushRouteIfPossible()
+    }
+
     private func openPendingMemberSessionIfPossible() {
         guard launchPhase == .signedIn,
               sessionCoordinator.currentSession != nil,
@@ -439,6 +485,60 @@ struct AppRootView: View {
         pendingMemberSessionRoute = nil
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
+    }
+
+    private func openPendingPushRouteIfPossible() {
+        guard launchPhase == .signedIn,
+              sessionCoordinator.currentSession != nil,
+              let route = pendingPushRoute else {
+            return
+        }
+
+        if case .notaryRequestReview = route,
+           MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) != .notary {
+            Task {
+                guard await sessionCoordinator.switchActiveRole(to: "notary") else { return }
+                openPushRoute(route)
+            }
+            return
+        }
+
+        openPushRoute(route)
+    }
+
+    private func openPushRoute(_ route: PushNotificationRoute) {
+        selectedProductModeKey = nil
+        intakeRoute = nil
+        reviewRoute = nil
+        signingRoute = nil
+        notaryReviewRoute = nil
+        notarySessionRoute = nil
+        memberSessionRoute = nil
+        isProfileSelectionPresented = false
+        isUserSettingsPresented = false
+
+        switch route {
+        case .memberSession(let requestId, _), .memberRequest(let requestId, _):
+            selectedTab = .requests
+            memberSessionRoute = MemberInPersonSessionRoute(requestId: requestId)
+        case .notaryRequestReview(let requestId, _):
+            selectedTab = .notary
+            notaryReviewRoute = NotaryRequestReviewRoute(requestId: requestId)
+        case .memberDocument(let documentId, _), .memberNotarySelection(let documentId, _), .documentSigning(let documentId, _):
+            selectedTab = .documents
+            signingRoute = DocumentSigningRoute(documentId: documentId)
+        case .documentReview(let documentId, _):
+            selectedTab = .documents
+            reviewRoute = DocumentReviewRoute(documentId: documentId)
+        }
+
+        pendingPushRoute = nil
+    }
+
+    private func presentPushPermissionPromptIfEligible() {
+        guard pushCoordinator.shouldPresentPermissionPrompt else { return }
+        pushCoordinator.markPermissionPromptPresented()
+        isPushPermissionPromptPresented = true
     }
 
     private func intakeModeKey(for document: DocumentsListItem) -> String {
@@ -532,6 +632,38 @@ private struct PlaceholderScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DARCiTheme.background.ignoresSafeArea())
         .navigationTitle(section.title)
+    }
+}
+
+private struct PushPermissionExplanationView: View {
+    let onContinue: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 40, height: 5)
+                .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Stay current on time-sensitive updates")
+                    .font(.title3.weight(.semibold))
+                Text("DARCi can notify you when a request, signing step, or in-person session needs attention. Sensitive details stay inside the app.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button("Not now", action: onDismiss)
+                    .buttonStyle(.bordered)
+
+                Button("Continue", action: onContinue)
+                    .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(24)
     }
 }
 

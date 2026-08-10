@@ -1,7 +1,7 @@
 # Push Notification Implementation Roadmap
 
-Last updated: 2026-08-07
-Status: Phase 1 in progress; Apple provisioning required
+Last updated: 2026-08-10
+Status: Phase 3 native implementation complete; physical-device APNs callback validation next
 
 Related:
 
@@ -401,6 +401,18 @@ Estimated duration: 1 day
 
 Primary artifact: a new Supabase migration.
 
+Phase status: **Complete on 2026-08-10**
+
+Repository checkpoint:
+
+1. [x] Added `supabase/migrations/20260810120000_add_push_notification_device_tokens.sql` and applied it to staging.
+2. [x] Added `device_push_tokens` with service-role and owner RLS policies.
+3. [x] Added `push` notification channel support and `apns` provider support to the notification schema checks.
+4. [x] Added `notification_deliveries.device_push_token_id` so push deliveries target a token row instead of exposing raw APNs tokens as `recipient_address`.
+5. [x] Added authenticated `/notifications/devices` registration, deactivation, and permission endpoints.
+6. [x] Added OpenAPI definitions for the device registration contract.
+7. [x] Added focused route/service tests for user-derived ownership, replay-safe registration, permission updates, token redaction, and user-scoped deactivation.
+
 ### Device Token Table
 
 Add `device_push_tokens` with at least:
@@ -412,7 +424,7 @@ Add `device_push_tokens` with at least:
 5. `provider text not null` constrained initially to `apns`.
 6. `environment text not null` constrained to `sandbox` or `production`.
 7. `app_bundle_id text not null`.
-8. `device_token text not null`.
+8. `device_token text` nullable until the app has APNs permission/token material; registration with a token is required for active push delivery.
 9. `permission_status text` for authorized, provisional, denied, or unknown.
 10. `app_version`, `build_number`, and optional device metadata.
 11. `is_active boolean not null default true`.
@@ -456,13 +468,28 @@ Add authenticated endpoints and OpenAPI definitions:
 
 Exit criteria:
 
-1. Migration applies cleanly locally and to staging.
-2. Existing email outbox tests still pass unchanged.
-3. A user cannot register, inspect, rotate, or deactivate another user's installation.
+1. [x] Migration applies cleanly to staging and staged catalog checks confirm `device_push_tokens`, RLS, `push` channel checks, `apns` provider checks, and `device_push_token_id` delivery targeting.
+2. [x] Existing email outbox tests still pass unchanged (`backend/tests/unit/notificationService.test.ts`).
+3. [x] A user cannot register, inspect, rotate, or deactivate another user's installation; ownership is derived from the authenticated session and route/service tests cover scoped mutation.
 
 ## Phase 3: Native iOS Registration and Lifecycle
 
 Estimated duration: 1.5 to 2 days
+
+Phase status: **Native implementation complete on 2026-08-10; physical-device APNs prompt/callback validation pending**
+
+Repository checkpoint:
+
+1. [x] Added an app-delegate-backed `PushNotificationCoordinator` through `@UIApplicationDelegateAdaptor`.
+2. [x] Added `UNUserNotificationCenterDelegate` foreground presentation and notification-tap handling.
+3. [x] Added Keychain-backed random installation id persistence for device registration.
+4. [x] Added native device registration, permission update, and deactivation API client/models for `/notifications/devices`.
+5. [x] Added APNs token conversion and idempotent backend registration using the authenticated session.
+6. [x] Added foreground permission sync and token-registration retry.
+7. [x] Added sign-out device deactivation while preserving registration across role switches.
+8. [x] Added typed push route parsing for Wave 1 native destinations and signed-out pending-route restoration.
+9. [x] Added the DARCi-owned pre-prompt sheet at meaningful authenticated workflow moments.
+10. [x] Added focused iOS tests for route parsing, sensitive-payload rejection, installation id persistence, and device-registration request shape.
 
 Primary files:
 
@@ -474,29 +501,29 @@ Primary files:
 
 Tasks:
 
-1. Add an application delegate through `@UIApplicationDelegateAdaptor`.
-2. Adopt `UNUserNotificationCenterDelegate`.
-3. Request alert, sound, and badge authorization at the approved product moment.
-4. Call `UIApplication.shared.registerForRemoteNotifications()` after permission handling.
-5. Convert `didRegisterForRemoteNotificationsWithDeviceToken` data to the APNs token string.
-6. Persist a random installation id in Keychain; do not use IDFA or a hardware identifier.
-7. Register/rotate the token after authentication is available.
-8. Retry backend registration on foreground when local token state is newer than server state.
-9. Deactivate the installation during explicit sign-out.
-10. Keep the token on role switch because roles belong to the same signed-in user.
-11. Record denied/provisional/authorized permission changes.
-12. Handle foreground notification presentation intentionally.
-13. Parse notification taps into typed routes and defer navigation until session restoration completes.
-14. Generalize the existing member-session deep-link handling into a typed notification route parser rather than accepting arbitrary URLs.
-15. If the user is signed out, retain only the non-sensitive pending route and open it after successful authentication.
+1. [x] Add an application delegate through `@UIApplicationDelegateAdaptor`.
+2. [x] Adopt `UNUserNotificationCenterDelegate`.
+3. [x] Request alert, sound, and badge authorization at the approved product moment.
+4. [x] Call `UIApplication.shared.registerForRemoteNotifications()` after permission handling.
+5. [x] Convert `didRegisterForRemoteNotificationsWithDeviceToken` data to the APNs token string.
+6. [x] Persist a random installation id in Keychain; do not use IDFA or a hardware identifier.
+7. [x] Register/rotate the token after authentication is available.
+8. [x] Retry backend registration on foreground when local token state is newer than server state.
+9. [x] Deactivate the installation during explicit sign-out.
+10. [x] Keep the token on role switch because roles belong to the same signed-in user.
+11. [x] Record denied/provisional/authorized permission changes.
+12. [x] Handle foreground notification presentation intentionally.
+13. [x] Parse notification taps into typed routes and defer navigation until session restoration completes.
+14. [x] Generalize the existing member-session deep-link handling into a typed notification route parser rather than accepting arbitrary URLs.
+15. [x] If the user is signed out, retain only the non-sensitive pending route and open it after successful authentication.
 
 Exit criteria:
 
-1. Token registration is idempotent.
-2. Token rotation updates one installation instead of creating duplicates.
-3. Sign-out deactivates server delivery eligibility.
-4. Foreground, background, terminated, and sign-in-deferred taps route correctly.
-5. The app behaves normally when permission is denied.
+1. [x] Token registration is idempotent at the client/server contract boundary.
+2. [x] Token rotation updates one installation instead of creating duplicates by reusing the Keychain installation id.
+3. [x] Sign-out deactivates server delivery eligibility.
+4. [x] Sign-in-deferred taps are retained as typed non-sensitive routes and opened after authentication; physical foreground/background/terminated tap validation remains part of Phase 8 device validation.
+5. [x] Denied/provisional/authorized permission states are recorded without blocking normal app use.
 
 ## Phase 4: APNs Provider Adapter
 

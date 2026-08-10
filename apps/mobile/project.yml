@@ -46,6 +46,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         DARCI_API_BASE_URL: $(DARCI_API_BASE_URL)
+        DARCI_APNS_ENVIRONMENT: $(APS_ENVIRONMENT)
         DARCI_SUPABASE_URL: $(DARCI_SUPABASE_URL)
         DARCI_SUPABASE_ANON_KEY: $(DARCI_SUPABASE_ANON_KEY)
         NSLocationWhenInUseUsageDescription: DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.

@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>DARCI_API_BASE_URL</key>
 	<string>$(DARCI_API_BASE_URL)</string>
+	<key>DARCI_APNS_ENVIRONMENT</key>
+	<string>$(APS_ENVIRONMENT)</string>
 	<key>DARCI_SUPABASE_ANON_KEY</key>
 	<string>$(DARCI_SUPABASE_ANON_KEY)</string>
 	<key>DARCI_SUPABASE_URL</key>
