@@ -121,6 +121,30 @@ describe("notificationOutboxService", () => {
           created_at: "2026-04-23T10:00:00.000Z",
           updated_at: "2026-04-23T10:01:00.000Z",
         },
+        {
+          id: "job-push-1",
+          template_id: null,
+          invite_id: null,
+          document_id: "doc-2",
+          billing_payment_request_id: null,
+          notarization_request_id: "request-1",
+          requested_by_user_id: "user-3",
+          job_kind: "status_update",
+          channel: "push",
+          status: "completed",
+          priority: "normal",
+          dedupe_key: "request-1:push",
+          scheduled_for: "2026-04-23T10:00:00.000Z",
+          processing_started_at: null,
+          completed_at: "2026-04-23T10:02:00.000Z",
+          canceled_at: null,
+          last_attempt_at: "2026-04-23T10:02:00.000Z",
+          attempt_count: 1,
+          payload_json: {},
+          metadata: {},
+          created_at: "2026-04-23T10:00:00.000Z",
+          updated_at: "2026-04-23T10:02:00.000Z",
+        },
       ],
       deliveries: [
         {
@@ -175,21 +199,88 @@ describe("notificationOutboxService", () => {
           created_at: "2026-04-23T10:00:00.000Z",
           updated_at: "2026-04-23T10:01:00.000Z",
         },
+        {
+          id: "delivery-3",
+          notification_job_id: "job-push-1",
+          invite_recipient_id: null,
+          target_user_id: "user-3",
+          channel: "push",
+          recipient_address: null,
+          recipient_display_name: null,
+          provider: "apns",
+          provider_message_id: "apns-1",
+          device_push_token_id: "device-1",
+          status: "accepted",
+          attempt_number: 1,
+          queued_at: "2026-04-23T10:00:00.000Z",
+          sent_at: "2026-04-23T10:02:00.000Z",
+          delivered_at: null,
+          failed_at: null,
+          bounced_at: null,
+          opened_at: null,
+          clicked_at: null,
+          accepted_at: "2026-04-23T10:02:00.000Z",
+          error_code: null,
+          error_message: null,
+          metadata: { tokenEnvironment: "sandbox" },
+          created_at: "2026-04-23T10:00:00.000Z",
+          updated_at: "2026-04-23T10:02:00.000Z",
+        },
+        {
+          id: "delivery-4",
+          notification_job_id: "job-push-1",
+          invite_recipient_id: null,
+          target_user_id: "user-3",
+          channel: "push",
+          recipient_address: null,
+          recipient_display_name: null,
+          provider: "apns",
+          provider_message_id: "apns-2",
+          device_push_token_id: "device-1",
+          status: "opened",
+          attempt_number: 1,
+          queued_at: "2026-04-23T10:00:00.000Z",
+          sent_at: "2026-04-23T10:02:00.000Z",
+          delivered_at: "2026-04-23T10:03:00.000Z",
+          failed_at: null,
+          bounced_at: null,
+          opened_at: "2026-04-23T10:03:00.000Z",
+          clicked_at: null,
+          accepted_at: "2026-04-23T10:02:00.000Z",
+          error_code: null,
+          error_message: null,
+          metadata: { tokenEnvironment: "sandbox" },
+          created_at: "2026-04-23T10:00:00.000Z",
+          updated_at: "2026-04-23T10:03:00.000Z",
+        },
       ],
       windowHours: 24,
       generatedAt: "2026-04-23T12:00:00.000Z",
     });
 
-    expect(metrics.jobs.total).toBe(2);
+    expect(metrics.jobs.total).toBe(3);
     expect(metrics.jobs.byStatus.queued).toBe(1);
-    expect(metrics.jobs.byStatus.completed).toBe(1);
+    expect(metrics.jobs.byStatus.completed).toBe(2);
+    expect(metrics.jobs.byChannel.push).toBe(1);
     expect(metrics.jobs.inviteJobs).toBe(1);
     expect(metrics.jobs.inviteJobsByStatus.queued).toBe(1);
 
-    expect(metrics.deliveries.total).toBe(2);
+    expect(metrics.deliveries.total).toBe(4);
     expect(metrics.deliveries.byStatus.queued).toBe(1);
     expect(metrics.deliveries.byStatus.delivered).toBe(1);
+    expect(metrics.deliveries.byStatus.accepted).toBe(1);
+    expect(metrics.deliveries.byStatus.opened).toBe(1);
     expect(metrics.deliveries.inviteDeliveries).toBe(1);
     expect(metrics.deliveries.inviteDeliveriesByStatus.queued).toBe(1);
+    expect(metrics.push).toEqual(
+      expect.objectContaining({
+        jobsQueued: 1,
+        deliveriesQueued: 2,
+        activeInstallations: 1,
+        eligibleUsers: 1,
+        accepted: 1,
+        opens: 1,
+      }),
+    );
   });
 });

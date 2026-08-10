@@ -1204,6 +1204,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /notifications/push-deliveries/{deliveryId}/open:
+    post:
+      summary: Record push notification open
+      description: Records authenticated iOS notification tap attribution for a push delivery. This is an app-open signal, not APNs delivery confirmation.
+      x-roles:
+        - member
+        - notary
+        - admin
+        - service_role
+      parameters:
+        - in: path
+          name: deliveryId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushNotificationOpenRequest"
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushNotificationOpenResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Delivery not found for authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /admin/notification-jobs:
     get:
       summary: List notification jobs
@@ -10680,6 +10733,37 @@ components:
       properties:
         deactivated:
           type: boolean
+    PushNotificationRouteName:
+      type: string
+      enum:
+        - member_session
+        - member_request
+        - notary_request_review
+        - member_document
+        - member_notary_selection
+        - document_review
+        - document_signing
+    PushNotificationOpenRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        route:
+          $ref: "#/components/schemas/PushNotificationRouteName"
+    PushNotificationOpenResponse:
+      type: object
+      properties:
+        opened:
+          type: boolean
+        jobId:
+          type: string
+          format: uuid
+        jobStatus:
+          type: string
+        deliveryId:
+          type: string
+          format: uuid
+        deliveryStatus:
+          type: string
     NotificationJobDeliveryCounts:
       type: object
       properties:
@@ -10835,6 +10919,7 @@ components:
             - ses
             - twilio
             - webhook
+            - apns
         providerMessageId:
           type: string
           nullable: true
@@ -10934,6 +11019,7 @@ components:
             - ses
             - twilio
             - webhook
+            - apns
         providerEventId:
           type: string
           nullable: true
@@ -10994,6 +11080,31 @@ components:
           type: integer
         inviteDeliveriesByStatus:
           $ref: "#/components/schemas/NotificationStatusCounts"
+    NotificationPushMetricsSummary:
+      type: object
+      properties:
+        jobsQueued:
+          type: integer
+        deliveriesQueued:
+          type: integer
+        activeInstallations:
+          type: integer
+        eligibleUsers:
+          type: integer
+        accepted:
+          type: integer
+        permanentTokenFailures:
+          type: integer
+        transientFailures:
+          type: integer
+        retryableFailures:
+          type: integer
+        noTokenSkips:
+          type: integer
+        permissionDeniedRegistrations:
+          type: integer
+        opens:
+          type: integer
     NotificationJobsMetricsResponse:
       type: object
       properties:
@@ -11006,6 +11117,8 @@ components:
           $ref: "#/components/schemas/NotificationJobMetricsSummary"
         deliveries:
           $ref: "#/components/schemas/NotificationDeliveryMetricsSummary"
+        push:
+          $ref: "#/components/schemas/NotificationPushMetricsSummary"
     RunDueNotificationJobsRequest:
       type: object
       properties:
@@ -11073,6 +11186,7 @@ components:
             - ses
             - twilio
             - webhook
+            - apns
         eventType:
           type: string
           enum:

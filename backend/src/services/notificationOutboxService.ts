@@ -63,6 +63,20 @@ export type OutboundMessageEventType =
   | "rendered";
 
 type JsonObject = Record<string, unknown>;
+type PushRouteName =
+  | "member_session"
+  | "member_request"
+  | "notary_request_review"
+  | "member_document"
+  | "member_notary_selection"
+  | "document_review"
+  | "document_signing";
+
+type PushRoutePayload = {
+  route: PushRouteName;
+  requestId?: string;
+  documentId?: string;
+};
 
 type NotificationTemplateRecord = {
   id: string;
@@ -341,6 +355,19 @@ export type NotificationJobsMetrics = {
     byStatus: Record<NotificationDeliveryStatus, number>;
     inviteDeliveries: number;
     inviteDeliveriesByStatus: Record<NotificationDeliveryStatus, number>;
+  };
+  push: {
+    jobsQueued: number;
+    deliveriesQueued: number;
+    activeInstallations: number;
+    eligibleUsers: number;
+    accepted: number;
+    permanentTokenFailures: number;
+    transientFailures: number;
+    retryableFailures: number;
+    noTokenSkips: number;
+    permissionDeniedRegistrations: number;
+    opens: number;
   };
 };
 
@@ -1046,6 +1073,72 @@ const getApnsExpiration = (input: NotificationProviderDispatchInput) => {
   return Math.floor(new Date(input.now).getTime() / 1000) + rawExpirationSeconds;
 };
 
+const pushRouteRequiredIdByName: Record<PushRouteName, "requestId" | "documentId"> = {
+  member_session: "requestId",
+  member_request: "requestId",
+  notary_request_review: "requestId",
+  member_document: "documentId",
+  member_notary_selection: "documentId",
+  document_review: "documentId",
+  document_signing: "documentId",
+};
+
+const pushRouteByTemplateKey: Partial<Record<string, PushRouteName>> = {
+  document_ready_for_review_email: "document_review",
+  member_signing_ready_email: "document_signing",
+  all_signatures_complete_email: "member_document",
+  notary_request_received_email: "notary_request_review",
+  notary_changes_requested_email: "member_request",
+  notary_request_rejected_email: "member_notary_selection",
+  notary_approval_received_email: "member_session",
+  notary_member_contact_received_email: "notary_request_review",
+  meeting_scheduled_confirmation_email: "member_session",
+  in_person_session_started_email: "member_session",
+};
+
+const isPushRouteName = (value: unknown): value is PushRouteName =>
+  typeof value === "string" && value in pushRouteRequiredIdByName;
+
+const isPushRouteIdentifier = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(value.trim());
+
+const getPushRoutePayload = (input: NotificationProviderDispatchInput): PushRoutePayload | null => {
+  const payload = input.job.payload_json as Record<string, unknown>;
+  const payloadApnsData = objectOrEmpty(payload.apnsData);
+  const jobMetadata = objectOrEmpty(input.job.metadata);
+  const templateKey = input.template?.template_key ?? jobMetadata.templateKey;
+  const routeCandidate = isPushRouteName(payloadApnsData.route)
+    ? payloadApnsData.route
+    : typeof templateKey === "string"
+      ? pushRouteByTemplateKey[templateKey]
+      : undefined;
+
+  if (!routeCandidate) {
+    return null;
+  }
+
+  const requiredIdentifier = pushRouteRequiredIdByName[routeCandidate];
+  const identifierValue =
+    requiredIdentifier === "requestId"
+      ? (payload.requestId ??
+        payloadApnsData.requestId ??
+        input.job.notarization_request_id ??
+        jobMetadata.requestId)
+      : (payload.documentId ?? payloadApnsData.documentId ?? input.job.document_id ?? jobMetadata.documentId);
+
+  if (!isPushRouteIdentifier(identifierValue)) {
+    throw new NotificationProviderDispatchError(
+      "invalid_push_route",
+      `Push route ${routeCandidate} requires ${requiredIdentifier}`,
+    );
+  }
+
+  return {
+    route: routeCandidate,
+    [requiredIdentifier]: identifierValue.trim(),
+  } as PushRoutePayload;
+};
+
 const buildApnsAlertPayload = (input: NotificationProviderDispatchInput) => {
   if (!input.template?.subject_template || !input.template.body_template) {
     throw new NotificationProviderDispatchError(
@@ -1064,14 +1157,14 @@ const buildApnsAlertPayload = (input: NotificationProviderDispatchInput) => {
     );
   }
 
-  const customData = objectOrEmpty(payload.apnsData);
+  const routePayload = getPushRoutePayload(input);
   return {
     aps: {
       alert: { title, body },
       sound: "default",
     },
     notificationId: input.delivery.id,
-    ...customData,
+    ...(routePayload ?? {}),
   } satisfies JsonObject;
 };
 
@@ -1729,6 +1822,8 @@ const computeNotificationJobsMetrics = (input: {
   const inviteDeliveriesByStatus = emptyDeliveryStatusCounts();
 
   const inviteJobIds = new Set<string>();
+  const pushEligibleUserIds = new Set<string>();
+  const pushInstallationIds = new Set<string>();
 
   for (const job of input.jobs) {
     jobsByStatus[job.status] += 1;
@@ -1747,6 +1842,15 @@ const computeNotificationJobsMetrics = (input: {
 
   for (const delivery of input.deliveries) {
     deliveriesByStatus[delivery.status] += 1;
+
+    if (delivery.channel === "push") {
+      if (delivery.target_user_id) {
+        pushEligibleUserIds.add(delivery.target_user_id);
+      }
+      if (delivery.device_push_token_id) {
+        pushInstallationIds.add(delivery.device_push_token_id);
+      }
+    }
 
     if (inviteJobIds.has(delivery.notification_job_id)) {
       inviteDeliveriesByStatus[delivery.status] += 1;
@@ -1770,6 +1874,42 @@ const computeNotificationJobsMetrics = (input: {
         inviteJobIds.has(delivery.notification_job_id),
       ).length,
       inviteDeliveriesByStatus,
+    },
+    push: {
+      jobsQueued: input.jobs.filter((job) => job.channel === "push").length,
+      deliveriesQueued: input.deliveries.filter((delivery) => delivery.channel === "push").length,
+      activeInstallations: pushInstallationIds.size,
+      eligibleUsers: pushEligibleUserIds.size,
+      accepted: input.deliveries.filter(
+        (delivery) => delivery.channel === "push" && delivery.status === "accepted",
+      ).length,
+      permanentTokenFailures: input.deliveries.filter(
+        (delivery) =>
+          delivery.channel === "push" &&
+          objectOrEmpty(delivery.metadata).permanentTokenFailure === true,
+      ).length,
+      transientFailures: input.deliveries.filter((delivery) => {
+        const metadata = objectOrEmpty(delivery.metadata);
+        return (
+          delivery.channel === "push" &&
+          delivery.status === "failed" &&
+          metadata.permanentTokenFailure !== true
+        );
+      }).length,
+      retryableFailures: input.deliveries.filter(
+        (delivery) =>
+          delivery.channel === "push" && objectOrEmpty(delivery.metadata).retryable === true,
+      ).length,
+      noTokenSkips: input.jobs.filter(
+        (job) => job.channel === "push" && objectOrEmpty(job.metadata).skipReason === "no_eligible_token",
+      ).length,
+      permissionDeniedRegistrations: input.deliveries.filter(
+        (delivery) =>
+          delivery.channel === "push" && objectOrEmpty(delivery.metadata).permissionStatus === "denied",
+      ).length,
+      opens: input.deliveries.filter(
+        (delivery) => delivery.channel === "push" && delivery.opened_at !== null,
+      ).length,
     },
   };
 };
@@ -2172,6 +2312,47 @@ export const recordNotificationDeliveryEvent = async (input: {
     deliveryId: updatedDelivery.id,
     deliveryStatus: updatedDelivery.status,
   };
+};
+
+export const recordPushNotificationOpen = async (input: {
+  deliveryId: string;
+  userId: string;
+  route?: string | null | undefined;
+}) => {
+  assertSupabaseConfigured();
+
+  const { data, error } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select(notificationDeliverySelect)
+    .eq("id", input.deliveryId)
+    .eq("channel", "push")
+    .eq("target_user_id", input.userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  const delivery = (data as NotificationDeliveryRecord | null) ?? null;
+  if (!delivery) {
+    throw new NotificationOutboxServiceError(404, "Push notification delivery not found");
+  }
+
+  return recordNotificationDeliveryEvent({
+    deliveryId: input.deliveryId,
+    provider: "apns",
+    providerMessageId: delivery.provider_message_id,
+    providerEventId: `mobile-open:${input.deliveryId}`,
+    eventType: "opened",
+    payload: {
+      route: input.route ?? null,
+      source: "ios_notification_tap",
+    },
+    metadata: {
+      source: "ios_notification_tap",
+    },
+  });
 };
 
 export const recordNotificationDeliveryEventByProviderMessageId = async (input: {

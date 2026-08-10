@@ -73,6 +73,50 @@ xcodegen generate
 xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' test
 ```
 
+## Push Supabase Migrations To Staging
+
+Use this after adding a new file under `supabase/migrations/` and before staging validation needs the schema or seed data.
+
+```sh
+cd /Users/jorge/Desktop/darci
+set -e
+set -o pipefail
+set -a
+source .env.staging
+set +a
+
+supabase migration list --db-url "$DATABASE_URL" | tail -40
+supabase db push --db-url "$DATABASE_URL" --dry-run
+supabase db push --db-url "$DATABASE_URL" --yes
+supabase migration list --db-url "$DATABASE_URL" | tail -40
+```
+
+For one-off verification after a push-template migration:
+
+```sh
+cd /Users/jorge/Desktop/darci/backend
+DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config - <<'NODE'
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+	auth: { persistSession: false },
+});
+
+(async () => {
+	const { data, error } = await supabase
+		.from('notification_templates')
+		.select('template_key, channel, subject_template, is_active')
+		.eq('channel', 'push')
+		.order('template_key', { ascending: true });
+
+	if (error) throw error;
+	console.log(JSON.stringify({ count: data.length, rows: data }, null, 2));
+})().catch((error) => {
+	console.error(error.message || error);
+	process.exit(1);
+});
+NODE
+```
+
 If the simulator gets stuck during tests:
 
 ```sh

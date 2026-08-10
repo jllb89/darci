@@ -1,7 +1,7 @@
 # Push Notification Implementation Roadmap
 
 Last updated: 2026-08-10
-Status: Phase 4 complete; Phase 5 channel-aware queue fanout next
+Status: Phase 7 implementation complete locally; Phase 8 test plan next
 
 Related:
 
@@ -569,7 +569,7 @@ Exit criteria:
 
 ## Phase 5: Channel-Aware Queue Fanout
 
-Phase status: **Implementation complete locally on 2026-08-10; migration/deploy pending**
+Phase status: **Complete on 2026-08-10; staging fanout smoke created email and APNs push jobs, then canceled the smoke rows before dispatch**
 
 Estimated duration: 1 to 1.5 days
 
@@ -595,11 +595,13 @@ Exit criteria:
 
 ## Phase 6: Push Templates and Deep Links
 
+Phase status: **Complete on 2026-08-10; Wave 1 templates are seeded and APNs payloads now use allowlisted native routes with typed identifiers**
+
 Estimated duration: 1 day
 
 Tasks:
 
-1. Seed Wave 1 push templates with short title/body copy.
+1. [x] Seed Wave 1 push templates with short title/body copy.
 2. Define a typed route contract, for example:
 
 ```json
@@ -610,46 +612,48 @@ Tasks:
 }
 ```
 
-3. Allowlist route names and required identifiers server-side and client-side.
-4. Keep document names generic when titles or names may reveal sensitive legal or health information on a lock screen.
-5. Do not send contact details, OTPs, codes, signatures, identity data, location, or document contents.
-6. Add collapse identifiers only for replaceable state updates, not distinct action requests.
-7. Start without badge counts unless there is a canonical unread source; stale badges are worse than no badges.
-8. Use the default sound and active interruption level for the first release. Reserve time-sensitive interruption for a separately approved policy.
+3. [x] Allowlist route names and required identifiers server-side and client-side.
+4. [x] Keep document names generic when titles or names may reveal sensitive legal or health information on a lock screen.
+5. [x] Do not send contact details, OTPs, codes, signatures, identity data, location, or document contents.
+6. [x] Add collapse identifiers only for replaceable state updates, not distinct action requests.
+7. [x] Start without badge counts unless there is a canonical unread source; stale badges are worse than no badges.
+8. [x] Use the default sound and active interruption level for the first release. Reserve time-sensitive interruption for a separately approved policy.
 
 Exit criteria:
 
-1. Every Wave 1 push renders within APNs limits.
-2. Every route is validated and opens a real native destination.
-3. Lock-screen copy passes privacy review.
+1. [x] Every Wave 1 push renders within APNs limits.
+2. [x] Every route is validated and opens a real native destination.
+3. [x] Lock-screen copy passes privacy review.
 
 ## Phase 7: Preferences, Observability, and Admin Read Models
+
+Phase status: **Implementation complete locally on 2026-08-10 for permission-gated delivery, redacted admin details, push metrics, and tap attribution; account-level preference management API/UI remains a follow-up**
 
 Estimated duration: 1 to 1.5 days
 
 Tasks:
 
-1. Extend notification preferences to `push` by transactional category.
-2. Treat iOS permission as a device capability and DARCi preference as an account choice; both must allow delivery.
-3. Expose redacted push delivery details in notification admin views.
+1. [x] Extend notification preferences to `push` by transactional category.
+2. [ ] Treat iOS permission as a device capability and DARCi preference as an account choice; both must allow delivery. The schema supports this, and permission gating is active; account preference read/write APIs and UI are still needed.
+3. [x] Expose redacted push delivery details in notification admin views.
 4. Add metrics for:
-   - eligible users
-   - active installations
-   - push jobs queued
-   - APNs accepted
-   - permanent token failures
-   - transient failures and retries
-   - no-token skips
-   - permission-denied registrations
-5. Keep email and push metrics separate.
-6. Record app-open attribution when a tap includes `notificationId`; do not call this APNs delivery confirmation.
-7. Add Sentry context for route parsing and registration failures without recording tokens.
+   - [x] eligible users
+   - [x] active installations
+   - [x] push jobs queued
+   - [x] APNs accepted
+   - [x] permanent token failures
+   - [x] transient failures and retries
+   - [x] no-token skips
+   - [x] permission-denied registrations
+5. [x] Keep email and push metrics separate.
+6. [x] Record app-open attribution when a tap includes `notificationId`; do not call this APNs delivery confirmation.
+7. [x] Add Sentry context for route parsing and registration failures without recording tokens.
 
 Exit criteria:
 
-1. Operators can trace business event to email and push jobs.
-2. Tokens remain redacted from logs and admin APIs.
-3. APNs acceptance and notification-open metrics are named accurately.
+1. [x] Operators can trace business event to email and push jobs.
+2. [x] Tokens remain redacted from logs and admin APIs.
+3. [x] APNs acceptance and notification-open metrics are named accurately.
 
 ## Phase 8: Test Plan
 

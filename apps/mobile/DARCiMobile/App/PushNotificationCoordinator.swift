@@ -171,6 +171,25 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
         }
     }
 
+    private func recordOpenIfPossible(for route: PushNotificationRoute) async {
+        guard let accessToken = currentSession?.accessToken,
+              let notificationId = route.notificationId,
+              notificationId.isEmpty == false else {
+            return
+        }
+
+        do {
+            _ = try await apiClient.recordOpen(
+                deliveryId: notificationId,
+                request: PushNotificationOpenRequest(route: route.routeName),
+                accessToken: accessToken
+            )
+            Self.diagnostic("push_open_recorded route=\(route.routeName)")
+        } catch {
+            Self.diagnostic("push_open_record_failed route=\(route.routeName) error=\(String(describing: error))")
+        }
+    }
+
     private func didRegisterForRemoteNotifications(deviceToken: Data) {
         currentDeviceToken = Self.hexString(from: deviceToken)
         Self.diagnostic("apns_token_received")
@@ -361,6 +380,7 @@ extension PushNotificationCoordinator: @preconcurrency UNUserNotificationCenterD
             return
         }
 
+        await recordOpenIfPossible(for: route)
         pendingRoute = route
     }
 }

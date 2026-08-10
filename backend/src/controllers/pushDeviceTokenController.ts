@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { getUserIdBySupabaseId } from "../services/documentService";
 import {
+  NotificationOutboxServiceError,
+  recordPushNotificationOpen,
+} from "../services/notificationOutboxService";
+import {
   deactivatePushDeviceInstallation,
   PushDeviceTokenServiceError,
   registerPushDeviceToken,
@@ -13,6 +17,10 @@ const allowedBundleId = process.env.APNS_BUNDLE_ID?.trim() || "com.illuminote.da
 
 const installationParamsSchema = z.object({
   installationId: z.string().uuid(),
+});
+
+const notificationDeliveryParamsSchema = z.object({
+  deliveryId: z.string().uuid(),
 });
 
 const pushEnvironmentSchema = z.enum(["sandbox", "production"]);
@@ -42,10 +50,32 @@ const permissionBodySchema = z.object({
   buildNumber: optionalNonEmptyStringSchema,
 }).strict();
 
+const pushOpenBodySchema = z.object({
+  route: z
+    .enum([
+      "member_session",
+      "member_request",
+      "notary_request_review",
+      "member_document",
+      "member_notary_selection",
+      "document_review",
+      "document_signing",
+    ])
+    .optional(),
+}).strict();
+
 const sendServiceError = (res: Response, error: unknown) => {
   if (error instanceof PushDeviceTokenServiceError) {
     return res.status(error.statusCode).json({
       error: error.code,
+      message: error.message,
+    });
+  }
+
+  if (error instanceof NotificationOutboxServiceError) {
+    const errorCode = error.statusCode === 404 ? "not_found" : "bad_request";
+    return res.status(error.statusCode).json({
+      error: errorCode,
       message: error.message,
     });
   }
@@ -161,6 +191,38 @@ export const deactivatePushDevice = async (req: Request, res: Response) => {
     });
 
     return res.status(200).json(result);
+  } catch (error) {
+    return sendServiceError(res, error);
+  }
+};
+
+export const recordPushNotificationOpenEvent = async (req: Request, res: Response) => {
+  const parsedParams = notificationDeliveryParamsSchema.safeParse(req.params ?? {});
+  if (!parsedParams.success) {
+    return sendValidationError(res, parsedParams.error);
+  }
+
+  const parsedBody = pushOpenBodySchema.safeParse(req.body ?? {});
+  if (!parsedBody.success) {
+    return sendValidationError(res, parsedBody.error);
+  }
+
+  try {
+    const userId = await resolveAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({
+        error: "unauthorized",
+        message: "Authenticated user is not linked to a DARCi user",
+      });
+    }
+
+    const result = await recordPushNotificationOpen({
+      deliveryId: parsedParams.data.deliveryId,
+      userId,
+      route: parsedBody.data.route ?? null,
+    });
+
+    return res.status(200).json({ opened: true, ...result });
   } catch (error) {
     return sendServiceError(res, error);
   }

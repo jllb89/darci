@@ -22,7 +22,7 @@ const listNotificationJobsQuerySchema = z.object({
       "suppressed",
     ])
     .optional(),
-  channel: z.enum(["email", "sms", "in_app"]).optional(),
+  channel: z.enum(["email", "sms", "in_app", "push"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

@@ -718,7 +718,15 @@ describe("notification outbox Resend runtime", () => {
     seedOutbox({
       job: {
         channel: "push",
-        payload_json: { recipientName: "Casey", apnsData: { route: "member_request", requestId: "request-1" } },
+        payload_json: {
+          recipientName: "Casey",
+          apnsData: {
+            route: "member_request",
+            requestId: "request-1",
+            url: "https://example.test/sensitive",
+            accessToken: "secret",
+          },
+        },
       },
       delivery: {
         channel: "push",
@@ -765,6 +773,8 @@ describe("notification outbox Resend runtime", () => {
         }),
       }),
     );
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("url");
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("accessToken");
     expect(supabaseMocks.state.notification_deliveries[0]).toEqual(
       expect.objectContaining({
         status: "accepted",

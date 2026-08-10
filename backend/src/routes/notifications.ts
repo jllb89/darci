@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   deactivatePushDevice,
+  recordPushNotificationOpenEvent,
   registerPushDevice,
   updatePushDevicePermissionStatus,
 } from "../controllers/pushDeviceTokenController";
@@ -24,6 +25,12 @@ router.delete(
   "/devices/:installationId",
   requireRole(["member", "notary", "admin", "service_role"]),
   deactivatePushDevice,
+);
+
+router.post(
+  "/push-deliveries/:deliveryId/open",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  recordPushNotificationOpenEvent,
 );
 
 export default router;

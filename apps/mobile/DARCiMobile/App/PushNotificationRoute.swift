@@ -19,6 +19,38 @@ enum PushNotificationRoute: Equatable, Sendable {
     case documentReview(documentId: String, notificationId: String?)
     case documentSigning(documentId: String, notificationId: String?)
 
+    var routeName: String {
+        switch self {
+        case .memberSession:
+            return "member_session"
+        case .memberRequest:
+            return "member_request"
+        case .notaryRequestReview:
+            return "notary_request_review"
+        case .memberDocument:
+            return "member_document"
+        case .memberNotarySelection:
+            return "member_notary_selection"
+        case .documentReview:
+            return "document_review"
+        case .documentSigning:
+            return "document_signing"
+        }
+    }
+
+    var notificationId: String? {
+        switch self {
+        case .memberSession(_, let notificationId),
+             .memberRequest(_, let notificationId),
+             .notaryRequestReview(_, let notificationId),
+             .memberDocument(_, let notificationId),
+             .memberNotarySelection(_, let notificationId),
+             .documentReview(_, let notificationId),
+             .documentSigning(_, let notificationId):
+            return notificationId
+        }
+    }
+
     init?(userInfo: [AnyHashable: Any]) {
         let keys = Set(userInfo.keys.compactMap { $0 as? String })
         guard keys.isDisjoint(with: Self.forbiddenKeys) else {

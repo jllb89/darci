@@ -81,6 +81,18 @@ struct PushDeviceDeactivationResponse: Decodable, Equatable, Sendable {
     let deactivated: Bool
 }
 
+struct PushNotificationOpenRequest: Encodable, Equatable, Sendable {
+    let route: String?
+}
+
+struct PushNotificationOpenResponse: Decodable, Equatable, Sendable {
+    let opened: Bool
+    let jobId: String
+    let jobStatus: String
+    let deliveryId: String
+    let deliveryStatus: String
+}
+
 struct PushDevice: Decodable, Equatable, Sendable {
     let id: String
     let installationId: String

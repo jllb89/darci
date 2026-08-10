@@ -533,15 +533,16 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     func testPushNotificationRouteParsesAllowlistedRoutes() throws {
-        XCTAssertEqual(
-            PushNotificationRoute(userInfo: [
-                "aps": ["alert": ["title": "Ready"]],
-                "route": "notary_request_review",
-                "requestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                "notificationId": "delivery-1",
-            ]),
-            .notaryRequestReview(requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", notificationId: "delivery-1")
-        )
+        let notaryRoute = PushNotificationRoute(userInfo: [
+            "aps": ["alert": ["title": "Ready"]],
+            "route": "notary_request_review",
+            "requestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "notificationId": "delivery-1",
+        ])
+
+        XCTAssertEqual(notaryRoute, .notaryRequestReview(requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", notificationId: "delivery-1"))
+        XCTAssertEqual(notaryRoute?.routeName, "notary_request_review")
+        XCTAssertEqual(notaryRoute?.notificationId, "delivery-1")
         XCTAssertEqual(
             PushNotificationRoute(userInfo: [
                 "route": "document_signing",
@@ -627,6 +628,43 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(response.device.installationId, installationId)
         XCTAssertEqual(response.device.environment, .sandbox)
         XCTAssertEqual(response.device.permissionStatus, .authorized)
+    }
+
+    func testPushDeviceAPIClientRecordsNotificationOpenWithBearerToken() async throws {
+        let deliveryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/notifications/push-deliveries/\(deliveryId)/open")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(self.requestBodyData(from: request))
+            let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            XCTAssertEqual(payload?["route"] as? String, "member_session")
+
+            return (
+                try XCTUnwrap(HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )),
+                Data(#"{"opened":true,"jobId":"job-1","jobStatus":"completed","deliveryId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","deliveryStatus":"opened"}"#.utf8)
+            )
+        }
+        let client = PushDeviceAPIClient(authClient: AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        ))
+
+        let response = try await client.recordOpen(
+            deliveryId: deliveryId,
+            request: PushNotificationOpenRequest(route: "member_session"),
+            accessToken: "access-token"
+        )
+
+        XCTAssertTrue(response.opened)
+        XCTAssertEqual(response.deliveryStatus, "opened")
     }
 
     @MainActor

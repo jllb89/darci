@@ -4,6 +4,7 @@ protocol PushDeviceAPIProviding: Sendable {
     func registerDevice(installationId: String, request: PushDeviceRegistrationRequest, accessToken: String) async throws -> PushDeviceResponse
     func updatePermission(installationId: String, request: PushDevicePermissionRequest, accessToken: String) async throws -> PushDeviceResponse
     func deactivateDevice(installationId: String, accessToken: String) async throws -> PushDeviceDeactivationResponse
+    func recordOpen(deliveryId: String, request: PushNotificationOpenRequest, accessToken: String) async throws -> PushNotificationOpenResponse
 }
 
 struct PushDeviceAPIClient: PushDeviceAPIProviding, Sendable {
@@ -32,6 +33,14 @@ struct PushDeviceAPIClient: PushDeviceAPIProviding, Sendable {
     func deactivateDevice(installationId: String, accessToken: String) async throws -> PushDeviceDeactivationResponse {
         try await authClient.delete(
             path: "/notifications/devices/\(installationId)",
+            accessToken: accessToken
+        )
+    }
+
+    func recordOpen(deliveryId: String, request: PushNotificationOpenRequest, accessToken: String) async throws -> PushNotificationOpenResponse {
+        try await authClient.post(
+            path: "/notifications/push-deliveries/\(deliveryId)/open",
+            body: request,
             accessToken: accessToken
         )
     }
