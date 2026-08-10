@@ -98,11 +98,13 @@ struct AppRootView: View {
         .onChange(of: launchPhase) { _, phase in
             guard phase == .signedIn else { return }
             pushCoordinator.activate(session: sessionCoordinator.currentSession)
+            presentPushPermissionPromptIfEligible()
             openPendingMemberSessionIfPossible()
             openPendingPushRouteIfPossible()
         }
         .onChange(of: sessionCoordinator.currentSession) { _, session in
             pushCoordinator.activate(session: session)
+            presentPushPermissionPromptIfEligible()
             openPendingPushRouteIfPossible()
         }
         .onChange(of: scenePhase) { _, phase in
