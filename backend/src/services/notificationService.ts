@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import {
   resolveEmailNotificationProvider,
+  resolvePushNotificationProvider,
   resolveSmsNotificationProvider,
 } from "./notificationProviderPolicy";
 
@@ -11,7 +13,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-type NotificationChannel = "email" | "sms" | "in_app";
+type NotificationChannel = "email" | "sms" | "in_app" | "push";
 type NotificationJobKind =
   | "invite"
   | "invite_reminder"
@@ -36,6 +38,14 @@ type NotificationJobRecord = {
 type NotificationDeliveryRecord = {
   id: string;
   provider: string | null;
+};
+
+type DevicePushTokenRecord = {
+  id: string;
+  user_id: string;
+  environment: "sandbox" | "production";
+  app_bundle_id: string;
+  permission_status: string;
 };
 
 type FallbackNotificationTemplate = {
@@ -83,6 +93,7 @@ type NotificationRecipient = {
   email?: string | null;
   phone?: string | null;
   displayName?: string | null;
+  devicePushTokenId?: string | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -104,6 +115,7 @@ type QueueNotificationResult = {
   deliveryCount: number;
   existing: boolean;
   jobIds?: string[];
+  channelResults?: Partial<Record<NotificationChannel, QueueNotificationResult>>;
 };
 
 const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate> = {
@@ -710,11 +722,15 @@ const resolveRequestedByUserId = async (supabaseUserId?: string) => {
   return (data?.id as string | undefined) ?? null;
 };
 
-const getActiveTemplateByKey = async (templateKey: string) => {
+const getActiveTemplateByKey = async (
+  templateKey: string,
+  channel: NotificationChannel = "email",
+) => {
   const loadTemplate = () => supabaseAdmin
     .from("notification_templates")
     .select("id, template_key, channel, trigger_event")
     .eq("template_key", templateKey)
+    .eq("channel", channel)
     .eq("locale", "en-US")
     .eq("is_active", true)
     .limit(1)
@@ -730,7 +746,7 @@ const getActiveTemplateByKey = async (templateKey: string) => {
     return data as NotificationTemplateRecord;
   }
 
-  const fallbackTemplate = fallbackNotificationTemplates[templateKey];
+  const fallbackTemplate = channel === "email" ? fallbackNotificationTemplates[templateKey] : null;
   if (!fallbackTemplate) {
     return null;
   }
@@ -767,6 +783,32 @@ const getNotificationJobByDedupeKey = async (dedupeKey: string) => {
   }
 
   return (data as NotificationJobRecord | null) ?? null;
+};
+
+const listActivePushDeviceTokensForUserIds = async (userIds: string[]) => {
+  const uniqueUserIds = Array.from(
+    new Set(userIds.map((userId) => userId.trim()).filter((userId) => userId.length > 0)),
+  );
+  if (uniqueUserIds.length === 0) {
+    return [] as DevicePushTokenRecord[];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("device_push_tokens")
+    .select("id, user_id, environment, app_bundle_id, permission_status")
+    .in("user_id", uniqueUserIds)
+    .eq("platform", "ios")
+    .eq("provider", "apns")
+    .eq("is_active", true)
+    .not("device_token", "is", null)
+    .in("permission_status", ["authorized", "provisional"])
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as DevicePushTokenRecord[];
 };
 
 const insertNotificationJob = async (input: {
@@ -827,7 +869,7 @@ const insertNotificationDeliveries = async (input: {
   const eventType = input.channel === "in_app" ? "delivered" : "queued";
 
   const getRecipientAddress = (recipient: NotificationRecipient) => {
-    if (input.channel === "in_app") {
+    if (input.channel === "in_app" || input.channel === "push") {
       return null;
     }
 
@@ -853,12 +895,17 @@ const insertNotificationDeliveries = async (input: {
       return resolveSmsNotificationProvider({ rolloutKey }).provider;
     }
 
+    if (input.channel === "push") {
+      return resolvePushNotificationProvider({ rolloutKey }).provider;
+    }
+
     return "internal";
   };
 
   const deliveriesToInsert = input.recipients.map((recipient, index) => ({
     notification_job_id: input.jobId,
     target_user_id: recipient.targetUserId ?? null,
+    device_push_token_id: input.channel === "push" ? (recipient.devicePushTokenId ?? null) : null,
     channel: input.channel,
     recipient_address: getRecipientAddress(recipient),
     recipient_display_name: recipient.displayName ?? null,
@@ -913,33 +960,77 @@ const insertNotificationDeliveries = async (input: {
   return deliveries;
 };
 
-const queueTemplatedNotification = async (
-  input: QueueTemplatedNotificationInput,
+const filterRecipientsForChannel = (
+  recipients: NotificationRecipient[],
+  channel: NotificationChannel,
+) => recipients.filter((recipient) => {
+  if (channel === "email") {
+    return Boolean(recipient.email?.trim());
+  }
+
+  if (channel === "sms") {
+    return Boolean(recipient.phone?.trim());
+  }
+
+  if (channel === "push") {
+    return Boolean(recipient.targetUserId && recipient.devicePushTokenId);
+  }
+
+  return Boolean(recipient.targetUserId);
+});
+
+const buildPushRecipients = async (recipients: NotificationRecipient[]) => {
+  const recipientsByUserId = new Map<string, NotificationRecipient>();
+  for (const recipient of recipients) {
+    const targetUserId = recipient.targetUserId?.trim();
+    if (!targetUserId || recipientsByUserId.has(targetUserId)) {
+      continue;
+    }
+
+    recipientsByUserId.set(targetUserId, recipient);
+  }
+
+  const tokens = await listActivePushDeviceTokensForUserIds(Array.from(recipientsByUserId.keys()));
+  return tokens.map((token) => {
+    const sourceRecipient = recipientsByUserId.get(token.user_id);
+    return {
+      targetUserId: token.user_id,
+      displayName: sourceRecipient?.displayName ?? null,
+      devicePushTokenId: token.id,
+      metadata: {
+        ...(sourceRecipient?.metadata ?? {}),
+        tokenEnvironment: token.environment,
+        appBundleId: token.app_bundle_id,
+        permissionStatus: token.permission_status,
+      },
+    } satisfies NotificationRecipient;
+  });
+};
+
+const queueSingleChannelTemplatedNotification = async (
+  input: QueueTemplatedNotificationInput & {
+    channel: NotificationChannel;
+    dedupeKey?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
+    recipients: NotificationRecipient[];
+  },
 ): Promise<QueueNotificationResult | null> => {
-  const template = await getActiveTemplateByKey(input.templateKey);
+  const template = await getActiveTemplateByKey(input.templateKey, input.channel);
   if (!template) {
     console.warn("Notification template not found", {
       templateKey: input.templateKey,
+      channel: input.channel,
     });
     return null;
   }
 
   const requestedByUserId = await resolveRequestedByUserId(input.requestedBySupabaseUserId);
-  const recipients = input.recipients.filter((recipient) => {
-    if (template.channel === "email") {
-      return Boolean(recipient.email?.trim());
-    }
-
-    if (template.channel === "sms") {
-      return Boolean(recipient.phone?.trim());
-    }
-
-    return Boolean(recipient.targetUserId);
-  });
+  const recipients = filterRecipientsForChannel(input.recipients, template.channel);
 
   if (recipients.length === 0) {
     console.warn("Notification recipients missing delivery targets", {
       templateKey: input.templateKey,
+      channel: template.channel,
       documentId: input.documentId ?? null,
       billingPaymentRequestId: input.billingPaymentRequestId ?? null,
       notarizationRequestId: input.notarizationRequestId ?? null,
@@ -990,6 +1081,90 @@ const queueTemplatedNotification = async (
     }
 
     throw error;
+  }
+};
+
+const queuePushCompanionNotification = async (input: {
+  source: QueueTemplatedNotificationInput;
+  emailJobId: string;
+  eventCorrelationId: string;
+}) => {
+  if (!input.source.dedupeKey) {
+    return null;
+  }
+
+  const pushTemplate = await getActiveTemplateByKey(input.source.templateKey, "push");
+  if (!pushTemplate) {
+    return null;
+  }
+
+  const pushRecipients = await buildPushRecipients(input.source.recipients);
+  if (pushRecipients.length === 0) {
+    return null;
+  }
+
+  return queueSingleChannelTemplatedNotification({
+    ...input.source,
+    channel: "push",
+    dedupeKey: `${input.source.dedupeKey}:push`,
+    recipients: pushRecipients,
+    metadata: {
+      ...(input.source.metadata ?? {}),
+      eventCorrelationId: input.eventCorrelationId,
+      emailJobId: input.emailJobId,
+      sourceEmailTemplateKey: input.source.templateKey,
+      source: "runtime_notification_service_push_fanout",
+    },
+  });
+};
+
+const queueTemplatedNotification = async (
+  input: QueueTemplatedNotificationInput,
+): Promise<QueueNotificationResult | null> => {
+  const eventCorrelationId =
+    typeof input.metadata?.eventCorrelationId === "string"
+      ? input.metadata.eventCorrelationId
+      : randomUUID();
+
+  const emailResult = await queueSingleChannelTemplatedNotification({
+    ...input,
+    channel: "email",
+    metadata: {
+      ...(input.metadata ?? {}),
+      eventCorrelationId,
+    },
+  });
+
+  if (!emailResult || emailResult.existing) {
+    return emailResult;
+  }
+
+  try {
+    const pushResult = await queuePushCompanionNotification({
+      source: input,
+      emailJobId: emailResult.jobId,
+      eventCorrelationId,
+    });
+
+    if (!pushResult) {
+      return emailResult;
+    }
+
+    return {
+      ...emailResult,
+      jobIds: [emailResult.jobId, pushResult.jobId],
+      channelResults: {
+        email: emailResult,
+        push: pushResult,
+      },
+    };
+  } catch (error) {
+    logNotificationFailure("push_fanout", error, {
+      templateKey: input.templateKey,
+      dedupeKey: input.dedupeKey ?? null,
+      emailJobId: emailResult.jobId,
+    });
+    return emailResult;
   }
 };
 

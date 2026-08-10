@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import {
   getDocumentById,
@@ -14,7 +15,10 @@ import {
   type InviteTokenStatus,
 } from "./inviteClaimService";
 import { recordAuditEvent } from "./auditService";
-import { resolveEmailNotificationProvider } from "./notificationProviderPolicy";
+import {
+  resolveEmailNotificationProvider,
+  resolvePushNotificationProvider,
+} from "./notificationProviderPolicy";
 import type { RequestRole } from "./userRoleService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -36,7 +40,15 @@ type UserRow = {
 type NotificationTemplateRow = {
   id: string;
   template_key: string;
-  channel: "email" | "sms" | "in_app";
+  channel: "email" | "sms" | "in_app" | "push";
+};
+
+type DevicePushTokenRow = {
+  id: string;
+  user_id: string;
+  environment: "sandbox" | "production";
+  app_bundle_id: string;
+  permission_status: string;
 };
 
 type DocumentInviteRow = {
@@ -371,6 +383,7 @@ export type InviteNotificationDispatch = {
   deliveryId: string;
   templateId: string;
   templateKey: string;
+  pushJobIds?: string[];
 };
 
 export type DocumentInviteMutationResult = {
@@ -673,11 +686,15 @@ const findUserByEmail = async (email: string) => {
   return (data as UserRow | null) ?? null;
 };
 
-const getActiveTemplateByKey = async (templateKey: string) => {
+const getActiveTemplateByKey = async (
+  templateKey: string,
+  channel: NotificationTemplateRow["channel"] = "email",
+) => {
   const { data, error } = await supabaseAdmin
     .from("notification_templates")
     .select("id, template_key, channel")
     .eq("template_key", templateKey)
+    .eq("channel", channel)
     .eq("locale", "en-US")
     .eq("is_active", true)
     .limit(1)
@@ -688,6 +705,30 @@ const getActiveTemplateByKey = async (templateKey: string) => {
   }
 
   return (data as NotificationTemplateRow | null) ?? null;
+};
+
+const listActivePushDeviceTokensForUserId = async (userId: string | null) => {
+  const normalizedUserId = userId?.trim();
+  if (!normalizedUserId) {
+    return [] as DevicePushTokenRow[];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("device_push_tokens")
+    .select("id, user_id, environment, app_bundle_id, permission_status")
+    .eq("user_id", normalizedUserId)
+    .eq("platform", "ios")
+    .eq("provider", "apns")
+    .eq("is_active", true)
+    .not("device_token", "is", null)
+    .in("permission_status", ["authorized", "provisional"])
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as DevicePushTokenRow[];
 };
 
 const loadInviteRowsByIds = async (inviteIds: string[]) => {
@@ -968,6 +1009,10 @@ const queueInviteNotification = async (input: {
   }
 
   const queuedAt = new Date().toISOString();
+  const eventCorrelationId =
+    typeof input.metadata?.eventCorrelationId === "string"
+      ? input.metadata.eventCorrelationId
+      : randomUUID();
   const provider = resolveDocumentInviteEmailProvider({
     rolloutKey:
       input.targetUserId ??
@@ -990,6 +1035,7 @@ const queueInviteNotification = async (input: {
       payload_json: input.payload,
       metadata: {
         ...(input.metadata ?? {}),
+        eventCorrelationId,
         source: "document_invite_service",
         templateKey: input.templateKey,
       },
@@ -1016,6 +1062,7 @@ const queueInviteNotification = async (input: {
       queued_at: queuedAt,
       metadata: {
         ...(input.metadata ?? {}),
+        eventCorrelationId,
         source: "document_invite_service",
         templateKey: input.templateKey,
       },
@@ -1045,12 +1092,156 @@ const queueInviteNotification = async (input: {
     throw new Error(eventError.message);
   }
 
+  let pushJobIds: string[] = [];
+  try {
+    pushJobIds = await queueInvitePushCompanion({
+      ...input,
+      emailJobId: (jobData as NotificationJobRow).id,
+      eventCorrelationId,
+    });
+  } catch (error) {
+    console.warn("Invite push notification queue failed", {
+      inviteId: input.inviteId,
+      inviteRecipientId: input.inviteRecipientId,
+      templateKey: input.templateKey,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   return {
     jobId: (jobData as NotificationJobRow).id,
     deliveryId: (deliveryData as NotificationDeliveryRow).id,
     templateId: template.id,
     templateKey: template.template_key,
+    ...(pushJobIds.length > 0 ? { pushJobIds } : {}),
   } satisfies InviteNotificationDispatch;
+};
+
+const queueInvitePushCompanion = async (input: {
+  inviteId: string;
+  inviteRecipientId: string;
+  documentId: string;
+  requestedByUserId?: string | null;
+  templateKey: string;
+  jobKind: "invite" | "invite_reminder";
+  recipientDisplayName: string | null;
+  targetUserId: string | null;
+  payload: JsonObject;
+  metadata?: JsonObject;
+  emailJobId: string;
+  eventCorrelationId: string;
+}) => {
+  if (!input.targetUserId) {
+    return [] as string[];
+  }
+
+  const template = await getActiveTemplateByKey(input.templateKey, "push");
+  if (!template) {
+    return [] as string[];
+  }
+
+  const tokens = await listActivePushDeviceTokensForUserId(input.targetUserId);
+  if (tokens.length === 0) {
+    return [] as string[];
+  }
+
+  const queuedAt = new Date().toISOString();
+  const pushDedupeKey = `invite:${input.inviteId}:${input.inviteRecipientId}:${input.templateKey}:push`;
+  const { data: jobData, error: jobError } = await supabaseAdmin
+    .from("notification_jobs")
+    .insert({
+      template_id: template.id,
+      invite_id: input.inviteId,
+      document_id: input.documentId,
+      requested_by_user_id: input.requestedByUserId ?? null,
+      job_kind: input.jobKind,
+      channel: "push",
+      status: "queued",
+      priority: "normal",
+      dedupe_key: pushDedupeKey,
+      scheduled_for: queuedAt,
+      payload_json: input.payload,
+      metadata: {
+        ...(input.metadata ?? {}),
+        eventCorrelationId: input.eventCorrelationId,
+        emailJobId: input.emailJobId,
+        source: "document_invite_service_push_fanout",
+        templateKey: input.templateKey,
+      },
+    })
+    .select("id")
+    .single();
+
+  if (jobError || !jobData) {
+    const duplicateCode =
+      typeof jobError === "object" && jobError !== null && "code" in jobError
+        ? ((jobError as { code?: string }).code ?? null)
+        : null;
+    if (duplicateCode === "23505") {
+      return [] as string[];
+    }
+
+    throw new Error(jobError?.message ?? "Failed to create invite push notification job");
+  }
+
+  const pushJobId = (jobData as NotificationJobRow).id;
+  const deliveryRows = tokens.map((token, index) => ({
+    notification_job_id: pushJobId,
+    invite_recipient_id: input.inviteRecipientId,
+    target_user_id: token.user_id,
+    device_push_token_id: token.id,
+    channel: "push",
+    recipient_address: null,
+    recipient_display_name: input.recipientDisplayName,
+    provider: resolvePushNotificationProvider({ rolloutKey: token.user_id }).provider,
+    status: "queued",
+    attempt_number: 1,
+    queued_at: queuedAt,
+    metadata: {
+      ...(input.metadata ?? {}),
+      eventCorrelationId: input.eventCorrelationId,
+      source: "document_invite_service_push_fanout",
+      templateKey: input.templateKey,
+      recipientIndex: index,
+      tokenEnvironment: token.environment,
+      appBundleId: token.app_bundle_id,
+      permissionStatus: token.permission_status,
+    },
+  }));
+
+  const { data: deliveries, error: deliveryError } = await supabaseAdmin
+    .from("notification_deliveries")
+    .insert(deliveryRows)
+    .select("id, provider");
+
+  if (deliveryError) {
+    throw new Error(deliveryError.message);
+  }
+
+  const deliveryEvents = ((deliveries ?? []) as Array<{ id: string; provider: string | null }>).map(
+    (delivery) => ({
+      notification_delivery_id: delivery.id,
+      event_type: "queued",
+      provider: delivery.provider ?? "internal",
+      event_at: queuedAt,
+      payload: {},
+      metadata: {
+        source: "document_invite_service_push_fanout",
+        templateKey: input.templateKey,
+      },
+    }),
+  );
+
+  if (deliveryEvents.length > 0) {
+    const { error: eventError } = await supabaseAdmin
+      .from("outbound_message_events")
+      .insert(deliveryEvents);
+    if (eventError) {
+      throw new Error(eventError.message);
+    }
+  }
+
+  return [pushJobId];
 };
 
 const createInvitePayload = (input: {

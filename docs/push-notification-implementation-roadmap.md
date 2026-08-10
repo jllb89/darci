@@ -1,7 +1,7 @@
 # Push Notification Implementation Roadmap
 
 Last updated: 2026-08-10
-Status: Phase 4 backend APNs provider implementation complete; staging APNs send validation next
+Status: Phase 4 complete; Phase 5 channel-aware queue fanout next
 
 Related:
 
@@ -527,7 +527,7 @@ Exit criteria:
 
 ## Phase 4: APNs Provider Adapter
 
-Phase status: **Backend implementation and deterministic tests complete on 2026-08-10; staging physical-device send validation pending deployment**
+Phase status: **Complete on 2026-08-10; APNs accepted a sandbox push that was received on a physical staging iPhone**
 
 Estimated duration: 1.5 to 2 days
 
@@ -563,33 +563,35 @@ Tasks:
 Exit criteria:
 
 1. [x] Internal push adapter supports deterministic local tests.
-2. [ ] APNs adapter sends to a physical staging device.
+2. [x] APNs adapter sends to a physical staging device.
 3. [x] Permanent invalid tokens deactivate automatically.
 4. [x] Transient failures retry without duplicating successful deliveries.
 
 ## Phase 5: Channel-Aware Queue Fanout
 
+Phase status: **Implementation complete locally on 2026-08-10; migration/deploy pending**
+
 Estimated duration: 1 to 1.5 days
 
 Tasks:
 
-1. Make template lookup require `template_key`, `locale`, and `channel`.
-2. Preserve all existing email lookups as explicit `channel = 'email'`.
-3. Add push templates using the same semantic key with `channel = 'push'`.
-4. Add a fanout helper that queues email and push independently from one business payload.
-5. Resolve push recipients by `target_user_id` and active eligible installations.
-6. Skip push cleanly when there is no eligible token; do not mark the email job failed.
-7. Give push jobs channel-qualified dedupe keys while retaining current email keys unchanged.
-8. Add an event correlation id in job metadata to connect email and push for the same business event.
-9. Keep invite email mandatory. Add invite push only for known `target_user_id` users.
-10. Ensure a failure creating a push job cannot roll back the business transaction or successful email job.
+1. [x] Make template lookup require `template_key`, `locale`, and `channel`.
+2. [x] Preserve all existing email lookups as explicit `channel = 'email'`.
+3. [x] Add push templates using the same semantic key with `channel = 'push'`.
+4. [x] Add a fanout helper that queues email and push independently from one business payload.
+5. [x] Resolve push recipients by `target_user_id` and active eligible installations.
+6. [x] Skip push cleanly when there is no eligible token; do not mark the email job failed.
+7. [x] Give push jobs channel-qualified dedupe keys while retaining current email keys unchanged.
+8. [x] Add an event correlation id in job metadata to connect email and push for the same business event.
+9. [x] Keep invite email mandatory. Add invite push only for known `target_user_id` users.
+10. [x] Ensure a failure creating a push job cannot roll back the business transaction or successful email job.
 
 Exit criteria:
 
-1. A Wave 1 event creates at most one email job and one push job per semantic event.
-2. Retries and repeated controller calls do not duplicate either channel.
-3. Users without tokens receive the same email behavior as today.
-4. Users with multiple active installations receive one delivery per installation.
+1. [x] A Wave 1 event creates at most one email job and one push job per semantic event.
+2. [x] Retries and repeated controller calls do not duplicate either channel.
+3. [x] Users without tokens receive the same email behavior as today.
+4. [x] Users with multiple active installations receive one delivery per installation.
 
 ## Phase 6: Push Templates and Deep Links
 

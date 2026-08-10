@@ -27,6 +27,9 @@ const buildQuery = (table: string) => {
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn(() => query),
+    in: vi.fn(() => query),
+    not: vi.fn(() => query),
+    order: vi.fn(() => query),
     limit: vi.fn(() => query),
     maybeSingle: vi.fn(() => mocks.maybeSingleMock(table)),
     single: vi.fn(() => mocks.singleMock(table)),
@@ -55,6 +58,7 @@ describe("notificationService notary application decision notifications", () => 
     mocks.insertMock.mockReset();
     mocks.awaitQueryMock.mockReset();
     mocks.fromMock.mockImplementation((table: string) => buildQuery(table));
+    mocks.maybeSingleMock.mockResolvedValue({ data: null, error: null });
     mocks.upsertMock.mockResolvedValue({ data: null, error: null });
     mocks.singleMock.mockResolvedValue({ data: { id: "job-1" }, error: null });
     mocks.awaitQueryMock.mockImplementation((table: string) => {
@@ -416,6 +420,173 @@ describe("notificationService notary application decision notifications", () => 
           memberRequestPath: "/app/requests/req-1",
         }),
       }),
+    );
+  });
+
+  it("fans out a Wave 1 event to email and push when a push template and active token exist", async () => {
+    process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
+    mocks.singleMock
+      .mockResolvedValueOnce({ data: { id: "job-email" }, error: null })
+      .mockResolvedValueOnce({ data: { id: "job-push" }, error: null });
+    mocks.awaitQueryMock.mockImplementation((table: string) => {
+      if (table === "device_push_tokens") {
+        return {
+          data: [
+            {
+              id: "push-token-1",
+              user_id: "owner-1",
+              environment: "sandbox",
+              app_bundle_id: "com.illuminote.darci",
+              permission_status: "authorized",
+            },
+            {
+              id: "push-token-2",
+              user_id: "owner-1",
+              environment: "sandbox",
+              app_bundle_id: "com.illuminote.darci",
+              permission_status: "provisional",
+            },
+          ],
+          error: null,
+        };
+      }
+
+      if (table === "notification_deliveries") {
+        return { data: [{ id: "delivery-1", provider: "apns" }], error: null };
+      }
+
+      return { data: null, error: null };
+    });
+    mocks.maybeSingleMock
+      .mockResolvedValueOnce({
+        data: {
+          id: "doc-1",
+          owner_id: "owner-1",
+          document_type: "generic",
+          product_flow_mode: "notarize_document",
+          jurisdiction: "US-OH",
+          idn: "IDN-123",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "owner-1",
+          email: "owner@example.test",
+          phone: null,
+          first_name: "Olivia",
+          last_name: "Owner",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "notary-1",
+          email: "notary@example.test",
+          phone: null,
+          first_name: "Nora",
+          last_name: "Tary",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-email",
+          template_key: "in_person_session_started_email",
+          channel: "email",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-push",
+          template_key: "in_person_session_started_email",
+          channel: "push",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-push",
+          template_key: "in_person_session_started_email",
+          channel: "push",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      });
+
+    const result = await queueInPersonSessionStartedNotification({
+      documentId: "doc-1",
+      requestId: "req-1",
+      notaryUserId: "notary-1",
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        jobId: "job-email",
+        deliveryCount: 1,
+        existing: false,
+        jobIds: ["job-email", "job-push"],
+      }),
+    );
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_jobs",
+      expect.objectContaining({
+        template_id: "template-email",
+        channel: "email",
+        dedupe_key: "in_person_session_started:req-1",
+        metadata: expect.objectContaining({
+          eventCorrelationId: expect.any(String),
+        }),
+      }),
+    );
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_jobs",
+      expect.objectContaining({
+        template_id: "template-push",
+        channel: "push",
+        dedupe_key: "in_person_session_started:req-1:push",
+        metadata: expect.objectContaining({
+          emailJobId: "job-email",
+          sourceEmailTemplateKey: "in_person_session_started_email",
+          eventCorrelationId: expect.any(String),
+        }),
+      }),
+    );
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_deliveries",
+      [
+        expect.objectContaining({
+          notification_job_id: "job-push",
+          target_user_id: "owner-1",
+          device_push_token_id: "push-token-1",
+          channel: "push",
+          recipient_address: null,
+          provider: "apns",
+          status: "queued",
+          metadata: expect.objectContaining({
+            tokenEnvironment: "sandbox",
+            appBundleId: "com.illuminote.darci",
+            permissionStatus: "authorized",
+          }),
+        }),
+        expect.objectContaining({
+          notification_job_id: "job-push",
+          target_user_id: "owner-1",
+          device_push_token_id: "push-token-2",
+          channel: "push",
+          recipient_address: null,
+          provider: "apns",
+          status: "queued",
+          metadata: expect.objectContaining({
+            tokenEnvironment: "sandbox",
+            appBundleId: "com.illuminote.darci",
+            permissionStatus: "provisional",
+          }),
+        }),
+      ],
     );
   });
 
