@@ -18,6 +18,29 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     @Published private(set) var lastRegistrationError: String?
     @Published var pendingRoute: PushNotificationRoute?
 
+    private struct PermissionSyncKey: Equatable {
+        let accessToken: String
+        let installationId: String
+        let environment: PushEnvironment
+        let permissionStatus: PushPermissionStatus
+        let appBundleId: String
+        let appVersion: String?
+        let buildNumber: String?
+    }
+
+    private struct TokenRegistrationKey: Equatable {
+        let accessToken: String
+        let installationId: String
+        let environment: PushEnvironment
+        let deviceToken: String
+        let permissionStatus: PushPermissionStatus
+        let appBundleId: String
+        let appVersion: String?
+        let buildNumber: String?
+        let deviceModel: String
+        let osVersion: String
+    }
+
     private let apiClient: PushDeviceAPIProviding
     private let installationStore: PushInstallationStoring
     private let notificationCenter: UNUserNotificationCenter
@@ -25,6 +48,12 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     private var currentSession: AuthSession?
     private var currentDeviceToken: String?
     private var didOfferPermissionPrompt = false
+    private var hasRequestedRemoteNotifications = false
+    private var refreshTask: Task<Void, Never>?
+    private var permissionSyncInFlightKey: PermissionSyncKey?
+    private var lastSuccessfulPermissionSyncKey: PermissionSyncKey?
+    private var tokenRegistrationInFlightKey: TokenRegistrationKey?
+    private var lastSuccessfulTokenRegistrationKey: TokenRegistrationKey?
 
     override convenience init() {
         self.init(
@@ -74,7 +103,7 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
             Self.diagnostic("authorization_prompt_completed granted=\(granted)")
             await refreshPermissionAndSync()
             if granted || permissionStatus == .provisional {
-                UIApplication.shared.registerForRemoteNotifications()
+                registerForRemoteNotificationsIfNeeded()
             }
         } catch {
             Self.diagnostic("authorization_failed error=\(String(describing: error))")
@@ -84,6 +113,21 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     }
 
     func refreshPermissionAndSync() async {
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRefreshPermissionAndSync()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefreshPermissionAndSync() async {
         let settings = await notificationCenter.notificationSettings()
         let status = Self.permissionStatus(from: settings.authorizationStatus)
         permissionStatus = status
@@ -91,7 +135,7 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
         await syncPermissionStatus(status)
 
         if status == .authorized || status == .provisional {
-            UIApplication.shared.registerForRemoteNotifications()
+            registerForRemoteNotificationsIfNeeded()
             await registerCurrentTokenIfPossible()
         }
     }
@@ -112,6 +156,13 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
 
         currentSession = nil
         currentDeviceToken = nil
+        hasRequestedRemoteNotifications = false
+        refreshTask?.cancel()
+        refreshTask = nil
+        permissionSyncInFlightKey = nil
+        lastSuccessfulPermissionSyncKey = nil
+        tokenRegistrationInFlightKey = nil
+        lastSuccessfulTokenRegistrationKey = nil
     }
 
     func clearPendingRoute(_ route: PushNotificationRoute) {
@@ -140,26 +191,49 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
 
         do {
             let installationId = try installationStore.installationId()
-            Self.diagnostic("token_register_start environment=\(runtimeEnvironment.rawValue)")
-            _ = try await apiClient.registerDevice(
+            let key = TokenRegistrationKey(
+                accessToken: accessToken,
                 installationId: installationId,
+                environment: runtimeEnvironment,
+                deviceToken: currentDeviceToken,
+                permissionStatus: permissionStatus,
+                appBundleId: appBundleId,
+                appVersion: appVersion,
+                buildNumber: buildNumber,
+                deviceModel: UIDevice.current.model,
+                osVersion: UIDevice.current.systemVersion
+            )
+
+            if lastSuccessfulTokenRegistrationKey == key || tokenRegistrationInFlightKey == key {
+                return
+            }
+
+            tokenRegistrationInFlightKey = key
+            Self.diagnostic("token_register_start environment=\(key.environment.rawValue)")
+            _ = try await apiClient.registerDevice(
+                installationId: key.installationId,
                 request: PushDeviceRegistrationRequest(
-                    environment: runtimeEnvironment,
-                    deviceToken: currentDeviceToken,
-                    permissionStatus: permissionStatus,
-                    appBundleId: appBundleId,
-                    appVersion: appVersion,
-                    buildNumber: buildNumber,
-                    deviceModel: UIDevice.current.model,
-                    osVersion: UIDevice.current.systemVersion
+                    environment: key.environment,
+                    deviceToken: key.deviceToken,
+                    permissionStatus: key.permissionStatus,
+                    appBundleId: key.appBundleId,
+                    appVersion: key.appVersion,
+                    buildNumber: key.buildNumber,
+                    deviceModel: key.deviceModel,
+                    osVersion: key.osVersion
                 ),
-                accessToken: accessToken
+                accessToken: key.accessToken
             )
             lastRegistrationError = nil
+            lastSuccessfulTokenRegistrationKey = key
             Self.diagnostic("token_register_success")
+            if tokenRegistrationInFlightKey == key {
+                tokenRegistrationInFlightKey = nil
+            }
         } catch {
             Self.diagnostic("token_register_failed error=\(String(describing: error))")
             lastRegistrationError = "push_registration_failed"
+            tokenRegistrationInFlightKey = nil
         }
     }
 
@@ -168,23 +242,49 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
 
         do {
             let installationId = try installationStore.installationId()
-            Self.diagnostic("permission_sync_start status=\(status.rawValue) environment=\(runtimeEnvironment.rawValue)")
-            _ = try await apiClient.updatePermission(
+            let key = PermissionSyncKey(
+                accessToken: accessToken,
                 installationId: installationId,
-                request: PushDevicePermissionRequest(
-                    environment: runtimeEnvironment,
-                    permissionStatus: status,
-                    appBundleId: appBundleId,
-                    appVersion: appVersion,
-                    buildNumber: buildNumber
-                ),
-                accessToken: accessToken
+                environment: runtimeEnvironment,
+                permissionStatus: status,
+                appBundleId: appBundleId,
+                appVersion: appVersion,
+                buildNumber: buildNumber
             )
+
+            if lastSuccessfulPermissionSyncKey == key || permissionSyncInFlightKey == key {
+                return
+            }
+
+            permissionSyncInFlightKey = key
+            Self.diagnostic("permission_sync_start status=\(key.permissionStatus.rawValue) environment=\(key.environment.rawValue)")
+            _ = try await apiClient.updatePermission(
+                installationId: key.installationId,
+                request: PushDevicePermissionRequest(
+                    environment: key.environment,
+                    permissionStatus: key.permissionStatus,
+                    appBundleId: key.appBundleId,
+                    appVersion: key.appVersion,
+                    buildNumber: key.buildNumber
+                ),
+                accessToken: key.accessToken
+            )
+            lastSuccessfulPermissionSyncKey = key
             Self.diagnostic("permission_sync_success")
+            if permissionSyncInFlightKey == key {
+                permissionSyncInFlightKey = nil
+            }
         } catch {
             Self.diagnostic("permission_sync_failed error=\(String(describing: error))")
             lastRegistrationError = "push_permission_sync_failed"
+            permissionSyncInFlightKey = nil
         }
+    }
+
+    private func registerForRemoteNotificationsIfNeeded() {
+        guard hasRequestedRemoteNotifications == false else { return }
+        hasRequestedRemoteNotifications = true
+        UIApplication.shared.registerForRemoteNotifications()
     }
 
     private var runtimeEnvironment: PushEnvironment {
