@@ -2,7 +2,9 @@ import { randomUUID } from "crypto";
 import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
+import { ApnsClientError, sendApnsNotification } from "./apnsClient";
 import { renderNotificationTemplate } from "./notificationTemplateRenderService";
+import { invalidatePushDeviceTokenById } from "./pushDeviceTokenService";
 import { captureException } from "../utils/sentry";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -12,7 +14,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-export type NotificationChannel = "email" | "sms" | "in_app";
+export type NotificationChannel = "email" | "sms" | "in_app" | "push";
 export type NotificationProviderName =
   | "internal"
   | "resend"
@@ -20,7 +22,8 @@ export type NotificationProviderName =
   | "ses"
   | "sns"
   | "twilio"
-  | "webhook";
+  | "webhook"
+  | "apns";
 export type NotificationJobStatus =
   | "queued"
   | "scheduled"
@@ -102,6 +105,7 @@ type NotificationDeliveryRecord = {
   notification_job_id: string;
   invite_recipient_id: string | null;
   target_user_id: string | null;
+  device_push_token_id: string | null;
   channel: NotificationChannel;
   recipient_address: string | null;
   recipient_display_name: string | null;
@@ -176,6 +180,19 @@ type OutboundMessageEventRecord = {
   payload: JsonObject;
   metadata: JsonObject;
   created_at: string;
+};
+
+type DevicePushTokenRecord = {
+  id: string;
+  user_id: string;
+  platform: "ios";
+  provider: "apns";
+  environment: "sandbox" | "production";
+  app_bundle_id: string;
+  device_token: string | null;
+  permission_status: "authorized" | "provisional" | "denied" | "unknown";
+  is_active: boolean;
+  invalidated_at: string | null;
 };
 
 type NotificationProviderDispatchEvent = {
@@ -265,6 +282,7 @@ export type NotificationJobDetail = {
   deliveries: Array<{
     id: string;
     targetUserId: string | null;
+    devicePushTokenId: string | null;
     channel: NotificationChannel;
     recipientAddress: string | null;
     recipientDisplayName: string | null;
@@ -376,6 +394,7 @@ const notificationDeliverySelect = [
   "notification_job_id",
   "invite_recipient_id",
   "target_user_id",
+  "device_push_token_id",
   "channel",
   "recipient_address",
   "recipient_display_name",
@@ -396,6 +415,19 @@ const notificationDeliverySelect = [
   "metadata",
   "created_at",
   "updated_at",
+].join(", ");
+
+const devicePushTokenSelect = [
+  "id",
+  "user_id",
+  "platform",
+  "provider",
+  "environment",
+  "app_bundle_id",
+  "device_token",
+  "permission_status",
+  "is_active",
+  "invalidated_at",
 ].join(", ");
 
 const outboundEventSelect = [
@@ -989,6 +1021,128 @@ const buildSnsAdapter = (): NotificationProviderAdapter => {
   };
 };
 
+const getApnsCollapseId = (input: NotificationProviderDispatchInput) => {
+  const deliveryMetadata = objectOrEmpty(input.delivery.metadata);
+  const jobMetadata = objectOrEmpty(input.job.metadata);
+  const rawCollapseId =
+    typeof deliveryMetadata.apnsCollapseId === "string"
+      ? deliveryMetadata.apnsCollapseId
+      : typeof jobMetadata.apnsCollapseId === "string"
+        ? jobMetadata.apnsCollapseId
+        : input.job.dedupe_key;
+  const collapseId = rawCollapseId?.trim() ?? "";
+  return collapseId.length > 0 ? collapseId : null;
+};
+
+const getApnsExpiration = (input: NotificationProviderDispatchInput) => {
+  const deliveryMetadata = objectOrEmpty(input.delivery.metadata);
+  const jobMetadata = objectOrEmpty(input.job.metadata);
+  const rawExpirationSeconds =
+    typeof deliveryMetadata.apnsExpirationSeconds === "number"
+      ? deliveryMetadata.apnsExpirationSeconds
+      : typeof jobMetadata.apnsExpirationSeconds === "number"
+        ? jobMetadata.apnsExpirationSeconds
+        : 60 * 60;
+  return Math.floor(new Date(input.now).getTime() / 1000) + rawExpirationSeconds;
+};
+
+const buildApnsAlertPayload = (input: NotificationProviderDispatchInput) => {
+  if (!input.template?.subject_template || !input.template.body_template) {
+    throw new NotificationProviderDispatchError(
+      "missing_template",
+      "APNs adapter requires a resolved push template with subject_template and body_template",
+    );
+  }
+
+  const payload = input.job.payload_json as Record<string, unknown>;
+  const title = interpolateTemplateText(input.template.subject_template, payload).trim();
+  const body = interpolateTemplateText(input.template.body_template, payload).trim();
+  if (!title || !body) {
+    throw new NotificationProviderDispatchError(
+      "template_missing_content",
+      `Template ${input.template.template_key} rendered an empty APNs title or body`,
+    );
+  }
+
+  const customData = objectOrEmpty(payload.apnsData);
+  return {
+    aps: {
+      alert: { title, body },
+      sound: "default",
+    },
+    notificationId: input.delivery.id,
+    ...customData,
+  } satisfies JsonObject;
+};
+
+const buildApnsAdapter = (): NotificationProviderAdapter => ({
+  provider: "apns",
+  async send(input) {
+    if (input.delivery.channel !== "push") {
+      throw new NotificationProviderDispatchError(
+        "invalid_delivery_channel",
+        "APNs adapter only supports push notification deliveries",
+      );
+    }
+
+    if (!input.delivery.device_push_token_id) {
+      throw new NotificationProviderDispatchError(
+        "missing_device_push_token",
+        "Push delivery has no device_push_token_id for APNs send",
+      );
+    }
+
+    const devicePushToken = await getDevicePushTokenById(input.delivery.device_push_token_id);
+    if (!devicePushToken?.device_token || !devicePushToken.is_active) {
+      throw new NotificationProviderDispatchError(
+        "device_token_unavailable",
+        "APNs device token is unavailable or inactive",
+      );
+    }
+
+    if (!["authorized", "provisional"].includes(devicePushToken.permission_status)) {
+      throw new NotificationProviderDispatchError(
+        "push_permission_not_authorized",
+        "APNs device token does not have notification permission",
+      );
+    }
+
+    const apnsResult = await sendApnsNotification({
+      deviceToken: devicePushToken.device_token,
+      environment: devicePushToken.environment,
+      topic: devicePushToken.app_bundle_id,
+      payload: buildApnsAlertPayload(input),
+      collapseId: getApnsCollapseId(input),
+      expiration: getApnsExpiration(input),
+      priority: 10,
+      pushType: "alert",
+    });
+
+    return {
+      provider: "apns",
+      providerMessageId: apnsResult.apnsId,
+      deliveryStatus: "accepted",
+      metadata: {
+        apnsId: apnsResult.apnsId,
+        apnsEnvironment: devicePushToken.environment,
+        apnsTopic: devicePushToken.app_bundle_id,
+        templateKey: input.template?.template_key ?? null,
+        workerId: input.workerId ?? null,
+      },
+      events: [
+        {
+          eventType: "accepted",
+          eventAt: input.now,
+          payload: {
+            apnsId: apnsResult.apnsId,
+            environment: devicePushToken.environment,
+          },
+        },
+      ],
+    };
+  },
+});
+
 // Cache the adapter instance to avoid reconstructing on every delivery.
 // The API key is read once at first use; a server restart is required to
 // pick up a key rotation.
@@ -1008,6 +1162,14 @@ const getSnsAdapter = (): NotificationProviderAdapter => {
   return _snsAdapter;
 };
 
+let _apnsAdapter: NotificationProviderAdapter | null = null;
+const getApnsAdapter = (): NotificationProviderAdapter => {
+  if (!_apnsAdapter) {
+    _apnsAdapter = buildApnsAdapter();
+  }
+  return _apnsAdapter;
+};
+
 // ---------------------------------------------------------------------------
 // Provider resolver
 // ---------------------------------------------------------------------------
@@ -1023,6 +1185,10 @@ const resolveProviderAdapter = (delivery: NotificationDeliveryRecord) => {
 
   if (delivery.provider === "sns") {
     return getSnsAdapter();
+  }
+
+  if (delivery.provider === "apns") {
+    return getApnsAdapter();
   }
 
   throw new NotificationProviderDispatchError(
@@ -1095,6 +1261,21 @@ const getNotificationJobById = async (jobId: string) => {
   }
 
   return (data as NotificationJobRecord | null) ?? null;
+};
+
+const getDevicePushTokenById = async (devicePushTokenId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("device_push_tokens")
+    .select(devicePushTokenSelect)
+    .eq("id", devicePushTokenId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  return (data as DevicePushTokenRecord | null) ?? null;
 };
 
 const updateNotificationJob = async (
@@ -1518,6 +1699,7 @@ const emptyJobChannelCounts = (): Record<NotificationChannel, number> => ({
   email: 0,
   sms: 0,
   in_app: 0,
+  push: 0,
 });
 
 const emptyDeliveryStatusCounts = (): Record<NotificationDeliveryStatus, number> => ({
@@ -1664,10 +1846,10 @@ const processClaimedNotificationJob = async (input: {
       const deliveredAt =
         dispatch.deliveryStatus === "delivered" ||
         dispatch.deliveryStatus === "opened" ||
-        dispatch.deliveryStatus === "clicked" ||
-        dispatch.deliveryStatus === "accepted"
+        dispatch.deliveryStatus === "clicked"
           ? attemptStartedAt
           : null;
+      const acceptedAt = dispatch.deliveryStatus === "accepted" ? attemptStartedAt : null;
 
       const updatedDelivery = await updateNotificationDelivery(delivery.id, {
         provider: dispatch.provider,
@@ -1676,6 +1858,7 @@ const processClaimedNotificationJob = async (input: {
         attempt_number: effectiveAttemptNumber,
         sent_at: attemptStartedAt,
         delivered_at: deliveredAt,
+        accepted_at: acceptedAt,
         failed_at: null,
         error_code: null,
         error_message: null,
@@ -1718,8 +1901,31 @@ const processClaimedNotificationJob = async (input: {
       const errorCode =
         error instanceof NotificationProviderDispatchError
           ? error.code
+          : error instanceof ApnsClientError
+            ? error.code
           : "dispatch_failed";
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const apnsFailureMetadata =
+        error instanceof ApnsClientError
+          ? {
+              apnsId: error.apnsId ?? null,
+              apnsReason: error.reason ?? null,
+              apnsStatusCode: error.statusCode ?? null,
+              permanentTokenFailure: error.permanentTokenFailure,
+              retryable: error.retryable,
+            }
+          : {};
+
+      if (
+        error instanceof ApnsClientError &&
+        error.permanentTokenFailure &&
+        delivery.device_push_token_id
+      ) {
+        await invalidatePushDeviceTokenById({
+          devicePushTokenId: delivery.device_push_token_id,
+          reason: error.reason ?? error.code,
+        });
+      }
 
       console.warn("Notification delivery dispatch failed", {
         jobId: input.job.id,
@@ -1762,6 +1968,7 @@ const processClaimedNotificationJob = async (input: {
         metadata: {
           ...objectOrEmpty(delivery.metadata),
           lastFailureAt: attemptStartedAt,
+          ...apnsFailureMetadata,
         },
       });
 
@@ -1774,6 +1981,7 @@ const processClaimedNotificationJob = async (input: {
           payload: {
             errorCode,
             errorMessage,
+            ...apnsFailureMetadata,
           },
           metadata: {
             workerId: input.workerId ?? null,
@@ -2111,6 +2319,7 @@ export const getNotificationJobDetail = async (jobId: string) => {
     deliveries: deliveries.map((delivery) => ({
       id: delivery.id,
       targetUserId: delivery.target_user_id,
+      devicePushTokenId: delivery.device_push_token_id,
       channel: delivery.channel,
       recipientAddress: delivery.recipient_address,
       recipientDisplayName: delivery.recipient_display_name,
@@ -2198,10 +2407,14 @@ export const __testUtils = {
   computeNotificationJobsMetrics,
   buildResendAdapter,
   buildSnsAdapter,
+  buildApnsAdapter,
   resetResendAdapterCache: () => {
     _resendAdapter = null;
   },
   resetSnsAdapterCache: () => {
     _snsAdapter = null;
+  },
+  resetApnsAdapterCache: () => {
+    _apnsAdapter = null;
   },
 };

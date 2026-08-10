@@ -1,7 +1,7 @@
 # Push Notification Implementation Roadmap
 
 Last updated: 2026-08-10
-Status: Phase 3 native implementation complete; physical-device APNs callback validation next
+Status: Phase 4 backend APNs provider implementation complete; staging APNs send validation next
 
 Related:
 
@@ -527,6 +527,8 @@ Exit criteria:
 
 ## Phase 4: APNs Provider Adapter
 
+Phase status: **Backend implementation and deterministic tests complete on 2026-08-10; staging physical-device send validation pending deployment**
+
 Estimated duration: 1.5 to 2 days
 
 Primary files:
@@ -538,32 +540,32 @@ Primary files:
 
 Tasks:
 
-1. Add `PushNotificationProvider = 'internal' | 'apns'`.
-2. Add environment allowlist and deterministic percentage rollout behavior matching Resend/SNS policy.
-3. Implement token-based APNs JWT authentication with short-lived cached provider tokens.
-4. Use the correct endpoint:
+1. [x] Add `PushNotificationProvider = 'internal' | 'apns'`.
+2. [x] Add environment allowlist and deterministic percentage rollout behavior matching Resend/SNS policy.
+3. [x] Implement token-based APNs JWT authentication with short-lived cached provider tokens.
+4. [x] Use the correct endpoint:
    - Sandbox: `api.sandbox.push.apple.com`
    - Production/TestFlight/App Store: `api.push.apple.com`
-5. Send required headers:
+5. [x] Send required headers:
    - `apns-topic: com.illuminote.darci`
    - `apns-push-type: alert`
    - `apns-priority: 10`
    - bounded `apns-expiration`
    - stable `apns-collapse-id` where replacement is correct
-6. Enforce APNs payload size before dispatch.
-7. Map successful APNs responses to `accepted`/`sent`, not `delivered`.
-8. Persist `apns-id` as the provider message id.
-9. Map permanent token failures such as `BadDeviceToken` and `Unregistered` to token invalidation.
-10. Retry transient responses such as 429 and 5xx with existing worker backoff.
-11. Do not retry permanent payload, topic, or credential errors indefinitely.
-12. Never log the device token or full private payload.
+6. [x] Enforce APNs payload size before dispatch.
+7. [x] Map successful APNs responses to `accepted`/`sent`, not `delivered`.
+8. [x] Persist `apns-id` as the provider message id.
+9. [x] Map permanent token failures such as `BadDeviceToken` and `Unregistered` to token invalidation.
+10. [x] Retry transient responses such as 429 and 5xx with existing worker backoff.
+11. [x] Do not retry permanent payload, topic, or credential errors indefinitely.
+12. [x] Never log the device token or full private payload.
 
 Exit criteria:
 
-1. Internal push adapter supports deterministic local tests.
-2. APNs adapter sends to a physical staging device.
-3. Permanent invalid tokens deactivate automatically.
-4. Transient failures retry without duplicating successful deliveries.
+1. [x] Internal push adapter supports deterministic local tests.
+2. [ ] APNs adapter sends to a physical staging device.
+3. [x] Permanent invalid tokens deactivate automatically.
+4. [x] Transient failures retry without duplicating successful deliveries.
 
 ## Phase 5: Channel-Aware Queue Fanout
 

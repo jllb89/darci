@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 
 export type EmailNotificationProvider = "internal" | "resend";
 export type SmsNotificationProvider = "internal" | "sns";
+export type PushNotificationProvider = "internal" | "apns";
 
 export type EmailProviderResolution = {
   provider: EmailNotificationProvider;
@@ -27,6 +28,22 @@ export type SmsProviderResolution = {
   reason:
     | "provider_not_sns"
     | "sns_disabled"
+    | "environment_not_allowed"
+    | "rollout_percent_zero"
+    | "rollout_percent_full"
+    | "rollout_key_missing"
+    | "rollout_key_selected"
+    | "rollout_key_not_selected";
+};
+
+export type PushProviderResolution = {
+  provider: PushNotificationProvider;
+  configuredProvider: string | null;
+  environment: string;
+  rolloutPercent: number;
+  reason:
+    | "provider_not_apns"
+    | "apns_disabled"
     | "environment_not_allowed"
     | "rollout_percent_zero"
     | "rollout_percent_full"
@@ -293,6 +310,108 @@ export const resolveSmsNotificationProvider = (input?: {
 
   return {
     provider: selected ? "sns" : "internal",
+    configuredProvider,
+    environment,
+    rolloutPercent,
+    reason: selected ? "rollout_key_selected" : "rollout_key_not_selected",
+  };
+};
+
+export const resolvePushNotificationProvider = (input?: {
+  rolloutKey?: string | null | undefined;
+  environment?: string | null | undefined;
+}): PushProviderResolution => {
+  const configuredProvider =
+    normalize(
+      process.env.NOTIFICATION_PUSH_PROVIDER ??
+        process.env.PUSH_NOTIFICATION_PROVIDER ??
+        process.env.NOTIFICATION_PROVIDER_PUSH,
+    ) || null;
+  const environment = normalize(input?.environment) || getCurrentEnvironment();
+  const rolloutPercent = parseRolloutPercent([
+    "NOTIFICATION_PROVIDER_APNS_ROLLOUT_PERCENT",
+    "NOTIFICATION_APNS_ROLLOUT_PERCENT",
+    "NOTIFICATION_PUSH_ROLLOUT_PERCENT",
+  ]);
+
+  if (configuredProvider !== "apns") {
+    return {
+      provider: "internal",
+      configuredProvider,
+      environment,
+      rolloutPercent,
+      reason: "provider_not_apns",
+    };
+  }
+
+  const apnsEnabled = parseBooleanFlag(
+    process.env.NOTIFICATION_PROVIDER_APNS_ENABLED ??
+      process.env.NOTIFICATION_APNS_ENABLED ??
+      process.env.NOTIFICATION_PUSH_ENABLED,
+  );
+  if (apnsEnabled === false) {
+    return {
+      provider: "internal",
+      configuredProvider,
+      environment,
+      rolloutPercent,
+      reason: "apns_disabled",
+    };
+  }
+
+  const allowedEnvironments = parseAllowedEnvironments([
+    "NOTIFICATION_PUSH_ALLOWED_ENVS",
+    "NOTIFICATION_APNS_ALLOWED_ENVS",
+  ]);
+  if (
+    allowedEnvironments.length > 0 &&
+    !allowedEnvironments.includes(environment)
+  ) {
+    return {
+      provider: "internal",
+      configuredProvider,
+      environment,
+      rolloutPercent,
+      reason: "environment_not_allowed",
+    };
+  }
+
+  if (rolloutPercent <= 0) {
+    return {
+      provider: "internal",
+      configuredProvider,
+      environment,
+      rolloutPercent,
+      reason: "rollout_percent_zero",
+    };
+  }
+
+  if (rolloutPercent >= 100) {
+    return {
+      provider: "apns",
+      configuredProvider,
+      environment,
+      rolloutPercent,
+      reason: "rollout_percent_full",
+    };
+  }
+
+  const rolloutKey = input?.rolloutKey?.trim();
+  if (!rolloutKey) {
+    return {
+      provider: "internal",
+      configuredProvider,
+      environment,
+      rolloutPercent,
+      reason: "rollout_key_missing",
+    };
+  }
+
+  const bucket = hashRolloutKey(`${environment}:${rolloutKey}`);
+  const selected = bucket < rolloutPercent;
+
+  return {
+    provider: selected ? "apns" : "internal",
     configuredProvider,
     environment,
     rolloutPercent,

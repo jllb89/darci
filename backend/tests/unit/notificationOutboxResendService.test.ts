@@ -9,6 +9,38 @@ const snsMocks = vi.hoisted(() => ({
   publishMock: vi.fn(),
 }));
 
+const apnsMocks = vi.hoisted(() => {
+  class MockApnsClientError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly options: {
+        statusCode?: number;
+        apnsId?: string | null;
+        reason?: string | null;
+        retryable?: boolean;
+        permanentTokenFailure?: boolean;
+      } = {},
+    ) {
+      super(message);
+      this.name = "ApnsClientError";
+    }
+
+    get permanentTokenFailure() {
+      return this.options.permanentTokenFailure === true;
+    }
+
+    get reason() {
+      return this.options.reason ?? null;
+    }
+  }
+
+  return {
+    sendMock: vi.fn(),
+    ApnsClientError: MockApnsClientError,
+  };
+});
+
 vi.mock("@aws-sdk/client-sns", () => ({
   SNSClient: vi.fn().mockImplementation(() => ({
     send: snsMocks.publishMock,
@@ -27,6 +59,11 @@ vi.mock("resend", () => ({
   })),
 }));
 
+vi.mock("../../src/services/apnsClient", () => ({
+  ApnsClientError: apnsMocks.ApnsClientError,
+  sendApnsNotification: apnsMocks.sendMock,
+}));
+
 const supabaseMocks = vi.hoisted(() => ({
   client: {
     from: vi.fn(),
@@ -37,6 +74,7 @@ const supabaseMocks = vi.hoisted(() => ({
     notification_jobs: [] as any[],
     notification_deliveries: [] as any[],
     notification_templates: [] as any[],
+    device_push_tokens: [] as any[],
     outbound_message_events: [] as any[],
     nextEventId: 1,
   },
@@ -293,6 +331,7 @@ const buildDelivery = (overrides: Record<string, unknown> = {}) => ({
   recipient_display_name: "Casey Signer",
   provider: "resend",
   provider_message_id: null,
+  device_push_token_id: null,
   status: "queued",
   attempt_number: 1,
   queued_at: "2026-04-29T11:00:00.000Z",
@@ -320,6 +359,23 @@ const buildTemplate = (overrides: Record<string, unknown> = {}) => ({
   body_template: "Hi {{recipientName}}, review here: {{ctaUrl}}",
   body_format: "markdown",
   audience_scope: "member",
+  ...overrides,
+});
+
+const buildDevicePushToken = (overrides: Record<string, unknown> = {}) => ({
+  id: "push-token-1",
+  user_id: "user-1",
+  platform: "ios",
+  provider: "apns",
+  environment: "sandbox",
+  app_bundle_id: "com.illuminote.darci",
+  device_token: "a".repeat(64),
+  permission_status: "authorized",
+  is_active: true,
+  invalidated_at: null,
+  metadata: {},
+  created_at: "2026-04-29T11:00:00.000Z",
+  updated_at: "2026-04-29T11:00:00.000Z",
   ...overrides,
 });
 
@@ -353,10 +409,15 @@ const seedOutbox = (overrides?: {
   template?: Record<string, unknown>;
   invite?: Record<string, unknown>;
   inviteRecipient?: Record<string, unknown>;
+  devicePushToken?: Record<string, unknown>;
 }) => {
   supabaseMocks.state.notification_jobs.push(buildJob(overrides?.job));
   supabaseMocks.state.notification_deliveries.push(buildDelivery(overrides?.delivery));
   supabaseMocks.state.notification_templates.push(buildTemplate(overrides?.template));
+
+  if (overrides?.devicePushToken) {
+    supabaseMocks.state.device_push_tokens.push(buildDevicePushToken(overrides.devicePushToken));
+  }
 
   if (overrides?.invite || overrides?.inviteRecipient) {
     supabaseMocks.state.document_access_invites.push(buildInvite(overrides?.invite));
@@ -372,14 +433,17 @@ describe("notification outbox Resend runtime", () => {
     resendMocks.sendEmailMock.mockReset();
     resendMocks.verifyWebhookMock.mockReset();
     snsMocks.publishMock.mockReset();
+    apnsMocks.sendMock.mockReset();
     __testUtils.resetResendAdapterCache();
     __testUtils.resetSnsAdapterCache();
+    __testUtils.resetApnsAdapterCache();
 
     supabaseMocks.state.document_access_invites = [];
     supabaseMocks.state.invite_recipients = [];
     supabaseMocks.state.notification_jobs = [];
     supabaseMocks.state.notification_deliveries = [];
     supabaseMocks.state.notification_templates = [];
+    supabaseMocks.state.device_push_tokens = [];
     supabaseMocks.state.outbound_message_events = [];
     supabaseMocks.state.nextEventId = 1;
     supabaseMocks.client.from.mockReset();
@@ -646,6 +710,136 @@ describe("notification outbox Resend runtime", () => {
         provider_event_id: null,
       }),
     ]);
+  });
+
+  it("runs due APNs push deliveries through the notification outbox", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: {
+        channel: "push",
+        payload_json: { recipientName: "Casey", apnsData: { route: "member_request", requestId: "request-1" } },
+      },
+      delivery: {
+        channel: "push",
+        recipient_address: null,
+        provider: "apns",
+        device_push_token_id: "push-token-1",
+      },
+      template: {
+        template_key: "member_session_push",
+        channel: "push",
+        subject_template: "Session ready",
+        body_template: "Hi {{recipientName}}, continue in DARCi.",
+        body_format: "text",
+      },
+      devicePushToken: { id: "push-token-1" },
+    });
+    apnsMocks.sendMock.mockResolvedValue({ apnsId: "apns-msg-1", statusCode: 200 });
+
+    const result = await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(result.jobs[0]).toEqual(
+      expect.objectContaining({
+        jobId: "job-1",
+        status: "completed",
+        attemptedDeliveryCount: 1,
+        deliveredCount: 1,
+        failedCount: 0,
+      }),
+    );
+    expect(apnsMocks.sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceToken: "a".repeat(64),
+        environment: "sandbox",
+        topic: "com.illuminote.darci",
+        collapseId: "job:doc-1",
+        payload: expect.objectContaining({
+          aps: {
+            alert: { title: "Session ready", body: "Hi Casey, continue in DARCi." },
+            sound: "default",
+          },
+          notificationId: "delivery-1",
+          route: "member_request",
+          requestId: "request-1",
+        }),
+      }),
+    );
+    expect(supabaseMocks.state.notification_deliveries[0]).toEqual(
+      expect.objectContaining({
+        status: "accepted",
+        provider: "apns",
+        provider_message_id: "apns-msg-1",
+        sent_at: nowIso,
+        accepted_at: nowIso,
+        delivered_at: null,
+        failed_at: null,
+      }),
+    );
+    expect(supabaseMocks.state.outbound_message_events).toEqual([
+      expect.objectContaining({
+        notification_delivery_id: "delivery-1",
+        event_type: "accepted",
+        provider: "apns",
+      }),
+    ]);
+  });
+
+  it("deactivates device tokens after permanent APNs token failures", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: { channel: "push" },
+      delivery: {
+        channel: "push",
+        recipient_address: null,
+        provider: "apns",
+        device_push_token_id: "push-token-1",
+      },
+      template: {
+        template_key: "member_session_push",
+        channel: "push",
+        subject_template: "Session ready",
+        body_template: "Continue in DARCi.",
+        body_format: "text",
+      },
+      devicePushToken: { id: "push-token-1" },
+    });
+    apnsMocks.sendMock.mockRejectedValue(
+      new apnsMocks.ApnsClientError("apns_BadDeviceToken", "APNs rejected notification: BadDeviceToken", {
+        statusCode: 400,
+        reason: "BadDeviceToken",
+        permanentTokenFailure: true,
+      }),
+    );
+
+    const result = await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(result.jobs[0]).toEqual(
+      expect.objectContaining({
+        status: "scheduled",
+        attemptedDeliveryCount: 1,
+        failedCount: 1,
+        scheduledFor: "2026-04-29T12:05:00.000Z",
+      }),
+    );
+    expect(supabaseMocks.state.device_push_tokens[0]).toEqual(
+      expect.objectContaining({
+        is_active: false,
+        invalidated_at: nowIso,
+        metadata: expect.objectContaining({
+          invalidationReason: "BadDeviceToken",
+          invalidatedBy: "apns_provider_adapter",
+        }),
+      }),
+    );
+    expect(supabaseMocks.state.notification_deliveries[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        error_code: "apns_BadDeviceToken",
+        error_message: "APNs rejected notification: BadDeviceToken",
+      }),
+    );
   });
 
   it("syncs immediate Resend sent events to linked invite lifecycle state", async () => {

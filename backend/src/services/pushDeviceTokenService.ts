@@ -281,3 +281,29 @@ export const deactivatePushDeviceInstallation = async (input: {
     deactivated: ((data as DeviceTokenRow[] | null) ?? []).length > 0,
   };
 };
+
+export const invalidatePushDeviceTokenById = async (input: {
+  devicePushTokenId: string;
+  reason?: string | null | undefined;
+}) => {
+  assertSupabaseConfigured();
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("device_push_tokens")
+    .update({
+      is_active: false,
+      invalidated_at: now,
+      updated_at: now,
+      metadata: {
+        invalidationReason: input.reason ?? "apns_permanent_token_failure",
+        invalidatedBy: "apns_provider_adapter",
+        invalidatedAt: now,
+      },
+    })
+    .eq("id", input.devicePushTokenId)
+    .select(devicePushTokenSelect)
+    .maybeSingle();
+
+  handleSupabaseError(error);
+  return data ? mapDeviceTokenRow(data as unknown as DeviceTokenRow) : null;
+};

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resolveEmailNotificationProvider,
+  resolvePushNotificationProvider,
   resolveSmsNotificationProvider,
 } from "../../src/services/notificationProviderPolicy";
 
@@ -23,6 +24,17 @@ const providerEnvKeys = [
   "NOTIFICATION_PROVIDER_SNS_ROLLOUT_PERCENT",
   "NOTIFICATION_SNS_ROLLOUT_PERCENT",
   "NOTIFICATION_SMS_ROLLOUT_PERCENT",
+  "NOTIFICATION_PUSH_PROVIDER",
+  "PUSH_NOTIFICATION_PROVIDER",
+  "NOTIFICATION_PROVIDER_PUSH",
+  "NOTIFICATION_PROVIDER_APNS_ENABLED",
+  "NOTIFICATION_APNS_ENABLED",
+  "NOTIFICATION_PUSH_ENABLED",
+  "NOTIFICATION_PUSH_ALLOWED_ENVS",
+  "NOTIFICATION_APNS_ALLOWED_ENVS",
+  "NOTIFICATION_PROVIDER_APNS_ROLLOUT_PERCENT",
+  "NOTIFICATION_APNS_ROLLOUT_PERCENT",
+  "NOTIFICATION_PUSH_ROLLOUT_PERCENT",
   "APP_ENV",
   "DARCI_ENV",
 ] as const;
@@ -174,5 +186,67 @@ describe("SMS notification provider policy", () => {
 
     expect(resolution.provider).toBe("internal");
     expect(resolution.reason).toBe("environment_not_allowed");
+  });
+});
+
+describe("push notification provider policy", () => {
+  beforeEach(() => {
+    clearProviderEnv();
+  });
+
+  afterEach(() => {
+    restoreProviderEnv();
+  });
+
+  it("defaults to the internal provider", () => {
+    const resolution = resolvePushNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("provider_not_apns");
+  });
+
+  it("uses APNs when explicitly configured", () => {
+    process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
+
+    const resolution = resolvePushNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("apns");
+    expect(resolution.reason).toBe("rollout_percent_full");
+  });
+
+  it("supports an emergency APNs disable flag", () => {
+    process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
+    process.env.NOTIFICATION_PROVIDER_APNS_ENABLED = "false";
+
+    const resolution = resolvePushNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("apns_disabled");
+  });
+
+  it("limits APNs to allowed environments", () => {
+    process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
+    process.env.APP_ENV = "production";
+    process.env.NOTIFICATION_APNS_ALLOWED_ENVS = "staging";
+
+    const resolution = resolvePushNotificationProvider({ rolloutKey: "user-1" });
+
+    expect(resolution.provider).toBe("internal");
+    expect(resolution.reason).toBe("environment_not_allowed");
+  });
+
+  it("selects partial APNs rollout traffic deterministically", () => {
+    process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
+    process.env.NOTIFICATION_PROVIDER_APNS_ROLLOUT_PERCENT = "50";
+
+    const selected = resolvePushNotificationProvider({ rolloutKey: "user-0" });
+    const notSelected = resolvePushNotificationProvider({ rolloutKey: "alpha" });
+    const selectedAgain = resolvePushNotificationProvider({ rolloutKey: "user-0" });
+
+    expect(selected.provider).toBe("apns");
+    expect(selected.reason).toBe("rollout_key_selected");
+    expect(selectedAgain.provider).toBe(selected.provider);
+    expect(notSelected.provider).toBe("internal");
+    expect(notSelected.reason).toBe("rollout_key_not_selected");
   });
 });
