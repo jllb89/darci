@@ -8,6 +8,7 @@ Related:
 - `docs/resend-email-provider-integration-roadmap.md`
 - `docs/notification-template-wave.md`
 - `docs/resend-email-incident-runbook.md`
+- `docs/push-notification-runbook.md`
 - `backend/src/services/notificationService.ts`
 - `backend/src/services/documentInviteService.ts`
 - `backend/src/services/notificationOutboxService.ts`
@@ -657,75 +658,79 @@ Exit criteria:
 
 ## Phase 8: Test Plan
 
+Phase status: **Automated readiness complete locally on 2026-08-10; physical TestFlight Wave 1 validation is the next release gate**
+
 Estimated duration: 1.5 to 2 days
 
 ### Backend Unit Tests
 
-1. APNs JWT creation and refresh boundaries.
-2. Sandbox versus production host selection.
-3. Provider policy enablement, environment allowlist, and rollout buckets.
-4. Payload rendering and byte-size rejection.
-5. APNs response mapping.
-6. Permanent token invalidation.
-7. Transient retry scheduling.
-8. Channel-qualified template lookup.
-9. Email and push dedupe independence.
-10. Sensitive payload-field rejection.
+1. [x] APNs JWT creation and refresh boundaries.
+2. [x] Sandbox versus production host selection.
+3. [x] Provider policy enablement, environment allowlist, and rollout buckets.
+4. [x] Payload rendering and byte-size rejection.
+5. [x] APNs response mapping.
+6. [x] Permanent token invalidation.
+7. [x] Transient retry scheduling.
+8. [x] Channel-qualified template lookup.
+9. [x] Email and push dedupe independence.
+10. [x] Sensitive payload-field rejection.
 
 ### Backend Integration Tests
 
-1. Register, rotate, and deactivate an installation.
-2. Reject cross-user token operations.
-3. Fan out one Wave 1 event to email and push.
-4. Skip push when no active token exists while email still queues.
-5. Queue one delivery per active installation.
-6. Preserve existing Resend behavior and webhook tests.
-7. Confirm dormant templates are not accidentally activated by the push work.
+1. [x] Register, rotate, and deactivate an installation.
+2. [x] Reject cross-user token operations.
+3. [x] Fan out one Wave 1 event to email and push.
+4. [x] Skip push when no active token exists while email still queues.
+5. [x] Queue one delivery per active installation.
+6. [x] Preserve existing Resend behavior and webhook tests.
+7. [x] Confirm dormant templates are not accidentally activated by the push work.
 
 ### Native Unit Tests
 
-1. Permission-state transitions.
-2. Device-token encoding.
-3. Installation-id persistence.
-4. Registration retry and idempotency.
-5. Sign-out deactivation.
-6. Typed route parsing and rejection of malformed payloads.
-7. Pending-route handling through session restoration.
-8. Member versus Illuminotary destination selection.
+1. [x] Permission-state transitions.
+2. [x] Device-token encoding.
+3. [x] Installation-id persistence.
+4. [x] Registration retry and idempotency.
+5. [x] Sign-out deactivation.
+6. [x] Typed route parsing and rejection of malformed payloads.
+7. [x] Pending-route handling through session restoration.
+8. [x] Member versus Illuminotary destination selection.
 
 ### Device Validation
 
-1. Physical debug device with APNs sandbox.
-2. TestFlight device with APNs production.
-3. Foreground, background, terminated, and signed-out states.
-4. Permission allowed, denied, and later changed in Settings.
-5. Token rotation after reinstall or provisioning change.
-6. Multiple devices for one account.
-7. One device switching between member and Illuminotary roles.
+1. [x] Physical debug device with APNs sandbox.
+2. [ ] TestFlight device with APNs production.
+3. [ ] Foreground, background, terminated, and signed-out states.
+4. [x] Permission allowed, denied, and later changed in Settings.
+5. [x] Token rotation after reinstall or provisioning change.
+6. [x] Multiple devices for one account.
+7. [ ] One device switching between member and Illuminotary roles.
 
 Exit criteria:
 
-1. All automated tests pass.
-2. A physical staging device receives every Wave 1 notification.
-3. Email parity is verified for the same events.
-4. No secrets or tokens appear in logs.
+1. [x] All automated tests pass.
+2. [ ] A physical staging device receives every Wave 1 notification.
+3. [x] Email parity is verified for the same events.
+4. [x] No secrets or tokens appear in logs.
 
 ## Phase 9: Rollout
 
+Phase status: **Rollout readiness complete locally on 2026-08-10; next gates are a fresh TestFlight archive, production-token registration, and Wave 1 physical-device smoke**
+
 Estimated duration: 1 to 2 days of observation
 
-1. Deploy schema and backend with APNs provider disabled.
-2. Release a TestFlight build that can register production APNs tokens.
-3. Verify token registration and permissions without sending pushes.
-4. Enable internal adapter push jobs in staging to validate fanout.
-5. Enable APNs for DARCi-owned test accounts only.
-6. Run each Wave 1 event end to end.
-7. Increase staging rollout to 100%.
-8. Deploy production backend with APNs disabled.
-9. Release the production-capable iOS build.
-10. Enable 5% deterministic production rollout.
-11. Observe errors, invalid-token rate, email parity, and app-open routing.
-12. Increase to 25%, 50%, and 100% only after each gate passes.
+1. [x] Deploy schema and backend with APNs provider disabled.
+2. [ ] Release a TestFlight build that can register production APNs tokens.
+3. [ ] Verify token registration and permissions without sending pushes.
+4. [x] Enable internal adapter push jobs in staging to validate fanout.
+5. [x] Enable APNs for DARCi-owned test accounts only.
+6. [ ] Run each Wave 1 event end to end.
+7. [ ] Increase staging rollout to 100%.
+8. [ ] Deploy production backend with APNs disabled.
+9. [ ] Release the production-capable iOS build.
+10. [ ] Enable 5% deterministic production rollout.
+11. [ ] Observe errors, invalid-token rate, email parity, and app-open routing.
+12. [ ] Increase to 25%, 50%, and 100% only after each gate passes.
 
 Rollback:
 
@@ -738,16 +743,16 @@ Rollback:
 
 Before production rollout, document:
 
-1. APNs credential rotation.
-2. Expired/revoked key response.
-3. Sandbox/production mismatch diagnosis.
-4. `BadDeviceToken`, `DeviceTokenNotForTopic`, and `Unregistered` handling.
-5. 429 and 5xx retry behavior.
-6. Token redaction rules.
-7. Emergency disable switches.
-8. TestFlight versus App Store validation steps.
-9. Dashboard queries for accepted, failed, retried, invalidated, and no-token outcomes.
-10. Escalation owners for Apple provisioning, backend delivery, and iOS routing.
+1. [x] APNs credential rotation.
+2. [x] Expired/revoked key response.
+3. [x] Sandbox/production mismatch diagnosis.
+4. [x] `BadDeviceToken`, `DeviceTokenNotForTopic`, and `Unregistered` handling.
+5. [x] 429 and 5xx retry behavior.
+6. [x] Token redaction rules.
+7. [x] Emergency disable switches.
+8. [x] TestFlight versus App Store validation steps.
+9. [x] Dashboard queries for accepted, failed, retried, invalidated, and no-token outcomes.
+10. [x] Escalation owners for Apple provisioning, backend delivery, and iOS routing.
 
 ## Acceptance Criteria
 

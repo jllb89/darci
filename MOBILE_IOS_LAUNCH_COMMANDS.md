@@ -14,7 +14,7 @@ cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && set -a && source
 ```
 
 For a backend running locally on port `4000`, use the localhost build instead:
-w
+
 ```sh
 cd /Users/jorge/Desktop/darci/apps/mobile && set -o pipefail && rm -rf .DerivedData && xcodegen generate && xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' -derivedDataPath .DerivedData build && (xcrun simctl boot vet >/dev/null 2>&1 || true) && open -a Simulator && xcrun simctl install vet "$PWD/.DerivedData/Build/Products/Debug-iphonesimulator/DARCiMobile.app" && xcrun simctl terminate vet com.illuminote.darci >/dev/null 2>&1 || true && xcrun simctl launch vet com.illuminote.darci
 ```
@@ -71,6 +71,53 @@ xcrun simctl launch vet com.illuminote.darci
 cd /Users/jorge/Desktop/darci/apps/mobile
 xcodegen generate
 xcodebuild -quiet -scheme DARCiMobile -destination 'platform=iOS Simulator,name=vet' test
+```
+
+## Prepare TestFlight Archive
+
+Release builds use `APS_ENVIRONMENT = production`, so TestFlight registers production APNs tokens while still pointing at the staging API unless `Release.local.xcconfig` overrides `DARCI_API_BASE_URL`.
+
+```sh
+cd /Users/jorge/Desktop/darci/apps/mobile
+make release-config
+make archive
+```
+
+Equivalent expanded form:
+
+```sh
+cd /Users/jorge/Desktop/darci/apps/mobile
+zsh ./scripts/generate-release-config.sh ../../.env.staging
+xcodegen generate
+xcodebuild -scheme DARCiMobile -configuration Release -destination 'generic/platform=iOS' -archivePath build/DARCiMobile.xcarchive archive
+```
+
+After installing the TestFlight build, verify the device registered a production token:
+
+```sh
+cd /Users/jorge/Desktop/darci/backend
+DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config - <<'NODE'
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+	auth: { persistSession: false },
+});
+
+(async () => {
+	const { data, error } = await supabase
+		.from('device_push_tokens')
+		.select('id,user_id,environment,app_bundle_id,permission_status,is_active,last_registered_at,last_seen_at')
+		.eq('environment', 'production')
+		.eq('app_bundle_id', 'com.illuminote.darci')
+		.order('updated_at', { ascending: false })
+		.limit(20);
+
+	if (error) throw error;
+	console.log(JSON.stringify({ count: data.length, rows: data }, null, 2));
+})().catch((error) => {
+	console.error(error.message || error);
+	process.exit(1);
+});
+NODE
 ```
 
 ## Push Supabase Migrations To Staging

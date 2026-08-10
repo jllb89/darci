@@ -145,6 +145,30 @@ describe("notificationOutboxService", () => {
           created_at: "2026-04-23T10:00:00.000Z",
           updated_at: "2026-04-23T10:02:00.000Z",
         },
+        {
+          id: "job-push-suppressed-1",
+          template_id: null,
+          invite_id: null,
+          document_id: "doc-3",
+          billing_payment_request_id: null,
+          notarization_request_id: "request-2",
+          requested_by_user_id: "user-4",
+          job_kind: "status_update",
+          channel: "push",
+          status: "suppressed",
+          priority: "normal",
+          dedupe_key: "request-2:push",
+          scheduled_for: "2026-04-23T10:00:00.000Z",
+          processing_started_at: null,
+          completed_at: "2026-04-23T10:02:00.000Z",
+          canceled_at: null,
+          last_attempt_at: null,
+          attempt_count: 0,
+          payload_json: {},
+          metadata: { skipReason: "account_preference_disabled" },
+          created_at: "2026-04-23T10:00:00.000Z",
+          updated_at: "2026-04-23T10:02:00.000Z",
+        },
       ],
       deliveries: [
         {
@@ -258,10 +282,11 @@ describe("notificationOutboxService", () => {
       generatedAt: "2026-04-23T12:00:00.000Z",
     });
 
-    expect(metrics.jobs.total).toBe(3);
+    expect(metrics.jobs.total).toBe(4);
     expect(metrics.jobs.byStatus.queued).toBe(1);
     expect(metrics.jobs.byStatus.completed).toBe(2);
-    expect(metrics.jobs.byChannel.push).toBe(1);
+    expect(metrics.jobs.byStatus.suppressed).toBe(1);
+    expect(metrics.jobs.byChannel.push).toBe(2);
     expect(metrics.jobs.inviteJobs).toBe(1);
     expect(metrics.jobs.inviteJobsByStatus.queued).toBe(1);
 
@@ -274,11 +299,12 @@ describe("notificationOutboxService", () => {
     expect(metrics.deliveries.inviteDeliveriesByStatus.queued).toBe(1);
     expect(metrics.push).toEqual(
       expect.objectContaining({
-        jobsQueued: 1,
+        jobsQueued: 2,
         deliveriesQueued: 2,
         activeInstallations: 1,
         eligibleUsers: 1,
         accepted: 1,
+        accountPreferenceSkips: 1,
         opens: 1,
       }),
     );

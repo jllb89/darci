@@ -11101,6 +11101,8 @@ components:
           type: integer
         noTokenSkips:
           type: integer
+        accountPreferenceSkips:
+          type: integer
         permissionDeniedRegistrations:
           type: integer
         opens:

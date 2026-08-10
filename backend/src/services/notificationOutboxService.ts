@@ -366,6 +366,7 @@ export type NotificationJobsMetrics = {
     transientFailures: number;
     retryableFailures: number;
     noTokenSkips: number;
+    accountPreferenceSkips: number;
     permissionDeniedRegistrations: number;
     opens: number;
   };
@@ -1902,6 +1903,11 @@ const computeNotificationJobsMetrics = (input: {
       ).length,
       noTokenSkips: input.jobs.filter(
         (job) => job.channel === "push" && objectOrEmpty(job.metadata).skipReason === "no_eligible_token",
+      ).length,
+      accountPreferenceSkips: input.jobs.filter(
+        (job) =>
+          job.channel === "push" &&
+          objectOrEmpty(job.metadata).skipReason === "account_preference_disabled",
       ).length,
       permissionDeniedRegistrations: input.deliveries.filter(
         (delivery) =>

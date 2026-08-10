@@ -590,6 +590,143 @@ describe("notificationService notary application decision notifications", () => 
     );
   });
 
+  it("suppresses the push companion when the account push preference is disabled", async () => {
+    process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
+    mocks.singleMock
+      .mockResolvedValueOnce({ data: { id: "job-email" }, error: null })
+      .mockResolvedValueOnce({ data: { id: "job-push-suppressed" }, error: null });
+    mocks.awaitQueryMock.mockImplementation((table: string) => {
+      if (table === "device_push_tokens") {
+        return {
+          data: [
+            {
+              id: "push-token-1",
+              user_id: "owner-1",
+              environment: "production",
+              app_bundle_id: "com.illuminote.darci",
+              permission_status: "authorized",
+            },
+          ],
+          error: null,
+        };
+      }
+
+      if (table === "notification_preferences") {
+        return {
+          data: [
+            {
+              user_id: "owner-1",
+              is_enabled: false,
+              snoozed_until: null,
+            },
+          ],
+          error: null,
+        };
+      }
+
+      if (table === "notification_deliveries") {
+        return { data: [{ id: "delivery-email", provider: "internal" }], error: null };
+      }
+
+      return { data: null, error: null };
+    });
+    mocks.maybeSingleMock
+      .mockResolvedValueOnce({
+        data: {
+          id: "doc-1",
+          owner_id: "owner-1",
+          document_type: "generic",
+          product_flow_mode: "notarize_document",
+          jurisdiction: "US-OH",
+          idn: "IDN-123",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "owner-1",
+          email: "owner@example.test",
+          phone: null,
+          first_name: "Olivia",
+          last_name: "Owner",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "notary-1",
+          email: "notary@example.test",
+          phone: null,
+          first_name: "Nora",
+          last_name: "Tary",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-email",
+          template_key: "in_person_session_started_email",
+          channel: "email",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-push",
+          template_key: "in_person_session_started_email",
+          channel: "push",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-push",
+          template_key: "in_person_session_started_email",
+          channel: "push",
+          trigger_event: "notary.in_person_session_started",
+        },
+        error: null,
+      });
+
+    const result = await queueInPersonSessionStartedNotification({
+      documentId: "doc-1",
+      requestId: "req-1",
+      notaryUserId: "notary-1",
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        jobId: "job-email",
+        deliveryCount: 1,
+        existing: false,
+        jobIds: ["job-email", "job-push-suppressed"],
+      }),
+    );
+    expect(mocks.insertMock).toHaveBeenCalledWith(
+      "notification_jobs",
+      expect.objectContaining({
+        template_id: "template-push",
+        channel: "push",
+        status: "suppressed",
+        dedupe_key: "in_person_session_started:req-1:push",
+        metadata: expect.objectContaining({
+          emailJobId: "job-email",
+          skipReason: "account_preference_disabled",
+        }),
+      }),
+    );
+    expect(mocks.insertMock).not.toHaveBeenCalledWith(
+      "notification_deliveries",
+      [
+        expect.objectContaining({
+          channel: "push",
+        }),
+      ],
+    );
+  });
+
   it("does not queue in-person session links with an unsafe local app host", async () => {
     process.env.APP_BASE_URL = "https://0.0.0.0:3000";
     delete process.env.WEB_APP_URL;

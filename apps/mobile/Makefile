@@ -2,8 +2,9 @@ XCODEGEN ?= xcodegen
 SCHEME ?= DARCiMobile
 DESTINATION ?= generic/platform=iOS Simulator
 TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17
+ARCHIVE_PATH ?= build/DARCiMobile.xcarchive
 
-.PHONY: bootstrap generate release-config build test open clean
+.PHONY: bootstrap generate release-config build test archive open clean
 
 bootstrap:
 	@command -v $(XCODEGEN) >/dev/null || { echo "XcodeGen is missing. Install it with: brew install xcodegen"; exit 1; }
@@ -19,6 +20,9 @@ build: generate
 
 test: generate
 	xcodebuild -scheme $(SCHEME) -destination '$(TEST_DESTINATION)' test
+
+archive: release-config generate
+	xcodebuild -scheme $(SCHEME) -configuration Release -destination 'generic/platform=iOS' -archivePath '$(ARCHIVE_PATH)' archive
 
 open: generate
 	open DARCiMobile.xcodeproj

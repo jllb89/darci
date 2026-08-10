@@ -48,6 +48,12 @@ type DevicePushTokenRecord = {
   permission_status: string;
 };
 
+type NotificationPreferenceRecord = {
+  user_id: string;
+  is_enabled: boolean;
+  snoozed_until: string | null;
+};
+
 type FallbackNotificationTemplate = {
   template_key: string;
   template_version: string;
@@ -811,6 +817,45 @@ const listActivePushDeviceTokensForUserIds = async (userIds: string[]) => {
   return (data ?? []) as DevicePushTokenRecord[];
 };
 
+const listPushNotificationPreferencesForUserIds = async (userIds: string[]) => {
+  if (userIds.length === 0) {
+    return [] as NotificationPreferenceRecord[];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("notification_preferences")
+    .select("user_id, is_enabled, snoozed_until")
+    .in("user_id", userIds)
+    .eq("channel", "push")
+    .eq("preference_scope", "transactional");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as NotificationPreferenceRecord[];
+};
+
+const isPushPreferenceEnabled = (
+  preference: NotificationPreferenceRecord | undefined,
+  now: Date,
+) => {
+  if (!preference) {
+    return true;
+  }
+
+  if (!preference.is_enabled) {
+    return false;
+  }
+
+  if (!preference.snoozed_until) {
+    return true;
+  }
+
+  const snoozedUntil = new Date(preference.snoozed_until);
+  return Number.isNaN(snoozedUntil.getTime()) || snoozedUntil <= now;
+};
+
 const insertNotificationJob = async (input: {
   template: NotificationTemplateRecord;
   jobKind: NotificationJobKind;
@@ -821,8 +866,10 @@ const insertNotificationJob = async (input: {
   requestedByUserId?: string | null | undefined;
   payload: Record<string, unknown>;
   metadata?: Record<string, unknown> | undefined;
+  status?: "queued" | "completed" | "suppressed" | undefined;
 }) => {
   const queuedAt = new Date().toISOString();
+  const status = input.status ?? (input.template.channel === "in_app" ? "completed" : "queued");
   const jobPayload = {
     template_id: input.template.id,
     document_id: input.documentId ?? null,
@@ -831,11 +878,11 @@ const insertNotificationJob = async (input: {
     requested_by_user_id: input.requestedByUserId ?? null,
     job_kind: input.jobKind,
     channel: input.template.channel,
-    status: input.template.channel === "in_app" ? "completed" : "queued",
+    status,
     priority: "normal",
     dedupe_key: input.dedupeKey ?? null,
     scheduled_for: queuedAt,
-    completed_at: input.template.channel === "in_app" ? queuedAt : null,
+    completed_at: status === "completed" || status === "suppressed" ? queuedAt : null,
     payload_json: input.payload,
     metadata: {
       ...(input.metadata ?? {}),
@@ -990,8 +1037,17 @@ const buildPushRecipients = async (recipients: NotificationRecipient[]) => {
     recipientsByUserId.set(targetUserId, recipient);
   }
 
-  const tokens = await listActivePushDeviceTokensForUserIds(Array.from(recipientsByUserId.keys()));
-  return tokens.map((token) => {
+  const targetUserIds = Array.from(recipientsByUserId.keys());
+  const tokens = await listActivePushDeviceTokensForUserIds(targetUserIds);
+  const preferences = await listPushNotificationPreferencesForUserIds(targetUserIds);
+  const preferenceByUserId = new Map(preferences.map((preference) => [preference.user_id, preference]));
+  const now = new Date();
+  const filteredTokens = tokens.filter((token) =>
+    isPushPreferenceEnabled(preferenceByUserId.get(token.user_id), now),
+  );
+
+  return {
+    recipients: filteredTokens.map((token) => {
     const sourceRecipient = recipientsByUserId.get(token.user_id);
     return {
       targetUserId: token.user_id,
@@ -1004,7 +1060,12 @@ const buildPushRecipients = async (recipients: NotificationRecipient[]) => {
         permissionStatus: token.permission_status,
       },
     } satisfies NotificationRecipient;
-  });
+    }),
+    activeTokenCount: tokens.length,
+    preferenceDisabledUserCount: targetUserIds.filter(
+      (userId) => !isPushPreferenceEnabled(preferenceByUserId.get(userId), now),
+    ).length,
+  };
 };
 
 const queueSingleChannelTemplatedNotification = async (
@@ -1098,16 +1159,27 @@ const queuePushCompanionNotification = async (input: {
     return null;
   }
 
-  const pushRecipients = await buildPushRecipients(input.source.recipients);
-  if (pushRecipients.length === 0) {
-    return null;
+  const pushRecipientResult = await buildPushRecipients(input.source.recipients);
+  if (pushRecipientResult.recipients.length === 0) {
+    const skipReason =
+      pushRecipientResult.activeTokenCount > 0 && pushRecipientResult.preferenceDisabledUserCount > 0
+        ? "account_preference_disabled"
+        : "no_eligible_token";
+
+    return queueSuppressedPushCompanionNotification({
+      source: input.source,
+      pushTemplate,
+      emailJobId: input.emailJobId,
+      eventCorrelationId: input.eventCorrelationId,
+      skipReason,
+    });
   }
 
   return queueSingleChannelTemplatedNotification({
     ...input.source,
     channel: "push",
     dedupeKey: `${input.source.dedupeKey}:push`,
-    recipients: pushRecipients,
+    recipients: pushRecipientResult.recipients,
     metadata: {
       ...(input.source.metadata ?? {}),
       eventCorrelationId: input.eventCorrelationId,
@@ -1116,6 +1188,62 @@ const queuePushCompanionNotification = async (input: {
       source: "runtime_notification_service_push_fanout",
     },
   });
+};
+
+const queueSuppressedPushCompanionNotification = async (input: {
+  source: QueueTemplatedNotificationInput;
+  pushTemplate: NotificationTemplateRecord;
+  emailJobId: string;
+  eventCorrelationId: string;
+  skipReason: "no_eligible_token" | "account_preference_disabled";
+}) => {
+  const dedupeKey = `${input.source.dedupeKey}:push`;
+  try {
+    const requestedByUserId = await resolveRequestedByUserId(input.source.requestedBySupabaseUserId);
+    const job = await insertNotificationJob({
+      template: input.pushTemplate,
+      jobKind: input.source.jobKind,
+      dedupeKey,
+      documentId: input.source.documentId,
+      billingPaymentRequestId: input.source.billingPaymentRequestId,
+      notarizationRequestId: input.source.notarizationRequestId,
+      requestedByUserId,
+      payload: input.source.payload,
+      status: "suppressed",
+      metadata: {
+        ...(input.source.metadata ?? {}),
+        eventCorrelationId: input.eventCorrelationId,
+        emailJobId: input.emailJobId,
+        sourceEmailTemplateKey: input.source.templateKey,
+        source: "runtime_notification_service_push_fanout",
+        skipReason: input.skipReason,
+      },
+    });
+
+    return {
+      jobId: job.id,
+      deliveryCount: 0,
+      existing: false,
+    } satisfies QueueNotificationResult;
+  } catch (error) {
+    const duplicateCode =
+      typeof error === "object" && error !== null && "code" in error
+        ? ((error as { code?: string }).code ?? null)
+        : null;
+
+    if (duplicateCode === "23505") {
+      const existingJob = await getNotificationJobByDedupeKey(dedupeKey);
+      if (existingJob) {
+        return {
+          jobId: existingJob.id,
+          deliveryCount: 0,
+          existing: true,
+        } satisfies QueueNotificationResult;
+      }
+    }
+
+    throw error;
+  }
 };
 
 const queueTemplatedNotification = async (
