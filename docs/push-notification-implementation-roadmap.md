@@ -781,5 +781,3 @@ Push notification work is complete when:
 8. Tests and physical-device validation.
 9. Staging rollout.
 10. Production canary.
-
-Estimated engineering effort: **8 to 12 focused engineering days**, excluding Apple account delays, product copy review, and rollout observation.
