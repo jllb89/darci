@@ -98,24 +98,33 @@ const handleServiceError = (res: Response, error: unknown, fallbackMessage: stri
 const processNotaryDecisionNotification = async (input: {
   applicationId: string;
   notificationType: "approved" | "rejected";
-  notificationResult: { jobId: string } | null;
+  notificationResult: { jobId: string; jobIds?: string[] } | null;
 }) => {
-  if (!input.notificationResult?.jobId) {
+  const notificationJobIds = Array.from(
+    new Set(
+      [
+        ...(input.notificationResult?.jobIds ?? []),
+        input.notificationResult?.jobId ?? null,
+      ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+    ),
+  );
+
+  if (notificationJobIds.length === 0) {
     return;
   }
 
   try {
     const result = await runDueNotificationJobs({
-      limit: 1,
+      limit: notificationJobIds.length,
       workerId: `notary-application-${input.notificationType}-inline`,
-      notificationJobIds: [input.notificationResult.jobId],
+      notificationJobIds,
     });
 
     if (result.processedCount === 0) {
       console.warn("Notary application decision notification was queued but not processed", {
         applicationId: input.applicationId,
         notificationType: input.notificationType,
-        notificationJobId: input.notificationResult.jobId,
+        notificationJobIds,
         scannedCount: result.scannedCount,
         claimedCount: result.claimedCount,
       });
@@ -124,7 +133,7 @@ const processNotaryDecisionNotification = async (input: {
     console.error("Failed to process notary application decision notification", {
       applicationId: input.applicationId,
       notificationType: input.notificationType,
-      notificationJobId: input.notificationResult.jobId,
+      notificationJobIds,
       error: error instanceof Error ? error.message : error,
     });
   }

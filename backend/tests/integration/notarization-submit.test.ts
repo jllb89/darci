@@ -295,6 +295,7 @@ describe("submit notarization", () => {
     mocks.queueNotarizationSubmissionConfirmationNotificationMock.mockResolvedValue({ jobId: "job-2" });
     mocks.queueSelectedNotaryRequestNotificationMock.mockResolvedValue({
       jobId: "job-selected-notary",
+      jobIds: ["job-selected-notary", "job-selected-notary-push"],
       deliveryCount: 1,
       existing: false,
     });
@@ -888,14 +889,15 @@ describe("submit notarization", () => {
       requestedBySupabaseUserId: "user-1",
     });
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 1,
-      notificationJobIds: ["job-selected-notary"],
+      limit: 2,
+      notificationJobIds: ["job-selected-notary", "job-selected-notary-push"],
     });
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "system.selected_notary_notified",
         metadata: expect.objectContaining({
           notification_job_id: "job-selected-notary",
+          notification_job_ids: ["job-selected-notary", "job-selected-notary-push"],
           inline_processed_count: 1,
         }),
       }),

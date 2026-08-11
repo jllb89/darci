@@ -1234,6 +1234,7 @@ describe("Phase 5 meeting runtime slice", () => {
     });
     mocks.queueInPersonSessionStartedNotificationMock.mockResolvedValue({
       jobId: "job-session-start-3",
+      jobIds: ["job-session-start-3", "job-session-start-3-push"],
       deliveryCount: 1,
       existing: false,
     });
@@ -1292,8 +1293,8 @@ describe("Phase 5 meeting runtime slice", () => {
       }),
     );
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 1,
-      notificationJobIds: ["job-session-start-3"],
+      limit: 2,
+      notificationJobIds: ["job-session-start-3", "job-session-start-3-push"],
     });
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "notary.meeting_started" }),

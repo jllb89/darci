@@ -20,6 +20,7 @@ import {
   queueSignerCompletionConfirmationNotification,
   queueSignerSignedUpdateNotification,
 } from "./notificationService";
+import { runDueNotificationJobs } from "./notificationOutboxService";
 
 type SigningCompletionExecutionValue = {
   confirmedAt: string | null;
@@ -75,6 +76,16 @@ const notarialOutputKeys = new Set([
   "public_instrument",
   "uploaded_document_with_seal",
 ]);
+
+const collectNotificationJobIds = (notification: { jobId?: string | null; jobIds?: string[] } | null | undefined) =>
+  Array.from(
+    new Set(
+      [
+        ...(notification?.jobIds ?? []),
+        notification?.jobId ?? null,
+      ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+    ),
+  );
 
 const toTimestamp = (value?: string | null) => {
   if (!value) {
@@ -429,6 +440,7 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
   const signerCompletionConfirmationJobIds: string[] = [];
   const signerSignedUpdateJobId = { value: null as string | null };
   const allSignaturesCompleteJobId = { value: null as string | null };
+  const queuedNotificationJobIds: string[] = [];
 
   const completedInvites = await completeDocumentSignerInvitesForOutputSigners({
     documentId: document.id,
@@ -456,6 +468,7 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
     if (notification?.jobId) {
       signerCompletionConfirmationJobIds.push(notification.jobId);
     }
+    queuedNotificationJobIds.push(...collectNotificationJobIds(notification));
   }
 
   if (completedSignerTask && input.signatureRecord.signer_id !== document.owner_id) {
@@ -469,6 +482,7 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
     });
 
     signerSignedUpdateJobId.value = notification?.jobId ?? null;
+    queuedNotificationJobIds.push(...collectNotificationJobIds(notification));
   }
 
   let allCompletedInvites: DocumentInviteDetail[] = [];
@@ -542,6 +556,25 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
       requestedBySupabaseUserId: input.actorSupabaseId ?? undefined,
     });
     allSignaturesCompleteJobId.value = notification?.jobId ?? null;
+    queuedNotificationJobIds.push(...collectNotificationJobIds(notification));
+  }
+
+  const notificationJobIds = Array.from(new Set(queuedNotificationJobIds));
+  if (notificationJobIds.length > 0) {
+    try {
+      await runDueNotificationJobs({
+        limit: notificationJobIds.length,
+        workerId: "signing-completion-inline",
+        documentId: document.id,
+        notificationJobIds,
+      });
+    } catch (error) {
+      console.warn("Signing completion notification inline processing failed", {
+        documentId: document.id,
+        notificationJobIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   const completedInviteIds = uniqueStrings([

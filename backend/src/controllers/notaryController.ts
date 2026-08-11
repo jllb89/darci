@@ -3222,16 +3222,25 @@ export const startInPersonSession = async (req: Request, res: Response) => {
     requestedBySupabaseUserId: req.user?.id,
   });
 
-  if (sessionNotification?.jobId) {
+  const notificationJobIds = Array.from(
+    new Set(
+      [
+        ...(sessionNotification?.jobIds ?? []),
+        sessionNotification?.jobId ?? null,
+      ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+    ),
+  );
+
+  if (notificationJobIds.length > 0) {
     try {
       await runDueNotificationJobs({
-        limit: 1,
-        notificationJobIds: [sessionNotification.jobId],
+        limit: notificationJobIds.length,
+        notificationJobIds,
       });
     } catch (error) {
       console.warn("In-person session start inline notification processing failed", {
         requestId: request.id,
-        notificationJobId: sessionNotification.jobId,
+        notificationJobIds,
         error: error instanceof Error ? error.message : String(error),
       });
     }

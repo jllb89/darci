@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   queueSignerCompletionConfirmationNotificationMock: vi.fn(),
   queueSignerSignedUpdateNotificationMock: vi.fn(),
   queueAllSignaturesCompleteNotificationMock: vi.fn(),
+  runDueNotificationJobsMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -39,6 +40,10 @@ vi.mock("../../src/services/notificationService", () => ({
     mocks.queueSignerCompletionConfirmationNotificationMock,
   queueSignerSignedUpdateNotification: mocks.queueSignerSignedUpdateNotificationMock,
   queueAllSignaturesCompleteNotification: mocks.queueAllSignaturesCompleteNotificationMock,
+}));
+
+vi.mock("../../src/services/notificationOutboxService", () => ({
+  runDueNotificationJobs: mocks.runDueNotificationJobsMock,
 }));
 
 import { completeSigningWorkflowAfterSignatureCapture } from "../../src/services/signingCompletionService";
@@ -202,18 +207,27 @@ const mockBaseReads = () => {
   mocks.completeDocumentSignerInvitesForOutputSignersMock.mockResolvedValue([]);
   mocks.queueSignerCompletionConfirmationNotificationMock.mockResolvedValue({
     jobId: "job-signer-confirmation",
+    jobIds: ["job-signer-confirmation", "job-signer-confirmation-push"],
     deliveryCount: 1,
     existing: false,
   });
   mocks.queueSignerSignedUpdateNotificationMock.mockResolvedValue({
     jobId: "job-owner-update",
+    jobIds: ["job-owner-update", "job-owner-update-push"],
     deliveryCount: 1,
     existing: false,
   });
   mocks.queueAllSignaturesCompleteNotificationMock.mockResolvedValue({
     jobId: "job-all-complete",
+    jobIds: ["job-all-complete", "job-all-complete-push"],
     deliveryCount: 1,
     existing: false,
+  });
+  mocks.runDueNotificationJobsMock.mockResolvedValue({
+    scannedCount: 6,
+    claimedCount: 6,
+    processedCount: 6,
+    jobs: [],
   });
 };
 
@@ -301,6 +315,19 @@ describe("signing completion service", () => {
         nextDocumentStatus: "pending_notary",
       }),
     );
+    expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
+      limit: 6,
+      workerId: "signing-completion-inline",
+      documentId: "doc-1",
+      notificationJobIds: [
+        "job-signer-confirmation",
+        "job-signer-confirmation-push",
+        "job-owner-update",
+        "job-owner-update-push",
+        "job-all-complete",
+        "job-all-complete-push",
+      ],
+    });
   });
 
   it("leaves execution open when another required signer is still pending", async () => {

@@ -4396,12 +4396,38 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
       },
     });
 
-    await queueDocumentReadyForReviewNotification({
+    const notification = await queueDocumentReadyForReviewNotification({
       documentId: updatedDocument.id,
       documentVersionId: updatedVersion.id,
       reviewSource: "uploaded_pdf",
       requestedBySupabaseUserId: req.user?.id,
     });
+
+    const notificationJobIds = Array.from(
+      new Set(
+        [
+          ...(notification?.jobIds ?? []),
+          notification?.jobId ?? null,
+        ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+      ),
+    );
+
+    if (notificationJobIds.length > 0) {
+      try {
+        await runDueNotificationJobs({
+          limit: notificationJobIds.length,
+          workerId: "document-ready-upload-inline",
+          documentId: updatedDocument.id,
+          notificationJobIds,
+        });
+      } catch (error) {
+        console.warn("Document ready notification inline processing failed", {
+          documentId: updatedDocument.id,
+          notificationJobIds,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   res.status(200).json({
@@ -8032,12 +8058,21 @@ export const submitNotarization = async (req: Request, res: Response) => {
       requestedBySupabaseUserId: req.user?.id,
     });
 
+    const notificationJobIds = Array.from(
+      new Set(
+        [
+          ...(selectedNotaryNotification?.jobIds ?? []),
+          selectedNotaryNotification?.jobId ?? null,
+        ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+      ),
+    );
+
     let inlineProcessingResult: Awaited<ReturnType<typeof runDueNotificationJobs>> | null = null;
-    if (selectedNotaryNotification?.jobId) {
+    if (selectedNotaryNotification && notificationJobIds.length > 0) {
       try {
         inlineProcessingResult = await runDueNotificationJobs({
-          limit: 1,
-          notificationJobIds: [selectedNotaryNotification.jobId],
+          limit: notificationJobIds.length,
+          notificationJobIds,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -8045,7 +8080,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
           documentId,
           requestId: request.id,
           selectedNotaryUserId,
-          notificationJobId: selectedNotaryNotification.jobId,
+          notificationJobIds,
           error: message,
         });
       }
@@ -8061,6 +8096,7 @@ export const submitNotarization = async (req: Request, res: Response) => {
           document_id: documentId,
           selected_notary_user_id: selectedNotaryUserId,
           notification_job_id: selectedNotaryNotification.jobId,
+          notification_job_ids: notificationJobIds,
           notification_existing: selectedNotaryNotification.existing,
           delivery_count: selectedNotaryNotification.deliveryCount,
           inline_processed_count: inlineProcessingResult?.processedCount ?? 0,

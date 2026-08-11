@@ -130,6 +130,7 @@ describe("notaryProfileController admin application decisions", () => {
     mocks.approveNotaryApplicationMock.mockResolvedValue({ application, applicant, profile });
     mocks.queueApprovedNotificationMock.mockResolvedValue({
       jobId: "approval-job-1",
+      jobIds: ["approval-job-1", "approval-job-1-push"],
       deliveryCount: 1,
       existing: false,
     });
@@ -147,9 +148,9 @@ describe("notaryProfileController admin application decisions", () => {
       reviewNotes: "Approved.",
     });
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 1,
+      limit: 2,
       workerId: "notary-application-approved-inline",
-      notificationJobIds: ["approval-job-1"],
+      notificationJobIds: ["approval-job-1", "approval-job-1-push"],
     });
     expect(response.status).toHaveBeenCalledWith(200);
   });
@@ -191,6 +192,7 @@ describe("notaryProfileController admin application decisions", () => {
     });
     mocks.queueRejectedNotificationMock.mockResolvedValue({
       jobId: "rejection-job-1",
+      jobIds: ["rejection-job-1", "rejection-job-1-push"],
       deliveryCount: 1,
       existing: false,
     });
@@ -208,9 +210,9 @@ describe("notaryProfileController admin application decisions", () => {
       reviewNotes: "Not enough coverage.",
     });
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 1,
+      limit: 2,
       workerId: "notary-application-rejected-inline",
-      notificationJobIds: ["rejection-job-1"],
+      notificationJobIds: ["rejection-job-1", "rejection-job-1-push"],
     });
     expect(response.status).toHaveBeenCalledWith(200);
   });

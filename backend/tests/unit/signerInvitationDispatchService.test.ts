@@ -114,6 +114,7 @@ describe("signer invitation dispatcher", () => {
       invite: { id: "invite-1" },
       notification: {
         jobId: "job-1",
+        jobIds: ["job-1", "job-1-push"],
         deliveryId: "delivery-1",
         templateId: "template-1",
         templateKey: "signer_signup_required_email",
@@ -155,16 +156,17 @@ describe("signer invitation dispatcher", () => {
         inviteId: "invite-1",
         existing: false,
         notificationJobId: "job-1",
+        notificationJobIds: ["job-1", "job-1-push"],
         notificationDeliveryId: "delivery-1",
         idempotencyKey: "signing-remaining:doc-1:signer-1",
       },
     ]);
     expect(result.failures).toEqual([]);
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 1,
+      limit: 2,
       workerId: "signer-invite-immediate",
       documentId: "doc-1",
-      notificationJobIds: ["job-1"],
+      notificationJobIds: ["job-1", "job-1-push"],
     });
   });
 
@@ -187,6 +189,7 @@ describe("signer invitation dispatcher", () => {
       invite: { id: "invite-1", status: "queued" },
       notification: {
         jobId: "job-reminder-1",
+        jobIds: ["job-reminder-1", "job-reminder-1-push"],
         deliveryId: "delivery-reminder-1",
         templateId: "template-reminder-1",
         templateKey: "signer_reminder_email",
@@ -217,14 +220,15 @@ describe("signer invitation dispatcher", () => {
         inviteId: "invite-1",
         existing: true,
         notificationJobId: "job-reminder-1",
+        notificationJobIds: ["job-reminder-1", "job-reminder-1-push"],
         notificationDeliveryId: "delivery-reminder-1",
       }),
     ]);
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 1,
+      limit: 2,
       workerId: "signer-invite-immediate",
       documentId: "doc-1",
-      notificationJobIds: ["job-reminder-1"],
+      notificationJobIds: ["job-reminder-1", "job-reminder-1-push"],
     });
   });
 

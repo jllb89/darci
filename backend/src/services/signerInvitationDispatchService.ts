@@ -15,6 +15,7 @@ export type RemainingSignerInviteDispatchSuccess = {
   inviteId: string;
   existing: boolean;
   notificationJobId: string | null;
+  notificationJobIds: string[];
   notificationDeliveryId: string | null;
   idempotencyKey: string;
 };
@@ -45,6 +46,16 @@ const existingInviteStatusesEligibleForImmediateResend = new Set([
   "queued",
   "failed",
 ]);
+
+const collectNotificationJobIds = (notification: { jobId?: string | null; jobIds?: string[] } | null | undefined) =>
+  Array.from(
+    new Set(
+      [
+        ...(notification?.jobIds ?? []),
+        notification?.jobId ?? null,
+      ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+    ),
+  );
 
 const queueCandidateInvite = async (input: {
   actorUserId: string | null;
@@ -82,6 +93,7 @@ const queueCandidateInvite = async (input: {
     inviteId: notificationResult.invite.id,
     existing: result.existing,
     notificationJobId: notificationResult.notification?.jobId ?? null,
+    notificationJobIds: collectNotificationJobIds(notificationResult.notification),
     notificationDeliveryId: notificationResult.notification?.deliveryId ?? null,
     idempotencyKey: input.candidate.idempotencyKey,
   } satisfies RemainingSignerInviteDispatchSuccess;
@@ -218,9 +230,7 @@ export const queueRemainingSignerInvitesAfterCreatorSignature = async (input: {
     });
   }
 
-  const notificationJobIds = invited
-    .map((invite) => invite.notificationJobId)
-    .filter((jobId): jobId is string => Boolean(jobId));
+  const notificationJobIds = invited.flatMap((invite) => invite.notificationJobIds);
 
   if (invited.length > 0 && notificationJobIds.length === 0) {
     console.info("Remaining signer invite dispatch produced no notification jobs", {

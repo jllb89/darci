@@ -9,6 +9,7 @@ import {
 import type { PDFFont, PDFPage } from "pdf-lib";
 import { recordAuditEvent } from "./auditService";
 import { queueDocumentReadyForReviewNotification } from "./notificationService";
+import { runDueNotificationJobs } from "./notificationOutboxService";
 import {
   toRenderableMemberValue,
   type CanonicalAnswers,
@@ -3587,12 +3588,39 @@ export const processDocumentGenerationRun = async (input: {
         },
       });
 
-      await queueDocumentReadyForReviewNotification({
+      const notification = await queueDocumentReadyForReviewNotification({
         documentId: document.id,
         documentVersionId: version.id,
         generationRunId: renderedRun.id,
         reviewSource: "generated_output",
       });
+
+      const notificationJobIds = Array.from(
+        new Set(
+          [
+            ...(notification?.jobIds ?? []),
+            notification?.jobId ?? null,
+          ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
+        ),
+      );
+
+      if (notificationJobIds.length > 0) {
+        try {
+          await runDueNotificationJobs({
+            limit: notificationJobIds.length,
+            workerId: "document-ready-generation-inline",
+            documentId: document.id,
+            notificationJobIds,
+          });
+        } catch (error) {
+          console.warn("Generated document ready notification inline processing failed", {
+            documentId: document.id,
+            generationRunId: renderedRun.id,
+            notificationJobIds,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
 
     await recordAuditEvent({
