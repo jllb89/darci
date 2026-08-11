@@ -242,7 +242,29 @@ Wave 1 exclusions:
 
 ### Wave 2: Remaining Live Transactional Events
 
-Candidates after Wave 1 metrics are stable:
+Implementation status: **Implemented locally on 2026-08-10; migration seeds safe push templates and APNs routing now has backend/mobile route sanity coverage.**
+
+Included live events:
+
+| Email template key | Push route | Native destination |
+| --- | --- | --- |
+| `member_signatures_recorded_email` | `document_signing` | Document signing/status |
+| `signer_invitation_email` | `document_signing` | Document signing/status |
+| `signer_reminder_email` | `document_signing` | Document signing/status |
+| `signer_completion_confirmation_email` | `document_signing` | Document signing/status |
+| `signer_signed_update_email` | `document_signing` | Document signing/status |
+| `notarization_submission_confirmation_email` | `member_document` | Member document details/signing |
+| `notary_request_claimed_email` | `member_request` | Member request/session workspace |
+| `notary_application_approved_email` | `user_settings` | Profile settings |
+| `notary_application_rejected_email` | `user_settings` | Profile settings |
+
+Safety exclusions remain:
+
+1. Do not create a push template for `notary_next_step_email`; the email contains an Illuminotary code and push must not expose codes in body or custom data.
+2. Do not create a push template for `signer_signup_required_email` until there is an authenticated native destination for the recipient. Existing-user invitations and reminders already require `target_user_id` before push fanout.
+3. Do not create dormant lifecycle push templates until the corresponding email trigger is live and route-tested.
+
+Original candidate list:
 
 1. Member signature recorded.
 2. Individual signer completion confirmation.
@@ -781,3 +803,11 @@ Push notification work is complete when:
 8. Tests and physical-device validation.
 9. Staging rollout.
 10. Production canary.
+
+
+Push-wise, the remaining items are now mostly product/rollout polish, not core APNs blockers:
+
+- Durable scheduled outbox runner: implemented locally on 2026-08-10 in the worker process through `NOTIFICATION_OUTBOX_RUNNER_ENABLED`, `NOTIFICATION_OUTBOX_RUNNER_INTERVAL_SECONDS`, and `NOTIFICATION_OUTBOX_RUN_LIMIT`.
+- Admin visibility for APNs failures: implemented locally on 2026-08-10 through the web admin Notifications section, with filters, job/delivery status, user, template, date, document IDN, device context, error details, and retry actions for failed deliveries.
+- In-app notification history/notification center, so users can recover missed pushes.
+- Badge count strategy, if you want the app icon badge to mean “things needing action.”

@@ -323,6 +323,20 @@ const toUserSummaryById = async (userIds: string[]) => {
   );
 };
 
+const toRowsByUserId = (rows: Record<string, unknown>[], userIdKey: string) => {
+  return rows.reduce<Map<string, Record<string, unknown>[]>>((map, row) => {
+    const userId = row[userIdKey] == null ? "" : String(row[userIdKey]);
+    if (!userId) {
+      return map;
+    }
+
+    const existing = map.get(userId) ?? [];
+    existing.push(row);
+    map.set(userId, existing);
+    return map;
+  }, new Map());
+};
+
 const withUserSummary = (row: Record<string, unknown>, user?: Record<string, unknown>) => ({
   ...row,
   email: user?.email ?? null,
@@ -470,65 +484,80 @@ export const getAdminDashboard = async (context: AdminProfileContext) => {
 };
 
 export const listAdminUsers = async (input: { search?: string; limit?: number }) => {
-  await ensureAdminProfileSchema();
   const search = input.search?.trim().toLowerCase() ?? "";
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
 
-  const result = await pool.query(
-    `
-      select
-        u.id,
-        u.supabase_user_id,
-        u.email,
-        u.phone,
-        u.first_name,
-        u.last_name,
-        u.role,
-        u.status,
-        u.created_at,
-        u.last_sign_in_at,
-        u.last_auth_synced_at,
-        ap.can_manage_admins,
-        ap.can_review_notaries,
-        ap.can_manage_users,
-        ap.can_view_audit,
-        ap.can_manage_platform_rules,
-        coalesce(document_counts.document_count, 0)::int as document_count,
-        coalesce(
-          jsonb_agg(
-            jsonb_build_object(
-              'id', ur.id,
-              'role', ur.role,
-              'status', ur.status,
-              'is_active_profile', ur.is_active_profile,
-              'granted_reason', ur.granted_reason,
-              'created_at', ur.created_at,
-              'updated_at', ur.updated_at
-            )
-            order by ur.created_at asc
-          ) filter (where ur.id is not null),
-          '[]'::jsonb
-        ) as roles
-      from public.users u
-      left join public.user_roles ur on ur.user_id = u.id
-      left join public.admin_permissions ap on ap.user_id = u.id
-      left join lateral (
-        select count(*)::int as document_count
-        from public.documents d
-        where d.owner_id = u.id
-      ) document_counts on true
-      where $1 = ''
-        or lower(coalesce(u.email, '')) like '%' || $1 || '%'
-        or lower(coalesce(u.phone, '')) like '%' || $1 || '%'
-        or lower(coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, '')) like '%' || $1 || '%'
-      group by u.id, ap.user_id, document_counts.document_count
-      order by u.created_at desc
-      limit $2
-    `,
-    [search, limit],
+  let usersQuery = supabaseAdmin
+    .from("users")
+    .select("id, supabase_user_id, email, phone, first_name, last_name, role, status, created_at, last_sign_in_at, last_auth_synced_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (search) {
+    const escapedSearch = search.replace(/[%,]/g, "");
+    usersQuery = usersQuery.or(
+      [
+        `email.ilike.%${escapedSearch}%`,
+        `phone.ilike.%${escapedSearch}%`,
+        `first_name.ilike.%${escapedSearch}%`,
+        `last_name.ilike.%${escapedSearch}%`,
+      ].join(","),
+    );
+  }
+
+  const { data: usersData, error: usersError } = await usersQuery;
+  throwAdminSupabaseError(usersError, "Failed to load users");
+
+  const users = (usersData ?? []) as Record<string, unknown>[];
+  const userIds = users.map((user) => String(user.id)).filter(Boolean);
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const [rolesResult, permissionsResult, documentsResult] = await Promise.all([
+    supabaseAdmin
+      .from("user_roles")
+      .select("id, user_id, role, status, is_active_profile, granted_reason, created_at, updated_at")
+      .in("user_id", userIds)
+      .order("created_at", { ascending: true }),
+    supabaseAdmin
+      .from("admin_permissions")
+      .select("user_id, can_manage_admins, can_review_notaries, can_manage_users, can_view_audit, can_manage_platform_rules")
+      .in("user_id", userIds),
+    supabaseAdmin
+      .from("documents")
+      .select("id, owner_id")
+      .in("owner_id", userIds),
+  ]);
+
+  throwAdminSupabaseError(rolesResult.error, "Failed to load user roles");
+  throwAdminSupabaseError(permissionsResult.error, "Failed to load admin permissions");
+  throwAdminSupabaseError(documentsResult.error, "Failed to load user document counts");
+
+  const rolesByUserId = toRowsByUserId((rolesResult.data ?? []) as Record<string, unknown>[], "user_id");
+  const permissionsByUserId = new Map(
+    ((permissionsResult.data ?? []) as Record<string, unknown>[]).map((row) => [String(row.user_id), row]),
+  );
+  const documentCountByUserId = ((documentsResult.data ?? []) as Record<string, unknown>[]).reduce<Map<string, number>>(
+    (map, row) => {
+      const ownerId = row.owner_id == null ? "" : String(row.owner_id);
+      if (ownerId) {
+        map.set(ownerId, (map.get(ownerId) ?? 0) + 1);
+      }
+      return map;
+    },
+    new Map(),
   );
 
-  return result.rows.map((row) => mapUserRow(row as Record<string, unknown>));
+  return users.map((user) => {
+    const userId = String(user.id);
+    return mapUserRow({
+      ...user,
+      ...(permissionsByUserId.get(userId) ?? {}),
+      document_count: documentCountByUserId.get(userId) ?? 0,
+      roles: rolesByUserId.get(userId) ?? [],
+    });
+  });
 };
 
 export const updateAdminUserStatus = async (input: {

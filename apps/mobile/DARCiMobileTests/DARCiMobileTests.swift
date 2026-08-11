@@ -550,6 +550,13 @@ final class DARCiMobileTests: XCTestCase {
             ]),
             .documentSigning(documentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", notificationId: nil)
         )
+        XCTAssertEqual(
+            PushNotificationRoute(userInfo: [
+                "route": "user_settings",
+                "notificationId": "delivery-2",
+            ]),
+            .userSettings(notificationId: "delivery-2")
+        )
     }
 
     func testPushNotificationRouteRejectsUnknownMissingOrSensitivePayloads() {

@@ -568,6 +568,9 @@ struct AppRootView: View {
         case .documentReview(let documentId, _):
             selectedTab = .documents
             reviewRoute = DocumentReviewRoute(documentId: documentId)
+        case .userSettings:
+            selectedTab = .home
+            isUserSettingsPresented = true
         }
 
         pendingPushRoute = nil

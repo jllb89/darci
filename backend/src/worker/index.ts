@@ -4,6 +4,7 @@ import { bullMqPrefix, connection } from "./queues";
 import { processDocumentGenerationRun } from "../services/documentGenerationRenderService";
 import { hashDocument } from "../services/hashingService";
 import { anchorToLedger } from "../services/ledgerService";
+import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import { deliverWebhook } from "../services/webhookService";
 import { captureException, flushSentry } from "../utils/sentry";
 
@@ -34,6 +35,25 @@ type GenerationRunJobData = {
 const redisConnection = connection;
 
 const workers: Array<Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>> = [];
+let notificationOutboxInterval: NodeJS.Timeout | null = null;
+let notificationOutboxRunInFlight = false;
+
+const parsePositiveInt = (value: string | undefined, fallback: number, max: number) => {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+};
+
+const notificationOutboxRunnerEnabled = process.env.NOTIFICATION_OUTBOX_RUNNER_ENABLED !== "false";
+const notificationOutboxIntervalMs = parsePositiveInt(
+  process.env.NOTIFICATION_OUTBOX_RUNNER_INTERVAL_SECONDS,
+  60,
+  60 * 60,
+) * 1000;
+const notificationOutboxRunLimit = parsePositiveInt(
+  process.env.NOTIFICATION_OUTBOX_RUN_LIMIT,
+  25,
+  100,
+);
 
 const summarizeJobData = (data: unknown) => {
   if (!data || typeof data !== "object") {
@@ -179,7 +199,56 @@ if (!redisConnection) {
   workers.forEach(attachWorkerTelemetry);
 }
 
+const runNotificationOutboxOnce = async () => {
+  if (notificationOutboxRunInFlight) {
+    return;
+  }
+
+  notificationOutboxRunInFlight = true;
+  try {
+    const result = await runDueNotificationJobs({
+      limit: notificationOutboxRunLimit,
+      workerId: process.env.NOTIFICATION_OUTBOX_WORKER_ID ?? "worker-scheduled",
+    });
+    if (result.processedCount > 0) {
+      console.log("Notification outbox scheduled run complete", {
+        scannedCount: result.scannedCount,
+        claimedCount: result.claimedCount,
+        processedCount: result.processedCount,
+      });
+    }
+  } catch (error) {
+    captureException(error, {
+      level: "error",
+      tags: {
+        service: "worker",
+        worker_queue: "notification-outbox",
+      },
+      fingerprint: ["worker", "notification-outbox", "scheduled-run"],
+    });
+    console.error("Notification outbox scheduled run failed", error instanceof Error ? error.message : error);
+  } finally {
+    notificationOutboxRunInFlight = false;
+  }
+};
+
+if (notificationOutboxRunnerEnabled) {
+  notificationOutboxInterval = setInterval(() => {
+    void runNotificationOutboxOnce();
+  }, notificationOutboxIntervalMs);
+  void runNotificationOutboxOnce();
+  console.log("Notification outbox scheduled runner started", {
+    intervalSeconds: notificationOutboxIntervalMs / 1000,
+    limit: notificationOutboxRunLimit,
+  });
+}
+
 const shutdown = async () => {
+  if (notificationOutboxInterval) {
+    clearInterval(notificationOutboxInterval);
+    notificationOutboxInterval = null;
+  }
+
   await Promise.all(workers.map((worker) => worker.close()));
   await flushSentry();
 

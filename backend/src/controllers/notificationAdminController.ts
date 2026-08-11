@@ -5,6 +5,7 @@ import {
   getNotificationJobDetail,
   listNotificationJobs,
   NotificationOutboxServiceError,
+  requeueNotificationJobForAdmin,
 } from "../services/notificationOutboxService";
 import { sendValidationError } from "../utils/validation";
 
@@ -100,6 +101,20 @@ export const getNotificationMetricsAdmin = async (req: Request, res: Response) =
     });
 
     return res.status(200).json(metrics);
+  } catch (error) {
+    return sendServiceError(res, error);
+  }
+};
+
+export const retryNotificationJobAdmin = async (req: Request, res: Response) => {
+  const parsed = notificationJobParamsSchema.safeParse(req.params ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, parsed.error);
+  }
+
+  try {
+    const result = await requeueNotificationJobForAdmin(parsed.data.id);
+    return res.status(202).json({ result });
   } catch (error) {
     return sendServiceError(res, error);
   }

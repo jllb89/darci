@@ -114,7 +114,7 @@ describe("signer invitation dispatcher", () => {
       invite: { id: "invite-1" },
       notification: {
         jobId: "job-1",
-        jobIds: ["job-1", "job-1-push"],
+        pushJobIds: ["job-1-push"],
         deliveryId: "delivery-1",
         templateId: "template-1",
         templateKey: "signer_signup_required_email",
@@ -189,7 +189,7 @@ describe("signer invitation dispatcher", () => {
       invite: { id: "invite-1", status: "queued" },
       notification: {
         jobId: "job-reminder-1",
-        jobIds: ["job-reminder-1", "job-reminder-1-push"],
+        pushJobIds: ["job-reminder-1-push"],
         deliveryId: "delivery-reminder-1",
         templateId: "template-reminder-1",
         templateKey: "signer_reminder_email",

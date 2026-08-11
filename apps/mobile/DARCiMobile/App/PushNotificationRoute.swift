@@ -18,6 +18,7 @@ enum PushNotificationRoute: Equatable, Sendable {
     case memberNotarySelection(documentId: String, notificationId: String?)
     case documentReview(documentId: String, notificationId: String?)
     case documentSigning(documentId: String, notificationId: String?)
+    case userSettings(notificationId: String?)
 
     var routeName: String {
         switch self {
@@ -35,6 +36,8 @@ enum PushNotificationRoute: Equatable, Sendable {
             return "document_review"
         case .documentSigning:
             return "document_signing"
+        case .userSettings:
+            return "user_settings"
         }
     }
 
@@ -46,7 +49,8 @@ enum PushNotificationRoute: Equatable, Sendable {
              .memberDocument(_, let notificationId),
              .memberNotarySelection(_, let notificationId),
              .documentReview(_, let notificationId),
-             .documentSigning(_, let notificationId):
+             .documentSigning(_, let notificationId),
+             .userSettings(let notificationId):
             return notificationId
         }
     }
@@ -85,6 +89,8 @@ enum PushNotificationRoute: Equatable, Sendable {
         case "document_signing":
             guard let documentId = Self.validIdentifier(userInfo["documentId"]) else { return nil }
             self = .documentSigning(documentId: documentId, notificationId: notificationId)
+        case "user_settings":
+            self = .userSettings(notificationId: notificationId)
         default:
             return nil
         }

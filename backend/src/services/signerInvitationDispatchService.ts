@@ -47,12 +47,13 @@ const existingInviteStatusesEligibleForImmediateResend = new Set([
   "failed",
 ]);
 
-const collectNotificationJobIds = (notification: { jobId?: string | null; jobIds?: string[] } | null | undefined) =>
+const collectNotificationJobIds = (notification: { jobId?: string | null; jobIds?: string[]; pushJobIds?: string[] } | null | undefined) =>
   Array.from(
     new Set(
       [
-        ...(notification?.jobIds ?? []),
         notification?.jobId ?? null,
+        ...(notification?.jobIds ?? []),
+        ...(notification?.pushJobIds ?? []),
       ].filter((jobId): jobId is string => Boolean(jobId && jobId.trim())),
     ),
   );

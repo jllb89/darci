@@ -70,13 +70,15 @@ type PushRouteName =
   | "member_document"
   | "member_notary_selection"
   | "document_review"
-  | "document_signing";
+  | "document_signing"
+  | "user_settings";
 
 type PushRoutePayload = {
   route: PushRouteName;
   requestId?: string;
   documentId?: string;
 };
+type PushRouteWithRequiredId = Exclude<PushRouteName, "user_settings">;
 
 type NotificationTemplateRecord = {
   id: string;
@@ -209,6 +211,13 @@ type DevicePushTokenRecord = {
   invalidated_at: string | null;
 };
 
+type NotificationAdminUserSummary = {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  displayName: string;
+};
+
 type NotificationProviderDispatchEvent = {
   eventType: OutboundMessageEventType;
   eventAt: string;
@@ -274,6 +283,15 @@ export type NotificationJobListItem = {
   notarizationRequestId: string | null;
   inviteId: string | null;
   requestedByUserId: string | null;
+  documentIdn: string | null;
+  user: NotificationAdminUserSummary | null;
+  deliveryStatus: NotificationDeliveryStatus | "mixed" | "none";
+  deliveryProvider: NotificationProviderName | null;
+  devicePushTokenId: string | null;
+  deviceEnvironment: string | null;
+  permissionStatus: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
   createdAt: string;
   updatedAt: string;
   deliveryCounts: {
@@ -469,6 +487,9 @@ const outboundEventSelect = [
   "metadata",
   "created_at",
 ].join(", ");
+
+const notificationAdminUserSelect = "id, email, phone, first_name, last_name";
+const notificationAdminDocumentSelect = "id, idn";
 
 const eventTypeToDeliveryStatus: Partial<
   Record<OutboundMessageEventType, NotificationDeliveryStatus>
@@ -1074,7 +1095,7 @@ const getApnsExpiration = (input: NotificationProviderDispatchInput) => {
   return Math.floor(new Date(input.now).getTime() / 1000) + rawExpirationSeconds;
 };
 
-const pushRouteRequiredIdByName: Record<PushRouteName, "requestId" | "documentId"> = {
+const pushRouteRequiredIdByName: Record<PushRouteWithRequiredId, "requestId" | "documentId"> = {
   member_session: "requestId",
   member_request: "requestId",
   notary_request_review: "requestId",
@@ -1084,21 +1105,36 @@ const pushRouteRequiredIdByName: Record<PushRouteName, "requestId" | "documentId
   document_signing: "documentId",
 };
 
+const pushRoutesWithoutRequiredId = new Set<Exclude<PushRouteName, PushRouteWithRequiredId>>(["user_settings"]);
+
 const pushRouteByTemplateKey: Partial<Record<string, PushRouteName>> = {
   document_ready_for_review_email: "document_review",
   member_signing_ready_email: "document_signing",
+  member_signatures_recorded_email: "document_signing",
+  signer_invitation_email: "document_signing",
+  signer_reminder_email: "document_signing",
+  signer_completion_confirmation_email: "document_signing",
+  signer_signed_update_email: "document_signing",
   all_signatures_complete_email: "member_document",
+  notarization_submission_confirmation_email: "member_document",
   notary_request_received_email: "notary_request_review",
+  notary_request_claimed_email: "member_request",
   notary_changes_requested_email: "member_request",
   notary_request_rejected_email: "member_notary_selection",
   notary_approval_received_email: "member_session",
   notary_member_contact_received_email: "notary_request_review",
   meeting_scheduled_confirmation_email: "member_session",
   in_person_session_started_email: "member_session",
+  notary_application_approved_email: "user_settings",
+  notary_application_rejected_email: "user_settings",
 };
 
 const isPushRouteName = (value: unknown): value is PushRouteName =>
-  typeof value === "string" && value in pushRouteRequiredIdByName;
+  typeof value === "string" &&
+  (value in pushRouteRequiredIdByName || pushRoutesWithoutRequiredId.has(value as Exclude<PushRouteName, PushRouteWithRequiredId>));
+
+const isPushRouteWithRequiredId = (route: PushRouteName): route is PushRouteWithRequiredId =>
+  route in pushRouteRequiredIdByName;
 
 const isPushRouteIdentifier = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(value.trim());
@@ -1116,6 +1152,10 @@ const getPushRoutePayload = (input: NotificationProviderDispatchInput): PushRout
 
   if (!routeCandidate) {
     return null;
+  }
+
+  if (!isPushRouteWithRequiredId(routeCandidate)) {
+    return { route: routeCandidate };
   }
 
   const requiredIdentifier = pushRouteRequiredIdByName[routeCandidate];
@@ -1307,6 +1347,46 @@ const getNotificationTemplatesByIds = async (templateIds: string[]) => {
 
   const templates = (data ?? []) as NotificationTemplateRecord[];
   return new Map(templates.map((template) => [template.id, template]));
+};
+
+const getNotificationAdminDocumentsByIds = async (documentIds: string[]) => {
+  const uniqueDocumentIds = Array.from(new Set(documentIds.filter(Boolean)));
+  if (uniqueDocumentIds.length === 0) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("documents")
+    .select(notificationAdminDocumentSelect)
+    .in("id", uniqueDocumentIds);
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  return new Map(
+    ((data ?? []) as Record<string, unknown>[]).map((document) => [String(document.id), document]),
+  );
+};
+
+const getNotificationAdminUsersByIds = async (userIds: string[]) => {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) {
+    return new Map<string, Record<string, unknown>>();
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select(notificationAdminUserSelect)
+    .in("id", uniqueUserIds);
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  return new Map(
+    ((data ?? []) as Record<string, unknown>[]).map((user) => [String(user.id), user]),
+  );
 };
 
 const listJobDeliveries = async (jobId: string) => {
@@ -1748,10 +1828,31 @@ const buildJobListItem = (input: {
   job: NotificationJobRecord;
   templateById: Map<string, NotificationTemplateRecord>;
   deliveries: NotificationDeliveryRecord[];
+  documentById?: Map<string, Record<string, unknown>>;
+  userById?: Map<string, Record<string, unknown>>;
 }) => {
   const template = input.job.template_id
     ? input.templateById.get(input.job.template_id) ?? null
     : null;
+  const primaryDelivery = [...input.deliveries].sort((left, right) => {
+    if (left.status === "failed" && right.status !== "failed") {
+      return -1;
+    }
+    if (right.status === "failed" && left.status !== "failed") {
+      return 1;
+    }
+    return String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? ""));
+  })[0] ?? null;
+  const deliveryStatuses = new Set(input.deliveries.map((delivery) => delivery.status));
+  const deliveryStatus = deliveryStatuses.size === 0
+    ? "none"
+    : deliveryStatuses.size === 1
+      ? input.deliveries[0]?.status ?? "none"
+      : "mixed";
+  const deliveryMetadata = primaryDelivery ? objectOrEmpty(primaryDelivery.metadata) : {};
+  const userId = primaryDelivery?.target_user_id ?? input.job.requested_by_user_id ?? null;
+  const user = userId ? input.userById?.get(userId) ?? null : null;
+  const document = input.job.document_id ? input.documentById?.get(input.job.document_id) ?? null : null;
 
   return {
     id: input.job.id,
@@ -1771,6 +1872,25 @@ const buildJobListItem = (input: {
     notarizationRequestId: input.job.notarization_request_id,
     inviteId: input.job.invite_id,
     requestedByUserId: input.job.requested_by_user_id,
+    documentIdn: document?.idn == null ? null : String(document.idn),
+    user: user
+      ? {
+          id: String(user.id),
+          email: user.email == null ? null : String(user.email),
+          phone: user.phone == null ? null : String(user.phone),
+          displayName: [user.first_name, user.last_name]
+            .map((value) => (value == null ? "" : String(value).trim()))
+            .filter(Boolean)
+            .join(" ") || (user.email == null ? null : String(user.email)) || (user.phone == null ? null : String(user.phone)) || "User",
+        }
+      : null,
+    deliveryStatus,
+    deliveryProvider: primaryDelivery?.provider ?? null,
+    devicePushTokenId: primaryDelivery?.device_push_token_id ?? null,
+    deviceEnvironment: typeof deliveryMetadata.tokenEnvironment === "string" ? deliveryMetadata.tokenEnvironment : null,
+    permissionStatus: typeof deliveryMetadata.permissionStatus === "string" ? deliveryMetadata.permissionStatus : null,
+    lastErrorCode: primaryDelivery?.error_code ?? null,
+    lastErrorMessage: primaryDelivery?.error_message ?? null,
     createdAt: input.job.created_at,
     updatedAt: input.job.updated_at,
     deliveryCounts: summarizeDeliveryCounts(input.deliveries),
@@ -2433,6 +2553,9 @@ export const listNotificationJobs = async (input: {
   const templateById = await getNotificationTemplatesByIds(
     jobs.flatMap((job) => (job.template_id ? [job.template_id] : [])),
   );
+  const documentById = await getNotificationAdminDocumentsByIds(
+    jobs.flatMap((job) => (job.document_id ? [job.document_id] : [])),
+  );
   const jobIds = jobs.map((job) => job.id);
 
   let deliveries: NotificationDeliveryRecord[] = [];
@@ -2449,6 +2572,10 @@ export const listNotificationJobs = async (input: {
 
     deliveries = castValue<NotificationDeliveryRecord[]>(deliveriesResult.data ?? []);
   }
+  const userById = await getNotificationAdminUsersByIds([
+    ...jobs.flatMap((job) => (job.requested_by_user_id ? [job.requested_by_user_id] : [])),
+    ...deliveries.flatMap((delivery) => (delivery.target_user_id ? [delivery.target_user_id] : [])),
+  ]);
 
   const deliveriesByJobId = deliveries.reduce<Map<string, NotificationDeliveryRecord[]>>(
     (map, delivery) => {
@@ -2466,6 +2593,8 @@ export const listNotificationJobs = async (input: {
         job,
         templateById,
         deliveries: deliveriesByJobId.get(job.id) ?? [],
+        documentById,
+        userById,
       }),
     ),
     page: {
@@ -2489,10 +2618,17 @@ export const getNotificationJobDetail = async (jobId: string) => {
   const templateById = await getNotificationTemplatesByIds(
     job.template_id ? [job.template_id] : [],
   );
+  const documentById = await getNotificationAdminDocumentsByIds(job.document_id ? [job.document_id] : []);
+  const userById = await getNotificationAdminUsersByIds([
+    ...(job.requested_by_user_id ? [job.requested_by_user_id] : []),
+    ...deliveries.flatMap((delivery) => (delivery.target_user_id ? [delivery.target_user_id] : [])),
+  ]);
   const listItem = buildJobListItem({
     job,
     templateById,
     deliveries,
+    documentById,
+    userById,
   });
 
   return {
@@ -2540,6 +2676,64 @@ export const getNotificationJobDetail = async (jobId: string) => {
       createdAt: event.created_at,
     })),
   } satisfies NotificationJobDetail;
+};
+
+export const requeueNotificationJobForAdmin = async (jobId: string) => {
+  assertSupabaseConfigured();
+
+  const job = await getNotificationJobById(jobId);
+  if (!job) {
+    throw new NotificationOutboxServiceError(404, "Notification job not found");
+  }
+
+  const deliveries = await listJobDeliveries(job.id);
+  const failedDeliveries = deliveries.filter((delivery) => delivery.status === "failed");
+  if (failedDeliveries.length === 0) {
+    throw new NotificationOutboxServiceError(400, "Only jobs with failed deliveries can be retried.");
+  }
+
+  const now = new Date().toISOString();
+  const deliveryUpdates = await Promise.all(
+    failedDeliveries.map((delivery) =>
+      supabaseAdmin
+        .from("notification_deliveries")
+        .update({
+          status: "queued",
+          queued_at: now,
+          failed_at: null,
+          error_code: null,
+          error_message: null,
+          metadata: {
+            ...objectOrEmpty(delivery.metadata),
+            adminRetryRequestedAt: now,
+          },
+        })
+        .eq("id", delivery.id),
+    ),
+  );
+  const failedUpdate = deliveryUpdates.find((result) => result.error);
+  if (failedUpdate?.error) {
+    throw new NotificationOutboxServiceError(500, failedUpdate.error.message);
+  }
+
+  await updateNotificationJob(job.id, {
+    status: "scheduled",
+    scheduled_for: now,
+    processing_started_at: null,
+    completed_at: null,
+    canceled_at: null,
+    metadata: {
+      ...objectOrEmpty(job.metadata),
+      adminRetryRequestedAt: now,
+      adminRetryDeliveryCount: failedDeliveries.length,
+    },
+  });
+
+  return runDueNotificationJobs({
+    limit: 1,
+    workerId: "admin-notification-retry",
+    notificationJobIds: [job.id],
+  });
 };
 
 export const getNotificationJobsMetrics = async (input?: {

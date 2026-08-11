@@ -1007,6 +1007,91 @@ describe("notification outbox Resend runtime", () => {
     );
   });
 
+  it("routes Wave 2 signer invite push deliveries to document signing without sensitive links", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: {
+        channel: "push",
+        payload_json: {
+          recipientName: "Casey",
+          documentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          inviteUrl: "https://app.example.test/invite?token=secret",
+          accessToken: "secret",
+        },
+      },
+      delivery: {
+        channel: "push",
+        recipient_address: null,
+        provider: "apns",
+        device_push_token_id: "push-token-1",
+      },
+      template: {
+        template_key: "signer_invitation_email",
+        channel: "push",
+        subject_template: "Signature requested",
+        body_template: "A document is ready for your review and signature in DARCi.",
+        body_format: "text",
+      },
+      devicePushToken: { id: "push-token-1" },
+    });
+    apnsMocks.sendMock.mockResolvedValue({ apnsId: "apns-msg-2", statusCode: 200 });
+
+    await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(apnsMocks.sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          notificationId: "delivery-1",
+          route: "document_signing",
+          documentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        }),
+      }),
+    );
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("inviteUrl");
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("accessToken");
+  });
+
+  it("routes Wave 2 notary application result pushes to user settings without identifiers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: {
+        channel: "push",
+        document_id: null,
+        payload_json: {},
+      },
+      delivery: {
+        channel: "push",
+        recipient_address: null,
+        provider: "apns",
+        device_push_token_id: "push-token-1",
+      },
+      template: {
+        template_key: "notary_application_approved_email",
+        channel: "push",
+        subject_template: "Illuminotary profile approved",
+        body_template: "Your Illuminotary profile was approved. Open DARCi to review settings.",
+        body_format: "text",
+      },
+      devicePushToken: { id: "push-token-1" },
+    });
+    apnsMocks.sendMock.mockResolvedValue({ apnsId: "apns-msg-3", statusCode: 200 });
+
+    await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(apnsMocks.sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          notificationId: "delivery-1",
+          route: "user_settings",
+        }),
+      }),
+    );
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("documentId");
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("requestId");
+  });
+
   it("syncs Resend delivery engagement events to linked invite lifecycle state", async () => {
     seedOutbox({
       job: {

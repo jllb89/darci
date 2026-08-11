@@ -19,6 +19,7 @@ import {
   getNotificationMetricsAdmin,
   getNotificationJobDetailAdmin,
   listNotificationJobsAdmin,
+  retryNotificationJobAdmin,
 } from "../controllers/notificationAdminController";
 import {
   getNotificationTemplateAdmin,
@@ -129,6 +130,12 @@ router.get(
   "/notification-jobs/:id",
   requireRole(["admin", "service_role"]),
   getNotificationJobDetailAdmin,
+);
+
+router.post(
+  "/notification-jobs/:id/retry",
+  requireRole(["admin", "service_role"]),
+  retryNotificationJobAdmin,
 );
 
 router.get(

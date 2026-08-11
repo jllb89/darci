@@ -152,6 +152,7 @@ const ROLE_SIDEBAR_CONFIG: Record<StoredUserRole, SidebarConfig> = {
         icon: "requests",
       },
       { label: "Users", href: "/app/admin/users", icon: "documents" },
+      { label: "Notifications", href: "/app/admin/notifications", icon: "notifications" },
       { label: "Admin team", href: "/app/admin/team", icon: "settings" },
       { label: "Verify a document", href: "/app/verification", icon: "verify", sectionLabel: "Tools" },
     ],
