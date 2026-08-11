@@ -1208,7 +1208,29 @@ const getPushRoutePayload = (input: NotificationProviderDispatchInput): PushRout
   } as PushRoutePayload;
 };
 
-const buildApnsAlertPayload = (input: NotificationProviderDispatchInput) => {
+const countUnreadPushDeliveriesForUser = async (userId: string | null | undefined) => {
+  if (!userId) {
+    return 0;
+  }
+
+  const { count, error } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select("id", { count: "exact", head: true })
+    .eq("target_user_id", userId)
+    .eq("channel", "push")
+    .is("opened_at", null);
+
+  if (error) {
+    throw new NotificationProviderDispatchError(
+      "badge_count_unavailable",
+      `Unable to calculate unread push badge count: ${error.message}`,
+    );
+  }
+
+  return count ?? 0;
+};
+
+const buildApnsAlertPayload = async (input: NotificationProviderDispatchInput) => {
   if (!input.template?.subject_template || !input.template.body_template) {
     throw new NotificationProviderDispatchError(
       "missing_template",
@@ -1227,10 +1249,12 @@ const buildApnsAlertPayload = (input: NotificationProviderDispatchInput) => {
   }
 
   const routePayload = getPushRoutePayload(input);
+  const badgeCount = await countUnreadPushDeliveriesForUser(input.delivery.target_user_id);
   return {
     aps: {
       alert: { title, body },
       sound: "default",
+      badge: badgeCount,
     },
     notificationId: input.delivery.id,
     ...(routePayload ?? {}),
@@ -1273,7 +1297,7 @@ const buildApnsAdapter = (): NotificationProviderAdapter => ({
       deviceToken: devicePushToken.device_token,
       environment: devicePushToken.environment,
       topic: devicePushToken.app_bundle_id,
-      payload: buildApnsAlertPayload(input),
+      payload: await buildApnsAlertPayload(input),
       collapseId: getApnsCollapseId(input),
       expiration: getApnsExpiration(input),
       priority: 10,

@@ -102,16 +102,16 @@ struct HomeView: View {
             Button(action: onNotificationsAction) {
                 ZStack(alignment: .topTrailing) {
                     HomeResourceIconGlyph(icon: .bellHome)
-                        .stroke(.black, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                        .frame(width: scaled(22, in: proxy), height: scaled(22, in: proxy))
+                        .stroke(.black, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
+                        .frame(width: scaled(24, in: proxy), height: scaled(24, in: proxy))
 
                     Circle()
                         .fill(DARCiTheme.onboardingGreen)
                         .frame(width: scaled(8, in: proxy), height: scaled(8, in: proxy))
-                        .offset(x: scaled(1, in: proxy), y: -scaled(2, in: proxy))
+                        .offset(x: scaled(4, in: proxy), y: -scaled(4, in: proxy))
                         .opacity(hasUnreadNotifications ? 1 : 0)
                 }
-                .frame(width: scaled(32, in: proxy), height: scaled(32, in: proxy))
+                .frame(width: scaled(36, in: proxy), height: scaled(36, in: proxy))
             }
             .buttonStyle(.plain)
             .padding(.leading, scaled(21, in: proxy))
@@ -390,31 +390,37 @@ private struct HomeResourceIconGlyph: Shape {
     private func bellHomePath(in rect: CGRect) -> Path {
         var path = Path()
         let source: CGFloat = 24
+        let drawingRect = rect.insetBy(dx: rect.width * 0.08, dy: rect.height * 0.08)
 
-        path.move(to: point(22, 17, in: rect, source: source))
-        path.addLine(to: point(2, 17, in: rect, source: source))
+        path.move(to: point(22, 17, in: drawingRect, source: source))
+        path.addLine(to: point(2, 17, in: drawingRect, source: source))
         path.addCurve(
-            to: point(5, 14, in: rect, source: source),
-            control1: point(3.65685, 17, in: rect, source: source),
-            control2: point(5, 15.6569, in: rect, source: source)
+            to: point(5, 14, in: drawingRect, source: source),
+            control1: point(3.65685, 17, in: drawingRect, source: source),
+            control2: point(5, 15.6569, in: drawingRect, source: source)
         )
-        path.addLine(to: point(5, 9, in: rect, source: source))
+        path.addLine(to: point(5, 9, in: drawingRect, source: source))
         path.addCurve(
-            to: point(19, 9, in: rect, source: source),
-            control1: point(5, 5.13401, in: rect, source: source),
-            control2: point(8.13401, 2, in: rect, source: source)
+            to: point(12, 2, in: drawingRect, source: source),
+            control1: point(5, 5.13401, in: drawingRect, source: source),
+            control2: point(8.13401, 2, in: drawingRect, source: source)
         )
-        path.addLine(to: point(19, 14, in: rect, source: source))
         path.addCurve(
-            to: point(22, 17, in: rect, source: source),
-            control1: point(19, 15.6569, in: rect, source: source),
-            control2: point(20.3431, 17, in: rect, source: source)
+            to: point(19, 9, in: drawingRect, source: source),
+            control1: point(15.866, 2, in: drawingRect, source: source),
+            control2: point(19, 5.13401, in: drawingRect, source: source)
         )
-        path.move(to: point(13.73, 21, in: rect, source: source))
+        path.addLine(to: point(19, 14, in: drawingRect, source: source))
         path.addCurve(
-            to: point(10.27, 21, in: rect, source: source),
-            control1: point(13.373, 21.6179, in: rect, source: source),
-            control2: point(12.7138, 22, in: rect, source: source)
+            to: point(22, 17, in: drawingRect, source: source),
+            control1: point(19, 15.6569, in: drawingRect, source: source),
+            control2: point(20.3431, 17, in: drawingRect, source: source)
+        )
+        path.move(to: point(13.73, 21, in: drawingRect, source: source))
+        path.addCurve(
+            to: point(10.27, 21, in: drawingRect, source: source),
+            control1: point(13.373, 21.6179, in: drawingRect, source: source),
+            control2: point(12.7138, 22, in: drawingRect, source: source)
         )
 
         return path

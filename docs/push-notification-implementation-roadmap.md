@@ -809,5 +809,5 @@ Push-wise, the remaining items are now mostly product/rollout polish, not core A
 
 - Durable scheduled outbox runner: implemented locally on 2026-08-10 in the worker process through `NOTIFICATION_OUTBOX_RUNNER_ENABLED`, `NOTIFICATION_OUTBOX_RUNNER_INTERVAL_SECONDS`, and `NOTIFICATION_OUTBOX_RUN_LIMIT`.
 - Admin visibility for APNs failures: implemented locally on 2026-08-10 through the web admin Notifications section, with filters, job/delivery status, user, template, date, document IDN, device context, error details, and retry actions for failed deliveries.
-- In-app notification history/notification center, so users can recover missed pushes.
-- Badge count strategy, if you want the app icon badge to mean “things needing action.”
+- In-app notification history/notification center: implemented locally on 2026-08-10 with authenticated user history, read state, category filters, mark-all-read, home bell entry, and typed route navigation.
+- Badge count strategy: implemented locally on 2026-08-10. The app icon badge means unread push notification deliveries (`opened_at is null`) for the signed-in user; APNs payloads include the current unread count and the app refreshes/clears the icon badge from the notification center read state.

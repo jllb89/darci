@@ -27,6 +27,7 @@ struct AppRootView: View {
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
     @State private var isNotificationCenterPresented = false
+    @State private var shouldReturnToNotificationCenterAfterRoute = false
     @State private var isPushPermissionPromptPresented = false
     @State private var homeBannerMessage: String?
 
@@ -123,7 +124,7 @@ struct AppRootView: View {
                 await notificationCenterViewModel.load(for: sessionCoordinator.currentSession)
             }
         }
-        .sheet(isPresented: $isPushPermissionPromptPresented) {
+        .fullScreenCover(isPresented: $isPushPermissionPromptPresented) {
             PushPermissionExplanationView(
                 onContinue: {
                     isPushPermissionPromptPresented = false
@@ -133,7 +134,6 @@ struct AppRootView: View {
                     isPushPermissionPromptPresented = false
                 }
             )
-            .presentationDetents([.medium])
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -227,15 +227,18 @@ struct AppRootView: View {
                     documentId: route.documentId,
                     apiClient: documentIntakeAPIClient,
                     onSavedToDraft: {
+                        shouldReturnToNotificationCenterAfterRoute = false
                         selectedProductModeKey = nil
                         intakeRoute = nil
                         reviewRoute = nil
                     },
                     onContinueToSign: { documentId in
+                        shouldReturnToNotificationCenterAfterRoute = false
                         signingRoute = DocumentSigningRoute(documentId: documentId)
                         presentPushPermissionPromptIfEligible()
                     },
                     onContinueWithoutSignature: { documentId in
+                        shouldReturnToNotificationCenterAfterRoute = false
                         signingRoute = DocumentSigningRoute(documentId: documentId, skipSignatureForNotarization: true)
                         presentPushPermissionPromptIfEligible()
                     }
@@ -243,6 +246,7 @@ struct AppRootView: View {
                     .onDisappear {
                         selectedProductModeKey = nil
                         intakeRoute = nil
+                        maybeReturnToNotificationCenterAfterRoute()
                     }
             }
             .navigationDestination(item: $notaryReviewRoute) { route in
@@ -251,11 +255,13 @@ struct AppRootView: View {
                     requestId: route.requestId,
                     apiClient: notaryProfileAPIClient,
                     onDecisionRecorded: {
+                        shouldReturnToNotificationCenterAfterRoute = false
                         selectedTab = .home
                         notaryReviewRoute = nil
                         presentPushPermissionPromptIfEligible()
                     }
                 )
+                .onDisappear(perform: maybeReturnToNotificationCenterAfterRoute)
             }
             .navigationDestination(item: $notarySessionRoute) { route in
                 NotaryInPersonSessionView(
@@ -263,6 +269,7 @@ struct AppRootView: View {
                     requestId: route.requestId,
                     apiClient: notaryProfileAPIClient
                 )
+                .onDisappear(perform: maybeReturnToNotificationCenterAfterRoute)
             }
             .navigationDestination(item: $memberSessionRoute) { route in
                 MemberInPersonSessionView(
@@ -270,6 +277,7 @@ struct AppRootView: View {
                     requestId: route.requestId,
                     apiClient: requestsAPIClient
                 )
+                .onDisappear(perform: maybeReturnToNotificationCenterAfterRoute)
             }
             .navigationDestination(item: $signingRoute) { route in
                 DocumentSigningView(
@@ -277,6 +285,7 @@ struct AppRootView: View {
                     documentId: route.documentId,
                     skipSignatureForNotarization: route.skipSignatureForNotarization,
                     onSentToSelectedNotary: { notaryName in
+                        shouldReturnToNotificationCenterAfterRoute = false
                         showHomeBanner(
                             notaryName.map { "Document sent to \($0)." }
                                 ?? "Document sent to the selected notary."
@@ -294,6 +303,7 @@ struct AppRootView: View {
                         selectedProductModeKey = nil
                         intakeRoute = nil
                         reviewRoute = nil
+                        maybeReturnToNotificationCenterAfterRoute()
                     }
             }
         }
@@ -446,9 +456,27 @@ struct AppRootView: View {
     }
 
     private func openRouteFromNotificationCenter(_ route: PushNotificationRoute) {
-        isNotificationCenterPresented = false
+        shouldReturnToNotificationCenterAfterRoute = true
         pendingPushRoute = route
         openPendingPushRouteIfPossible()
+    }
+
+    private func maybeReturnToNotificationCenterAfterRoute() {
+        guard shouldReturnToNotificationCenterAfterRoute else { return }
+
+        shouldReturnToNotificationCenterAfterRoute = false
+        selectedTab = .home
+        selectedProductModeKey = nil
+        intakeRoute = nil
+        reviewRoute = nil
+        signingRoute = nil
+        notaryReviewRoute = nil
+        notarySessionRoute = nil
+        memberSessionRoute = nil
+
+        guard launchPhase == .signedIn, isProfileSelectionPresented == false, isUserSettingsPresented == false else { return }
+        isNotificationCenterPresented = true
+        Task { await notificationCenterViewModel.load(for: sessionCoordinator.currentSession) }
     }
 
     private func switchProfileRole(_ role: MobileProfileRole) {
@@ -569,6 +597,7 @@ struct AppRootView: View {
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
         isNotificationCenterPresented = false
+        shouldReturnToNotificationCenterAfterRoute = false
     }
 
     private func openPendingPushRouteIfPossible() {
@@ -582,15 +611,15 @@ struct AppRootView: View {
            MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) != .notary {
             Task {
                 guard await sessionCoordinator.switchActiveRole(to: "notary") else { return }
-                openPushRoute(route)
+                openPushRoute(route, keepUnderlyingHome: shouldReturnToNotificationCenterAfterRoute)
             }
             return
         }
 
-        openPushRoute(route)
+        openPushRoute(route, keepUnderlyingHome: shouldReturnToNotificationCenterAfterRoute)
     }
 
-    private func openPushRoute(_ route: PushNotificationRoute) {
+    private func openPushRoute(_ route: PushNotificationRoute, keepUnderlyingHome: Bool = false) {
         selectedProductModeKey = nil
         intakeRoute = nil
         reviewRoute = nil
@@ -600,23 +629,26 @@ struct AppRootView: View {
         memberSessionRoute = nil
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
-        isNotificationCenterPresented = false
+        if keepUnderlyingHome == false {
+            isNotificationCenterPresented = false
+        }
 
         switch route {
         case .memberSession(let requestId, _), .memberRequest(let requestId, _):
-            selectedTab = .requests
+            selectedTab = keepUnderlyingHome ? .home : .requests
             memberSessionRoute = MemberInPersonSessionRoute(requestId: requestId)
         case .notaryRequestReview(let requestId, _):
-            selectedTab = .notary
+            selectedTab = keepUnderlyingHome ? .home : .notary
             notaryReviewRoute = NotaryRequestReviewRoute(requestId: requestId)
         case .memberDocument(let documentId, _), .memberNotarySelection(let documentId, _), .documentSigning(let documentId, _):
-            selectedTab = .documents
+            selectedTab = keepUnderlyingHome ? .home : .documents
             signingRoute = DocumentSigningRoute(documentId: documentId)
         case .documentReview(let documentId, _):
-            selectedTab = .documents
+            selectedTab = keepUnderlyingHome ? .home : .documents
             reviewRoute = DocumentReviewRoute(documentId: documentId)
         case .userSettings:
             selectedTab = .home
+            isNotificationCenterPresented = false
             isUserSettingsPresented = true
         }
 
@@ -750,34 +782,69 @@ private struct PlaceholderScreen: View {
 }
 
 private struct PushPermissionExplanationView: View {
+    private let designSize = CGSize(width: 440, height: 956)
     let onContinue: () -> Void
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 40, height: 5)
-                .frame(maxWidth: .infinity)
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer(minLength: scaled(260, in: proxy))
 
-            VStack(alignment: .leading, spacing: 10) {
                 Text("Stay current on time-sensitive updates")
-                    .font(.title3.weight(.semibold))
+                    .font(DARCiFont.maisonNeue(.demi, size: 34))
+                    .lineSpacing(6)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Text("DARCi can notify you when a request, signing step, or in-person session needs attention. Sensitive details stay inside the app.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
+                    .font(DARCiFont.maisonNeue(.book, size: 18))
+                    .lineSpacing(6)
+                    .foregroundStyle(Color.white.opacity(0.70))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, scaled(18, in: proxy))
 
-            HStack(spacing: 12) {
-                Button("Not now", action: onDismiss)
-                    .buttonStyle(.bordered)
+                Spacer(minLength: scaled(64, in: proxy))
 
-                Button("Continue", action: onContinue)
-                    .buttonStyle(.borderedProminent)
+                Button(action: onContinue) {
+                    HStack(spacing: scaled(12, in: proxy)) {
+                        Spacer()
+
+                        Text("Continue")
+                            .font(DARCiFont.maisonNeue(.book, size: 22))
+                            .foregroundStyle(.black)
+
+                        DARCiArrowCornerIcon()
+                            .stroke(.black, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
+                            .frame(width: 28, height: 28)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
+                    .padding(.horizontal, scaled(22, in: proxy))
+                    .background(DARCiTheme.onboardingGreen)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("push-permission-continue")
+
+                Button(action: onDismiss) {
+                    Text("Not now")
+                        .font(DARCiFont.maisonNeue(.book, size: 18))
+                        .foregroundStyle(Color.white.opacity(0.70))
+                        .frame(maxWidth: .infinity, minHeight: scaled(52, in: proxy))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, scaled(12, in: proxy))
+                .padding(.bottom, scaled(48, in: proxy))
+                .accessibilityIdentifier("push-permission-dismiss")
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.horizontal, scaled(33, in: proxy))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(Color.black.ignoresSafeArea())
         }
-        .padding(24)
+    }
+
+    private func scaled(_ value: CGFloat, in proxy: GeometryProxy) -> CGFloat {
+        let scale = min(proxy.size.width / designSize.width, proxy.size.height / designSize.height)
+        return value * max(scale, 0.82)
     }
 }
 

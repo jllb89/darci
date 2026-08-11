@@ -92,6 +92,7 @@ import {
 
 type Filter =
   | { kind: "eq"; field: string; value: unknown }
+  | { kind: "is"; field: string; value: unknown }
   | { kind: "in"; field: string; values: unknown[] }
   | { kind: "lte"; field: string; value: unknown }
   | { kind: "gte"; field: string; value: unknown };
@@ -131,6 +132,11 @@ class FakeSupabaseQueryBuilder {
 
   eq(field: string, value: unknown) {
     this.filters.push({ kind: "eq", field, value });
+    return this;
+  }
+
+  is(field: string, value: unknown) {
+    this.filters.push({ kind: "is", field, value });
     return this;
   }
 
@@ -261,6 +267,10 @@ class FakeSupabaseQueryBuilder {
         const value = row[filter.field];
 
         if (filter.kind === "eq") {
+          return value === filter.value;
+        }
+
+        if (filter.kind === "is") {
           return value === filter.value;
         }
 
@@ -766,6 +776,7 @@ describe("notification outbox Resend runtime", () => {
           aps: {
             alert: { title: "Session ready", body: "Hi Casey, continue in DARCi." },
             sound: "default",
+            badge: 1,
           },
           notificationId: "delivery-1",
           route: "member_request",

@@ -23,16 +23,33 @@ struct NotificationCenterView: View {
     var body: some View {
         GeometryReader { proxy in
             VStack(alignment: .leading, spacing: 0) {
-                header(in: proxy)
+                Button(action: onBack) {
+                    DARCiArrowLeftIcon()
+                        .stroke(.black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
+                        .frame(width: scaled(28, in: proxy), height: scaled(28, in: proxy))
+                        .frame(width: scaled(36, in: proxy), height: scaled(36, in: proxy))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, scaled(37, in: proxy))
+                .padding(.leading, scaled(44, in: proxy))
+                .accessibilityLabel("Back")
+
+                Text("Notifications")
+                    .font(DARCiFont.maisonNeue(.book, size: 24))
+                    .lineSpacing(34)
+                    .foregroundStyle(.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .padding(.top, scaled(54, in: proxy))
-                    .padding(.horizontal, scaled(28, in: proxy))
+                    .padding(.horizontal, scaled(44, in: proxy))
 
                 statusBar(in: proxy)
-                    .padding(.top, scaled(26, in: proxy))
-                    .padding(.horizontal, scaled(33, in: proxy))
+                    .padding(.top, scaled(18, in: proxy))
+                    .padding(.horizontal, scaled(50, in: proxy))
 
                 categoryTabs(in: proxy)
-                    .padding(.top, scaled(32, in: proxy))
+                    .padding(.top, scaled(38, in: proxy))
+                    .padding(.horizontal, scaled(24, in: proxy))
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -49,7 +66,7 @@ struct NotificationCenterView: View {
                             notificationSections(in: proxy)
                         }
                     }
-                    .padding(.horizontal, scaled(33, in: proxy))
+                    .padding(.horizontal, scaled(44, in: proxy))
                     .padding(.bottom, scaled(48, in: proxy))
                 }
                 .refreshable {
@@ -67,38 +84,18 @@ struct NotificationCenterView: View {
         }
     }
 
-    private func header(in proxy: GeometryProxy) -> some View {
-        HStack(spacing: scaled(22, in: proxy)) {
-            Button(action: onBack) {
-                NotificationBackIcon()
-                    .stroke(.black, style: StrokeStyle(lineWidth: 1.8, lineCap: .square, lineJoin: .miter))
-                    .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
-                    .frame(width: scaled(32, in: proxy), height: scaled(32, in: proxy))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back")
-
-            Text("Notifications")
-                .font(DARCiFont.maisonNeue(.book, size: scaled(24, in: proxy)))
-                .foregroundStyle(.black)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Spacer(minLength: 0)
-        }
-    }
-
     private func statusBar(in proxy: GeometryProxy) -> some View {
         HStack(spacing: 0) {
-            HStack(spacing: scaled(8, in: proxy)) {
+            HStack(spacing: scaled(12, in: proxy)) {
                 Circle()
                     .fill(DARCiTheme.onboardingGreen)
-                    .frame(width: scaled(8, in: proxy), height: scaled(8, in: proxy))
+                    .frame(width: scaled(10, in: proxy), height: scaled(10, in: proxy))
                     .opacity(viewModel.hasUnreadNotifications ? 1 : 0)
 
                 Text("\(viewModel.unreadCount) UNREAD")
-                    .font(DARCiFont.maisonNeue(.demi, size: scaled(12, in: proxy)))
-                    .foregroundStyle(.black)
+                    .font(DARCiFont.maisonNeue(.medium, size: 10))
+                    .lineSpacing(20)
+                    .foregroundStyle(NotificationCenterPalette.secondaryText)
                     .lineLimit(1)
             }
 
@@ -108,7 +105,8 @@ struct NotificationCenterView: View {
                 Task { await viewModel.markAllRead(for: session) }
             } label: {
                 Text("MARK ALL AS READ")
-                    .font(DARCiFont.maisonNeue(.demi, size: scaled(11, in: proxy)))
+                    .font(DARCiFont.maisonNeue(.book, size: 10))
+                    .lineSpacing(14)
                     .foregroundStyle(.black)
                     .underline()
             }
@@ -120,32 +118,84 @@ struct NotificationCenterView: View {
 
     private func categoryTabs(in proxy: GeometryProxy) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(NotificationCenterCategory.allCases) { category in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            viewModel.selectedCategory = category
-                        }
-                    } label: {
-                        VStack(spacing: scaled(13, in: proxy)) {
-                            Text(category.title)
-                                .font(DARCiFont.maisonNeue(.demi, size: scaled(12, in: proxy)))
-                                .foregroundStyle(.black.opacity(viewModel.selectedCategory == category ? 1 : 0.42))
-                                .lineLimit(1)
-
-                            Rectangle()
-                                .fill(viewModel.selectedCategory == category ? Color.black : Color.clear)
-                                .frame(height: 1.5)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                }
+            HStack(alignment: .center, spacing: scaled(10, in: proxy)) {
+                notificationTab(.all, width: notificationTabWidth(for: .all, in: proxy), alignment: .leading, in: proxy)
+                notificationTab(.documents, width: notificationTabWidth(for: .documents, in: proxy), alignment: .center, in: proxy)
+                notificationTab(.account, width: notificationTabWidth(for: .account, in: proxy), alignment: .trailing, in: proxy)
             }
 
             Rectangle()
-                .fill(Color.black.opacity(0.16))
-                .frame(height: 1)
+                .fill(.black.opacity(0.12))
+                .frame(height: 0.5)
+                .overlay(alignment: .bottomLeading) {
+                    GeometryReader { lineProxy in
+                        Rectangle()
+                            .fill(.black)
+                            .frame(width: notificationIndicatorWidth(in: lineProxy.size.width), height: scaled(2, in: proxy))
+                            .offset(x: notificationIndicatorOffset(in: lineProxy.size.width))
+                    }
+                }
+                .frame(height: scaled(2, in: proxy))
+        }
+    }
+
+    private func notificationTab(
+        _ category: NotificationCenterCategory,
+        width: CGFloat,
+        alignment: Alignment,
+        in proxy: GeometryProxy
+    ) -> some View {
+        Button {
+            withAnimation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.28)) {
+                viewModel.selectedCategory = category
+            }
+        } label: {
+            Text(category.title)
+                .font(DARCiFont.maisonNeue(.mono, size: scaled(11, in: proxy)))
+                .lineSpacing(scaled(11, in: proxy))
+                .foregroundStyle(viewModel.selectedCategory == category ? .black : NotificationCenterPalette.inactiveText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .allowsTightening(true)
+                .frame(width: width, alignment: alignment)
+                .frame(height: scaled(31, in: proxy), alignment: .topLeading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func notificationTabWidth(for category: NotificationCenterCategory, in proxy: GeometryProxy) -> CGFloat {
+        let availableWidth = proxy.size.width - scaled(48, in: proxy)
+        return notificationTabWidth(for: category, availableWidth: availableWidth)
+    }
+
+    private func notificationTabWidth(for category: NotificationCenterCategory, availableWidth: CGFloat) -> CGFloat {
+        let totalSpacing: CGFloat = 20
+        let contentWidth = max(availableWidth - totalSpacing, 1)
+
+        switch category {
+        case .all:
+            return contentWidth * 0.24
+        case .documents:
+            return contentWidth * 0.41
+        case .account:
+            return contentWidth * 0.35
+        }
+    }
+
+    private func notificationIndicatorWidth(in availableWidth: CGFloat) -> CGFloat {
+        notificationTabWidth(for: viewModel.selectedCategory, availableWidth: availableWidth) * 0.46
+    }
+
+    private func notificationIndicatorOffset(in availableWidth: CGFloat) -> CGFloat {
+        let spacing: CGFloat = 10
+        switch viewModel.selectedCategory {
+        case .all:
+            return 0
+        case .documents:
+            return notificationTabWidth(for: .all, availableWidth: availableWidth) + spacing
+                + (notificationTabWidth(for: .documents, availableWidth: availableWidth) - notificationIndicatorWidth(in: availableWidth)) / 2
+        case .account:
+            return availableWidth - notificationIndicatorWidth(in: availableWidth)
         }
     }
 
@@ -153,7 +203,7 @@ struct NotificationCenterView: View {
         VStack(alignment: .leading, spacing: 0) {
             if viewModel.todayNotifications.isEmpty == false {
                 sectionHeader("TODAY", in: proxy)
-                    .padding(.top, scaled(28, in: proxy))
+                    .padding(.top, scaled(34, in: proxy))
                 ForEach(viewModel.todayNotifications) { item in
                     notificationRow(item, in: proxy)
                 }
@@ -161,7 +211,7 @@ struct NotificationCenterView: View {
 
             if viewModel.earlierNotifications.isEmpty == false {
                 sectionHeader("EARLIER", in: proxy)
-                    .padding(.top, scaled(viewModel.todayNotifications.isEmpty ? 28 : 38, in: proxy))
+                    .padding(.top, scaled(viewModel.todayNotifications.isEmpty ? 34 : 28, in: proxy))
                 ForEach(viewModel.earlierNotifications) { item in
                     notificationRow(item, in: proxy)
                 }
@@ -171,9 +221,10 @@ struct NotificationCenterView: View {
 
     private func sectionHeader(_ title: String, in proxy: GeometryProxy) -> some View {
         Text(title)
-            .font(DARCiFont.maisonNeue(.demi, size: scaled(11, in: proxy)))
-            .foregroundStyle(.black.opacity(0.44))
-            .padding(.bottom, scaled(8, in: proxy))
+            .font(DARCiFont.maisonNeue(.book, size: 10))
+            .tracking(0.30)
+            .foregroundStyle(NotificationCenterPalette.secondaryText)
+            .padding(.bottom, scaled(18, in: proxy))
     }
 
     private func notificationRow(_ item: NotificationCenterItem, in proxy: GeometryProxy) -> some View {
@@ -188,47 +239,52 @@ struct NotificationCenterView: View {
                 HStack(alignment: .top, spacing: scaled(12, in: proxy)) {
                     Circle()
                         .fill(DARCiTheme.onboardingGreen)
-                        .frame(width: scaled(8, in: proxy), height: scaled(8, in: proxy))
+                        .frame(width: scaled(10, in: proxy), height: scaled(10, in: proxy))
                         .opacity(item.isRead ? 0 : 1)
-                        .padding(.top, scaled(8, in: proxy))
+                        .padding(.top, scaled(38, in: proxy))
 
-                    VStack(alignment: .leading, spacing: scaled(5, in: proxy)) {
+                    VStack(alignment: .leading, spacing: scaled(10, in: proxy)) {
+                        Text(item.title)
+                            .font(DARCiFont.maisonNeue(item.isRead ? .book : .medium, size: 15))
+                            .lineSpacing(19)
+                            .foregroundStyle(NotificationCenterPalette.primaryText)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.82)
+
                         HStack(alignment: .firstTextBaseline, spacing: scaled(10, in: proxy)) {
-                            Text(item.title)
-                                .font(DARCiFont.maisonNeue(item.isRead ? .book : .demi, size: scaled(15, in: proxy)))
-                                .foregroundStyle(.black)
+                            Text(item.body)
+                                .font(DARCiFont.maisonNeue(.book, size: 11.5))
+                                .lineSpacing(3)
+                                .foregroundStyle(NotificationCenterPalette.bodyText)
                                 .lineLimit(2)
-                                .minimumScaleFactor(0.82)
+                                .fixedSize(horizontal: false, vertical: true)
 
                             Spacer(minLength: scaled(8, in: proxy))
 
                             Text(NotificationCenterViewModel.relativeTime(for: item.createdAt))
-                                .font(DARCiFont.maisonNeue(.book, size: scaled(10, in: proxy)))
-                                .foregroundStyle(.black.opacity(0.48))
+                                .font(DARCiFont.maisonNeue(.book, size: 9))
+                                .lineSpacing(12)
+                                .foregroundStyle(NotificationCenterPalette.secondaryText)
                                 .lineLimit(1)
                         }
 
-                        Text(item.body)
-                            .font(DARCiFont.maisonNeue(.book, size: scaled(12, in: proxy)))
-                            .foregroundStyle(.black.opacity(0.64))
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-
                         if let metadataLabel = item.metadataLabel, metadataLabel.isEmpty == false {
                             Text(metadataLabel)
-                                .font(DARCiFont.maisonNeue(.demi, size: scaled(9, in: proxy)))
-                                .foregroundStyle(.black.opacity(0.42))
+                                .font(DARCiFont.maisonNeue(.book, size: 8.5))
+                                .tracking(0.09)
+                                .lineSpacing(12)
+                                .foregroundStyle(NotificationCenterPalette.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
                     }
                 }
-                .padding(.vertical, scaled(17, in: proxy))
+                .padding(.top, scaled(20, in: proxy))
+                .padding(.bottom, scaled(20, in: proxy))
 
                 Rectangle()
                     .fill(Color.black.opacity(0.10))
                     .frame(height: 1)
-                    .padding(.leading, scaled(20, in: proxy))
             }
             .contentShape(Rectangle())
         }
@@ -257,14 +313,11 @@ struct NotificationCenterView: View {
     }
 }
 
-private struct NotificationBackIcon: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        return path
-    }
+private enum NotificationCenterPalette {
+    static let primaryText = Color(red: 0.10, green: 0.10, blue: 0.10)
+    static let bodyText = Color(red: 0.19, green: 0.19, blue: 0.19)
+    static let secondaryText = Color(red: 0.49, green: 0.49, blue: 0.49)
+    static let inactiveText = Color(red: 0.72, green: 0.72, blue: 0.72)
 }
 
 #Preview("Notification Center") {

@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 @MainActor
 final class NotificationCenterViewModel: ObservableObject {
@@ -44,6 +45,7 @@ final class NotificationCenterViewModel: ObservableObject {
             )
             notifications = response.notifications
             unreadCount = response.unreadCount
+            syncApplicationBadgeCount(response.unreadCount)
         } catch {
             errorMessage = Self.displayMessage(for: error)
         }
@@ -56,6 +58,7 @@ final class NotificationCenterViewModel: ObservableObject {
         do {
             let response = try await apiClient.markAllRead(accessToken: accessToken)
             unreadCount = response.unreadCount
+            syncApplicationBadgeCount(response.unreadCount)
             notifications = notifications.map { item in
                 NotificationCenterItem(
                     id: item.id,
@@ -107,6 +110,7 @@ final class NotificationCenterViewModel: ObservableObject {
                 )
             }
             unreadCount = max(0, unreadCount - 1)
+            syncApplicationBadgeCount(unreadCount)
         }
 
         do {
@@ -134,12 +138,12 @@ final class NotificationCenterViewModel: ObservableObject {
             return "\(Int(interval / 3_600))h"
         }
         if Calendar.current.isDateInYesterday(date) {
-            return "YESTERDAY"
+            return "Yesterday"
         }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d"
-        return formatter.string(from: date).uppercased()
+        return formatter.string(from: date)
     }
 
     private static func isToday(_ isoString: String) -> Bool {
@@ -174,5 +178,9 @@ final class NotificationCenterViewModel: ObservableObject {
         }
 
         return "Unable to load notifications."
+    }
+
+    private func syncApplicationBadgeCount(_ count: Int) {
+        UNUserNotificationCenter.current().setBadgeCount(max(0, count)) { _ in }
     }
 }
