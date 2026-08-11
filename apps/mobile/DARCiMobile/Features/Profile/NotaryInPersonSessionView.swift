@@ -601,7 +601,12 @@ struct NotaryInPersonSessionView: View {
                 placeholder: "\(placeholder)\(requiredSuffix)",
                 text: Binding(
                     get: { viewModel.identityValue(for: field.fieldKey) },
-                    set: { viewModel.updateIdentityValue($0, for: field.fieldKey) }
+                    set: { value in
+                        viewModel.updateIdentityValue(
+                            field.inputKind == "date" ? IntakeDateFormatting.formatISODateInput(value) : value,
+                            for: field.fieldKey
+                        )
+                    }
                 ),
                 keyboardType: field.inputKind == "date" ? .numbersAndPunctuation : .default,
                 capitalization: field.inputKind == "date" ? .never : .characters

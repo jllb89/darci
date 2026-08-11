@@ -7,6 +7,7 @@ struct DocumentSigningView: View {
     let session: AuthSession?
     let documentId: String
     let skipSignatureForNotarization: Bool
+    let onSentToSelectedNotary: (String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DocumentSigningViewModel
@@ -39,11 +40,13 @@ struct DocumentSigningView: View {
         session: AuthSession?,
         documentId: String,
         skipSignatureForNotarization: Bool = false,
+        onSentToSelectedNotary: @escaping (String?) -> Void = { _ in },
         apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient()
     ) {
         self.session = session
         self.documentId = documentId
         self.skipSignatureForNotarization = skipSignatureForNotarization
+        self.onSentToSelectedNotary = onSentToSelectedNotary
         _viewModel = StateObject(wrappedValue: DocumentSigningViewModel(documentId: documentId, apiClient: apiClient))
     }
 
@@ -499,8 +502,10 @@ struct DocumentSigningView: View {
 
                 Button {
                     Task {
+                        let notaryName = viewModel.selectedAvailableNotary?.displayName
                         if await viewModel.submitToSelectedNotary(session: session) {
                             closeNotarySelection(suppressSignatureCapture: false)
+                            onSentToSelectedNotary(notaryName)
                         }
                     }
                 } label: {

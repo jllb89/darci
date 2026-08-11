@@ -46,7 +46,7 @@ final class DocumentSigningViewModel: ObservableObject {
     }
 
     var activeSignature: DocumentSigningSignature? {
-        visibleSignatures.first { $0.isRequired && $0.status != "captured" }
+        visibleSignatures.first { Self.isActionableSignature($0) }
             ?? visibleSignatures.first
     }
 
@@ -68,12 +68,12 @@ final class DocumentSigningViewModel: ObservableObject {
         payload?.document?.status == "pending_signature" && signing?.state != "confirmed"
     }
 
-    var hasPendingVisibleRequiredSignatures: Bool {
-        visibleSignatures.contains { $0.isRequired && $0.status != "captured" }
+    var hasPendingVisibleActionableSignatures: Bool {
+        visibleSignatures.contains { Self.isActionableSignature($0) }
     }
 
     var shouldShowCaptureControls: Bool {
-        isReadyForSignatureMutations && hasPendingVisibleRequiredSignatures
+        isReadyForSignatureMutations && hasPendingVisibleActionableSignatures
     }
 
     var shouldShowCompletionActions: Bool {
@@ -567,9 +567,7 @@ final class DocumentSigningViewModel: ObservableObject {
             let response = try await apiClient.captureSignature(documentId: documentId, request: request, accessToken: accessToken)
             applyRemainingSignerInviteDispatchSummary(response.remainingSignerInvites)
             await fetchSigning(session: session, silent: true)
-            if request.captureMethod != "saved" {
-                await fetchSavedSignatures(session: session)
-            }
+            await fetchSavedSignatures(session: session)
             errorMessage = nil
             return true
         } catch {
@@ -600,21 +598,15 @@ final class DocumentSigningViewModel: ObservableObject {
 
         do {
             var latestInviteDispatch: RemainingSignerInviteDispatchResponse?
-            var shouldRefreshSavedSignatures = false
             for targetSignature in targetSignatures {
                 let request = makeRequest(targetSignature)
                 let response = try await apiClient.captureSignature(documentId: documentId, request: request, accessToken: accessToken)
                 latestInviteDispatch = response.remainingSignerInvites
-                if request.captureMethod != "saved" {
-                    shouldRefreshSavedSignatures = true
-                }
             }
 
             applyRemainingSignerInviteDispatchSummary(latestInviteDispatch)
             await fetchSigning(session: session, silent: true)
-            if shouldRefreshSavedSignatures {
-                await fetchSavedSignatures(session: session)
-            }
+            await fetchSavedSignatures(session: session)
             errorMessage = nil
             return true
         } catch {
@@ -626,8 +618,7 @@ final class DocumentSigningViewModel: ObservableObject {
     private func targetSignaturesForSharedCapture(from signature: DocumentSigningSignature) -> [DocumentSigningSignature] {
         let signerName = Self.normalizedPartyName(signature.partyName)
         let pendingRequiredSignatures = visibleSignatures.filter { candidate in
-            candidate.isRequired
-                && candidate.status != "captured"
+            Self.isActionableSignature(candidate)
                 && Self.normalizedPartyName(candidate.partyName) == signerName
         }
 
@@ -636,6 +627,12 @@ final class DocumentSigningViewModel: ObservableObject {
         }
 
         return [signature]
+    }
+
+    private static func isActionableSignature(_ signature: DocumentSigningSignature) -> Bool {
+        guard signature.status != "captured" else { return false }
+        if signature.isRequired { return true }
+        return signature.signingGroup != nil && signature.groupMinimumRequired != nil && signature.groupSatisfied == false
     }
 
     private func schedulePollIfNeeded(session: AuthSession?) {

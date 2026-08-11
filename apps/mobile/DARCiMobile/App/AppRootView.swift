@@ -27,6 +27,7 @@ struct AppRootView: View {
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
     @State private var isPushPermissionPromptPresented = false
+    @State private var homeBannerMessage: String?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     @ObservedObject private var pushCoordinator: PushNotificationCoordinator
@@ -144,6 +145,14 @@ struct AppRootView: View {
             ZStack(alignment: .top) {
                 signedInTabContent
 
+                if let homeBannerMessage {
+                    AppRootStatusBanner(message: homeBannerMessage)
+                        .padding(.horizontal, 22)
+                        .padding(.top, 18)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(30)
+                }
+
                 if isProfileSelectionPresented {
                     ProfileTypeSelectionView(
                         session: sessionCoordinator.currentSession,
@@ -243,6 +252,18 @@ struct AppRootView: View {
                     session: sessionCoordinator.currentSession,
                     documentId: route.documentId,
                     skipSignatureForNotarization: route.skipSignatureForNotarization,
+                    onSentToSelectedNotary: { notaryName in
+                        showHomeBanner(
+                            notaryName.map { "Document sent to \($0)." }
+                                ?? "Document sent to the selected notary."
+                        )
+                        selectedTab = .home
+                        signingRoute = nil
+                        reviewRoute = nil
+                        intakeRoute = nil
+                        selectedProductModeKey = nil
+                        presentPushPermissionPromptIfEligible()
+                    },
                     apiClient: documentIntakeAPIClient
                 )
                     .onDisappear {
@@ -303,7 +324,8 @@ struct AppRootView: View {
                 onProfileAction: showProfileSelection,
                 onSettingsAction: showUserSettings,
                 onReviewRequest: openNotaryReview,
-                onStartSession: openNotarySession
+                onStartSession: openNotarySession,
+                onViewCompletedDocument: openNotarySession
             )
         }
     }
@@ -408,6 +430,20 @@ struct AppRootView: View {
     private func beginProductIntake(_ card: HomeProductCard) {
         selectedProductModeKey = nil
         intakeRoute = ProductIntakeRoute(modeKey: card.modeKey)
+    }
+
+    private func showHomeBanner(_ message: String) {
+        withAnimation(.easeInOut(duration: 0.24)) {
+            homeBannerMessage = message
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard homeBannerMessage == message else { return }
+            withAnimation(.easeInOut(duration: 0.24)) {
+                homeBannerMessage = nil
+            }
+        }
     }
 
     private func openDocument(_ document: DocumentsListItem) {
@@ -584,6 +620,30 @@ struct AppRootView: View {
         }
 
         return (AuthAPIClient(), HomeAPIClient(), DocumentsAPIClient(), DocumentIntakeAPIClient(), RequestsAPIClient(), NotaryProfileAPIClient(), KeychainAuthSessionStore())
+    }
+}
+
+private struct AppRootStatusBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 17, weight: .semibold))
+
+            Text(message)
+                .font(DARCiFont.maisonNeue(.book, size: 14))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(Color.black.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 18, x: 0, y: 10)
     }
 }
 

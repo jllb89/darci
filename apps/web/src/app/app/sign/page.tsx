@@ -345,6 +345,18 @@ const getCaptureStatusLabel = (signature: SigningSignature) => {
   return "Optional";
 };
 
+const isActionableSignature = (signature: SigningSignature) => {
+  if (signature.status === "captured") {
+    return false;
+  }
+
+  if (signature.isRequired) {
+    return true;
+  }
+
+  return Boolean(signature.signingGroup && signature.groupMinimumRequired && !signature.groupSatisfied);
+};
+
 const formatProductFlowModeLabel = (value: string | null | undefined) => {
   if (!value) {
     return null;
@@ -806,15 +818,18 @@ export default function SignPage() {
       (signature) => normalizePartyName(signature.partyName) !== primarySelfSignerName,
     );
   }, [allSignatures, primarySelfSignerName]);
-  const visibleRequiredSignatureCount = visibleSignatures.filter(
-    (signature) => signature.isRequired,
+  const visibleActionableSignatureCount = visibleSignatures.filter((signature) =>
+    signature.isRequired || Boolean(signature.signingGroup && signature.groupMinimumRequired),
   ).length;
-  const capturedVisibleRequiredSignatureCount = visibleSignatures.filter(
-    (signature) => signature.isRequired && signature.status === "captured",
+  const capturedVisibleActionableSignatureCount = visibleSignatures.filter(
+    (signature) =>
+      signature.isRequired
+        ? signature.status === "captured"
+        : Boolean(signature.signingGroup && signature.groupMinimumRequired && signature.groupSatisfied),
   ).length;
   const principalSigningComplete =
-    visibleRequiredSignatureCount > 0 &&
-    capturedVisibleRequiredSignatureCount === visibleRequiredSignatureCount;
+    visibleActionableSignatureCount > 0 &&
+    capturedVisibleActionableSignatureCount === visibleActionableSignatureCount;
   const remainingSignerCount = Array.from(
     new Set(
       hiddenSignatures
@@ -925,9 +940,7 @@ export default function SignPage() {
     }
 
     const preferredSignature =
-      visibleSignatures.find((signature) => signature.status !== "captured") ??
-      visibleSignatures[0] ??
-      null;
+      visibleSignatures.find(isActionableSignature) ?? visibleSignatures[0] ?? null;
 
     if (
       !activeSignerId ||
@@ -941,7 +954,8 @@ export default function SignPage() {
       visibleSignatures.find((signature) => signature.outputSignerId === activeSignerId) ?? null;
 
     if (
-      currentActiveSignature?.status === "captured" &&
+      currentActiveSignature &&
+      !isActionableSignature(currentActiveSignature) &&
       preferredSignature &&
       preferredSignature.outputSignerId !== currentActiveSignature.outputSignerId
     ) {
