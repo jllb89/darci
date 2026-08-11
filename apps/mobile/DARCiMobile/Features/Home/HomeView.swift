@@ -6,6 +6,8 @@ struct HomeView: View {
     private let onProductSelected: (HomeProductCard) -> Void
     private let onProfileAction: () -> Void
     private let onSettingsAction: () -> Void
+    private let hasUnreadNotifications: Bool
+    private let onNotificationsAction: () -> Void
 
     @StateObject private var viewModel: HomeViewModel
     @Binding private var selectedProductModeKey: String?
@@ -20,12 +22,16 @@ struct HomeView: View {
         selectedTab: Binding<AppTab> = .constant(.home),
         onProductSelected: @escaping (HomeProductCard) -> Void = { _ in },
         onProfileAction: @escaping () -> Void = {},
-        onSettingsAction: @escaping () -> Void = {}
+        onSettingsAction: @escaping () -> Void = {},
+        hasUnreadNotifications: Bool = false,
+        onNotificationsAction: @escaping () -> Void = {}
     ) {
         self.session = session
         self.onProductSelected = onProductSelected
         self.onProfileAction = onProfileAction
         self.onSettingsAction = onSettingsAction
+        self.hasUnreadNotifications = hasUnreadNotifications
+        self.onNotificationsAction = onNotificationsAction
         _viewModel = StateObject(wrappedValue: viewModel)
         _selectedProductModeKey = selectedProductModeKey
         _selectedTab = selectedTab
@@ -93,10 +99,30 @@ struct HomeView: View {
             .accessibilityLabel("Profile initials \(profile.initials)")
             .accessibilityIdentifier("home-settings-button")
 
+            Button(action: onNotificationsAction) {
+                ZStack(alignment: .topTrailing) {
+                    HomeResourceIconGlyph(icon: .bellHome)
+                        .stroke(.black, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                        .frame(width: scaled(22, in: proxy), height: scaled(22, in: proxy))
+
+                    Circle()
+                        .fill(DARCiTheme.onboardingGreen)
+                        .frame(width: scaled(8, in: proxy), height: scaled(8, in: proxy))
+                        .offset(x: scaled(1, in: proxy), y: -scaled(2, in: proxy))
+                        .opacity(hasUnreadNotifications ? 1 : 0)
+                }
+                .frame(width: scaled(32, in: proxy), height: scaled(32, in: proxy))
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, scaled(21, in: proxy))
+            .accessibilityLabel("Notifications")
+            .accessibilityValue(hasUnreadNotifications ? "Unread notifications" : "No unread notifications")
+            .accessibilityIdentifier("home-notifications-button")
+
             HomeResourceIconGlyph(icon: .search)
                 .stroke(.black, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
                 .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
-                .padding(.leading, scaled(29, in: proxy))
+                .padding(.leading, scaled(18, in: proxy))
                 .accessibilityLabel("Search")
 
             Spacer(minLength: 0)
@@ -342,6 +368,8 @@ private struct HomeResourceIconGlyph: Shape {
 
     func path(in rect: CGRect) -> Path {
         switch icon {
+        case .bellHome:
+            bellHomePath(in: rect)
         case .file:
             filePath(in: rect)
         case .home:
@@ -357,6 +385,39 @@ private struct HomeResourceIconGlyph: Shape {
 
     private func point(_ x: CGFloat, _ y: CGFloat, in rect: CGRect, source: CGFloat) -> CGPoint {
         CGPoint(x: rect.minX + (x / source) * rect.width, y: rect.minY + (y / source) * rect.height)
+    }
+
+    private func bellHomePath(in rect: CGRect) -> Path {
+        var path = Path()
+        let source: CGFloat = 24
+
+        path.move(to: point(22, 17, in: rect, source: source))
+        path.addLine(to: point(2, 17, in: rect, source: source))
+        path.addCurve(
+            to: point(5, 14, in: rect, source: source),
+            control1: point(3.65685, 17, in: rect, source: source),
+            control2: point(5, 15.6569, in: rect, source: source)
+        )
+        path.addLine(to: point(5, 9, in: rect, source: source))
+        path.addCurve(
+            to: point(19, 9, in: rect, source: source),
+            control1: point(5, 5.13401, in: rect, source: source),
+            control2: point(8.13401, 2, in: rect, source: source)
+        )
+        path.addLine(to: point(19, 14, in: rect, source: source))
+        path.addCurve(
+            to: point(22, 17, in: rect, source: source),
+            control1: point(19, 15.6569, in: rect, source: source),
+            control2: point(20.3431, 17, in: rect, source: source)
+        )
+        path.move(to: point(13.73, 21, in: rect, source: source))
+        path.addCurve(
+            to: point(10.27, 21, in: rect, source: source),
+            control1: point(13.373, 21.6179, in: rect, source: source),
+            control2: point(12.7138, 22, in: rect, source: source)
+        )
+
+        return path
     }
 
     private func filePath(in rect: CGRect) -> Path {

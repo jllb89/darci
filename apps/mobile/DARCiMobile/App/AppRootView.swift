@@ -26,10 +26,12 @@ struct AppRootView: View {
     @State private var pendingPushRoute: PushNotificationRoute?
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
+    @State private var isNotificationCenterPresented = false
     @State private var isPushPermissionPromptPresented = false
     @State private var homeBannerMessage: String?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
+    @StateObject private var notificationCenterViewModel: NotificationCenterViewModel
     @ObservedObject private var pushCoordinator: PushNotificationCoordinator
     private let authenticationViewModel: AuthenticationViewModel
     private let homeAPIClient: HomeAPIProviding
@@ -46,7 +48,8 @@ struct AppRootView: View {
         documentsAPIClient: DocumentsAPIProviding? = nil,
         documentIntakeAPIClient: DocumentIntakeAPIProviding? = nil,
         requestsAPIClient: RequestsAPIProviding? = nil,
-        notaryProfileAPIClient: NotaryProfileAPIProviding? = nil
+        notaryProfileAPIClient: NotaryProfileAPIProviding? = nil,
+        notificationCenterAPIClient: NotificationCenterAPIProviding? = nil
     ) {
         let dependencies = AppRootView.makeAuthDependencies()
         self.authenticationViewModel = authenticationViewModel ?? AuthenticationViewModel(
@@ -58,6 +61,9 @@ struct AppRootView: View {
         self.documentIntakeAPIClient = documentIntakeAPIClient ?? dependencies.documentIntakeAPIClient
         self.requestsAPIClient = requestsAPIClient ?? dependencies.requestsAPIClient
         self.notaryProfileAPIClient = notaryProfileAPIClient ?? dependencies.notaryProfileAPIClient
+        _notificationCenterViewModel = StateObject(
+            wrappedValue: NotificationCenterViewModel(apiClient: notificationCenterAPIClient ?? dependencies.notificationCenterAPIClient)
+        )
         _sessionCoordinator = StateObject(
             wrappedValue: sessionCoordinator ?? AppSessionCoordinator(
                 apiClient: dependencies.apiClient,
@@ -102,15 +108,20 @@ struct AppRootView: View {
             presentPushPermissionPromptIfEligible()
             openPendingMemberSessionIfPossible()
             openPendingPushRouteIfPossible()
+            Task { await notificationCenterViewModel.load(for: sessionCoordinator.currentSession) }
         }
         .onChange(of: sessionCoordinator.currentSession) { _, session in
             pushCoordinator.activate(session: session)
             presentPushPermissionPromptIfEligible()
             openPendingPushRouteIfPossible()
+            Task { await notificationCenterViewModel.load(for: session) }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            Task { await pushCoordinator.refreshPermissionAndSync() }
+            Task {
+                await pushCoordinator.refreshPermissionAndSync()
+                await notificationCenterViewModel.load(for: sessionCoordinator.currentSession)
+            }
         }
         .sheet(isPresented: $isPushPermissionPromptPresented) {
             PushPermissionExplanationView(
@@ -180,9 +191,22 @@ struct AppRootView: View {
                     .transition(.opacity)
                     .zIndex(20)
                 }
+
+                if isNotificationCenterPresented {
+                    NotificationCenterView(
+                        session: sessionCoordinator.currentSession,
+                        viewModel: notificationCenterViewModel,
+                        onBack: hideNotificationCenter,
+                        onOpenRoute: openRouteFromNotificationCenter
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+                    .zIndex(25)
+                }
             }
             .animation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.42), value: isProfileSelectionPresented)
             .animation(.easeInOut(duration: 0.32), value: isUserSettingsPresented)
+            .animation(.easeInOut(duration: 0.28), value: isNotificationCenterPresented)
             .navigationDestination(item: $intakeRoute) { route in
                 ProductIntakeFlowView(
                     session: sessionCoordinator.currentSession,
@@ -296,7 +320,9 @@ struct AppRootView: View {
                     selectedTab: $selectedTab,
                     onProductSelected: beginProductIntake,
                     onProfileAction: showProfileSelection,
-                    onSettingsAction: showUserSettings
+                    onSettingsAction: showUserSettings,
+                    hasUnreadNotifications: notificationCenterViewModel.hasUnreadNotifications,
+                    onNotificationsAction: showNotificationCenter
                 )
             }
         case .documents:
@@ -378,6 +404,7 @@ struct AppRootView: View {
     }
 
     private func showUserSettings() {
+        isNotificationCenterPresented = false
         isUserSettingsPresented = true
     }
 
@@ -399,11 +426,29 @@ struct AppRootView: View {
     }
 
     private func showProfileSelection() {
+        isNotificationCenterPresented = false
         isProfileSelectionPresented = true
     }
 
     private func hideProfileSelection() {
         isProfileSelectionPresented = false
+    }
+
+    private func showNotificationCenter() {
+        isProfileSelectionPresented = false
+        isUserSettingsPresented = false
+        isNotificationCenterPresented = true
+        Task { await notificationCenterViewModel.load(for: sessionCoordinator.currentSession) }
+    }
+
+    private func hideNotificationCenter() {
+        isNotificationCenterPresented = false
+    }
+
+    private func openRouteFromNotificationCenter(_ route: PushNotificationRoute) {
+        isNotificationCenterPresented = false
+        pendingPushRoute = route
+        openPendingPushRouteIfPossible()
     }
 
     private func switchProfileRole(_ role: MobileProfileRole) {
@@ -523,6 +568,7 @@ struct AppRootView: View {
         pendingMemberSessionRoute = nil
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
+        isNotificationCenterPresented = false
     }
 
     private func openPendingPushRouteIfPossible() {
@@ -554,6 +600,7 @@ struct AppRootView: View {
         memberSessionRoute = nil
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
+        isNotificationCenterPresented = false
 
         switch route {
         case .memberSession(let requestId, _), .memberRequest(let requestId, _):
@@ -605,6 +652,7 @@ struct AppRootView: View {
         documentIntakeAPIClient: DocumentIntakeAPIProviding,
         requestsAPIClient: RequestsAPIProviding,
         notaryProfileAPIClient: NotaryProfileAPIProviding,
+        notificationCenterAPIClient: NotificationCenterAPIProviding,
         sessionStore: AuthSessionStore
     ) {
         if ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH"] == "1" {
@@ -618,11 +666,12 @@ struct AppRootView: View {
                 MockDocumentIntakeAPIClient(),
                 MockRequestsAPIClient(),
                 MockNotaryProfileAPIClient(),
+                MockNotificationCenterAPIClient(),
                 InMemoryAuthSessionStore(session: storedSession)
             )
         }
 
-        return (AuthAPIClient(), HomeAPIClient(), DocumentsAPIClient(), DocumentIntakeAPIClient(), RequestsAPIClient(), NotaryProfileAPIClient(), KeychainAuthSessionStore())
+        return (AuthAPIClient(), HomeAPIClient(), DocumentsAPIClient(), DocumentIntakeAPIClient(), RequestsAPIClient(), NotaryProfileAPIClient(), NotificationCenterAPIClient(), KeychainAuthSessionStore())
     }
 }
 

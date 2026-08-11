@@ -1,6 +1,8 @@
 import { Router } from "express";
 import {
   deactivatePushDevice,
+  listNotificationCenter,
+  markNotificationCenterRead,
   recordPushNotificationOpenEvent,
   registerPushDevice,
   updatePushDevicePermissionStatus,
@@ -8,6 +10,18 @@ import {
 import { requireRole } from "../middleware/roles";
 
 const router = Router();
+
+router.get(
+  "/",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  listNotificationCenter,
+);
+
+router.post(
+  "/mark-read",
+  requireRole(["member", "notary", "admin", "service_role"]),
+  markNotificationCenterRead,
+);
 
 router.put(
   "/devices/:installationId",

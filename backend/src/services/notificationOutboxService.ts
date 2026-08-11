@@ -349,6 +349,34 @@ export type NotificationJobDetail = {
   }>;
 };
 
+export type NotificationCenterItem = {
+  id: string;
+  deliveryId: string;
+  jobId: string;
+  templateKey: string | null;
+  title: string;
+  body: string;
+  category: "documents" | "account";
+  metadataLabel: string | null;
+  createdAt: string;
+  readAt: string | null;
+  isRead: boolean;
+  route: PushRoutePayload | null;
+  documentId: string | null;
+  documentIdn: string | null;
+  channel: NotificationChannel;
+};
+
+export type NotificationCenterResponse = {
+  unreadCount: number;
+  notifications: NotificationCenterItem[];
+};
+
+export type MarkNotificationsReadResponse = {
+  markedReadCount: number;
+  unreadCount: number;
+};
+
 export type NotificationJobsListResponse = {
   jobs: NotificationJobListItem[];
   page: {
@@ -1389,6 +1417,25 @@ const getNotificationAdminUsersByIds = async (userIds: string[]) => {
   );
 };
 
+const getNotificationJobsByIds = async (jobIds: string[]) => {
+  const uniqueJobIds = Array.from(new Set(jobIds.filter(Boolean)));
+  if (uniqueJobIds.length === 0) {
+    return new Map<string, NotificationJobRecord>();
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("notification_jobs")
+    .select(notificationJobSelect)
+    .in("id", uniqueJobIds);
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  const jobs = castValue<NotificationJobRecord[]>(data ?? []);
+  return new Map(jobs.map((job) => [job.id, job]));
+};
+
 const listJobDeliveries = async (jobId: string) => {
   const { data, error } = await supabaseAdmin
     .from("notification_deliveries")
@@ -1895,6 +1942,75 @@ const buildJobListItem = (input: {
     updatedAt: input.job.updated_at,
     deliveryCounts: summarizeDeliveryCounts(input.deliveries),
   } satisfies NotificationJobListItem;
+};
+
+const notificationCategoryForRoute = (route: PushRoutePayload | null): "documents" | "account" => {
+  if (route?.route === "user_settings") {
+    return "account";
+  }
+
+  return "documents";
+};
+
+const buildNotificationMetadataLabel = (input: {
+  job: NotificationJobRecord;
+  document: Record<string, unknown> | null;
+}) => {
+  const payload = objectOrEmpty(input.job.payload_json);
+  const documentName = typeof payload.documentName === "string" ? payload.documentName.trim() : "";
+  const documentIdn = input.document?.idn == null ? "" : String(input.document.idn).trim();
+
+  if (documentName && documentIdn) {
+    return `${documentName.toUpperCase()} · ${documentIdn}`;
+  }
+
+  return documentName || documentIdn || null;
+};
+
+const buildNotificationCenterItem = (input: {
+  delivery: NotificationDeliveryRecord;
+  job: NotificationJobRecord;
+  template: NotificationTemplateRecord | null;
+  document: Record<string, unknown> | null;
+}): NotificationCenterItem => {
+  const payload = objectOrEmpty(input.job.payload_json);
+  const title = input.template?.subject_template
+    ? interpolateTemplateText(input.template.subject_template, payload).trim()
+    : "Notification";
+  const body = input.template?.body_template
+    ? interpolateTemplateText(input.template.body_template, payload).trim()
+    : "Open DARCi for details.";
+  let route: PushRoutePayload | null = null;
+  if (input.template) {
+    try {
+      route = getPushRoutePayload({
+        job: input.job,
+        delivery: input.delivery,
+        template: input.template,
+        now: new Date().toISOString(),
+      });
+    } catch {
+      route = null;
+    }
+  }
+
+  return {
+    id: input.delivery.id,
+    deliveryId: input.delivery.id,
+    jobId: input.job.id,
+    templateKey: input.template?.template_key ?? null,
+    title: title || "Notification",
+    body: body || "Open DARCi for details.",
+    category: notificationCategoryForRoute(route),
+    metadataLabel: buildNotificationMetadataLabel({ job: input.job, document: input.document }),
+    createdAt: input.delivery.queued_at ?? input.delivery.created_at,
+    readAt: input.delivery.opened_at,
+    isRead: input.delivery.opened_at !== null,
+    route,
+    documentId: input.job.document_id,
+    documentIdn: input.document?.idn == null ? null : String(input.document.idn),
+    channel: input.delivery.channel,
+  };
 };
 
 const emptyJobStatusCounts = (): Record<NotificationJobStatus, number> => ({
@@ -2479,6 +2595,132 @@ export const recordPushNotificationOpen = async (input: {
       source: "ios_notification_tap",
     },
   });
+};
+
+export const listUserNotificationCenterItems = async (input: {
+  userId: string;
+  category?: "all" | "documents" | "account" | null | undefined;
+  limit?: number | null | undefined;
+  offset?: number | null | undefined;
+}): Promise<NotificationCenterResponse> => {
+  assertSupabaseConfigured();
+
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+  const offset = Math.max(input.offset ?? 0, 0);
+  const requestedCategory = input.category ?? "all";
+  const fetchLimit = requestedCategory === "all" ? limit : Math.min(limit * 4, 200);
+
+  const { count: unreadCount, error: unreadCountError } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select("id", { count: "exact", head: true })
+    .eq("target_user_id", input.userId)
+    .eq("channel", "push")
+    .is("opened_at", null);
+
+  if (unreadCountError) {
+    throw new NotificationOutboxServiceError(500, unreadCountError.message);
+  }
+
+  const { data: deliveryRows, error: deliveryError } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select(notificationDeliverySelect)
+    .eq("target_user_id", input.userId)
+    .eq("channel", "push")
+    .order("queued_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .range(offset, offset + fetchLimit - 1);
+
+  if (deliveryError) {
+    throw new NotificationOutboxServiceError(500, deliveryError.message);
+  }
+
+  const deliveries = castValue<NotificationDeliveryRecord[]>(deliveryRows ?? []);
+  const jobById = await getNotificationJobsByIds(deliveries.map((delivery) => delivery.notification_job_id));
+  const jobs = Array.from(jobById.values());
+  const templateById = await getNotificationTemplatesByIds(
+    jobs.map((job) => job.template_id).filter((templateId): templateId is string => Boolean(templateId)),
+  );
+  const documentById = await getNotificationAdminDocumentsByIds(
+    jobs.map((job) => job.document_id).filter((documentId): documentId is string => Boolean(documentId)),
+  );
+
+  const notifications = deliveries
+    .map((delivery) => {
+      const job = jobById.get(delivery.notification_job_id);
+      if (!job) {
+        return null;
+      }
+
+      return buildNotificationCenterItem({
+        delivery,
+        job,
+        template: job.template_id ? templateById.get(job.template_id) ?? null : null,
+        document: job.document_id ? documentById.get(job.document_id) ?? null : null,
+      });
+    })
+    .filter((item): item is NotificationCenterItem => item !== null)
+    .filter((item) => requestedCategory === "all" || item.category === requestedCategory)
+    .slice(0, limit);
+
+  return {
+    unreadCount: unreadCount ?? 0,
+    notifications,
+  };
+};
+
+export const markUserNotificationsRead = async (input: {
+  userId: string;
+}): Promise<MarkNotificationsReadResponse> => {
+  assertSupabaseConfigured();
+
+  const { data, error } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select(notificationDeliverySelect)
+    .eq("target_user_id", input.userId)
+    .eq("channel", "push")
+    .is("opened_at", null)
+    .order("queued_at", { ascending: false, nullsFirst: false })
+    .limit(500);
+
+  if (error) {
+    throw new NotificationOutboxServiceError(500, error.message);
+  }
+
+  const deliveries = castValue<NotificationDeliveryRecord[]>(data ?? []);
+  const readAt = new Date().toISOString();
+
+  for (const delivery of deliveries) {
+    await recordNotificationDeliveryEvent({
+      deliveryId: delivery.id,
+      provider: "apns",
+      providerMessageId: delivery.provider_message_id,
+      providerEventId: `mobile-mark-read:${delivery.id}`,
+      eventType: "opened",
+      eventAt: readAt,
+      payload: {
+        source: "ios_notification_center_mark_all_read",
+      },
+      metadata: {
+        readSource: "ios_notification_center_mark_all_read",
+      },
+    });
+  }
+
+  const { count: unreadCount, error: unreadCountError } = await supabaseAdmin
+    .from("notification_deliveries")
+    .select("id", { count: "exact", head: true })
+    .eq("target_user_id", input.userId)
+    .eq("channel", "push")
+    .is("opened_at", null);
+
+  if (unreadCountError) {
+    throw new NotificationOutboxServiceError(500, unreadCountError.message);
+  }
+
+  return {
+    markedReadCount: deliveries.length,
+    unreadCount: unreadCount ?? 0,
+  };
 };
 
 export const recordNotificationDeliveryEventByProviderMessageId = async (input: {

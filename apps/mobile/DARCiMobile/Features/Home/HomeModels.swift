@@ -92,6 +92,7 @@ struct HomeProductCard: Identifiable, Equatable, Sendable {
 }
 
 enum HomeProductIcon: String, Equatable, Sendable {
+    case bellHome = "bell-home"
     case file = "file 1"
     case home = "home 1"
     case mail = "mail 1"

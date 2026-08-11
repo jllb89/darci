@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { getUserIdBySupabaseId } from "../services/documentService";
 import {
+  listUserNotificationCenterItems,
+  markUserNotificationsRead,
   NotificationOutboxServiceError,
   recordPushNotificationOpen,
 } from "../services/notificationOutboxService";
@@ -22,6 +24,12 @@ const installationParamsSchema = z.object({
 const notificationDeliveryParamsSchema = z.object({
   deliveryId: z.string().uuid(),
 });
+
+const notificationCenterQuerySchema = z.object({
+  category: z.enum(["all", "documents", "account"]).default("all"),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+}).strict();
 
 const pushEnvironmentSchema = z.enum(["sandbox", "production"]);
 const permissionStatusSchema = z.enum(["authorized", "provisional", "denied", "unknown"]);
@@ -60,6 +68,7 @@ const pushOpenBodySchema = z.object({
       "member_notary_selection",
       "document_review",
       "document_signing",
+      "user_settings",
     ])
     .optional(),
 }).strict();
@@ -190,6 +199,51 @@ export const deactivatePushDevice = async (req: Request, res: Response) => {
       installationId: parsedParams.data.installationId,
     });
 
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendServiceError(res, error);
+  }
+};
+
+export const listNotificationCenter = async (req: Request, res: Response) => {
+  const parsedQuery = notificationCenterQuerySchema.safeParse(req.query ?? {});
+  if (!parsedQuery.success) {
+    return sendValidationError(res, parsedQuery.error);
+  }
+
+  try {
+    const userId = await resolveAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({
+        error: "unauthorized",
+        message: "Authenticated user is not linked to a DARCi user",
+      });
+    }
+
+    const result = await listUserNotificationCenterItems({
+      userId,
+      category: parsedQuery.data.category,
+      limit: parsedQuery.data.limit,
+      offset: parsedQuery.data.offset,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendServiceError(res, error);
+  }
+};
+
+export const markNotificationCenterRead = async (req: Request, res: Response) => {
+  try {
+    const userId = await resolveAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({
+        error: "unauthorized",
+        message: "Authenticated user is not linked to a DARCi user",
+      });
+    }
+
+    const result = await markUserNotificationsRead({ userId });
     return res.status(200).json(result);
   } catch (error) {
     return sendServiceError(res, error);
