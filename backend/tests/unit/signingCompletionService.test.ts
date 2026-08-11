@@ -431,4 +431,90 @@ describe("signing completion service", () => {
       ],
     });
   });
+
+  it("advances a trust bundle to notary selection when one any-one trustee certificate signer is captured", async () => {
+    const completedSignature = buildSignature({
+      id: "sig-cert-trustee-1",
+      generation_run_id: "run-cert",
+      document_output_signer_id: "cert-trustee-1",
+      signer_id: "owner-1",
+      typed_value: "Alice Trustee",
+    });
+
+    mocks.getDocumentByIdMock.mockResolvedValue(
+      buildDocument({
+        product_flow_mode: "trust_bundle",
+        output_bundle: [
+          { outputKey: "trust_rrr", outputLabel: "Trust RRR", sortOrder: 0 },
+          { outputKey: "trust_certificate", outputLabel: "Certificate of Trust", sortOrder: 1 },
+        ],
+      }),
+    );
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      buildGenerationRun({ id: "run-rrr", output_key: "trust_rrr", document_key: "trust_rrr" }),
+      buildGenerationRun({
+        id: "run-cert",
+        output_key: "trust_certificate",
+        document_key: "trust_certificate",
+      }),
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      buildSigner({
+        id: "grantor-1",
+        generation_run_id: "run-rrr",
+        output_key: "trust_rrr",
+        document_key: "trust_rrr",
+        party_role: "grantor",
+        party_name: "Alice Trustmaker",
+      }),
+      buildSigner({
+        id: "cert-trustee-1",
+        generation_run_id: "run-cert",
+        output_key: "trust_certificate",
+        document_key: "trust_certificate",
+        party_role: "trustee",
+        party_name: "Alice Trustee",
+        signing_group: "trustees_any_one",
+        is_required: false,
+        metadata: { authorityMode: "any_one_trustee", groupMinimumRequired: 1 },
+        sort_order: 1,
+      }),
+      buildSigner({
+        id: "cert-trustee-2",
+        generation_run_id: "run-cert",
+        output_key: "trust_certificate",
+        document_key: "trust_certificate",
+        party_role: "trustee",
+        party_name: "Bob Trustee",
+        signing_group: "trustees_any_one",
+        is_required: false,
+        metadata: { authorityMode: "any_one_trustee", groupMinimumRequired: 1 },
+        sort_order: 2,
+      }),
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      buildSignature({
+        id: "sig-grantor-1",
+        generation_run_id: "run-rrr",
+        document_output_signer_id: "grantor-1",
+        typed_value: "Alice Trustmaker",
+      }),
+    ]);
+
+    const result = await completeSigningWorkflowAfterSignatureCapture({
+      documentId: "doc-1",
+      completedOutputSignerId: "cert-trustee-1",
+      completedSignatureId: "sig-cert-trustee-1",
+      signatureRecord: completedSignature,
+      actorSupabaseId: "supabase-owner-1",
+      actorRole: "member",
+    });
+
+    expect(result?.allSignerRequirementsSatisfied).toBe(true);
+    expect(result?.remainingSignerCount).toBe(0);
+    expect(result?.documentStatus.nextStatus).toBe("pending_notary");
+    expect(mocks.updateDocumentMock).toHaveBeenCalledWith("doc-1", {
+      status: "pending_notary",
+    });
+  });
 });

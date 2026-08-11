@@ -4887,6 +4887,13 @@ export default function StartDocumentPage() {
         normalizedCanonicalKey === "tax_id_owner" &&
         isTaxIdOwnerSelectionBoundToTrustmakers(field) &&
         trustmakerNames.length > 0;
+      const namedSigningTrusteeCount = parsePersonListItems(formValues.trustees).filter(
+        (item) => item.fullName.trim().length > 0 && item.isSigningTrustee,
+      ).length;
+      const shouldShowNamedSigningTrusteePrompt =
+        normalizedCanonicalKey === "trustee_signature_authority" &&
+        fieldValue === "named_signing_trustee" &&
+        namedSigningTrusteeCount !== 1;
 
       const selectPlaceholder = isTrustmakerTaxIdSelection
         ? "Select primary trustmaker"
@@ -4918,6 +4925,12 @@ export default function StartDocumentPage() {
           {isTrustmakerTaxIdSelection ? (
             <div className="text-xs text-Color-Neutral">
               Select the Trustmaker whose tax ID is primary for this trust.
+            </div>
+          ) : null}
+
+          {shouldShowNamedSigningTrusteePrompt ? (
+            <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              In Trustees, mark exactly one acting trustee as the named signing trustee before continuing.
             </div>
           ) : null}
 

@@ -357,6 +357,18 @@ const isActionableSignature = (signature: SigningSignature) => {
   return Boolean(signature.signingGroup && signature.groupMinimumRequired && !signature.groupSatisfied);
 };
 
+const getTargetSignaturesForSharedCapture = (
+  signature: SigningSignature,
+  visibleSignatures: SigningSignature[],
+) => {
+  const signerName = normalizePartyName(signature.partyName);
+  const pendingSameSignerSignatures = visibleSignatures.filter(
+    (candidate) => isActionableSignature(candidate) && normalizePartyName(candidate.partyName) === signerName,
+  );
+
+  return pendingSameSignerSignatures.length > 0 ? pendingSameSignerSignatures : [signature];
+};
+
 const formatProductFlowModeLabel = (value: string | null | undefined) => {
   if (!value) {
     return null;
@@ -1325,69 +1337,76 @@ export default function SignPage() {
       });
 
       try {
-        const requestResponse = await fetchWithTokenRefresh(
-          `${apiBaseUrl}/documents/${documentId}/signatures/request`,
-          accessToken,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
+        let latestFinalizePayload: SignatureResponse | null = null;
+        const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
+
+        for (const targetSignature of targetSignatures) {
+          const requestResponse = await fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${documentId}/signatures/request`,
+            accessToken,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                generationRunId: targetSignature.generationRunId,
+                outputSignerId: targetSignature.outputSignerId,
+                fileName: file.name,
+                fileSize: file.size,
+                mimeType: file.type,
+              }),
             },
-            body: JSON.stringify({
-              generationRunId: activeSignature.generationRunId,
-              outputSignerId: activeSignature.outputSignerId,
-              fileName: file.name,
-              fileSize: file.size,
-              mimeType: file.type,
-            }),
-          },
-        );
-        requestId = getResponseRequestId(requestResponse);
-        const requestPayload = (await requestResponse.json().catch(() => null)) as
-          | SignatureUploadResponse
-          | null;
+          );
+          requestId = getResponseRequestId(requestResponse);
+          const requestPayload = (await requestResponse.json().catch(() => null)) as
+            | SignatureUploadResponse
+            | null;
 
-        if (!requestResponse.ok || !requestPayload?.signature || !requestPayload.upload) {
-          throw new Error(requestPayload?.message ?? "Failed to prepare signature upload.");
-        }
+          if (!requestResponse.ok || !requestPayload?.signature || !requestPayload.upload) {
+            throw new Error(requestPayload?.message ?? "Failed to prepare signature upload.");
+          }
 
-        const uploadResponse = await fetch(requestPayload.upload.signedUrl, {
-          method: "PUT",
-          headers: {
-            "Content-Type": file.type,
-          },
-          body: file,
-        });
-
-        if (!uploadResponse.ok) {
-          throw new Error("Failed to upload signature image.");
-        }
-
-        const finalizeResponse = await fetchWithTokenRefresh(
-          `${apiBaseUrl}/documents/${documentId}/signatures/finalize`,
-          accessToken,
-          {
-            method: "POST",
+          const uploadResponse = await fetch(requestPayload.upload.signedUrl, {
+            method: "PUT",
             headers: {
-              "Content-Type": "application/json",
+              "Content-Type": file.type,
             },
-            body: JSON.stringify({
-              signatureId: requestPayload.signature.id,
-              generationRunId: activeSignature.generationRunId,
-              outputSignerId: activeSignature.outputSignerId,
-            }),
-          },
-        );
-        requestId = getResponseRequestId(finalizeResponse) ?? requestId;
-        const finalizePayload = (await finalizeResponse.json().catch(() => null)) as
-          | SignatureResponse
-          | null;
+            body: file,
+          });
 
-        if (!finalizeResponse.ok) {
-          throw new Error(finalizePayload?.message ?? "Failed to finalize signature upload.");
+          if (!uploadResponse.ok) {
+            throw new Error("Failed to upload signature image.");
+          }
+
+          const finalizeResponse = await fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${documentId}/signatures/finalize`,
+            accessToken,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                signatureId: requestPayload.signature.id,
+                generationRunId: targetSignature.generationRunId,
+                outputSignerId: targetSignature.outputSignerId,
+              }),
+            },
+          );
+          requestId = getResponseRequestId(finalizeResponse) ?? requestId;
+          const finalizePayload = (await finalizeResponse.json().catch(() => null)) as
+            | SignatureResponse
+            | null;
+
+          if (!finalizeResponse.ok) {
+            throw new Error(finalizePayload?.message ?? "Failed to finalize signature upload.");
+          }
+
+          latestFinalizePayload = finalizePayload;
         }
 
-        applyRemainingSignerInviteDispatchSummary(finalizePayload?.remainingSignerInvites);
+        applyRemainingSignerInviteDispatchSummary(latestFinalizePayload?.remainingSignerInvites);
         showToast({ tone: "success", message: "Uploaded signature saved." });
         addFeatureBreadcrumb({
           feature: "document_signing",
@@ -1445,6 +1464,7 @@ export default function SignPage() {
       isSavingCapture,
       refreshAfterCapture,
       showToast,
+      visibleSignatures,
     ],
   );
 
@@ -1473,31 +1493,38 @@ export default function SignPage() {
     });
 
     try {
-      const response = await fetchWithTokenRefresh(
-        `${apiBaseUrl}/documents/${documentId}/signatures`,
-        accessToken,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            generationRunId: activeSignature.generationRunId,
-            outputSignerId: activeSignature.outputSignerId,
-            captureMethod: "type",
-            typedValue: nextTypedValue,
-            typedKind,
-          }),
-        },
-      );
-      requestId = getResponseRequestId(response);
-      const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+      let latestResponsePayload: SignatureResponse | null = null;
+      const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
 
-      if (!response.ok) {
-        throw new Error(responsePayload?.message ?? "Failed to save typed signature.");
+      for (const targetSignature of targetSignatures) {
+        const response = await fetchWithTokenRefresh(
+          `${apiBaseUrl}/documents/${documentId}/signatures`,
+          accessToken,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              generationRunId: targetSignature.generationRunId,
+              outputSignerId: targetSignature.outputSignerId,
+              captureMethod: "type",
+              typedValue: nextTypedValue,
+              typedKind,
+            }),
+          },
+        );
+        requestId = getResponseRequestId(response);
+        const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+
+        if (!response.ok) {
+          throw new Error(responsePayload?.message ?? "Failed to save typed signature.");
+        }
+
+        latestResponsePayload = responsePayload;
       }
 
-      applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
+      applyRemainingSignerInviteDispatchSummary(latestResponsePayload?.remainingSignerInvites);
       showToast({ tone: "success", message: "Typed signature saved." });
       addFeatureBreadcrumb({
         feature: "document_signing",
@@ -1549,6 +1576,7 @@ export default function SignPage() {
     showToast,
     typedKind,
     typedValue,
+    visibleSignatures,
   ]);
 
   const handleDrawSave = useCallback(async () => {
@@ -1580,30 +1608,37 @@ export default function SignPage() {
     });
 
     try {
-      const response = await fetchWithTokenRefresh(
-        `${apiBaseUrl}/documents/${documentId}/signatures`,
-        accessToken,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            generationRunId: activeSignature.generationRunId,
-            outputSignerId: activeSignature.outputSignerId,
-            captureMethod: "draw",
-            imageDataUrl,
-          }),
-        },
-      );
-      requestId = getResponseRequestId(response);
-      const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+      let latestResponsePayload: SignatureResponse | null = null;
+      const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
 
-      if (!response.ok) {
-        throw new Error(responsePayload?.message ?? "Failed to save drawn signature.");
+      for (const targetSignature of targetSignatures) {
+        const response = await fetchWithTokenRefresh(
+          `${apiBaseUrl}/documents/${documentId}/signatures`,
+          accessToken,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              generationRunId: targetSignature.generationRunId,
+              outputSignerId: targetSignature.outputSignerId,
+              captureMethod: "draw",
+              imageDataUrl,
+            }),
+          },
+        );
+        requestId = getResponseRequestId(response);
+        const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+
+        if (!response.ok) {
+          throw new Error(responsePayload?.message ?? "Failed to save drawn signature.");
+        }
+
+        latestResponsePayload = responsePayload;
       }
 
-      applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
+      applyRemainingSignerInviteDispatchSummary(latestResponsePayload?.remainingSignerInvites);
       clearCanvas();
       showToast({ tone: "success", message: "Drawn signature saved." });
       addFeatureBreadcrumb({
@@ -1656,6 +1691,7 @@ export default function SignPage() {
     isSavingCapture,
     refreshAfterCapture,
     showToast,
+    visibleSignatures,
   ]);
 
   const handleUploadChange = useCallback(
@@ -1692,30 +1728,37 @@ export default function SignPage() {
       });
 
       try {
-        const response = await fetchWithTokenRefresh(
-          `${apiBaseUrl}/documents/${documentId}/signatures`,
-          accessToken,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              generationRunId: activeSignature.generationRunId,
-              outputSignerId: activeSignature.outputSignerId,
-              captureMethod: "saved",
-              savedSignatureId,
-            }),
-          },
-        );
-        requestId = getResponseRequestId(response);
-        const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+        let latestResponsePayload: SignatureResponse | null = null;
+        const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
 
-        if (!response.ok) {
-          throw new Error(responsePayload?.message ?? "Failed to apply saved signature.");
+        for (const targetSignature of targetSignatures) {
+          const response = await fetchWithTokenRefresh(
+            `${apiBaseUrl}/documents/${documentId}/signatures`,
+            accessToken,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                generationRunId: targetSignature.generationRunId,
+                outputSignerId: targetSignature.outputSignerId,
+                captureMethod: "saved",
+                savedSignatureId,
+              }),
+            },
+          );
+          requestId = getResponseRequestId(response);
+          const responsePayload = (await response.json().catch(() => null)) as SignatureResponse | null;
+
+          if (!response.ok) {
+            throw new Error(responsePayload?.message ?? "Failed to apply saved signature.");
+          }
+
+          latestResponsePayload = responsePayload;
         }
 
-        applyRemainingSignerInviteDispatchSummary(responsePayload?.remainingSignerInvites);
+        applyRemainingSignerInviteDispatchSummary(latestResponsePayload?.remainingSignerInvites);
         showToast({ tone: "success", message: "Saved signature applied." });
         addFeatureBreadcrumb({
           feature: "document_signing",
@@ -1766,6 +1809,7 @@ export default function SignPage() {
       isSavingCapture,
       refreshAfterCapture,
       showToast,
+      visibleSignatures,
     ],
   );
 

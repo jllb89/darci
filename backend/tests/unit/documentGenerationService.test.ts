@@ -282,4 +282,52 @@ describe("documentGenerationService signer obligations", () => {
       }),
     ]);
   });
+
+  it("applies any-one trustee authority to certificate signer obligations", () => {
+    const firstTrustee = buildParty({
+      id: "party-trustee-1",
+      party_role: "trustee",
+      full_name: "Alice Trustee",
+      email: "alice.trustee@example.com",
+      sort_order: 0,
+    });
+    const secondTrustee = buildParty({
+      id: "party-trustee-2",
+      party_role: "trustee",
+      full_name: "Bob Trustee",
+      email: "bob.trustee@example.com",
+      sort_order: 1,
+    });
+
+    const obligations = deriveSignerObligationsForRun({
+      outputKey: "trust_certificate",
+      documentKey: "trust_certificate",
+      parties: [firstTrustee, secondTrustee],
+      canonicalAnswers: {
+        trustee_signature_authority: "any_one_trustee",
+      },
+    });
+
+    expect(obligations).toHaveLength(4);
+    expect(obligations.filter((obligation) => obligation.obligation_type === "signer")).toEqual([
+      expect.objectContaining({
+        document_party_id: "party-trustee-1",
+        signing_group: "trustees_any_one",
+        is_required: false,
+        metadata: expect.objectContaining({
+          authorityMode: "any_one_trustee",
+          groupMinimumRequired: 1,
+        }),
+      }),
+      expect.objectContaining({
+        document_party_id: "party-trustee-2",
+        signing_group: "trustees_any_one",
+        is_required: false,
+        metadata: expect.objectContaining({
+          authorityMode: "any_one_trustee",
+          groupMinimumRequired: 1,
+        }),
+      }),
+    ]);
+  });
 });

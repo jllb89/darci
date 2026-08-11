@@ -894,36 +894,98 @@ export const deriveSignerObligationsForRun = (input: {
   }
 
   if (input.documentKey === "trust_certificate") {
+    const authorityMode = asTrimmedString(input.canonicalAnswers.trustee_signature_authority);
+    const customInstructions = asTrimmedString(
+      input.canonicalAnswers.trustee_signature_authority_custom_text,
+    );
+
+    if (authorityMode === "named_signing_trustee") {
+      for (const trustee of trustees.filter((party) => partyRecordMatchesTrusteeSelection(party))) {
+        append({
+          ...buildSignerObligation({
+            party: trustee,
+            outputKey: input.outputKey,
+            documentKey: input.documentKey,
+            obligationType: "signer",
+            signingGroup: "trustees_named_one",
+            isRequired: true,
+            resolutionSource: "template",
+            sortOrder: 0,
+            metadata: {
+              authorityMode,
+            },
+          }),
+        });
+
+        append({
+          ...buildSignerObligation({
+            party: trustee,
+            outputKey: input.outputKey,
+            documentKey: input.documentKey,
+            obligationType: "acknowledger",
+            signingGroup: "trustees_named_one",
+            isRequired: true,
+            resolutionSource: "template",
+            sortOrder: 0,
+            metadata: {
+              authorityMode,
+            },
+          }),
+        });
+      }
+
+      return obligations;
+    }
+
     for (const trustee of trustees) {
+      const isAnyOneOrCustom = authorityMode === "any_one_trustee" || authorityMode === "custom";
+      const signingGroup =
+        authorityMode === "any_one_trustee"
+          ? "trustees_any_one"
+          : authorityMode === "custom"
+            ? "trustees_custom"
+            : "trustees_all";
+      const metadata =
+        authorityMode === "custom"
+          ? {
+              authorityMode,
+              customInstructions,
+              groupMinimumRequired: 1,
+            }
+          : authorityMode === "any_one_trustee"
+            ? {
+                authorityMode,
+                groupMinimumRequired: 1,
+              }
+            : {
+                authorityMode: authorityMode || "all_trustees",
+              };
+
       append({
         ...buildSignerObligation({
           party: trustee,
           outputKey: input.outputKey,
           documentKey: input.documentKey,
           obligationType: "signer",
-          signingGroup: "trustees_all",
-          isRequired: true,
-          resolutionSource: "template",
+          signingGroup,
+          isRequired: !isAnyOneOrCustom,
+          resolutionSource: authorityMode === "custom" ? "manual_override" : "template",
           sortOrder: 0,
-          metadata: {
-            templateOverride: true,
-            note: "Certification of trust currently resolves trustees as the required signers.",
-          },
+          metadata,
         }),
       });
-    }
 
-    for (const trustee of trustees) {
       append({
         ...buildSignerObligation({
           party: trustee,
           outputKey: input.outputKey,
           documentKey: input.documentKey,
           obligationType: "acknowledger",
-          signingGroup: "trustees_all",
-          isRequired: true,
-          resolutionSource: "template",
+          signingGroup,
+          isRequired: !isAnyOneOrCustom,
+          resolutionSource: authorityMode === "custom" ? "manual_override" : "template",
           sortOrder: 0,
+          metadata,
         }),
       });
     }
