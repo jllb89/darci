@@ -412,6 +412,16 @@
       "mitigations": ["Move the request back to a valid pre-meeting state or repair missing meeting rows.", "Have the notary retry after state repair."]
     },
     {
+      "code": "WEB_NOTARY_LOCATION_REFRESH_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Inspect automatic, notary_request_id, and request_id context for the location refresh failure.", "Confirm browser location capture and same-place evidence endpoints are healthy for the active notary request."],
+      "mitigations": ["Have the notary manually retry location refresh after browser permission or network repair.", "Repair stale request/meeting state if refresh fails after successful geolocation capture."]
+    },
+    {
       "code": "WEB_NOTARY_REVIEW_DECISION_FAILED",
       "family": "notarization",
       "severity": "P1",
@@ -420,6 +430,16 @@
       "runbookAnchor": "#signing-and-notarization-family",
       "checks": ["Inspect decision, notary_request_id, request_id, and backend review-decision response.", "Confirm request status still permits approval/rejection."],
       "mitigations": ["Repair duplicate or stale review state and retry the decision.", "If notification handoff failed after approval, reconcile notifications separately without reversing the decision." ]
+    },
+    {
+      "code": "WEB_MEMBER_LOCATION_CHECKIN_FAILED",
+      "family": "notarization",
+      "severity": "P1",
+      "owner": "notary-operations",
+      "alertRuleIds": ["p1-web-critical-flow", "p1-signing-notarization"],
+      "runbookAnchor": "#signing-and-notarization-family",
+      "checks": ["Use notary_request_id and request_id to inspect the member location check-in backend response.", "Confirm the request is assigned, in an in-person session state, and accepting member check-in evidence."],
+      "mitigations": ["Repair invalid meeting/check-in state and have the member retry location sharing.", "If backend validation is rejecting valid coordinates, patch the check-in endpoint and replay the member action."]
     },
     {
       "code": "WEB_REVIEW_APPROVAL_FAILED",

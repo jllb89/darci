@@ -63,6 +63,26 @@ const extractCodeFamily = (source, matchIndex) => {
   return familyMatch?.[1] ?? null;
 };
 
+const extractErrorCodeLiterals = (source) => {
+  const literals = [];
+
+  for (const match of source.matchAll(/errorCode:\s*/g)) {
+    const startIndex = (match.index ?? 0) + match[0].length;
+    const nearby = source.slice(startIndex, startIndex + 800);
+    const boundaryIndex = nearby.search(/,\s*\n\s*[A-Za-z_$][\w$]*\s*:|\n\s*\}/);
+    const expression = boundaryIndex >= 0 ? nearby.slice(0, boundaryIndex) : nearby;
+
+    for (const literalMatch of expression.matchAll(/"([A-Z][A-Z0-9_]+)"/g)) {
+      literals.push({
+        code: literalMatch[1],
+        index: startIndex + (literalMatch.index ?? 0),
+      });
+    }
+  }
+
+  return literals;
+};
+
 const collectSourceFacts = async () => {
   const codes = new Map();
   const criticalCaptureViolations = [];
@@ -100,11 +120,11 @@ const collectSourceFacts = async () => {
       });
     }
 
-    for (const match of source.matchAll(/errorCode:\s*"([^"]+)"/g)) {
-      const code = match[1];
+    for (const match of extractErrorCodeLiterals(source)) {
+      const code = match.code;
       codes.set(code, {
         code,
-        family: extractCodeFamily(source, match.index ?? 0),
+        family: extractCodeFamily(source, match.index),
         source: relativePath,
       });
     }
