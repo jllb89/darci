@@ -32,7 +32,11 @@ final class DocumentIntakeViewModel: ObservableObject {
             }
         }
     }
-    @Published var grantors = [IntakePersonListItem()]
+    @Published var grantors = [IntakePersonListItem()] {
+        didSet {
+            syncTrusteesFromCurrentTrustmakers()
+        }
+    }
     @Published var trustees = [IntakePersonListItem()]
     @Published var successorTrustees = [IntakePersonListItem()]
     @Published var revocationHolders = ""
@@ -650,6 +654,14 @@ final class DocumentIntakeViewModel: ObservableObject {
     func removeTrustmaker(at index: Int) {
         removePersonRow(from: &grantors, at: index)
         trustmakerPrincipalIndex = min(trustmakerPrincipalIndex, max(trustmakerPrincipalRows.count - 1, 0))
+    }
+
+    func setTrustmakerCurrentTrustee(at index: Int, isSelected: Bool) {
+        guard grantors.indices.contains(index) else {
+            return
+        }
+
+        grantors[index].isCurrentTrustee = isSelected
     }
 
     func addTrustee() {
@@ -1478,6 +1490,58 @@ final class DocumentIntakeViewModel: ObservableObject {
 
     private func filledPersonRows(_ items: [IntakePersonListItem]) -> [IntakePersonListItem] {
         items.filter(hasAnyPersonRowValue)
+    }
+
+    private func syncTrusteesFromCurrentTrustmakers() {
+        let currentTrustmakers = filledPersonRows(grantors).filter(\.isCurrentTrustee)
+        var nextTrustees = trustees.filter { $0.isCurrentTrustee == false && hasAnyPersonRowValue($0) }
+
+        for trustmaker in currentTrustmakers where nextTrustees.contains(where: { personListItemsMatch($0, trustmaker) }) == false {
+            nextTrustees.append(trusteeRow(from: trustmaker))
+        }
+
+        if nextTrustees.isEmpty {
+            nextTrustees = [IntakePersonListItem()]
+        }
+
+        if nextTrustees != trustees {
+            trustees = nextTrustees
+        }
+    }
+
+    private func trusteeRow(from trustmaker: IntakePersonListItem) -> IntakePersonListItem {
+        IntakePersonListItem(
+            fullName: trustmaker.fullName,
+            email: trustmaker.email,
+            address: trustmaker.address,
+            phoneCountryIso2: trustmaker.phoneCountryIso2,
+            phoneCountryCode: trustmaker.phoneCountryCode,
+            phone: trustmaker.phone,
+            isSigningTrustee: false,
+            isCurrentTrustee: true
+        )
+    }
+
+    private func personListItemsMatch(_ lhs: IntakePersonListItem, _ rhs: IntakePersonListItem) -> Bool {
+        let lhsEmail = lhs.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let rhsEmail = rhs.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lhsEmail.isEmpty == false, rhsEmail.isEmpty == false, lhsEmail == rhsEmail {
+            return true
+        }
+
+        let lhsPhone = lhs.phone.filter(\.isNumber)
+        let rhsPhone = rhs.phone.filter(\.isNumber)
+        if lhsPhone.isEmpty == false, rhsPhone.isEmpty == false, lhsPhone == rhsPhone {
+            return true
+        }
+
+        let lhsName = normalizedPersonToken(lhs.fullName)
+        let rhsName = normalizedPersonToken(rhs.fullName)
+        return lhsName.isEmpty == false && rhsName.isEmpty == false && lhsName == rhsName
+    }
+
+    private func normalizedPersonToken(_ value: String) -> String {
+        value.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
     private func hasAnyPersonRowValue(_ item: IntakePersonListItem) -> Bool {

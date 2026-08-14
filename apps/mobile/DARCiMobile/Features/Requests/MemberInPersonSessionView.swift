@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MemberInPersonSessionView: View {
     private let session: AuthSession?
@@ -86,7 +87,7 @@ struct MemberInPersonSessionView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "location.fill")
                                 .font(.system(size: 14, weight: .medium))
-                            Text(viewModel.isSharingLocation ? "Sharing location..." : "Re-share location")
+                            Text(viewModel.shareLocationButtonTitle)
                                 .font(DARCiFont.maisonNeue(.medium, size: 14))
                         }
                         .foregroundStyle(viewModel.canShareLocation ? Color.black : Color.white.opacity(0.64))
@@ -151,21 +152,54 @@ struct MemberInPersonSessionView: View {
     @ViewBuilder
     private var messages: some View {
         if let errorMessage = viewModel.errorMessage {
-            message(errorMessage, color: Color(red: 0.68, green: 0.10, blue: 0.10), background: Color(red: 0.99, green: 0.94, blue: 0.94))
+            message(
+                errorMessage,
+                color: Color(red: 0.68, green: 0.10, blue: 0.10),
+                background: Color(red: 0.99, green: 0.94, blue: 0.94),
+                showsLocationSettingsAction: viewModel.shouldShowLocationSettingsAction
+            )
         }
         if let noticeMessage = viewModel.noticeMessage {
             message(noticeMessage, color: Color(red: 0.03, green: 0.34, blue: 0.12), background: Color(red: 0.90, green: 0.98, blue: 0.91))
         }
     }
 
-    private func message(_ text: String, color: Color, background: Color) -> some View {
-        Text(text)
-            .font(DARCiFont.maisonNeue(.book, size: 12))
-            .foregroundStyle(color)
-            .padding(14)
+    private func message(
+        _ text: String,
+        color: Color,
+        background: Color,
+        showsLocationSettingsAction: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(text)
+                .font(DARCiFont.maisonNeue(.book, size: 12))
+                .foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if showsLocationSettingsAction {
+                Button("Open Settings", action: openLocationSettings)
+                    .font(DARCiFont.maisonNeue(.medium, size: 12))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.black.opacity(0.16), lineWidth: 1)
+                    }
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(background)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func openLocationSettings() {
+        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(settingsURL)
     }
 
     private var documentSelector: some View {

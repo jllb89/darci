@@ -321,11 +321,13 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
     func load(session: AuthSession?) async {
         await refresh(session: session, silent: false)
         startRealtimeIfNeeded(session: session)
+        prepareLocationIfHelpful()
     }
 
     func refreshFromForeground(session: AuthSession?) async {
         guard context != nil else { return }
         await refresh(session: session, silent: true)
+        prepareLocationIfHelpful()
     }
 
     func stop() {
@@ -335,6 +337,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         pollTask = nil
         previewTask?.cancel()
         previewTask = nil
+        locationProvider.stopPreparingLocationCapture()
     }
 
     func selectDocument(_ document: NotaryReviewDocumentFile) {
@@ -729,6 +732,15 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         }
 
         schedulePoll(session: session)
+    }
+
+    private func prepareLocationIfHelpful() {
+        guard context?.meeting?.status != "completed" else {
+            locationProvider.stopPreparingLocationCapture()
+            return
+        }
+
+        locationProvider.prepareForLocationCapture()
     }
 
     private func loadIdentitySchema(session: AuthSession?) async {

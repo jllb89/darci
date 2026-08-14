@@ -95,12 +95,14 @@ const FINE_PRINT_LINE_GAP = 1.3;
 const SIGNATURE_BLOCK_RESERVED_HEIGHT = 96;
 const EXECUTION_DATE_SIGNATURE_GROUP_RESERVED_HEIGHT = 132;
 const SIGNATURE_LAYOUT_MIN_GAP = 4;
-const ACKNOWLEDGMENT_SIGNATURE_MAX_WIDTH = 132;
-const ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT = 42;
 const PDF_POINTS_PER_INCH = 72;
 export const ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS = PDF_POINTS_PER_INCH * 2;
 const ACKNOWLEDGMENT_SEAL_MAX_WIDTH = ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS;
 const ACKNOWLEDGMENT_SEAL_MAX_HEIGHT = ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS;
+const ACKNOWLEDGMENT_SIGNATURE_SEAL_HEIGHT_RATIO = 0.875;
+const ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT =
+  ACKNOWLEDGMENT_SEAL_MAX_HEIGHT * ACKNOWLEDGMENT_SIGNATURE_SEAL_HEIGHT_RATIO;
+const ACKNOWLEDGMENT_SIGNATURE_SEAL_GAP = 24;
 const INLINE_VALUE_OPEN = "[[DARCI_VALUE]]";
 const INLINE_VALUE_CLOSE = "[[/DARCI_VALUE]]";
 const INLINE_PENDING_OPEN = "[[DARCI_PENDING]]";
@@ -140,7 +142,7 @@ type PdfAppendixImageAsset = {
 };
 type TemplateBlock =
   | { kind: "blank" }
-  | { kind: "title" | "heading" | "notice" | "fineprint" | "paragraph" | "bullet" | "table"; text: string }
+  | { kind: "title" | "heading" | "notice" | "fineprint" | "boxedFineprint" | "paragraph" | "bullet" | "table"; text: string }
   | { kind: "checklist"; text: string; checked: boolean }
   | { kind: "executionDate"; text: string }
   | { kind: "signature"; text: string; includeDate: boolean };
@@ -2017,7 +2019,9 @@ const buildTemplateBlocks = (renderedTemplate: string) => {
 
     if (isNotarialFinePrintLine(trimmed)) {
       return {
-        kind: "fineprint",
+        kind: /^A notary public or other officer completing this certificate verifies only the identity/i.test(trimmed)
+          ? "boxedFineprint"
+          : "fineprint",
         text: trimmed,
       };
     }
@@ -2311,13 +2315,15 @@ const renderTemplateBlocks = (
   options?: {
     getCurrentPageNumber?: () => number;
     onRenderSignatureField?: (placement: SignatureFieldPlacement) => void;
+    fontSizeOverride?: number;
   },
 ) => {
+  const fontSizeOverride = options?.fontSizeOverride;
   const bodyProfile: TextRenderProfile = {
     baseFont: fonts.regular,
     valueFont: fonts.emphasis,
     pendingFont: fonts.italic,
-    fontSize: BODY_FONT_SIZE,
+    fontSize: fontSizeOverride ?? BODY_FONT_SIZE,
     color: BODY_TEXT_COLOR,
     valueColor: ACCENT_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
@@ -2326,7 +2332,7 @@ const renderTemplateBlocks = (
     baseFont: fonts.emphasis,
     valueFont: fonts.strong,
     pendingFont: fonts.italic,
-    fontSize: HEADING_FONT_SIZE,
+    fontSize: fontSizeOverride ?? HEADING_FONT_SIZE,
     color: HEADING_TEXT_COLOR,
     valueColor: HEADING_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
@@ -2335,7 +2341,7 @@ const renderTemplateBlocks = (
     baseFont: fonts.strong,
     valueFont: fonts.strong,
     pendingFont: fonts.italic,
-    fontSize: TITLE_FONT_SIZE,
+    fontSize: fontSizeOverride ?? TITLE_FONT_SIZE,
     color: HEADING_TEXT_COLOR,
     valueColor: HEADING_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
@@ -2344,7 +2350,7 @@ const renderTemplateBlocks = (
     baseFont: fonts.regular,
     valueFont: fonts.emphasis,
     pendingFont: fonts.italic,
-    fontSize: NOTICE_FONT_SIZE,
+    fontSize: fontSizeOverride ?? NOTICE_FONT_SIZE,
     color: MUTED_TEXT_COLOR,
     valueColor: BODY_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
@@ -2353,7 +2359,7 @@ const renderTemplateBlocks = (
     baseFont: fonts.regular,
     valueFont: fonts.emphasis,
     pendingFont: fonts.italic,
-    fontSize: FINE_PRINT_FONT_SIZE,
+    fontSize: fontSizeOverride ?? FINE_PRINT_FONT_SIZE,
     color: MUTED_TEXT_COLOR,
     valueColor: MUTED_TEXT_COLOR,
     pendingColor: MUTED_TEXT_COLOR,
@@ -2404,6 +2410,31 @@ const renderTemplateBlocks = (
         lineGap: FINE_PRINT_LINE_GAP,
       });
       document.moveDown(0.12);
+      continue;
+    }
+
+    if (block.kind === "boxedFineprint") {
+      const boxPadding = 8;
+      const boxWidth = document.page.width - document.page.margins.left - document.page.margins.right;
+      const textWidth = boxWidth - boxPadding * 2;
+      document.font(finePrintProfile.baseFont).fontSize(finePrintProfile.fontSize);
+      const textHeight = document.heightOfString(block.text, {
+        width: textWidth,
+        lineGap: FINE_PRINT_LINE_GAP,
+      });
+      const boxHeight = textHeight + boxPadding * 2;
+
+      ensurePageSpace(document, boxHeight + 10);
+      const x = document.page.margins.left;
+      const y = document.y;
+      document.save();
+      document.lineWidth(1).strokeColor(BODY_TEXT_COLOR).rect(x, y, boxWidth, boxHeight).stroke();
+      document.restore();
+      document.fillColor(BODY_TEXT_COLOR).text(block.text, x + boxPadding, y + boxPadding, {
+        width: textWidth,
+        lineGap: FINE_PRINT_LINE_GAP,
+      });
+      document.y = y + boxHeight + 8;
       continue;
     }
 
@@ -2583,10 +2614,13 @@ const drawAcknowledgmentAppendixImages = (
   const left = document.page.margins.left;
   const right = document.page.width - document.page.margins.right;
   const topY = document.y + 2;
+  const signatureMaxWidth = input.sealImage
+    ? Math.max(right - left - ACKNOWLEDGMENT_SEAL_MAX_WIDTH - ACKNOWLEDGMENT_SIGNATURE_SEAL_GAP, 1)
+    : right - left;
 
   if (input.signatureImage) {
     document.image(input.signatureImage.bytes, left, topY, {
-      fit: [ACKNOWLEDGMENT_SIGNATURE_MAX_WIDTH, ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT],
+      fit: [signatureMaxWidth, ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT],
     });
   }
 
@@ -2644,6 +2678,7 @@ export const renderAcknowledgmentAppendixPdf = async (input: {
     pdf,
     buildTemplateBlocks(buildAcknowledgmentAppendixTemplate(input.acknowledgmentContent)),
     fonts,
+    { fontSizeOverride: 12 },
   );
   drawAcknowledgmentAppendixImages(pdf, fonts, {
     signatureImage: input.signatureImage,

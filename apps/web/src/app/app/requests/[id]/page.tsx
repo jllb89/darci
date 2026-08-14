@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAppToast } from "@/components/app/AppToastContext";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
+import { captureDomainException } from "@/lib/clientTelemetry";
+import { GeolocationCaptureError, getCurrentGeolocationSample } from "@/lib/geolocation";
 import {
   buildRealtimeEqualsFilter,
   requestRealtimeBroadcastEvent,
@@ -154,14 +156,6 @@ type RequestDetailPayload = {
   nextAction: string | null;
 };
 
-type BrowserGeolocationSample = {
-  latitude: number;
-  longitude: number;
-  accuracyMeters?: number;
-  altitudeMeters?: number;
-  sampleKind: "device_gps";
-};
-
 const fetchWithTokenRefresh = async (
   url: string,
   accessToken: string,
@@ -272,7 +266,8 @@ function SessionTimeline({ steps }: { steps: Array<{ description: string; done: 
   }
 
   return (
-    <div className="w-full rounded-2xl border border-white/10 bg-black py-3 text-xs text-white">
+    <div className="w-full overflow-x-auto">
+      <div className="min-w-[420px] rounded-2xl border border-white/10 bg-black py-3 text-xs text-white">
       <div className="space-y-2 px-4">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-white">
@@ -307,34 +302,10 @@ function SessionTimeline({ steps }: { steps: Array<{ description: string; done: 
           ) : null}
         </div>
       </div>
+      </div>
     </div>
   );
 }
-
-const getCurrentGeolocationSample = async (): Promise<BrowserGeolocationSample | null> => {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    return null;
-  }
-
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : undefined,
-          altitudeMeters:
-            typeof position.coords.altitude === "number" && Number.isFinite(position.coords.altitude)
-              ? position.coords.altitude
-              : undefined,
-          sampleKind: "device_gps",
-        });
-      },
-      () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
-    );
-  });
-};
 
 const readApiErrorMessage = async (response: Response, fallback: string) => {
   const payload = await response.json().catch(() => null) as { message?: unknown } | null;
@@ -420,9 +391,6 @@ export default function RequestWorkspacePage() {
 
     try {
       const geolocation = await getCurrentGeolocationSample();
-      if (!geolocation) {
-        throw new Error("Location permission is needed to check in for the in-person session.");
-      }
 
       const response = await fetchWithTokenRefresh(
         `${apiBaseUrl}/notary/requests/${encodeURIComponent(requestId)}/meeting/check-in`,
@@ -452,6 +420,18 @@ export default function RequestWorkspacePage() {
       });
       await loadRequest();
     } catch (error) {
+      captureDomainException(error, {
+        level: "warning",
+        operation: "member_request.location_checkin",
+        errorCode: error instanceof GeolocationCaptureError
+          ? `WEB_MEMBER_LOCATION_${error.code.toUpperCase()}`
+          : "WEB_MEMBER_LOCATION_CHECKIN_FAILED",
+        errorFamily: "notarization",
+        tags: {
+          feature: "member_request_workspace",
+          notary_request_id: requestId,
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Unable to record member check-in.");
     } finally {
       setIsCheckingIn(false);

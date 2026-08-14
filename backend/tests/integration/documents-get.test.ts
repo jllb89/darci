@@ -1673,6 +1673,144 @@ describe("GET documents endpoints", () => {
     expect(mocks.saveDocumentIntakeDraftMock).not.toHaveBeenCalled();
   });
 
+  it("allows a trustmaker phone when it belongs to that trustmaker's account", async () => {
+    const firstTrustmaker = JSON.stringify({
+      fullName: "Claire Eberts",
+      email: "claire.eberts@gmail.com",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "(614) 309-3410",
+      isSigningTrustee: false,
+    });
+    const secondTrustmaker = JSON.stringify({
+      fullName: "Kevin Eberts",
+      email: "kevin.eberts@example.com",
+      phoneCountryIso2: "US",
+      phoneCountryCode: "+1",
+      phone: "614-263-1983",
+      isSigningTrustee: false,
+    });
+
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "IDN-1234",
+      status: "draft",
+      document_type: "intake",
+      jurisdiction: "US-OH",
+      product_flow_mode: "trust_bundle",
+      output_bundle: [
+        {
+          outputKey: "trust_rrr",
+          outputLabel: "Trust Registration",
+          isRequired: true,
+          sortOrder: 0,
+          metadata: { documentKey: "trust_rrr" },
+        },
+        {
+          outputKey: "poa_document",
+          outputLabel: "POA Document",
+          isRequired: true,
+          sortOrder: 1,
+          metadata: { documentKey: "poa_general" },
+        },
+      ],
+      intake_status: "draft",
+      intake_submitted_at: null,
+      created_at: "2026-03-05T00:00:00.000Z",
+    });
+    mocks.deriveMemberFormRulesByJurisdictionMock.mockResolvedValue({
+      contract: {
+        aggregatedForm: {
+          sections: [
+            {
+              fields: [
+                { canonical_key: "trust_name" },
+                { canonical_key: "grantors" },
+              ],
+            },
+          ],
+        },
+      },
+      missing: [],
+    });
+    mocks.validateMemberFormSubmissionMock.mockReturnValue({
+      valid: true,
+      errors: [],
+    });
+    mocks.findUserByPhoneForInviteValidationMock
+      .mockResolvedValueOnce({
+        id: "claire-user-1",
+        email: "claire.eberts@gmail.com",
+        phone: "+16143093410",
+      })
+      .mockResolvedValueOnce(null);
+    mocks.saveDocumentIntakeDraftMock.mockResolvedValue({
+      conflict: false,
+      draft: {
+        document_id: "doc-1",
+        owner_id: "owner-1",
+        product_flow_mode: "trust_bundle",
+        jurisdiction: "US-OH",
+        current_step: "trust_requirements",
+        rules_snapshot_version: "member_form_rules_contract_v1",
+        answers_json: {
+          trust_name: "Family Trust",
+          grantors: [firstTrustmaker, secondTrustmaker],
+        },
+        canonical_answers_json: {
+          trust_name: "Family Trust",
+          grantors: [firstTrustmaker, secondTrustmaker],
+        },
+        revision: 7,
+        created_at: "2026-03-05T00:05:00.000Z",
+        updated_at: "2026-03-05T00:10:00.000Z",
+      },
+    });
+
+    const token = signToken({
+      sub: "admin-1",
+      email: "claire.eberts@gmail.com",
+      app_metadata: { role: "admin" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/intake-submit",
+      {
+        currentStep: "trust_requirements",
+        answers: {
+          trust_name: "Family Trust",
+          grantors: [firstTrustmaker, secondTrustmaker],
+        },
+      },
+      "allows a trustmaker phone when it belongs to that trustmaker's account",
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.saveDocumentIntakeDraftMock).toHaveBeenCalled();
+    expect(mocks.updateDocumentMock).toHaveBeenCalledWith("doc-1", {
+      output_bundle: expect.arrayContaining([
+        expect.objectContaining({
+          outputKey: "poa_document_tm1",
+          outputLabel: "POA Document - Claire Eberts",
+          metadata: expect.objectContaining({
+            grantorIndex: 0,
+            trustmakerEmail: "claire.eberts@gmail.com",
+          }),
+        }),
+        expect.objectContaining({
+          outputKey: "poa_document_tm2",
+          outputLabel: "POA Document - Kevin Eberts",
+          metadata: expect.objectContaining({
+            grantorIndex: 1,
+            trustmakerEmail: "kevin.eberts@example.com",
+          }),
+        }),
+      ]),
+    });
+  });
+
   it("resubmits submitted pending-review intake after blocker fixes", async () => {
     const trustmaker = JSON.stringify({
       fullName: "Jorge Lopez",

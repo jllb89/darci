@@ -224,6 +224,7 @@ describe("memberFormControls", () => {
         phoneCountryCode: "+1",
         phone: "555-222-3333",
         isSigningTrustee: true,
+        isCurrentTrustee: false,
       },
     ]);
 
@@ -237,9 +238,36 @@ describe("memberFormControls", () => {
         phoneCountryCode: "+1",
         phone: "555-222-3333",
         isSigningTrustee: true,
+        isCurrentTrustee: false,
       },
     ]);
     expect(hasSigningTrustee(parsed)).toBe(true);
+  });
+
+  it("serializes and parses trustmaker current trustee selection", () => {
+    const serialized = serializePersonListItems([
+      {
+        fullName: "Taylor Trustmaker",
+        email: "taylor@example.com",
+        phoneCountryIso2: "US",
+        phoneCountryCode: "+1",
+        phone: "555-303-4040",
+        isSigningTrustee: false,
+        isCurrentTrustee: true,
+      },
+    ]);
+
+    expect(parsePersonListItems(serialized)).toEqual([
+      {
+        fullName: "Taylor Trustmaker",
+        email: "taylor@example.com",
+        phoneCountryIso2: "US",
+        phoneCountryCode: "+1",
+        phone: "555-303-4040",
+        isSigningTrustee: false,
+        isCurrentTrustee: true,
+      },
+    ]);
   });
 
   it("preserves live spaces in trustee rows", () => {
@@ -251,6 +279,7 @@ describe("memberFormControls", () => {
         phoneCountryCode: "+1",
         phone: "555 222 ",
         isSigningTrustee: true,
+        isCurrentTrustee: false,
       },
     ]);
 
@@ -262,6 +291,7 @@ describe("memberFormControls", () => {
         phoneCountryCode: "+1",
         phone: "555 222 ",
         isSigningTrustee: true,
+        isCurrentTrustee: false,
       },
     ]);
   });
@@ -275,6 +305,7 @@ describe("memberFormControls", () => {
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "",
         isSigningTrustee: false,
+        isCurrentTrustee: false,
       },
     ]);
 
@@ -287,6 +318,7 @@ describe("memberFormControls", () => {
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "",
         isSigningTrustee: false,
+        isCurrentTrustee: false,
       },
     ]);
   });
@@ -309,6 +341,7 @@ describe("memberFormControls", () => {
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "555-101-2020",
         isSigningTrustee: false,
+        isCurrentTrustee: false,
       },
     ]);
   });

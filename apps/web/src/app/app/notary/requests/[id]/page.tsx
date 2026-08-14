@@ -11,6 +11,7 @@ import {
   captureDomainException,
   getResponseRequestId,
 } from "@/lib/clientTelemetry";
+import { GeolocationCaptureError, getCurrentGeolocationSample } from "@/lib/geolocation";
 import {
   buildRealtimeEqualsFilter,
   requestRealtimeBroadcastEvent,
@@ -39,14 +40,6 @@ type ContextResponse = {
 
 type ClaimByIdnResponse = {
   context?: NotaryRequestContext | null;
-};
-
-type BrowserGeolocationSample = {
-  latitude: number;
-  longitude: number;
-  accuracyMeters?: number;
-  altitudeMeters?: number;
-  sampleKind: "device_gps";
 };
 
 type NotaryProfileSummary = {
@@ -905,31 +898,6 @@ const isUnopenedReviewStatus = (status: string | null | undefined) => {
 
 const previewPanelHeightClass = "h-[72vh] min-h-[560px]";
 
-const getCurrentGeolocationSample = async (): Promise<BrowserGeolocationSample | null> => {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    return null;
-  }
-
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : undefined,
-          altitudeMeters:
-            typeof position.coords.altitude === "number" && Number.isFinite(position.coords.altitude)
-              ? position.coords.altitude
-              : undefined,
-          sampleKind: "device_gps",
-        });
-      },
-      () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
-    );
-  });
-};
-
 const formatProductLabel = (documentType: string | null | undefined) => {
   const label = formatStatusLabel(documentType);
   return label === "Not set" ? "Document" : label;
@@ -1224,7 +1192,8 @@ function SessionTimeline({ steps }: { steps: Array<{ description: string; done: 
   const isComplete = completedCount === steps.length;
 
   return (
-    <div className="w-full rounded-2xl border border-white/10 bg-black py-3 text-xs text-white">
+    <div className="w-full overflow-x-auto">
+      <div className="min-w-[420px] rounded-2xl border border-white/10 bg-black py-3 text-xs text-white">
       <div className="space-y-2 px-4">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-white">
@@ -1260,6 +1229,7 @@ function SessionTimeline({ steps }: { steps: Array<{ description: string; done: 
               </div>
             ) : null}
           </div>
+      </div>
       </div>
     </div>
   );
@@ -1926,9 +1896,6 @@ export default function NotaryRequestWorkspacePage() {
 
     try {
       const geolocation = await getCurrentGeolocationSample();
-      if (!geolocation) {
-        throw new Error("Location permission is needed to start the in-person session.");
-      }
 
       const response = await fetchWithTokenRefresh(
         `${notaryApiBaseUrl}/notary/requests/${encodeURIComponent(context.request.id)}/meeting/start`,
@@ -1965,7 +1932,9 @@ export default function NotaryRequestWorkspacePage() {
       captureDomainException(error, {
         level: "error",
         operation: "notary_workspace.start_meeting",
-        errorCode: "WEB_NOTARY_MEETING_START_FAILED",
+        errorCode: error instanceof GeolocationCaptureError
+          ? `WEB_NOTARY_LOCATION_${error.code.toUpperCase()}`
+          : "WEB_NOTARY_MEETING_START_FAILED",
         errorFamily: "notarization",
         requestId: requestIdHeader,
         tags: {
@@ -2087,9 +2056,26 @@ export default function NotaryRequestWorkspacePage() {
   }, [postRequestAction]);
 
   const refreshNotaryLocationSample = useCallback(async ({ automatic = false }: { automatic?: boolean } = {}) => {
-    const geolocation = await getCurrentGeolocationSample();
-    if (!geolocation) {
-      const message = "Location permission is needed so DARCi can confirm same-place evidence automatically.";
+    let geolocation;
+    try {
+      geolocation = await getCurrentGeolocationSample();
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "Location permission is needed so DARCi can confirm same-place evidence automatically.";
+      captureDomainException(error, {
+        level: automatic ? "info" : "warning",
+        operation: "notary_workspace.refresh_location",
+        errorCode: error instanceof GeolocationCaptureError
+          ? `WEB_NOTARY_LOCATION_${error.code.toUpperCase()}`
+          : "WEB_NOTARY_LOCATION_REFRESH_FAILED",
+        errorFamily: "notarization",
+        tags: {
+          automatic,
+          feature: "notary_workspace",
+          notary_request_id: context?.request.id,
+        },
+      });
       if (automatic) {
         setSamePlaceAutomationState("blocked");
         setSamePlaceAutomationMessage(message);

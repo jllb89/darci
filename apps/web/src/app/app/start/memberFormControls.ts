@@ -35,6 +35,7 @@ export type PersonListItem = {
   phoneCountryCode: string;
   phone: string;
   isSigningTrustee: boolean;
+  isCurrentTrustee: boolean;
 };
 
 export type PhoneCountryOption = {
@@ -429,6 +430,8 @@ const toPersonListItem = (value: unknown): PersonListItem | null => {
     phone: typeof value.phone === "string" ? value.phone : "",
     isSigningTrustee:
       typeof value.isSigningTrustee === "boolean" ? value.isSigningTrustee : false,
+    isCurrentTrustee:
+      typeof value.isCurrentTrustee === "boolean" ? value.isCurrentTrustee : false,
   };
 };
 
@@ -533,6 +536,7 @@ export const parsePersonListItems = (value: FormValue | undefined): PersonListIt
       phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
       phone: "",
       isSigningTrustee: false,
+      isCurrentTrustee: false,
     });
   }
 
@@ -554,6 +558,7 @@ export const serializePersonListItems = (items: PersonListItem[]): string[] => {
         phoneCountryCode: getPhoneCountryCodeByIso2(phoneCountryIso2),
         phone: item.phone,
         isSigningTrustee: Boolean(item.isSigningTrustee),
+        isCurrentTrustee: Boolean(item.isCurrentTrustee),
       };
     })
     .map((item) => JSON.stringify(item));

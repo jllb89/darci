@@ -171,6 +171,10 @@ struct TestAuthAPIClient: AuthAPIProviding {
     func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse {
         profileResponse
     }
+
+    func deleteAccount(accessToken: String) async throws -> AuthDeleteAccountResponse {
+        AuthDeleteAccountResponse(status: "deleted", message: nil)
+    }
 }
 
 extension NotaryProfileAPIProviding {
@@ -495,6 +499,16 @@ actor RecordingMemberSessionAPIClient: RequestsAPIProviding {
 @MainActor
 final class TestMemberSessionLocationProvider: NotarySessionLocationProviding {
     private(set) var captureStages: [String] = []
+    private(set) var prepareCallCount = 0
+    private(set) var stopPreparingCallCount = 0
+
+    func prepareForLocationCapture() {
+        prepareCallCount += 1
+    }
+
+    func stopPreparingLocationCapture() {
+        stopPreparingCallCount += 1
+    }
 
     func currentGeolocation(captureStage: String) async throws -> NotaryGeolocationPayload {
         captureStages.append(captureStage)
@@ -506,6 +520,34 @@ final class TestMemberSessionLocationProvider: NotarySessionLocationProviding {
             sampleKind: "device_gps",
             captureStage: captureStage
         )
+    }
+}
+
+actor FailingMemberSessionAPIClient: RequestsAPIProviding {
+    let checkInError: Error
+
+    init(checkInError: Error) {
+        self.checkInError = checkInError
+    }
+
+    func listSigningRequests(limit: Int, accessToken: String) async throws -> SigningRequestsResponse {
+        .empty
+    }
+
+    func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func getMemberInPersonSession(requestId: String, accessToken: String) async throws -> MemberInPersonSessionResponse {
+        .mock
+    }
+
+    func recordMemberCheckIn(requestId: String, request: MemberMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse {
+        throw checkInError
     }
 }
 
@@ -726,6 +768,9 @@ final class DARCiMobileTests: XCTestCase {
         )
 
         await viewModel.load(session: session)
+        XCTAssertEqual(locationProvider.prepareCallCount, 1)
+        XCTAssertEqual(viewModel.shareLocationButtonTitle, "Share location")
+
         await viewModel.shareLocation(session: session)
 
         let checkIns = await apiClient.recordedCheckIns()
@@ -735,6 +780,33 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(checkIns.first?.geolocation.captureStage, "member_check_in")
         XCTAssertEqual(locationProvider.captureStages, ["member_check_in"])
         XCTAssertEqual(viewModel.noticeMessage, "Location shared. Your Illuminotary can continue the session.")
+        XCTAssertEqual(viewModel.shareLocationButtonTitle, "Share location")
+        viewModel.stop()
+        XCTAssertEqual(locationProvider.stopPreparingCallCount, 1)
+    }
+
+    @MainActor
+    func testMemberSessionLocationActionShowsBackendErrorMessage() async {
+        let apiClient = FailingMemberSessionAPIClient(
+            checkInError: AuthAPIError.unexpectedStatus(
+                statusCode: 409,
+                message: "Meeting is not ready for member location check-in."
+            )
+        )
+        let locationProvider = TestMemberSessionLocationProvider()
+        let realtimeClient = TestNotarySessionRealtimeClient()
+        let session = makeAuthSession()
+        let viewModel = MemberInPersonSessionViewModel(
+            requestId: "request-1",
+            apiClient: apiClient,
+            locationProvider: locationProvider,
+            realtimeClient: realtimeClient
+        )
+
+        await viewModel.load(session: session)
+        await viewModel.shareLocation(session: session)
+
+        XCTAssertEqual(viewModel.errorMessage, "Meeting is not ready for member location check-in.")
         viewModel.stop()
     }
 
@@ -1495,6 +1567,35 @@ final class DARCiMobileTests: XCTestCase {
         let recordedCalls = await apiClient.recordedCalls()
         XCTAssertEqual(recordedCalls, ["20:0", "20:20", "20:40", "5:60"])
         XCTAssertEqual(viewModel.requests.count, 65)
+    }
+
+    @MainActor
+    func testDocumentIntakeTrustmakerCurrentTrusteeSyncsTrusteeRow() {
+        let viewModel = DocumentIntakeViewModel()
+        viewModel.grantors = [
+            IntakePersonListItem(
+                fullName: "Taylor Trustmaker",
+                email: "taylor@example.com",
+                phone: "555-303-4040"
+            )
+        ]
+
+        viewModel.setTrustmakerCurrentTrustee(at: 0, isSelected: true)
+
+        XCTAssertEqual(viewModel.trustees.count, 1)
+        XCTAssertEqual(viewModel.trustees.first?.fullName, "Taylor Trustmaker")
+        XCTAssertEqual(viewModel.trustees.first?.email, "taylor@example.com")
+        XCTAssertEqual(viewModel.trustees.first?.phone, "555-303-4040")
+        XCTAssertEqual(viewModel.trustees.first?.isCurrentTrustee, true)
+
+        viewModel.grantors[0].email = "updated@example.com"
+
+        XCTAssertEqual(viewModel.trustees.count, 1)
+        XCTAssertEqual(viewModel.trustees.first?.email, "updated@example.com")
+
+        viewModel.setTrustmakerCurrentTrustee(at: 0, isSelected: false)
+
+        XCTAssertEqual(viewModel.trustees, [IntakePersonListItem()])
     }
 
     func testDocumentIntakeAPIClientLoadsJurisdictionsWithModeQuery() async throws {

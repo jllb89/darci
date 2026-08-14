@@ -133,6 +133,7 @@ const getMockPersonListValue = (canonicalKey: string) => {
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "4155550103",
         isSigningTrustee: false,
+        isCurrentTrustee: false,
       },
     ]);
   }
@@ -146,6 +147,7 @@ const getMockPersonListValue = (canonicalKey: string) => {
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "4155550111",
         isSigningTrustee: false,
+        isCurrentTrustee: false,
       },
     ]);
   }
@@ -159,6 +161,7 @@ const getMockPersonListValue = (canonicalKey: string) => {
         phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
         phone: "4155550112",
         isSigningTrustee: false,
+        isCurrentTrustee: false,
       },
     ]);
   }
@@ -171,6 +174,7 @@ const getMockPersonListValue = (canonicalKey: string) => {
       phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
       phone: "4155550110",
       isSigningTrustee: false,
+      isCurrentTrustee: false,
     },
   ]);
 };

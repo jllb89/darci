@@ -3748,6 +3748,11 @@ const buildTrustmakerKnownPhoneValidationError = async (input: {
       excludeUserId: input.ownerId,
     });
     if (matchedUser) {
+      const matchedEmail = normalizeEmailAddress(matchedUser.email);
+      if (trustmaker.email && matchedEmail === trustmaker.email) {
+        continue;
+      }
+
       return {
         code: "trustmakers_phone_existing_user",
         field: "grantors",

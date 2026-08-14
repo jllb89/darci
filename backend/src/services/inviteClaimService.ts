@@ -323,7 +323,7 @@ const partyRoleLabels: Record<string, string> = {
   principal: "Principal",
   agent: "Agent",
   successor_agent: "Successor agent",
-  grantor: "Grantor",
+  grantor: "Trustmaker",
   trustee: "Trustee",
   successor_trustee: "Successor trustee",
 };
@@ -378,7 +378,7 @@ const getDocumentTypeLabel = (document: DocumentRow | null) => {
   return getDocumentLabel(document);
 };
 
-const getRoleLabel = (input: {
+export const resolveInviteClaimRoleLabel = (input: {
   partyRole?: string | null | undefined;
   obligationType?: string | null | undefined;
 }) => {
@@ -642,7 +642,7 @@ const mapInvitePublicView = (input: {
     claimedUserId: input.invite.claimed_user_id,
     documentLabel: getDocumentLabel(input.document),
     documentType: getDocumentTypeLabel(input.document),
-    roleLabel: getRoleLabel({
+    roleLabel: resolveInviteClaimRoleLabel({
       partyRole: input.invite.party_role_snapshot,
       obligationType: input.invite.obligation_type_snapshot,
     }),

@@ -744,6 +744,7 @@ struct IntakePersonListItem: Codable, Equatable, Sendable {
     var phoneCountryCode: String
     var phone: String
     var isSigningTrustee: Bool
+    var isCurrentTrustee: Bool
 
     init(
         fullName: String = "",
@@ -752,7 +753,8 @@ struct IntakePersonListItem: Codable, Equatable, Sendable {
         phoneCountryIso2: String = "US",
         phoneCountryCode: String = "+1",
         phone: String = "",
-        isSigningTrustee: Bool = false
+        isSigningTrustee: Bool = false,
+        isCurrentTrustee: Bool = false
     ) {
         self.fullName = fullName
         self.email = email
@@ -761,6 +763,7 @@ struct IntakePersonListItem: Codable, Equatable, Sendable {
         self.phoneCountryCode = phoneCountryCode
         self.phone = phone
         self.isSigningTrustee = isSigningTrustee
+        self.isCurrentTrustee = isCurrentTrustee
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -771,6 +774,7 @@ struct IntakePersonListItem: Codable, Equatable, Sendable {
         case phoneCountryCode
         case phone
         case isSigningTrustee
+        case isCurrentTrustee
     }
 
     init(from decoder: Decoder) throws {
@@ -782,6 +786,7 @@ struct IntakePersonListItem: Codable, Equatable, Sendable {
         phoneCountryCode = try container.decodeIfPresent(String.self, forKey: .phoneCountryCode) ?? "+1"
         phone = try container.decodeIfPresent(String.self, forKey: .phone) ?? ""
         isSigningTrustee = try container.decodeIfPresent(Bool.self, forKey: .isSigningTrustee) ?? false
+        isCurrentTrustee = try container.decodeIfPresent(Bool.self, forKey: .isCurrentTrustee) ?? false
     }
 }
 

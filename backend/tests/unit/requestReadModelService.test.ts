@@ -717,6 +717,64 @@ describe("requestReadModelService", () => {
     ]);
   });
 
+  it("includes uploaded notarization source PDFs in shared request review documents", async () => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({
+      id: "req-1",
+      document_id: "doc-1",
+      workflow_id: null,
+      assigned_notary_id: "notary-db-1",
+      status: "in_review",
+      submitted_at: "2026-04-22T10:00:00.000Z",
+      created_at: "2026-04-22T10:00:00.000Z",
+    });
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "member-db-1",
+      idn: "IDN-123",
+      status: "pending_notary",
+      document_type: "notarize_document",
+      jurisdiction: "US-OH",
+      product_flow_mode: "notarize_document",
+      selected_families: [],
+      output_bundle: [],
+      intake_status: "submitted",
+      intake_schema_version: "v1",
+      intake_last_saved_at: null,
+      intake_submitted_at: "2026-04-22T09:30:00.000Z",
+      created_at: "2026-04-22T09:00:00.000Z",
+      updated_at: "2026-04-22T09:30:00.000Z",
+    });
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "version-source",
+        document_id: "doc-1",
+        version: 1,
+        storage_path: "documents/doc-1/source.pdf",
+        file_name: "commission.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 12345,
+        is_final: false,
+        generation_run_id: null,
+        created_by: "member-db-1",
+        created_at: "2026-04-22T09:35:00.000Z",
+      },
+    ]);
+
+    const detail = await getSharedRequestDetail({
+      requestId: "req-1",
+      role: "member",
+      viewerUserId: "member-db-1",
+    });
+
+    expect(detail?.document.reviewDocuments).toMatchObject([
+      {
+        id: "version-source",
+        label: "commission.pdf",
+        downloadUrl: "https://signed.example/document.pdf",
+      },
+    ]);
+  });
+
   it("builds a shared request timeline for an authorized member", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",

@@ -936,6 +936,59 @@ const applyTrustmakerPrincipalSeed = (input: {
   };
 };
 
+const normalizePersonToken = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+const personHasAnyContactValue = (person: PersonListItem) => {
+  return [person.fullName, person.email, person.phone].some((value) => value.trim().length > 0);
+};
+
+const personMatches = (left: PersonListItem, right: PersonListItem) => {
+  const leftEmail = left.email.trim().toLowerCase();
+  const rightEmail = right.email.trim().toLowerCase();
+  if (leftEmail && rightEmail && leftEmail === rightEmail) {
+    return true;
+  }
+
+  const leftPhone = left.phone.replace(/\D/g, "");
+  const rightPhone = right.phone.replace(/\D/g, "");
+  if (leftPhone && rightPhone && leftPhone === rightPhone) {
+    return true;
+  }
+
+  const leftName = normalizePersonToken(left.fullName);
+  const rightName = normalizePersonToken(right.fullName);
+  return Boolean(leftName && rightName && leftName === rightName);
+};
+
+const trusteeFromTrustmaker = (trustmaker: PersonListItem): PersonListItem => ({
+  fullName: trustmaker.fullName,
+  email: trustmaker.email,
+  phoneCountryIso2: trustmaker.phoneCountryIso2,
+  phoneCountryCode: trustmaker.phoneCountryCode,
+  phone: trustmaker.phone,
+  isSigningTrustee: false,
+  isCurrentTrustee: true,
+});
+
+const syncTrusteesFromCurrentTrustmakers = (
+  trustmakers: PersonListItem[],
+  trustees: PersonListItem[],
+) => {
+  const currentTrustmakers = trustmakers.filter((trustmaker) => {
+    return trustmaker.isCurrentTrustee && personHasAnyContactValue(trustmaker);
+  });
+  const retainedTrustees = trustees.filter((trustee) => !trustee.isCurrentTrustee);
+  const nextTrustees = [...retainedTrustees];
+
+  for (const trustmaker of currentTrustmakers) {
+    if (!nextTrustees.some((trustee) => personMatches(trustee, trustmaker))) {
+      nextTrustees.push(trusteeFromTrustmaker(trustmaker));
+    }
+  }
+
+  return nextTrustees;
+};
+
 type DocumentResponsePayload = {
   document?: DocumentSummary;
   message?: string;
@@ -4417,6 +4470,22 @@ export default function StartDocumentPage() {
         isTrusteeField && requiresNamedSigningTrusteeSelection;
 
       const updateItems = (nextItems: PersonListItem[]) => {
+        if (isGrantorField) {
+          setSubmissionErrorMessage(null);
+          setShowContinueValidationDetails(false);
+          setFormValues((current) => {
+            const currentTrustees = parsePersonListItems(current.trustees);
+            const nextTrustees = syncTrusteesFromCurrentTrustmakers(nextItems, currentTrustees);
+
+            return {
+              ...current,
+              [field.canonical_key]: serializePersonListItems(nextItems),
+              trustees: serializePersonListItems(nextTrustees),
+            };
+          });
+          return;
+        }
+
         handleFieldChange(field.canonical_key, serializePersonListItems(nextItems));
       };
 
@@ -4522,7 +4591,24 @@ export default function StartDocumentPage() {
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
-                  {showNamedSignerCheckbox ? (
+                  {isGrantorField ? (
+                    <label className="flex items-center gap-2 text-xs text-Color-Scheme-1-Text">
+                      <input
+                        checked={Boolean(item.isCurrentTrustee)}
+                        className="h-4 w-4 accent-Color-Scheme-1-Text"
+                        onChange={(event) => {
+                          const nextItems = [...items];
+                          nextItems[index] = {
+                            ...item,
+                            isCurrentTrustee: event.target.checked,
+                          };
+                          updateItems(nextItems);
+                        }}
+                        type="checkbox"
+                      />
+                      This trustmaker is also a current trustee
+                    </label>
+                  ) : showNamedSignerCheckbox ? (
                     <label className="flex items-center gap-2 text-xs text-Color-Scheme-1-Text">
                       <input
                         checked={Boolean(item.isSigningTrustee)}
@@ -4618,6 +4704,7 @@ export default function StartDocumentPage() {
                     phoneCountryCode: DEFAULT_PHONE_COUNTRY_CODE,
                     phone: "",
                     isSigningTrustee: false,
+                    isCurrentTrustee: false,
                   },
                 ]);
               }}

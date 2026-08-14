@@ -17,6 +17,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     @Published private(set) var isSharingLocation = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var noticeMessage: String?
+    @Published private(set) var shouldShowLocationSettingsAction = false
     @Published private(set) var realtimeState: NotarySessionRealtimeState = .idle
 
     let requestId: String
@@ -89,6 +90,14 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         context?.meeting?.status == "in_progress" && isSharingLocation == false
     }
 
+    var shareLocationButtonTitle: String {
+        if isSharingLocation {
+            return hasMemberCheckIn ? "Refreshing location..." : "Sharing location..."
+        }
+
+        return hasMemberCheckIn ? "Re-share location" : "Share location"
+    }
+
     var hasMemberCheckIn: Bool {
         hasParticipantCheckedIn(role: "member")
     }
@@ -126,11 +135,13 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     func load(session: AuthSession?) async {
         await refresh(session: session, silent: false)
         startRealtimeIfNeeded(session: session)
+        prepareLocationIfHelpful()
     }
 
     func refreshFromForeground(session: AuthSession?) async {
         guard context != nil else { return }
         await refresh(session: session, silent: true)
+        prepareLocationIfHelpful()
     }
 
     func stop() {
@@ -140,6 +151,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         pollTask = nil
         previewTask?.cancel()
         previewTask = nil
+        locationProvider.stopPreparingLocationCapture()
     }
 
     func selectDocument(_ document: NotaryReviewDocumentFile) {
@@ -157,6 +169,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         isSharingLocation = true
         errorMessage = nil
         noticeMessage = nil
+        shouldShowLocationSettingsAction = false
         defer { isSharingLocation = false }
 
         do {
@@ -171,10 +184,22 @@ final class MemberInPersonSessionViewModel: ObservableObject {
                 accessToken: accessToken
             )
             noticeMessage = "Location shared. Your Illuminotary can continue the session."
+            shouldShowLocationSettingsAction = false
             await refresh(session: session, silent: true)
+            prepareLocationIfHelpful()
         } catch {
             errorMessage = Self.displayMessage(for: error, fallback: "Unable to share your location.")
+            shouldShowLocationSettingsAction = (error as? NotarySessionLocationError) == .permissionDenied
         }
+    }
+
+    private func prepareLocationIfHelpful() {
+        guard context?.meeting?.status == "in_progress" else {
+            locationProvider.stopPreparingLocationCapture()
+            return
+        }
+
+        locationProvider.prepareForLocationCapture()
     }
 
     private func hasParticipantCheckedIn(role: String) -> Bool {
@@ -295,6 +320,21 @@ final class MemberInPersonSessionViewModel: ObservableObject {
            let description = localizedError.errorDescription?.nilIfEmpty {
             return description
         }
+
+        if let apiError = error as? AuthAPIError {
+            switch apiError {
+            case .wrongCode(let message),
+                .unauthorized(let message),
+                .validation(let message),
+                .rateLimited(let message),
+                .server(_, let message),
+                .unexpectedStatus(_, let message):
+                return message?.nilIfEmpty ?? fallback
+            case .emptyResponse, .invalidResponse, .invalidURL:
+                return fallback
+            }
+        }
+
         return fallback
     }
 }

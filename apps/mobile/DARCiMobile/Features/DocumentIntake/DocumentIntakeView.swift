@@ -424,6 +424,7 @@ struct ProductIntakeFlowView: View {
                 canAdd: viewModel.canAddTrustmaker,
                 limitMessage: "A trust package supports up to two Trustmakers.",
                 accessibilityPrefix: "trust-grantor",
+                showsCurrentTrusteeSelection: true,
                 in: proxy
             ) {
                 viewModel.addTrustmaker()
@@ -482,6 +483,7 @@ struct ProductIntakeFlowView: View {
         limitMessage: String?,
         accessibilityPrefix: String,
         showsNamedSignerSelection: Bool = false,
+        showsCurrentTrusteeSelection: Bool = false,
         in proxy: GeometryProxy,
         addAction: @escaping () -> Void,
         removeAction: @escaping (Int) -> Void
@@ -505,6 +507,7 @@ struct ProductIntakeFlowView: View {
                     roleLabel: roleLabel,
                     accessibilityPrefix: accessibilityPrefix,
                     showsNamedSignerSelection: showsNamedSignerSelection,
+                    showsCurrentTrusteeSelection: showsCurrentTrusteeSelection,
                     in: proxy
                 ) {
                     removeAction(index)
@@ -540,6 +543,7 @@ struct ProductIntakeFlowView: View {
         roleLabel: String,
         accessibilityPrefix: String,
         showsNamedSignerSelection: Bool,
+        showsCurrentTrusteeSelection: Bool,
         in proxy: GeometryProxy,
         removeAction: @escaping () -> Void
     ) -> some View {
@@ -594,7 +598,23 @@ struct ProductIntakeFlowView: View {
             }
 
             HStack(alignment: .center, spacing: 14) {
-                if showsNamedSignerSelection {
+                if showsCurrentTrusteeSelection {
+                    Button {
+                        viewModel.setTrustmakerCurrentTrustee(at: index, isSelected: item.wrappedValue.isCurrentTrustee == false)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: item.wrappedValue.isCurrentTrustee ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 15, weight: .semibold))
+
+                            Text("Current trustee")
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                        }
+                        .font(DARCiFont.maisonNeue(.book, size: 11))
+                        .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                } else if showsNamedSignerSelection {
                     Button {
                         viewModel.setSigningTrustee(at: index, isSelected: item.wrappedValue.isSigningTrustee == false)
                     } label: {

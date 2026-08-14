@@ -15,6 +15,7 @@ import {
   canClaimInviteToken,
   createInviteAccessToken,
   hashInviteToken,
+  resolveInviteClaimRoleLabel,
 } from "../../src/services/inviteClaimService";
 
 const providerEnvKeys = [
@@ -105,6 +106,7 @@ describe("invite runtime helpers", () => {
 
   it("uses client-facing trust labels for signer invitation payloads", () => {
     expect(resolveDocumentInviteRoleLabel({ partyRole: "grantor" })).toBe("Trustmaker");
+    expect(resolveInviteClaimRoleLabel({ partyRole: "grantor" })).toBe("Trustmaker");
     expect(
       resolveDocumentInviteDocumentTypeLabel({
         document_type: "intake",
