@@ -190,6 +190,13 @@ struct AuthenticationSignInView: View {
                         .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(continueButtonY, in: proxy))
                         .revealOrder(4, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
 
+                    if shouldShowSmsDisclosure {
+                        smsConsentDisclosure(in: proxy)
+                            .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(smsDisclosureY, in: proxy))
+                            .revealOrder(5, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
+                            .transition(.opacity)
+                    }
+
                     if let feedbackMessage = viewModel.feedbackMessage {
                         Text(feedbackMessage)
                             .font(DARCiFont.maisonNeue(.book, size: scaled(13, in: proxy)))
@@ -211,7 +218,7 @@ struct AuthenticationSignInView: View {
                     .buttonStyle(.plain)
                     .frame(width: scaled(395, in: proxy), alignment: .leading)
                     .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(emailLinkY, in: proxy))
-                    .revealOrder(5, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
+                    .revealOrder(6, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
 
                     if !isCompactInputActive {
                         Button(action: onBrowse) {
@@ -221,8 +228,8 @@ struct AuthenticationSignInView: View {
                                 .foregroundStyle(.black)
                         }
                         .buttonStyle(.plain)
-                        .position(x: proxy.size.width / 2 + scaled(-101.5, in: proxy), y: proxy.size.height / 2 + scaled(432.5 - bottomGroupLift, in: proxy))
-                        .revealOrder(6, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
+                        .position(x: proxy.size.width / 2 + scaled(-101.5, in: proxy), y: proxy.size.height / 2 + scaled(browseButtonY, in: proxy))
+                        .revealOrder(7, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
                         .transition(.opacity)
                     }
                 }
@@ -271,8 +278,24 @@ struct AuthenticationSignInView: View {
         isCompactInputActive ? -155 : 335 - bottomGroupLift
     }
 
+    private var shouldShowSmsDisclosure: Bool {
+        activeInputMode != .email
+    }
+
+    private var smsDisclosureY: CGFloat {
+        isCompactInputActive ? -72 : 382 - bottomGroupLift
+    }
+
     private var emailLinkY: CGFloat {
-        isCompactInputActive ? -102.5 : 387.5 - bottomGroupLift
+        if shouldShowSmsDisclosure {
+            return isCompactInputActive ? -7.5 : 432.5 - bottomGroupLift
+        }
+
+        return isCompactInputActive ? -102.5 : 387.5 - bottomGroupLift
+    }
+
+    private var browseButtonY: CGFloat {
+        shouldShowSmsDisclosure ? 455 - bottomGroupLift : 432.5 - bottomGroupLift
     }
 
     private var entryFeedbackY: CGFloat {
@@ -440,6 +463,16 @@ struct AuthenticationSignInView: View {
         .buttonStyle(.plain)
         .disabled(viewModel.isBusy)
         .accessibilityIdentifier("auth-continue-button")
+    }
+
+    private func smsConsentDisclosure(in proxy: GeometryProxy) -> some View {
+        Text("By requesting a code, you agree to DARCi Terms: https://darciregistry.com/terms and Privacy: https://app.staging.darciregistry.dev/privacy. DARCi sends SMS verification codes only. Message/data rates may apply; frequency varies. Reply STOP to opt out or HELP for help.")
+            .font(DARCiFont.maisonNeue(.book, size: scaled(10, in: proxy)))
+            .lineSpacing(scaled(1.6, in: proxy))
+            .foregroundStyle(Color.black.opacity(0.68))
+            .frame(width: scaled(395, in: proxy), alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("auth-sms-consent-disclosure")
     }
 
     private func otpView(in proxy: GeometryProxy) -> some View {

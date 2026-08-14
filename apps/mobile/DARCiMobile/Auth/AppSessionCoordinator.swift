@@ -117,6 +117,16 @@ final class AppSessionCoordinator: ObservableObject {
         }
     }
 
+    func deleteAccount() async throws {
+        guard let currentSession else {
+            throw AuthAPIError.unauthorized(message: "Your session has expired. Sign in again.")
+        }
+
+        _ = try await apiClient.deleteAccount(accessToken: currentSession.accessToken)
+        self.currentSession = nil
+        try sessionStore.clear()
+    }
+
     @discardableResult
     func signOut() async -> Bool {
         let session = currentSession

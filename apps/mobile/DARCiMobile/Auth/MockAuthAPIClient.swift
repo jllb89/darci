@@ -92,6 +92,10 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
         AuthUserResponse(user: Self.mockUser(email: "member@example.com", phone: "+12025550147").withMockRole(role))
     }
 
+    func deleteAccount(accessToken: String) async throws -> AuthDeleteAccountResponse {
+        AuthDeleteAccountResponse(status: "deleted", message: "Account deletion completed.")
+    }
+
     static func mockSession() -> AuthSession {
         AuthSession(
             accessToken: "mock-stored-access-token",

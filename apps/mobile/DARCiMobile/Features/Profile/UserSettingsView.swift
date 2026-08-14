@@ -5,11 +5,17 @@ struct UserSettingsView: View {
     let session: AuthSession?
     let onBack: () -> Void
     let onSignOut: () -> Void
+    let onDeleteAccount: () async throws -> Void
     let onSavePersonalInfo: (PersonalInfoSaveInput) async throws -> Void
     let notaryProfileAPIClient: NotaryProfileAPIProviding
 
+    @Environment(\.openURL) private var openURL
     @State private var isPersonalInfoPresented = false
     @State private var isNotaryInformationPresented = false
+    @State private var presentedContent: UserSettingsContentScreen?
+    @State private var isDeleteAccountConfirmationPresented = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountErrorMessage: String?
 
     private var displayName: String {
         HomeProfileContent(user: session?.user).displayName
@@ -44,6 +50,13 @@ struct UserSettingsView: View {
                     onBack: { isNotaryInformationPresented = false }
                 )
                 .transition(.opacity)
+            } else if let presentedContent {
+                UserSettingsLegalContentView(
+                    screen: presentedContent,
+                    onBack: { self.presentedContent = nil },
+                    onContactSupport: openSupportEmail
+                )
+                .transition(.opacity)
             } else {
                 settingsMenu
                     .transition(.opacity)
@@ -52,6 +65,22 @@ struct UserSettingsView: View {
         .background(Color.black.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.24), value: isPersonalInfoPresented)
         .animation(.easeInOut(duration: 0.24), value: isNotaryInformationPresented)
+        .animation(.easeInOut(duration: 0.24), value: presentedContent)
+        .alert("Delete account?", isPresented: $isDeleteAccountConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete account", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+        } message: {
+            Text("This will close your DARCi account, sign you out, and remove access from this device. Some records may be retained where required for security, legal, or transaction history.")
+        }
+        .alert("Account deletion failed", isPresented: deleteAccountFailureBinding) {
+            Button("OK", role: .cancel) {
+                deleteAccountErrorMessage = nil
+            }
+        } message: {
+            Text(deleteAccountErrorMessage ?? "Please try again or contact support.")
+        }
         .toolbarBackground(.black, for: .navigationBar)
     }
 
@@ -84,7 +113,7 @@ struct UserSettingsView: View {
 
                 settingsSection(
                     title: "Help & Support",
-                    rows: ["Contact", "FAQs"],
+                    rows: ["Contact Support", "FAQs"],
                     proxy: proxy
                 )
                 .padding(.top, scaled(28, in: proxy))
@@ -190,6 +219,62 @@ struct UserSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-notary-information-button")
+                } else if title == "Delete my account" {
+                    Button {
+                        isDeleteAccountConfirmationPresented = true
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDeletingAccount)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-delete-account-button")
+                } else if title == "Contact Support" {
+                    Button {
+                        openSupportEmail()
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-contact-support-button")
+                } else if title == "FAQs" {
+                    Button {
+                        presentedContent = .faqs
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-faqs-button")
+                } else if title == "Privacy Policy" {
+                    Button {
+                        presentedContent = .privacy
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-privacy-policy-button")
+                } else if title == "Terms & Conditions" {
+                    Button {
+                        presentedContent = .terms
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-terms-button")
                 } else {
                     row
                 }
@@ -199,6 +284,52 @@ struct UserSettingsView: View {
 
     private func scaled(_ value: CGFloat, in proxy: GeometryProxy) -> CGFloat {
         value * min(proxy.size.width / designSize.width, proxy.size.height / designSize.height, 1.08)
+    }
+
+    private func openSupportEmail() {
+        guard let url = URL(string: "mailto:support@illuminote.io") else { return }
+        openURL(url)
+    }
+
+    private var deleteAccountFailureBinding: Binding<Bool> {
+        Binding(
+            get: { deleteAccountErrorMessage != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    deleteAccountErrorMessage = nil
+                }
+            }
+        )
+    }
+
+    @MainActor
+    private func deleteAccount() async {
+        guard isDeletingAccount == false else { return }
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
+
+        do {
+            try await onDeleteAccount()
+        } catch {
+            deleteAccountErrorMessage = userFacingErrorMessage(for: error)
+        }
+    }
+
+    private func userFacingErrorMessage(for error: Error) -> String {
+        if case let AuthAPIError.validation(message) = error, let message, message.isEmpty == false {
+            return message
+        }
+        if case let AuthAPIError.server(_, message) = error, let message, message.isEmpty == false {
+            return message
+        }
+        if case let AuthAPIError.unexpectedStatus(_, message) = error, let message, message.isEmpty == false {
+            return message
+        }
+        if case let AuthAPIError.unauthorized(message) = error, let message, message.isEmpty == false {
+            return message
+        }
+
+        return "Please try again or contact support."
     }
 }
 

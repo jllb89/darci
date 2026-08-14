@@ -61,6 +61,11 @@ export type UserRoleAssignment = {
   updatedAt: string;
 };
 
+export type CloseUserAccountResult = {
+  userId: string;
+  supabaseUserDeleted: boolean;
+};
+
 export type UserIdentityContext = {
   id: string;
   supabaseUserId: string;
@@ -87,6 +92,8 @@ export class UserRoleServiceError extends Error {
     this.statusCode = statusCode;
   }
 }
+
+const closedAccountStatus = "closed";
 
 const rolePreferenceOrder: RuntimeRole[] = ["member", "pro", "notary", "admin"];
 
@@ -575,6 +582,68 @@ export const ensureUserIdentityFromAuth = async (input: {
   }
 
   return refreshedContext;
+};
+
+export const closeUserAccountBySupabaseUserId = async (input: {
+  supabaseUserId: string;
+}) => {
+  const existingUser = await getUserIdentityContextBySupabaseId(input.supabaseUserId);
+  if (!existingUser) {
+    throw new UserRoleServiceError(404, "User account was not found");
+  }
+
+  const now = new Date().toISOString();
+  const { error: userError } = await supabaseAdmin
+    .from("users")
+    .update({
+      status: closedAccountStatus,
+      last_auth_synced_at: now,
+    })
+    .eq("id", existingUser.id);
+
+  if (userError) {
+    throw new Error(userError.message);
+  }
+
+  const { error: roleError } = await supabaseAdmin
+    .from("user_roles")
+    .update({
+      status: "revoked",
+      is_active_profile: false,
+      deactivated_at: now,
+      updated_at: now,
+    })
+    .eq("user_id", existingUser.id);
+
+  if (roleError) {
+    throw new Error(roleError.message);
+  }
+
+  const { error: deviceError } = await supabaseAdmin
+    .from("device_push_tokens")
+    .update({
+      is_active: false,
+      invalidated_at: now,
+      updated_at: now,
+    })
+    .eq("user_id", existingUser.id);
+
+  if (deviceError && deviceError.code !== "42P01") {
+    throw new Error(deviceError.message);
+  }
+
+  const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(input.supabaseUserId);
+  if (authDeleteError) {
+    console.warn("Supabase auth user deletion failed during account closure", {
+      supabaseUserId: input.supabaseUserId,
+      error: authDeleteError.message,
+    });
+  }
+
+  return {
+    userId: existingUser.id,
+    supabaseUserDeleted: !authDeleteError,
+  } satisfies CloseUserAccountResult;
 };
 
 const updateAuthUserRoleClaim = async (supabaseUserId: string, role: RuntimeRole) => {

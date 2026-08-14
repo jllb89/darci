@@ -1,11 +1,13 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import {
+  closeUserAccountBySupabaseUserId,
   ensureUserIdentityFromAuth,
   switchActiveRoleBySupabaseUserId,
   toUserResponse,
   UserRoleServiceError,
 } from "../services/userRoleService";
+import { recordAuditEvent } from "../services/auditService";
 import { sendValidationError } from "../utils/validation";
 import {
   duplicatePhoneMessage,
@@ -142,6 +144,43 @@ export const switchMyActiveRole = async (req: Request, res: Response) => {
     return res.status(statusCode).json({
       error: statusCode >= 500 ? "internal_error" : "validation_error",
       message: error instanceof Error ? error.message : "Failed to switch role",
+    });
+  }
+};
+
+export const deleteMe = async (req: Request, res: Response) => {
+  if (!req.user?.id) {
+    return res.status(401).json({
+      error: "unauthorized",
+      message: "Missing user context",
+    });
+  }
+
+  try {
+    const result = await closeUserAccountBySupabaseUserId({
+      supabaseUserId: req.user.id,
+    });
+
+    await recordAuditEvent({
+      actorSupabaseId: req.user.id,
+      entityType: "user",
+      entityId: result.userId,
+      action: "user.account_deleted",
+      ...(req.user.role ? { actorRole: req.user.role } : {}),
+      metadata: {
+        supabase_user_deleted: result.supabaseUserDeleted,
+      },
+    });
+
+    return res.status(200).json({
+      status: "deleted",
+      message: "Account deletion completed.",
+    });
+  } catch (error) {
+    const statusCode = error instanceof UserRoleServiceError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      error: statusCode >= 500 ? "internal_error" : "validation_error",
+      message: error instanceof Error ? error.message : "Failed to delete user account",
     });
   }
 };

@@ -143,6 +143,11 @@ struct AuthUserResponse: Decodable, Equatable, Sendable {
     let user: AuthenticatedUser
 }
 
+struct AuthDeleteAccountResponse: Decodable, Equatable, Sendable {
+    let status: String
+    let message: String?
+}
+
 struct AuthValidationErrorResponse: Decodable, Equatable, Sendable {
     let code: String?
     let field: String?

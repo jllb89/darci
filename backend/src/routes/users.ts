@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getMe, switchMyActiveRole, updateMe } from "../controllers/usersController";
+import { deleteMe, getMe, switchMyActiveRole, updateMe } from "../controllers/usersController";
 import {
 	getMyNotaryApplication,
 	getMyNotaryProfileHandler,
@@ -11,6 +11,7 @@ const router = Router();
 
 router.get("/me", getMe);
 router.patch("/me", updateMe);
+router.delete("/me", deleteMe);
 router.patch("/me/active-role", switchMyActiveRole);
 router.get("/me/notary-application", getMyNotaryApplication);
 router.post("/me/notary-application", submitMyNotaryApplication);

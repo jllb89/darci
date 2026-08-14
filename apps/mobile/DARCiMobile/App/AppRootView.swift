@@ -183,6 +183,7 @@ struct AppRootView: View {
                         session: sessionCoordinator.currentSession,
                         onBack: hideUserSettings,
                         onSignOut: signOut,
+                        onDeleteAccount: deleteAccount,
                         onSavePersonalInfo: savePersonalInfo,
                         notaryProfileAPIClient: notaryProfileAPIClient
                     )
@@ -410,6 +411,28 @@ struct AppRootView: View {
             withAnimation(.easeInOut(duration: 0.25)) {
                 launchPhase = .authentication
             }
+        }
+    }
+
+    private func deleteAccount() async throws {
+        await pushCoordinator.deactivateForSignOut()
+        try await sessionCoordinator.deleteAccount()
+        authenticationViewModel.clearChallenge()
+        selectedTab = .home
+        selectedProductModeKey = nil
+        intakeRoute = nil
+        reviewRoute = nil
+        signingRoute = nil
+        notaryReviewRoute = nil
+        notarySessionRoute = nil
+        memberSessionRoute = nil
+        pendingMemberSessionRoute = nil
+        pendingPushRoute = nil
+        isProfileSelectionPresented = false
+        isUserSettingsPresented = false
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            launchPhase = .authentication
         }
     }
 

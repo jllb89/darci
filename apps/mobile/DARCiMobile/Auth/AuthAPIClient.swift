@@ -23,6 +23,7 @@ protocol AuthAPIProviding: Sendable {
     func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, accessToken: String) async throws -> AuthUserResponse
     func resetPassword(_ password: String, refreshToken: String, accessToken: String) async throws -> AuthRefreshResponse
     func switchActiveRole(_ role: String, accessToken: String) async throws -> AuthUserResponse
+    func deleteAccount(accessToken: String) async throws -> AuthDeleteAccountResponse
 }
 
 struct AuthAPIClient: Sendable {
@@ -131,6 +132,10 @@ struct AuthAPIClient: Sendable {
             body: AuthActiveRoleRequest(role: role),
             accessToken: accessToken
         )
+    }
+
+    func deleteAccount(accessToken: String) async throws -> AuthDeleteAccountResponse {
+        try await delete(path: "/users/me", accessToken: accessToken)
     }
 
     func checkHealth() async throws {
