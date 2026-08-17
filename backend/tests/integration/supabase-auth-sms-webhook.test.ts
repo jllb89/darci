@@ -20,15 +20,15 @@ vi.hoisted(() => {
   }
 });
 
-const snsMocks = vi.hoisted(() => ({
-  publishMock: vi.fn(),
+const pinpointSmsMocks = vi.hoisted(() => ({
+  sendTextMessageMock: vi.fn(),
 }));
 
-vi.mock("@aws-sdk/client-sns", () => ({
-  SNSClient: vi.fn().mockImplementation(() => ({
-    send: snsMocks.publishMock,
+vi.mock("@aws-sdk/client-pinpoint-sms-voice-v2", () => ({
+  PinpointSMSVoiceV2Client: vi.fn().mockImplementation(() => ({
+    send: pinpointSmsMocks.sendTextMessageMock,
   })),
-  PublishCommand: vi.fn((input) => ({ input })),
+  SendTextMessageCommand: vi.fn((input) => ({ input })),
 }));
 
 import { app } from "../../src/index";
@@ -65,15 +65,16 @@ describe("Supabase Auth SMS hook", () => {
     process.env.SUPABASE_AUTH_SMS_HOOK_ENABLED = "true";
     process.env.SUPABASE_AUTH_SMS_HOOK_SECRET = dashboardHookSecret;
     process.env.SUPABASE_AUTH_SMS_MESSAGE_TEMPLATE = "Your DARCi verification code is {{otp}}.";
+    process.env.SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY = "+18773624121";
+    process.env.SUPABASE_AUTH_SMS_MESSAGE_TYPE = "TRANSACTIONAL";
     process.env.AWS_REGION = "us-east-1";
-    process.env.SNS_SMS_TYPE = "Transactional";
-    delete process.env.SNS_SMS_SENDER_ID;
-    snsMocks.publishMock.mockReset();
-    smsHookTestUtils.resetSnsClientCache();
+    delete process.env.SNS_SMS_TYPE;
+    pinpointSmsMocks.sendTextMessageMock.mockReset();
+    smsHookTestUtils.resetSmsClientCache();
   });
 
-  it("verifies Standard Webhooks signatures and publishes OTP via SNS", async () => {
-    snsMocks.publishMock.mockResolvedValue({ MessageId: "sns-msg-1" });
+  it("verifies Standard Webhooks signatures and sends OTP via Pinpoint SMS Voice v2", async () => {
+    pinpointSmsMocks.sendTextMessageMock.mockResolvedValue({ MessageId: "pinpoint-msg-1" });
     const rawBody = JSON.stringify({
       user: { id: "auth-user-1", phone: "+15551234567" },
       sms: { otp: "123456" },
@@ -84,21 +85,17 @@ describe("Supabase Auth SMS hook", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({});
     expect(response.headers["content-type"]).toContain("application/json");
-    expect(snsMocks.publishMock).toHaveBeenCalledWith({
+    expect(pinpointSmsMocks.sendTextMessageMock).toHaveBeenCalledWith({
       input: expect.objectContaining({
-        PhoneNumber: "+15551234567",
-        Message: "Your DARCi verification code is 123456.",
-        MessageAttributes: expect.objectContaining({
-          "AWS.SNS.SMS.SMSType": {
-            DataType: "String",
-            StringValue: "Transactional",
-          },
-        }),
+        DestinationPhoneNumber: "+15551234567",
+        OriginationIdentity: "+18773624121",
+        MessageBody: "Your DARCi verification code is 123456.",
+        MessageType: "TRANSACTIONAL",
       }),
     });
   });
 
-  it("rejects unsigned hook requests before SNS publish", async () => {
+  it("rejects unsigned hook requests before provider send", async () => {
     const response = await request(app)
       .post("/webhooks/supabase/auth/send-sms")
       .set("Content-Type", "application/json")
@@ -109,7 +106,7 @@ describe("Supabase Auth SMS hook", () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error.message).toBe("Missing Supabase Auth hook signature headers");
-    expect(snsMocks.publishMock).not.toHaveBeenCalled();
+    expect(pinpointSmsMocks.sendTextMessageMock).not.toHaveBeenCalled();
   });
 
   it("returns a Supabase hook-style error when the hook is disabled", async () => {
@@ -126,6 +123,6 @@ describe("Supabase Auth SMS hook", () => {
       http_code: 503,
       message: "Supabase Auth SMS hook is not enabled",
     });
-    expect(snsMocks.publishMock).not.toHaveBeenCalled();
+    expect(pinpointSmsMocks.sendTextMessageMock).not.toHaveBeenCalled();
   });
 });

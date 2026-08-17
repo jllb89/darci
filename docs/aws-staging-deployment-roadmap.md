@@ -320,9 +320,9 @@ Authentication uses **GitHub OIDC → AWS IAM Role** — no static AWS access ke
 - IAM OIDC provider: `token.actions.githubusercontent.com`
 - IAM role: `arn:aws:iam::427057633951:role/darci-github-actions-staging-deploy-role`
 - IAM deploy role inline policy includes `secretsmanager:GetSecretValue` for `/darci/staging/app` so the workflow can load web build-time public Supabase and Sentry config.
-- ECS task role `arn:aws:iam::427057633951:role/darci-staging-ecs-task-role` includes inline policy `darci-staging-task-sns-sms-publish`, allowing `sns:Publish` in `us-east-1` for the DARCi-owned SMS outbox provider when explicitly enabled.
+- ECS task role `arn:aws:iam::427057633951:role/darci-staging-ecs-task-role` includes inline policy `darci-staging-task-sns-sms-publish`, allowing `sns:Publish` for the DARCi-owned SMS outbox provider and `sms-voice:SendTextMessage` for Supabase Auth SMS in `us-east-1`.
 - Staging app secret includes `NOTIFICATION_SMS_PROVIDER=internal`, `NOTIFICATION_PROVIDER_SNS_ENABLED=false`, `SNS_REGION=us-east-1`, `SNS_SMS_TYPE=Transactional`, and blank `SNS_SMS_SENDER_ID`, so SNS SMS delivery is prepared but not active.
-- Staging also needs `SUPABASE_AUTH_SMS_HOOK_SECRET` and `SUPABASE_AUTH_SMS_HOOK_ENABLED=true` when the Supabase Auth Send SMS Hook is enabled. The local [.env.staging](../.env.staging) carries the same keys with safe disabled defaults.
+- Staging also needs `SUPABASE_AUTH_SMS_HOOK_SECRET`, `SUPABASE_AUTH_SMS_HOOK_ENABLED=true`, `PINPOINT_SMS_REGION=us-east-1`, and `SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY=+18773624121` when the Supabase Auth Send SMS Hook is enabled. The local [.env.staging](../.env.staging) carries the same keys with safe disabled defaults.
 - Staging API and worker services run task definition revision `:7`, which injects those SNS-related secret keys into both containers.
 - Repo variables set in `jllb89/darci`:
   - `AWS_ACCOUNT_ID=427057633951`
@@ -417,7 +417,7 @@ Production DNS/TLS should use the same pattern when production AWS resources are
 4. Hook URL: `https://api.staging.darciregistry.com/webhooks/supabase/auth/send-sms`.
 5. Copy the generated hook secret and set `SUPABASE_AUTH_SMS_HOOK_SECRET` in AWS Secrets Manager `/darci/staging/app`.
 6. Set `SUPABASE_AUTH_SMS_HOOK_ENABLED=true` only after the hook URL and secret are saved.
-7. Keep `SNS_REGION=us-east-1`, `SNS_SMS_TYPE=Transactional`, and optional `SNS_SMS_SENDER_ID` in the same AWS secret.
+7. Keep `PINPOINT_SMS_REGION=us-east-1`, `SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY=+18773624121`, and `SUPABASE_AUTH_SMS_MESSAGE_TYPE=TRANSACTIONAL` in the same AWS secret.
 8. In Supabase dashboard → Authentication → Providers, enable Google and enter the Google OAuth client ID/secret.
 9. In Supabase URL configuration, allow `https://app.staging.darciregistry.com/auth/callback` and `http://localhost:3000/auth/callback`.
 10. Raise the AWS SNS SMS monthly spend limit above `$1` before testing more than a tiny number of real SMS messages.

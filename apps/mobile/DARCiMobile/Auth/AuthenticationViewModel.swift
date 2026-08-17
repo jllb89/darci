@@ -224,13 +224,13 @@ final class AuthenticationViewModel: ObservableObject {
         switch verifiedContactMethod {
         case .email:
             resolvedEmail = verifiedEmailAddress
-            resolvedPhone = normalizedUSPhone(phone)
+            resolvedPhone = normalizedPhone(phone)
         case .phone:
             resolvedEmail = normalizedEmail(email)
             resolvedPhone = verifiedPhoneNumber
         case nil:
             resolvedEmail = normalizedEmail(email)
-            resolvedPhone = normalizedUSPhone(phone)
+            resolvedPhone = normalizedPhone(phone)
         }
 
         guard let resolvedEmail else {
@@ -291,7 +291,7 @@ final class AuthenticationViewModel: ObservableObject {
         case .email:
             return normalizedEmail(rawValue)
         case .phone:
-            return normalizedUSPhone(rawValue)
+            return normalizedPhone(rawValue)
         }
     }
 
@@ -309,8 +309,13 @@ final class AuthenticationViewModel: ObservableObject {
         return email
     }
 
-    private func normalizedUSPhone(_ rawValue: String) -> String? {
+    private func normalizedPhone(_ rawValue: String) -> String? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let digits = rawValue.filter(\.isNumber)
+
+        if trimmed.hasPrefix("+"), (8...15).contains(digits.count), digits.first != "0" {
+            return "+\(digits)"
+        }
 
         if digits.count == 10 {
             return "+1\(digits)"
@@ -328,7 +333,7 @@ final class AuthenticationViewModel: ObservableObject {
         case .email:
             return "Enter a valid email address."
         case .phone:
-            return "Enter a valid US phone number."
+            return "Enter a valid phone number."
         }
     }
 

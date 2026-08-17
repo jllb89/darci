@@ -17,6 +17,7 @@ type ProbeOptions = {
   otp: string;
   region: string;
   hookSecret: string;
+  originationIdentity: string;
   origin: string;
 };
 
@@ -73,11 +74,17 @@ const getProbeOptions = (): ProbeOptions => {
     otp: getArgValue("--otp") ?? "123456",
     region:
       getArgValue("--region") ??
+      process.env.PINPOINT_SMS_REGION ??
       process.env.SNS_REGION ??
       process.env.AWS_REGION ??
       process.env.AWS_DEFAULT_REGION ??
       "us-east-1",
     hookSecret: getLocalHookSecret(),
+    originationIdentity:
+      getArgValue("--origination-identity") ??
+      process.env.SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY ??
+      process.env.PINPOINT_SMS_ORIGINATION_IDENTITY ??
+      "+18773624121",
     origin: getArgValue("--origin") ?? "http://localhost:3000",
   };
 };
@@ -163,7 +170,9 @@ const probeSnsStatus = async (options: ProbeOptions) => {
 const probeSignedLocalHook = async (options: ProbeOptions) => {
   process.env.SUPABASE_AUTH_SMS_HOOK_ENABLED = "true";
   process.env.SUPABASE_AUTH_SMS_HOOK_SECRET = options.hookSecret;
+  process.env.PINPOINT_SMS_REGION = options.region;
   process.env.SNS_REGION = options.region;
+  process.env.SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY = options.originationIdentity;
 
   if (!process.env.SUPABASE_AUTH_SMS_MESSAGE_TEMPLATE?.trim()) {
     process.env.SUPABASE_AUTH_SMS_MESSAGE_TEMPLATE =
@@ -185,6 +194,7 @@ const probeSignedLocalHook = async (options: ProbeOptions) => {
     otpLength: options.otp.length,
     hookEnabled: process.env.SUPABASE_AUTH_SMS_HOOK_ENABLED,
     hookSecretConfigured: Boolean(process.env.SUPABASE_AUTH_SMS_HOOK_SECRET?.trim()),
+    originationIdentityConfigured: Boolean(options.originationIdentity.trim()),
     sendsProviderSms: true,
   });
 

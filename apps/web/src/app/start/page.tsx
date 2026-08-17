@@ -129,7 +129,9 @@ const resolveIdentifier = (value: string): IdentifierChallenge | null => {
     return { kind: "email", value: email, displayValue: email };
   }
 
-  const phoneNumber = parsePhoneNumberFromString(trimmed, "US");
+  const phoneNumber = trimmed.startsWith("+")
+    ? parsePhoneNumberFromString(trimmed)
+    : parsePhoneNumberFromString(trimmed, "US");
   if (phoneNumber?.isValid()) {
     return {
       kind: "phone",
@@ -463,7 +465,6 @@ function StartAuthPageContent() {
       nextCooldownSeconds = normalizeResendCooldownSeconds(payload?.cooldownSeconds);
       setNoticeMessage(payload?.message ?? `Code sent to ${nextChallenge.displayValue}.`);
     } else {
-      // ✅ FIXED: Phone OTP now uses backend endpoint (server-side like email OTP)
       const response = await fetch(`${apiBaseUrl}/auth/otp/phone/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -568,7 +569,6 @@ function StartAuthPageContent() {
 
       await finishVerifiedSession(payload, challenge);
     } else {
-      // ✅ FIXED: Phone OTP verify now uses backend endpoint (server-side like email OTP)
       const response = await fetch(`${apiBaseUrl}/auth/otp/phone/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1037,7 +1037,9 @@ function StartAuthPageContent() {
       ? "Sign in to continue to the document signature."
       : returnTo.startsWith("/app/notary")
         ? "Sign in as the assigned notary to review this request."
-      : "Sign in to continue your workspace.";
+      : authStep === "identifier"
+        ? "Use one field for email or mobile. We will send the right verification code."
+        : "Sign in to continue your workspace.";
   const headingLabel = authStep === "profile" ? "Complete your profile" : "Access DARCi";
 
   const submitLabel = isSubmitting
@@ -1154,12 +1156,15 @@ function StartAuthPageContent() {
                         <input
                           autoComplete="username"
                           className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                          placeholder="Enter your email or phone number"
+                          placeholder="name@example.com or +1 202 555 0147"
                           type="text"
                           value={identifier}
                           onChange={(event) => setIdentifier(event.target.value)}
                           required
                         />
+                        <p className="mt-2 text-xs leading-5 text-Color-Neutral">
+                          Email gets an email code. Mobile gets an SMS code.
+                        </p>
                       </div>
                     ) : null}
 

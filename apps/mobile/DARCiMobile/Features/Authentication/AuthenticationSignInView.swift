@@ -52,6 +52,22 @@ struct AuthenticationSignInContent: Equatable {
     )
 }
 
+private struct AuthenticationPhoneCountry: Identifiable, Equatable {
+    let id: String
+    let flag: String
+    let name: String
+    let dialCode: String
+    let digitLimit: Int
+}
+
+private let authenticationPhoneCountries: [AuthenticationPhoneCountry] = [
+    AuthenticationPhoneCountry(id: "US", flag: "🇺🇸", name: "United States", dialCode: "+1", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "MX", flag: "🇲🇽", name: "Mexico", dialCode: "+52", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "CA", flag: "🇨🇦", name: "Canada", dialCode: "+1", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "GB", flag: "🇬🇧", name: "United Kingdom", dialCode: "+44", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "ES", flag: "🇪🇸", name: "Spain", dialCode: "+34", digitLimit: 9)
+]
+
 struct AuthenticationSignInView: View {
     private let designSize = CGSize(width: 440, height: 956)
     private let bottomGroupLift: CGFloat = 24
@@ -105,6 +121,7 @@ struct AuthenticationSignInView: View {
     ]
 
     @State private var phoneNumber = ""
+    @State private var selectedPhoneCountry = authenticationPhoneCountries[0]
     @State private var emailAddress = ""
     @State private var otpCode = ""
     @State private var profileName = ""
@@ -323,7 +340,7 @@ struct AuthenticationSignInView: View {
     }
 
     private var currentRawIdentifier: String {
-        activeInputMode == .email ? emailAddress : phoneNumber
+        activeInputMode == .email ? emailAddress : "\(selectedPhoneCountry.dialCode)\(phoneNumber.filter(\.isNumber))"
     }
 
     private var isCompleteInfoReady: Bool {
@@ -353,13 +370,10 @@ struct AuthenticationSignInView: View {
             }
 
             HStack(spacing: 0) {
-                Text(content.countryCode)
-                    .font(DARCiFont.maisonNeue(.book, size: scaled(18, in: proxy)))
-                    .lineSpacing(scaled(1.8, in: proxy))
-                    .foregroundStyle(.black)
+                phoneCountrySelector(in: proxy)
 
                 Spacer()
-                    .frame(width: scaled(48, in: proxy))
+                    .frame(width: scaled(14, in: proxy))
 
                 TextField("", text: $phoneNumber, prompt: Text(content.phonePlaceholder).foregroundStyle(Color.black.opacity(0.26)))
                     .font(DARCiFont.maisonNeue(.light, size: scaled(18, in: proxy)))
@@ -370,6 +384,12 @@ struct AuthenticationSignInView: View {
                     .focused($focusedField, equals: .phone)
                     .accessibilityIdentifier("phone-number-field")
                     .simultaneousGesture(TapGesture().onEnded(activatePhoneInputLayout))
+                    .onChange(of: phoneNumber) { _, newValue in
+                        let formatted = formatPhoneNumberInput(newValue, country: selectedPhoneCountry)
+                        if formatted != newValue {
+                            phoneNumber = formatted
+                        }
+                    }
 
                 Spacer(minLength: scaled(12, in: proxy))
 
@@ -401,6 +421,65 @@ struct AuthenticationSignInView: View {
         .frame(width: scaled(395, in: proxy), height: scaled(48, in: proxy))
         .contentShape(Rectangle())
         .onTapGesture(perform: activatePhoneInputLayout)
+    }
+
+    private func phoneCountrySelector(in proxy: GeometryProxy) -> some View {
+        Menu {
+            ForEach(authenticationPhoneCountries) { country in
+                Button {
+                    selectedPhoneCountry = country
+                    phoneNumber = formatPhoneNumberInput(phoneNumber, country: country)
+                    focusedField = .phone
+                    activatePhoneInputLayout()
+                } label: {
+                    Text("\(country.flag)  \(country.name)  \(country.dialCode)")
+                }
+            }
+        } label: {
+            HStack(spacing: scaled(7, in: proxy)) {
+                Text(selectedPhoneCountry.flag)
+                    .font(.system(size: scaled(17, in: proxy)))
+
+                Text(selectedPhoneCountry.dialCode)
+                    .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
+                    .foregroundStyle(.black)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: scaled(9, in: proxy), weight: .bold))
+                    .foregroundStyle(.black.opacity(0.58))
+            }
+            .padding(.horizontal, scaled(12, in: proxy))
+            .frame(height: scaled(34, in: proxy))
+            .background(.white.opacity(0.34))
+            .overlay {
+                Capsule()
+                    .stroke(.black.opacity(0.18), lineWidth: max(0.5, scaled(0.7, in: proxy)))
+            }
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Country code")
+        .accessibilityValue("\(selectedPhoneCountry.name), \(selectedPhoneCountry.dialCode)")
+        .accessibilityIdentifier("phone-country-selector")
+    }
+
+    private func formatPhoneNumberInput(_ value: String, country: AuthenticationPhoneCountry) -> String {
+        let digits = String(value.filter(\.isNumber).prefix(country.digitLimit))
+        guard digits.isEmpty == false else { return "" }
+
+        if country.id == "US" || country.id == "CA" || country.id == "MX" {
+            switch digits.count {
+            case 0...3:
+                return digits
+            case 4...6:
+                return "(\(digits.prefix(3))) \(digits.dropFirst(3))"
+            default:
+                return "(\(digits.prefix(3))) \(digits.dropFirst(3).prefix(3))-\(digits.dropFirst(6))"
+            }
+        }
+
+        return digits
     }
 
     private func emailInput(in proxy: GeometryProxy) -> some View {

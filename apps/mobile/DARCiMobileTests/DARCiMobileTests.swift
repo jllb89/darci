@@ -2206,6 +2206,18 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     @MainActor
+    func testAuthenticationViewModelStartsInternationalPhoneChallenge() async {
+        TestAuthAPIClient.reset()
+        let viewModel = AuthenticationViewModel(apiClient: TestAuthAPIClient())
+
+        let didStart = await viewModel.requestOTP(method: .phone, rawIdentifier: "+52 (55) 5413-1672")
+
+        XCTAssertTrue(didStart)
+        XCTAssertEqual(TestAuthAPIClient.requestedPhone, "+525554131672")
+        XCTAssertEqual(viewModel.challenge?.identifier, "+525554131672")
+    }
+
+    @MainActor
     func testAuthenticationViewModelStartsEmailChallenge() async {
         TestAuthAPIClient.reset()
         let viewModel = AuthenticationViewModel(apiClient: TestAuthAPIClient())

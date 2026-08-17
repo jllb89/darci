@@ -582,7 +582,7 @@ Implementation status on 2026-05-07:
 - [backend/src/services/notificationOutboxService.ts](../backend/src/services/notificationOutboxService.ts) now includes an AWS SNS adapter that publishes queued SMS deliveries with `Transactional` SMS type by default and records SNS message ids in the delivery ledger.
 - [supabase/migrations/20260507120000_add_sns_notification_provider.sql](../supabase/migrations/20260507120000_add_sns_notification_provider.sql) expands notification provider constraints to include `sns` for deliveries and outbound events.
 - The staging database has been updated with this migration and Supabase migration history repaired for version `20260507120000`.
-- The staging ECS API/worker task role has inline policy `darci-staging-task-sns-sms-publish`, allowing `sns:Publish` in `us-east-1`.
+- The staging ECS API/worker task role has inline policy `darci-staging-task-sns-sms-publish`, allowing `sns:Publish` and `sms-voice:SendTextMessage` in `us-east-1`.
 - The staging app secret has inert SNS runtime config: `NOTIFICATION_SMS_PROVIDER=internal`, `NOTIFICATION_PROVIDER_SNS_ENABLED=false`, `SNS_REGION=us-east-1`, `SNS_SMS_TYPE=Transactional`, and blank `SNS_SMS_SENDER_ID`, so staging SMS remains disabled.
 - Staging API and worker services run task definition revision `:7`, which injects all SNS-related secret keys into both containers.
 - Step-up challenge tables/endpoints remain Phase 6 work. When mounted, they should use hashed challenge codes, expiry, attempt limits, and the existing sensitive-action policy; they should send through the SNS outbox provider rather than creating phone-login sessions.
@@ -780,5 +780,5 @@ This order fixes the most basic account trust gaps first, then improves signer/m
 ## Immediate Next Tasks
 
 - Apply migration `20260507133000` to staging and repair Supabase migration history after direct apply.
-- In AWS Secrets Manager `/darci/staging/app`, add `SUPABASE_AUTH_SMS_HOOK_SECRET`, set `SUPABASE_AUTH_SMS_HOOK_ENABLED=true` only after the Supabase hook is configured, and keep `SNS_REGION=us-east-1`, `SNS_SMS_TYPE=Transactional`, and optional `SNS_SMS_SENDER_ID` aligned with the task definition secrets.
+- In AWS Secrets Manager `/darci/staging/app`, add `SUPABASE_AUTH_SMS_HOOK_SECRET`, set `SUPABASE_AUTH_SMS_HOOK_ENABLED=true` only after the Supabase hook is configured, and keep `PINPOINT_SMS_REGION=us-east-1`, `SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY=+18773624121`, and `SUPABASE_AUTH_SMS_MESSAGE_TYPE=TRANSACTIONAL` aligned with the task definition secrets.
 - In Supabase Auth dashboard, enable Phone, configure the Send SMS Hook URL `https://api.staging.darciregistry.com/webhooks/supabase/auth/send-sms`, copy the generated hook secret into AWS, enable Google, and allow `https://app.staging.darciregistry.com/auth/callback` plus local callback URLs for development.

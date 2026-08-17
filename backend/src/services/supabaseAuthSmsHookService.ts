@@ -1,4 +1,8 @@
-import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
+import {
+  PinpointSMSVoiceV2Client,
+  SendTextMessageCommand,
+  type MessageType,
+} from "@aws-sdk/client-pinpoint-sms-voice-v2";
 
 type SendSupabaseAuthSmsInput = {
   phone: string;
@@ -27,6 +31,7 @@ const isHookEnabled = () => {
 
 const resolveSnsRegion = () => {
   const region =
+    process.env.PINPOINT_SMS_REGION?.trim() ||
     process.env.SNS_REGION?.trim() ||
     process.env.AWS_REGION?.trim() ||
     process.env.AWS_DEFAULT_REGION?.trim();
@@ -35,11 +40,37 @@ const resolveSnsRegion = () => {
     throw new SupabaseAuthSmsHookError(
       500,
       "provider_misconfigured",
-      "SNS_REGION or AWS_REGION is required for Supabase Auth SMS delivery",
+      "PINPOINT_SMS_REGION, SNS_REGION, or AWS_REGION is required for Supabase Auth SMS delivery",
     );
   }
 
   return region;
+};
+
+const resolveOriginationIdentity = () => {
+  const identity =
+    process.env.SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY?.trim() ||
+    process.env.PINPOINT_SMS_ORIGINATION_IDENTITY?.trim() ||
+    "+18773624121";
+
+  if (!identity) {
+    throw new SupabaseAuthSmsHookError(
+      500,
+      "provider_misconfigured",
+      "SUPABASE_AUTH_SMS_ORIGINATION_IDENTITY or PINPOINT_SMS_ORIGINATION_IDENTITY is required for Supabase Auth SMS delivery",
+    );
+  }
+
+  return identity;
+};
+
+const resolveMessageType = (): MessageType => {
+  const raw =
+    process.env.SUPABASE_AUTH_SMS_MESSAGE_TYPE?.trim().toUpperCase() ||
+    process.env.SNS_SMS_TYPE?.trim().toUpperCase() ||
+    "TRANSACTIONAL";
+
+  return raw === "PROMOTIONAL" ? "PROMOTIONAL" : "TRANSACTIONAL";
 };
 
 const renderSmsMessage = (otp: string) => {
@@ -50,14 +81,14 @@ const renderSmsMessage = (otp: string) => {
   return template.replace(/\{\{\s*otp\s*\}\}/g, otp).trim();
 };
 
-let snsClient: SNSClient | null = null;
+let smsClient: PinpointSMSVoiceV2Client | null = null;
 
-const getSnsClient = () => {
-  if (!snsClient) {
-    snsClient = new SNSClient({ region: resolveSnsRegion() });
+const getSmsClient = () => {
+  if (!smsClient) {
+    smsClient = new PinpointSMSVoiceV2Client({ region: resolveSnsRegion() });
   }
 
-  return snsClient;
+  return smsClient;
 };
 
 export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
@@ -81,30 +112,16 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
     );
   }
 
-  const messageAttributes: Record<
-    string,
-    { DataType: "String"; StringValue: string }
-  > = {
-    "AWS.SNS.SMS.SMSType": {
-      DataType: "String",
-      StringValue: process.env.SNS_SMS_TYPE?.trim() || "Transactional",
-    },
-  };
-
-  const senderId = process.env.SNS_SMS_SENDER_ID?.trim();
-  if (senderId) {
-    messageAttributes["AWS.SNS.SMS.SenderID"] = {
-      DataType: "String",
-      StringValue: senderId,
-    };
-  }
+  const originationIdentity = resolveOriginationIdentity();
+  const messageType = resolveMessageType();
 
   try {
-    const response = await getSnsClient().send(
-      new PublishCommand({
-        PhoneNumber: phone,
-        Message: message,
-        MessageAttributes: messageAttributes,
+    const response = await getSmsClient().send(
+      new SendTextMessageCommand({
+        DestinationPhoneNumber: phone,
+        OriginationIdentity: originationIdentity,
+        MessageBody: message,
+        MessageType: messageType,
       }),
     );
 
@@ -112,12 +129,12 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
       throw new SupabaseAuthSmsHookError(
         502,
         "sns_api_error",
-        "SNS publish returned no MessageId",
+        "Pinpoint SMS Voice v2 send returned no MessageId",
       );
     }
 
     return {
-      provider: "sns" as const,
+      provider: "pinpoint_sms_voice_v2" as const,
       messageId: response.MessageId,
       phone,
       userId: input.userId ?? null,
@@ -130,13 +147,16 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
     throw new SupabaseAuthSmsHookError(
       502,
       "sns_api_error",
-      error instanceof Error ? error.message : "SNS publish failed",
+      error instanceof Error ? error.message : "Pinpoint SMS Voice v2 send failed",
     );
   }
 };
 
 export const __testUtils = {
+  resetSmsClientCache: () => {
+    smsClient = null;
+  },
   resetSnsClientCache: () => {
-    snsClient = null;
+    smsClient = null;
   },
 };

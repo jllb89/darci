@@ -224,3 +224,8 @@ xcodebuild -scheme DARCiMobile -destination 'vet' build
 ```
 
 `xcodebuild -destination` needs `key=value` pairs. `simctl` accepts `vet`; `xcodebuild` needs `platform=iOS Simulator,name=vet`.
+
+
+
+aws pinpoint-sms-voice-v2 describe-registrations --region us-east-1
+aws pinpoint-sms-voice-v2 describe-phone-numbers --region us-east-1
