@@ -189,17 +189,33 @@ jobs:
             build_args+=(--build-arg "NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED=$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED")
           fi
 
-          docker buildx build \
-            --progress=plain \
-            --platform linux/arm64 \
-            -f "${{ matrix.dockerfile }}" \
-            --cache-from type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache" \
-            --cache-to type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache",mode=max \
-            "${build_args[@]}" \
-            -t "$ECR_REGISTRY/${{ matrix.repository }}:staging-latest" \
-            -t "$ECR_REGISTRY/${{ matrix.repository }}:$IMAGE_TAG" \
-            --push \
+          buildx_command=(
+            docker buildx build
+            --progress=plain
+            --platform linux/arm64
+            -f "${{ matrix.dockerfile }}"
+            --cache-from type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache"
+            --cache-to type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache",mode=max,ignore-error=true
+            "${build_args[@]}"
+            -t "$ECR_REGISTRY/${{ matrix.repository }}:staging-latest"
+            -t "$ECR_REGISTRY/${{ matrix.repository }}:$IMAGE_TAG"
+            --push
             .
+          )
+
+          for attempt in 1 2 3; do
+            if "${buildx_command[@]}"; then
+              exit 0
+            fi
+
+            if [ "$attempt" = "3" ]; then
+              echo "::error::Docker buildx push failed after 3 attempts"
+              exit 1
+            fi
+
+            echo "Docker buildx push failed on attempt $attempt; retrying after a short backoff."
+            sleep $((attempt * 20))
+          done
 
   deploy:
     name: Deploy Staging
