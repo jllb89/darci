@@ -54,19 +54,110 @@ struct AuthenticationSignInContent: Equatable {
 
 private struct AuthenticationPhoneCountry: Identifiable, Equatable {
     let id: String
-    let flag: String
     let name: String
     let dialCode: String
     let digitLimit: Int
 }
 
 private let authenticationPhoneCountries: [AuthenticationPhoneCountry] = [
-    AuthenticationPhoneCountry(id: "US", flag: "🇺🇸", name: "United States", dialCode: "+1", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "MX", flag: "🇲🇽", name: "Mexico", dialCode: "+52", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "CA", flag: "🇨🇦", name: "Canada", dialCode: "+1", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "GB", flag: "🇬🇧", name: "United Kingdom", dialCode: "+44", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "ES", flag: "🇪🇸", name: "Spain", dialCode: "+34", digitLimit: 9)
+    AuthenticationPhoneCountry(id: "US", name: "United States", dialCode: "+1", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "PR", name: "Puerto Rico", dialCode: "+1", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "CA", name: "Canada", dialCode: "+1", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "MX", name: "Mexico", dialCode: "+52", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "DO", name: "Dominican Republic", dialCode: "+1", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "CO", name: "Colombia", dialCode: "+57", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "VE", name: "Venezuela", dialCode: "+58", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "PE", name: "Peru", dialCode: "+51", digitLimit: 9),
+    AuthenticationPhoneCountry(id: "CL", name: "Chile", dialCode: "+56", digitLimit: 9),
+    AuthenticationPhoneCountry(id: "AR", name: "Argentina", dialCode: "+54", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "BR", name: "Brazil", dialCode: "+55", digitLimit: 11),
+    AuthenticationPhoneCountry(id: "GB", name: "United Kingdom", dialCode: "+44", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "ES", name: "Spain", dialCode: "+34", digitLimit: 9),
+    AuthenticationPhoneCountry(id: "PH", name: "Philippines", dialCode: "+63", digitLimit: 10),
+    AuthenticationPhoneCountry(id: "IN", name: "India", dialCode: "+91", digitLimit: 10)
 ]
+
+private struct AuthenticationPhoneCountryPickerSheet: View {
+    let countries: [AuthenticationPhoneCountry]
+    let selectedCountry: AuthenticationPhoneCountry
+    let onSelect: (AuthenticationPhoneCountry) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredCountries: [AuthenticationPhoneCountry] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard query.isEmpty == false else { return countries }
+
+        return countries.filter { country in
+            country.name.lowercased().contains(query)
+                || country.id.lowercased().contains(query)
+                || country.dialCode.contains(query)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                TextField("Search country or code", text: $searchText)
+                    .font(DARCiFont.maisonNeue(.book, size: 17))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 16)
+                    .frame(height: 52)
+                    .background(Color(red: 0.94, green: 0.94, blue: 0.94))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredCountries) { country in
+                            Button {
+                                onSelect(country)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 14) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(country.name)
+                                            .font(DARCiFont.maisonNeue(.book, size: 17))
+                                            .foregroundStyle(.black)
+
+                                        Text(country.id)
+                                            .font(DARCiFont.maisonNeue(.book, size: 11))
+                                            .foregroundStyle(.black.opacity(0.52))
+                                    }
+
+                                    Spacer(minLength: 12)
+
+                                    Text(country.dialCode)
+                                        .font(DARCiFont.maisonNeue(.book, size: 16))
+                                        .foregroundStyle(.black)
+
+                                    if country.id == selectedCountry.id {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(.black)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                                .frame(minHeight: 62)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            Divider()
+                                .padding(.leading, 20)
+                        }
+                    }
+                    .padding(.top, 12)
+                }
+            }
+            .background(.white)
+            .navigationTitle("Country code")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
 
 struct AuthenticationSignInView: View {
     private let designSize = CGSize(width: 440, height: 956)
@@ -128,6 +219,7 @@ struct AuthenticationSignInView: View {
     @State private var profileLastName = ""
     @State private var profileEmail = ""
     @State private var profilePhone = ""
+    @State private var isPhoneCountryPickerPresented = false
     @State private var visibleItemCount = 0
     @State private var activeInputMode: InputMode?
     @State private var authenticationStep: AuthenticationStep = .entry
@@ -273,6 +365,19 @@ struct AuthenticationSignInView: View {
                 otpCode = sanitized
             }
         }
+        .sheet(isPresented: $isPhoneCountryPickerPresented) {
+            AuthenticationPhoneCountryPickerSheet(
+                countries: authenticationPhoneCountries,
+                selectedCountry: selectedPhoneCountry
+            ) { country in
+                selectedPhoneCountry = country
+                phoneNumber = formatPhoneNumberInput(phoneNumber, country: country)
+                focusedField = .phone
+                activatePhoneInputLayout()
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var isCompactInputActive: Bool {
@@ -400,46 +505,20 @@ struct AuthenticationSignInView: View {
             }
             .frame(width: scaled(395, in: proxy), height: scaled(47, in: proxy), alignment: .leading)
 
-            Button {
-                focusedField = .phone
-                activatePhoneInputLayout()
-            } label: {
-                Rectangle()
-                    .fill(Color.black.opacity(0.001))
-                    .frame(width: scaled(395, in: proxy), height: scaled(48, in: proxy))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Phone number")
-            .accessibilityIdentifier("phone-input-tap-target")
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    focusedField = .phone
-                    activatePhoneInputLayout()
-                }
-            )
         }
         .frame(width: scaled(395, in: proxy), height: scaled(48, in: proxy))
         .contentShape(Rectangle())
-        .onTapGesture(perform: activatePhoneInputLayout)
+        .onTapGesture {
+            focusedField = .phone
+            activatePhoneInputLayout()
+        }
     }
 
     private func phoneCountrySelector(in proxy: GeometryProxy) -> some View {
-        Menu {
-            ForEach(authenticationPhoneCountries) { country in
-                Button {
-                    selectedPhoneCountry = country
-                    phoneNumber = formatPhoneNumberInput(phoneNumber, country: country)
-                    focusedField = .phone
-                    activatePhoneInputLayout()
-                } label: {
-                    Text("\(country.flag)  \(country.name)  \(country.dialCode)")
-                }
-            }
+        Button {
+            isPhoneCountryPickerPresented = true
         } label: {
             HStack(spacing: scaled(7, in: proxy)) {
-                Text(selectedPhoneCountry.flag)
-                    .font(.system(size: scaled(17, in: proxy)))
-
                 Text(selectedPhoneCountry.dialCode)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
                     .foregroundStyle(.black)
@@ -448,15 +527,9 @@ struct AuthenticationSignInView: View {
                     .font(.system(size: scaled(9, in: proxy), weight: .bold))
                     .foregroundStyle(.black.opacity(0.58))
             }
-            .padding(.horizontal, scaled(12, in: proxy))
+            .padding(.trailing, scaled(6, in: proxy))
             .frame(height: scaled(34, in: proxy))
-            .background(.white.opacity(0.34))
-            .overlay {
-                Capsule()
-                    .stroke(.black.opacity(0.18), lineWidth: max(0.5, scaled(0.7, in: proxy)))
-            }
-            .clipShape(Capsule())
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Country code")

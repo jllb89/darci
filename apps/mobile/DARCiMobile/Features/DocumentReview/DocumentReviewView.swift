@@ -58,7 +58,8 @@ struct DocumentReviewView: View {
                             statusMessage(draftNotice, tone: .success)
                         }
 
-                        if let outputs = viewModel.review?.outputs, outputs.count > 1 {
+                        let outputs = viewModel.visibleOutputs
+                        if outputs.count > 1 {
                             outputSelector(outputs)
                         }
 

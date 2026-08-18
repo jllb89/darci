@@ -81,6 +81,27 @@ const renderSmsMessage = (otp: string) => {
   return template.replace(/\{\{\s*otp\s*\}\}/g, otp).trim();
 };
 
+const normalizeDestinationPhoneNumber = (value: string) => {
+  const trimmed = value.trim();
+  const digits = trimmed.replace(/\D/g, "");
+
+  if (trimmed.startsWith("+")) {
+    return `+${digits}`;
+  }
+
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  return digits ? `+${digits}` : "";
+};
+
+const isValidE164PhoneNumber = (value: string) => /^\+[1-9]\d{7,14}$/.test(value);
+
 let smsClient: PinpointSMSVoiceV2Client | null = null;
 
 const getSmsClient = () => {
@@ -100,7 +121,7 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
     );
   }
 
-  const phone = input.phone.trim();
+  const phone = normalizeDestinationPhoneNumber(input.phone);
   const otp = input.otp.trim();
   const message = renderSmsMessage(otp);
 
@@ -109,6 +130,14 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
       400,
       "invalid_payload",
       "Supabase Auth SMS hook requires phone and otp",
+    );
+  }
+
+  if (!isValidE164PhoneNumber(phone)) {
+    throw new SupabaseAuthSmsHookError(
+      400,
+      "invalid_destination_phone_number",
+      "Supabase Auth SMS hook requires a valid E.164 destination phone number",
     );
   }
 

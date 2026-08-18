@@ -18,6 +18,7 @@ type DocumentInviteAccessRow = {
   obligation_type_snapshot: string | null;
   output_key_snapshot: string | null;
   document_key_snapshot: string | null;
+  recipient_name_snapshot: string | null;
   expires_at: string | null;
 };
 
@@ -39,6 +40,7 @@ export type ClaimedSignerInviteAccess = {
   outputKey: string | null;
   documentKey: string | null;
   recipientEmail: string;
+  recipientName: string | null;
 };
 
 const claimAccessibleInviteStatuses = ["claimed", "accepted", "completed"];
@@ -55,6 +57,7 @@ const documentInviteAccessSelect = [
   "obligation_type_snapshot",
   "output_key_snapshot",
   "document_key_snapshot",
+  "recipient_name_snapshot",
   "expires_at",
 ].join(", ");
 
@@ -133,6 +136,7 @@ export const resolveClaimedSignerInviteAccess = async (input: {
       outputKey: invite.output_key_snapshot,
       documentKey: invite.document_key_snapshot,
       recipientEmail,
+      recipientName: invite.recipient_name_snapshot,
     } satisfies ClaimedSignerInviteAccess;
   }
 

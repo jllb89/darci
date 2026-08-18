@@ -1106,6 +1106,10 @@ export default function SignPage() {
   const selectedSavedSignature = savedSignatures.find(
     (savedSignature) => savedSignature.id === selectedSavedSignatureId,
   ) ?? null;
+  const pendingVisibleSignatures = visibleSignatures.filter(isActionableSignature);
+  const sidebarSignatures = pendingVisibleSignatures.length > 0
+    ? pendingVisibleSignatures
+    : visibleSignatures;
 
   const fetchAvailableNotaries = useCallback(async () => {
     if (!accessToken || !documentId) {
@@ -2257,7 +2261,7 @@ export default function SignPage() {
           data-process-band-sticky-host
           style={{ animation: "darciContentFadeIn 220ms ease-out both", animationDelay: "60ms" }}
         >
-          <ProcessBand currentStep={3} />
+          <ProcessBand currentStep={3} hideOnSmallScreens />
         </div>
 
         {errorMessage ? (
@@ -2288,7 +2292,7 @@ export default function SignPage() {
               </div>
 
                 <div className="space-y-3">
-                  {visibleSignatures.map((signature) => {
+                  {sidebarSignatures.map((signature) => {
                     const isActive = signature.outputSignerId === activeSignature?.outputSignerId;
 
                     return (
@@ -2334,7 +2338,7 @@ export default function SignPage() {
                     );
                   })}
 
-                  {visibleSignatures.length === 0 ? (
+                  {sidebarSignatures.length === 0 ? (
                     <div className={`${signCardBaseClass} cursor-default`}>
                       <div className="text-sm font-medium text-Color-Scheme-1-Text">
                         No signature is available in this step yet.

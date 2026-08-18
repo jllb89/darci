@@ -410,7 +410,7 @@ describe("member signature capture", () => {
     expect(response.body.signature.id).toBe("sig-1");
   });
 
-  it("allows a claimed invite signer to load only their signing obligation", async () => {
+  it("allows a claimed invite signer to load their same-person signing obligations", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
@@ -436,15 +436,28 @@ describe("member signature capture", () => {
       outputKey: "trust_rrr",
       documentKey: "trust_rrr",
       recipientEmail: "signer@example.com",
+      recipientName: "Tester",
     });
     mocks.listDocumentOutputSignersMock.mockResolvedValue([
-      signerRecord,
+      {
+        ...signerRecord,
+        party_name: "Tester",
+      },
+      {
+        ...signerRecord,
+        id: "same-person-signer",
+        output_key: "poa_document_tm2",
+        document_key: "poa_general",
+        document_party_id: "same-person-party",
+        party_name: "Tester",
+        sort_order: 1,
+      },
       {
         ...signerRecord,
         id: "other-signer",
         document_party_id: "other-party",
         party_name: "Other Signer",
-        sort_order: 1,
+        sort_order: 2,
       },
     ]);
 
@@ -466,8 +479,10 @@ describe("member signature capture", () => {
         documentOutputSignerId: outputSignerId,
       }),
     );
-    expect(response.body.signing.signatures).toHaveLength(1);
-    expect(response.body.signing.signatures[0].outputSignerId).toBe(outputSignerId);
+    expect(response.body.signing.signatures.map((signature: { outputSignerId: string }) => signature.outputSignerId)).toEqual([
+      outputSignerId,
+      "same-person-signer",
+    ]);
     expect(response.body.signing.completion.canConfirm).toBe(false);
   });
 

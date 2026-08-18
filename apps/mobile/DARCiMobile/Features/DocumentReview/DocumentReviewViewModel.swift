@@ -37,11 +37,15 @@ final class DocumentReviewViewModel: ObservableObject {
         payload?.review
     }
 
-    var selectedOutput: DocumentReviewOutput? {
-        guard let review else { return nil }
+    var visibleOutputs: [DocumentReviewOutput] {
+        Self.memberVisibleOutputs(review?.outputs ?? [])
+    }
 
-        return review.outputs.first { $0.outputKey == selectedOutputKey }
-            ?? review.outputs.first
+    var selectedOutput: DocumentReviewOutput? {
+        let outputs = visibleOutputs
+
+        return outputs.first { $0.outputKey == selectedOutputKey }
+            ?? outputs.first
     }
 
     var canContinueToSign: Bool {
@@ -288,7 +292,8 @@ final class DocumentReviewViewModel: ObservableObject {
     }
 
     private func selectInitialOutputIfNeeded() {
-        guard let outputs = review?.outputs, outputs.isEmpty == false else {
+        let outputs = visibleOutputs
+        guard outputs.isEmpty == false else {
             selectedOutputKey = nil
             pdfData = nil
             loadedPreviewVersionId = nil
@@ -403,6 +408,10 @@ final class DocumentReviewViewModel: ObservableObject {
         }
 
         return value
+    }
+
+    private static func memberVisibleOutputs(_ outputs: [DocumentReviewOutput]) -> [DocumentReviewOutput] {
+        outputs.filter { normalizedDocumentLabelKey($0.outputKey) != "trust_certificate" }
     }
 
     private static func normalizedDocumentLabelKey(_ value: String?) -> String? {

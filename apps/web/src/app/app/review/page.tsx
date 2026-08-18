@@ -901,7 +901,7 @@ export default function ReviewPage() {
           data-process-band-sticky-host
           style={{ animation: "darciContentFadeIn 220ms ease-out both" }}
         >
-          <ProcessBand currentStep={payload?.review?.reviewApproval ? 3 : 2} forceCompact />
+          <ProcessBand currentStep={payload?.review?.reviewApproval ? 3 : 2} forceCompact hideOnSmallScreens />
         </div>
 
         <div

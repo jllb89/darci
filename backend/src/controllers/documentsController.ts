@@ -4706,6 +4706,34 @@ const buildScopedSigningCompletion = (signatures: SigningSignatureResponse[]) =>
   } satisfies SigningCompletionSummary;
 };
 
+const normalizeSigningScopeName = (value: string | null | undefined) =>
+  value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+
+const getInvitedSignerScopedSignatures = (
+  signing: DocumentSigningState,
+  inviteAccess: ClaimedSignerInviteAccess,
+) => {
+  const claimedSignature = signing.signatures.find(
+    (signature) => signature.outputSignerId === inviteAccess.documentOutputSignerId,
+  ) ?? null;
+  const claimedSignerName = normalizeSigningScopeName(claimedSignature?.partyName ?? inviteAccess.recipientName);
+
+  return signing.signatures.filter((signature) => {
+    if (signature.outputKey === "trust_certificate") {
+      return false;
+    }
+
+    if (signature.outputSignerId === inviteAccess.documentOutputSignerId) {
+      return true;
+    }
+
+    return Boolean(
+      claimedSignerName &&
+        normalizeSigningScopeName(signature.partyName) === claimedSignerName,
+    );
+  });
+};
+
 const scopeSigningStateForAccess = (
   signing: DocumentSigningState,
   access: DocumentSigningAccessContext,
@@ -4747,10 +4775,11 @@ const scopeSigningStateForAccess = (
     return signing;
   }
 
-  const scopedSignatures = signing.signatures.filter(
-    (signature) => signature.outputSignerId === access.inviteAccess?.documentOutputSignerId,
-  );
+  const scopedSignatures = getInvitedSignerScopedSignatures(signing, access.inviteAccess);
   const scopedOutputKeys = getScopedOutputKeys(signing, access.inviteAccess);
+  for (const signature of scopedSignatures) {
+    scopedOutputKeys.add(signature.outputKey);
+  }
   const scopedGroups = signing.groups.filter((group) =>
     scopedSignatures.some(
       (signature) =>
@@ -4782,7 +4811,20 @@ const ensureSigningAccessAllowsSignature = (
   outputSignerId: string,
 ) => {
   if (access.kind === "invited_signer") {
-    return access.inviteAccess?.documentOutputSignerId === outputSignerId;
+    const inviteAccess = access.inviteAccess;
+    if (!inviteAccess) {
+      return false;
+    }
+
+    if (inviteAccess.documentOutputSignerId === outputSignerId) {
+      return true;
+    }
+
+    return Boolean(
+      signer &&
+        signer.output_key !== "trust_certificate" &&
+        normalizeSigningScopeName(signer.party_name) === normalizeSigningScopeName(inviteAccess.recipientName),
+    );
   }
 
   if (

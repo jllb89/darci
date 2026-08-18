@@ -96,6 +96,7 @@ describe("resolveClaimedSignerInviteAccess", () => {
         obligation_type_snapshot: "signer",
         output_key_snapshot: "trust_rrr",
         document_key_snapshot: "trust_rrr",
+        recipient_name_snapshot: "Grantor Example",
         expires_at: null,
         updated_at: "2026-05-06T22:49:18.748754+00:00",
       },
@@ -122,6 +123,7 @@ describe("resolveClaimedSignerInviteAccess", () => {
       documentOutputSignerId: "signer-1",
       claimedUserId: "viewer-1",
       recipientEmail: "grantor@example.com",
+      recipientName: "Grantor Example",
     });
   });
 
@@ -138,6 +140,7 @@ describe("resolveClaimedSignerInviteAccess", () => {
         obligation_type_snapshot: "signer",
         output_key_snapshot: "ddpoa",
         document_key_snapshot: "ddpoa",
+        recipient_name_snapshot: "Trustor Example",
         expires_at: "2020-01-01T00:00:00.000Z",
         updated_at: "2026-05-06T22:49:18.748754+00:00",
       },
@@ -164,6 +167,7 @@ describe("resolveClaimedSignerInviteAccess", () => {
       documentOutputSignerId: "signer-2",
       claimedUserId: "viewer-2",
       recipientEmail: "trustor@example.com",
+      recipientName: "Trustor Example",
     });
   });
 });

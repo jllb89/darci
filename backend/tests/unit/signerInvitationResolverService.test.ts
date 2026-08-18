@@ -260,7 +260,7 @@ describe("signer invitation resolver", () => {
         }),
         expect.objectContaining({
           documentOutputSignerId: "creator-certificate",
-          reason: "creator_obligation",
+          reason: "internal_output",
         }),
         expect.objectContaining({
           documentOutputSignerId: "missing-email-signer",
@@ -316,6 +316,73 @@ describe("signer invitation resolver", () => {
     expect(result.trigger.blockedReason).toBe("creator_signing_incomplete");
     expect(result.candidates).toEqual([]);
     expect(mocks.listDocumentInvitesMock).not.toHaveBeenCalled();
+  });
+
+  it("combines multiple signer obligations for the same recipient into one invite candidate", async () => {
+    mocks.listDocumentPartiesMock.mockResolvedValue([
+      buildParty({ id: "party-owner", email: "owner@example.com" }),
+      buildParty({
+        id: "party-trustmaker",
+        party_role: "grantor",
+        full_name: "Tester",
+        email: "tester@example.com",
+        sort_order: 1,
+      }),
+      buildParty({
+        id: "party-trustee",
+        party_role: "trustee",
+        full_name: "Tester",
+        email: "tester@example.com",
+        sort_order: 2,
+      }),
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      buildSigner({ id: "creator-trust", document_party_id: "party-owner" }),
+      buildSigner({
+        id: "tester-grantor",
+        document_party_id: "party-trustmaker",
+        party_role: "grantor",
+        party_name: "Tester",
+        sort_order: 1,
+      }),
+      buildSigner({
+        id: "tester-trustee",
+        document_party_id: "party-trustee",
+        party_role: "trustee",
+        party_name: "Tester",
+        sort_order: 2,
+      }),
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      buildSignature({
+        id: "sig-creator-trust",
+        document_output_signer_id: "creator-trust",
+      }),
+    ]);
+
+    const result = await resolveRemainingSignerInvitationsAfterCreatorSignature({
+      documentId: "doc-1",
+      actorUserId: "owner-1",
+      actorEmail: "owner@example.com",
+      completedOutputSignerId: "creator-trust",
+      completedSignatureId: "sig-creator-trust",
+    });
+
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        documentOutputSignerId: "tester-grantor",
+        recipientEmail: "tester@example.com",
+        recipientName: "Tester",
+      }),
+    ]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          documentOutputSignerId: "tester-trustee",
+          reason: "combined_recipient_invite",
+        }),
+      ]),
+    );
   });
 
   it("scopes creator completion to the output that was just signed", async () => {

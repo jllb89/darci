@@ -34,7 +34,9 @@ export type RemainingSignerInvitationSkipReason =
   | "already_signed"
   | "active_invite_exists"
   | "missing_email"
-  | "group_satisfied";
+  | "group_satisfied"
+  | "internal_output"
+  | "combined_recipient_invite";
 
 export type RemainingSignerInvitationCandidate = {
   documentId: string;
@@ -104,12 +106,17 @@ const activeInviteStatuses = new Set<DocumentInviteStatus>([
   "accepted",
 ]);
 
+const internalInviteOutputKeys = new Set(["trust_certificate"]);
+
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeEmail = (value?: string | null) => {
   const normalized = value?.trim().toLowerCase() ?? "";
   return emailPattern.test(normalized) ? normalized : null;
 };
+
+const normalizeRecipientName = (value?: string | null) =>
+  value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
 
 const buildIdempotencyKey = (documentId: string, outputSignerId: string) =>
   `signing-remaining:${documentId}:${outputSignerId}`;
@@ -491,9 +498,25 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
   ]);
   const candidates: RemainingSignerInvitationCandidate[] = [];
   const skipped: RemainingSignerInvitationSkip[] = [];
+  const combinedRecipientKeys = new Set<string>();
 
   for (const signer of signers) {
     const idempotencyKey = buildIdempotencyKey(document.id, signer.id);
+    if (internalInviteOutputKeys.has(signer.output_key)) {
+      skipped.push({
+        documentOutputSignerId: signer.id,
+        documentPartyId: signer.document_party_id,
+        generationRunId: signer.generation_run_id,
+        outputKey: signer.output_key,
+        documentKey: signer.document_key,
+        partyRole: signer.party_role,
+        partyName: signer.party_name,
+        reason: "internal_output",
+        idempotencyKey,
+      });
+      continue;
+    }
+
     const isCreatorSigner = Boolean(
       signer.document_party_id && creatorPartyIds.has(signer.document_party_id),
     );
@@ -561,6 +584,18 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
       continue;
     }
 
+    const recipientName = party?.full_name?.trim() || signer.party_name;
+    const combinedRecipientKey = `${recipientEmail}:${normalizeRecipientName(recipientName)}`;
+    if (combinedRecipientKeys.has(combinedRecipientKey)) {
+      skipped.push({
+        ...baseSkip,
+        reason: "combined_recipient_invite",
+        idempotencyKey,
+      });
+      continue;
+    }
+    combinedRecipientKeys.add(combinedRecipientKey);
+
     candidates.push({
       documentId: document.id,
       documentOutputSignerId: signer.id,
@@ -571,7 +606,7 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
       partyRole: signer.party_role,
       obligationType: signer.obligation_type,
       recipientEmail,
-      recipientName: party?.full_name?.trim() || signer.party_name,
+      recipientName,
       claimMode: "required_signup",
       idempotencyKey,
     });

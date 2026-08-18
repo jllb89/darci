@@ -2042,6 +2042,49 @@ const buildNotificationCenterItem = (input: {
   };
 };
 
+const getNotificationCenterGroupKey = (input: {
+  job: NotificationJobRecord;
+  template: NotificationTemplateRecord | null;
+  document: Record<string, unknown> | null;
+}) => {
+  const metadata = objectOrEmpty(input.job.metadata);
+  const eventCorrelationId = typeof metadata.eventCorrelationId === "string" ? metadata.eventCorrelationId.trim() : "";
+  if (eventCorrelationId) {
+    return `event:${eventCorrelationId}`;
+  }
+
+  const emailJobId = typeof metadata.emailJobId === "string" ? metadata.emailJobId.trim() : "";
+  if (emailJobId) {
+    return `email:${emailJobId}`;
+  }
+
+  const payload = objectOrEmpty(input.job.payload_json);
+  return [
+    input.template?.template_key ?? "unknown_template",
+    input.job.document_id ?? "no_document",
+    input.document?.idn == null ? "no_idn" : String(input.document.idn),
+    typeof payload.signerName === "string" ? payload.signerName.trim().toLowerCase() : "",
+    typeof payload.documentName === "string" ? payload.documentName.trim().toLowerCase() : "",
+  ].join("|");
+};
+
+const shouldPreferNotificationDelivery = (
+  current: NotificationDeliveryRecord,
+  candidate: NotificationDeliveryRecord,
+) => {
+  if (current.opened_at && !candidate.opened_at) {
+    return true;
+  }
+
+  if (current.channel !== "in_app" && candidate.channel === "in_app") {
+    return true;
+  }
+
+  return String(candidate.queued_at ?? candidate.created_at).localeCompare(
+    String(current.queued_at ?? current.created_at),
+  ) > 0;
+};
+
 const emptyJobStatusCounts = (): Record<NotificationJobStatus, number> => ({
   queued: 0,
   scheduled: 0,
@@ -2673,9 +2716,29 @@ export const listUserNotificationCenterItems = async (input: {
     jobs.map((job) => job.document_id).filter((documentId): documentId is string => Boolean(documentId)),
   );
 
-  const notifications = deliveries
-    .map((delivery) => {
-      const job = jobById.get(delivery.notification_job_id);
+  const groupedDeliveries = new Map<string, NotificationDeliveryRecord>();
+  const groupedJobs = new Map<string, NotificationJobRecord>();
+
+  for (const delivery of deliveries) {
+    const job = jobById.get(delivery.notification_job_id);
+    if (!job) {
+      continue;
+    }
+
+    const template = job.template_id ? templateById.get(job.template_id) ?? null : null;
+    const document = job.document_id ? documentById.get(job.document_id) ?? null : null;
+    const groupKey = getNotificationCenterGroupKey({ job, template, document });
+    const existing = groupedDeliveries.get(groupKey);
+
+    if (!existing || shouldPreferNotificationDelivery(existing, delivery)) {
+      groupedDeliveries.set(groupKey, delivery);
+      groupedJobs.set(groupKey, job);
+    }
+  }
+
+  const notifications = Array.from(groupedDeliveries.entries())
+    .map(([groupKey, delivery]) => {
+      const job = groupedJobs.get(groupKey);
       if (!job) {
         return null;
       }

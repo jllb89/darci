@@ -43,9 +43,10 @@ final class NotificationCenterViewModel: ObservableObject {
                 offset: 0,
                 accessToken: accessToken
             )
-            notifications = response.notifications
-            unreadCount = response.unreadCount
-            syncApplicationBadgeCount(response.unreadCount)
+            let dedupedNotifications = Self.deduplicated(response.notifications)
+            notifications = dedupedNotifications
+            unreadCount = dedupedNotifications.filter { $0.isRead == false }.count
+            syncApplicationBadgeCount(unreadCount)
         } catch {
             errorMessage = Self.displayMessage(for: error)
         }
@@ -149,6 +150,27 @@ final class NotificationCenterViewModel: ObservableObject {
     private static func isToday(_ isoString: String) -> Bool {
         guard let date = parseDate(isoString) else { return false }
         return Calendar.current.isDateInToday(date)
+    }
+
+    private static func deduplicated(_ items: [NotificationCenterItem]) -> [NotificationCenterItem] {
+        var seenKeys = Set<String>()
+        var result: [NotificationCenterItem] = []
+
+        for item in items {
+            let key = [
+                item.templateKey ?? "",
+                item.documentId ?? "",
+                item.documentIdn ?? "",
+                item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                item.body.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                item.metadataLabel ?? ""
+            ].joined(separator: "|")
+
+            guard seenKeys.insert(key).inserted else { continue }
+            result.append(item)
+        }
+
+        return result
     }
 
     private static func parseDate(_ isoString: String) -> Date? {

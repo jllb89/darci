@@ -1550,7 +1550,7 @@ struct ProductIntakeFlowView: View {
     ) -> some View {
         let resolvedTooltipKey = tooltipKey ?? label
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center) {
                 fieldLabel(label: label, helpText: helpText, tooltipKey: resolvedTooltipKey)
                     .zIndex(activeTooltipKey == resolvedTooltipKey ? 160 : 0)
@@ -1567,6 +1567,7 @@ struct ProductIntakeFlowView: View {
             content()
                 .zIndex(0)
         }
+        .padding(.bottom, 6)
         .zIndex(activeTooltipKey == resolvedTooltipKey ? 160 : 0)
     }
 

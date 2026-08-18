@@ -33,6 +33,7 @@ const PROCESS_STEPS: ProcessStep[] = [
 type ProcessBandProps = {
   currentStep?: number;
   forceCompact?: boolean;
+  hideOnSmallScreens?: boolean;
 };
 
 const COMPACT_TRANSITION_DURATION_MS = 760;
@@ -40,7 +41,7 @@ const PROCESS_BAND_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 const STICKY_TOP_COMPENSATION_PX = 64;
 const STICKY_CONTENT_GAP_PX = 24;
 
-export default function ProcessBand({ currentStep = 1, forceCompact = false }: ProcessBandProps) {
+export default function ProcessBand({ currentStep = 1, forceCompact = false, hideOnSmallScreens = false }: ProcessBandProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const bandRef = useRef<HTMLDivElement | null>(null);
   const isCompactRef = useRef(forceCompact);
@@ -179,7 +180,10 @@ export default function ProcessBand({ currentStep = 1, forceCompact = false }: P
   }, [forceCompact]);
 
   return (
-    <div ref={sentinelRef} className="relative z-[900] -mx-6 md:-mx-10">
+    <div
+      ref={sentinelRef}
+      className={`relative z-[900] -mx-6 md:-mx-10 ${hideOnSmallScreens ? "max-[900px]:hidden [@media(max-height:720px)]:hidden" : ""}`}
+    >
       <div
         ref={bandRef}
         className={`relative isolate z-[910] transition-[background-color,box-shadow,border-radius] ${
