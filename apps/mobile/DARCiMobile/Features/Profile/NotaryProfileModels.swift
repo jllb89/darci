@@ -503,6 +503,7 @@ struct NotaryIdentitySummary: Codable, Equatable, Sendable {
     let displayName: String?
     let fullName: String?
     let email: String?
+    let phone: String?
     let role: String?
     let status: String?
 }

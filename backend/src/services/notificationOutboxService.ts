@@ -67,6 +67,7 @@ type PushRouteName =
   | "member_session"
   | "member_request"
   | "notary_request_review"
+  | "notary_session"
   | "member_document"
   | "member_notary_selection"
   | "document_review"
@@ -1127,6 +1128,7 @@ const pushRouteRequiredIdByName: Record<PushRouteWithRequiredId, "requestId" | "
   member_session: "requestId",
   member_request: "requestId",
   notary_request_review: "requestId",
+  notary_session: "requestId",
   member_document: "documentId",
   member_notary_selection: "documentId",
   document_review: "documentId",
@@ -1149,8 +1151,8 @@ const pushRouteByTemplateKey: Partial<Record<string, PushRouteName>> = {
   notary_request_claimed_email: "member_request",
   notary_changes_requested_email: "member_request",
   notary_request_rejected_email: "member_notary_selection",
-  notary_approval_received_email: "member_session",
-  notary_member_contact_received_email: "notary_request_review",
+  notary_approval_received_email: "member_request",
+  notary_member_contact_received_email: "notary_session",
   meeting_scheduled_confirmation_email: "member_session",
   in_person_session_started_email: "member_session",
   notary_application_approved_email: "user_settings",

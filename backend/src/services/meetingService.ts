@@ -53,6 +53,7 @@ export type GeolocationSampleKind = "device_gps" | "network" | "manual_pin" | "d
 
 export type GeolocationCaptureStage =
   | "checkin"
+  | "member_check_in"
   | "checkin_confirmation"
   | "proximity_validation"
   | "meeting_start"

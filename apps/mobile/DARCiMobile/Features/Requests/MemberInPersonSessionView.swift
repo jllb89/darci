@@ -44,13 +44,17 @@ struct MemberInPersonSessionView: View {
                         messages
 
                         if viewModel.context != nil {
-                            MemberSessionStatusBar(
-                                documentType: viewModel.documentTypeLabel,
-                                jurisdiction: viewModel.jurisdictionLabel,
-                                documentCode: viewModel.documentCode,
-                                statusLabel: viewModel.statusLabel,
-                                timeline: viewModel.timeline
-                            )
+                            if viewModel.shouldShowContactExchange {
+                                contactExchangeCard
+                            } else {
+                                MemberSessionStatusBar(
+                                    documentType: viewModel.documentTypeLabel,
+                                    jurisdiction: viewModel.jurisdictionLabel,
+                                    documentCode: viewModel.documentCode,
+                                    statusLabel: viewModel.statusLabel,
+                                    timeline: viewModel.timeline
+                                )
+                            }
 
                             if viewModel.reviewDocuments.count > 1 {
                                 documentSelector
@@ -139,14 +143,90 @@ struct MemberInPersonSessionView: View {
 
     private var heading: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("In-person session")
+            Text(viewModel.shouldShowContactExchange ? "Request approved" : "In-person session")
                 .font(DARCiFont.maisonNeue(.demi, size: 17))
                 .foregroundStyle(.black)
-            Text("\(viewModel.notaryName) · Review the live document while your session is recorded.")
+            Text(viewModel.shouldShowContactExchange
+                 ? "\(viewModel.notaryName) approved the request. Coordinate directly before the live session starts."
+                 : "\(viewModel.notaryName) · Review the live document while your session is recorded.")
                 .font(DARCiFont.maisonNeue(.book, size: 12))
                 .lineSpacing(4)
                 .foregroundStyle(.black.opacity(0.66))
         }
+    }
+
+    private var contactExchangeCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("YOUR ILLUMINOTARY")
+                .font(DARCiFont.maisonNeue(.mono, size: 9))
+                .foregroundStyle(.black.opacity(0.48))
+
+            Text(viewModel.notaryName)
+                .font(DARCiFont.maisonNeue(.demi, size: 18))
+                .foregroundStyle(.black)
+                .lineLimit(2)
+
+            HStack(spacing: 10) {
+                contactButton(title: "Email", systemImage: "envelope", value: viewModel.notaryEmail, url: contactURL(scheme: "mailto", value: viewModel.notaryEmail))
+                contactButton(title: "Call", systemImage: "phone", value: viewModel.notaryPhone, url: contactURL(scheme: "tel", value: viewModel.notaryPhone))
+            }
+
+            Text(contactDetailLine(email: viewModel.notaryEmail, phone: viewModel.notaryPhone))
+                .font(DARCiFont.maisonNeue(.book, size: 11))
+                .foregroundStyle(.black.opacity(0.56))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.94, green: 0.94, blue: 0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(0.12), lineWidth: 0.5)
+        }
+    }
+
+    private func contactButton(title: String, systemImage: String, value: String?, url: URL?) -> some View {
+        Button {
+            guard let url else { return }
+            openURL(url)
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .medium))
+                Text(title)
+                    .font(DARCiFont.maisonNeue(.medium, size: 12))
+            }
+            .foregroundStyle(url == nil ? Color.black.opacity(0.42) : Color.black)
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(title == "Email" ? DARCiTheme.onboardingGreen.opacity(url == nil ? 0.42 : 1) : Color.black.opacity(url == nil ? 0.18 : 1))
+            .foregroundStyle(title == "Email" ? Color.black : Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(value?.isEmpty != false || url == nil)
+    }
+
+    private func contactDetailLine(email: String?, phone: String?) -> String {
+        [email, phone]
+            .compactMap { nonEmptyContactValue($0) }
+            .joined(separator: "   ")
+    }
+
+    private func nonEmptyContactValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func contactURL(scheme: String, value: String?) -> URL? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), value.isEmpty == false else { return nil }
+        if scheme == "tel" {
+            let allowed = value.filter { $0.isNumber || $0 == "+" }
+            return allowed.isEmpty ? nil : URL(string: "tel:\(allowed)")
+        }
+        return URL(string: "\(scheme):\(value)")
     }
 
     @ViewBuilder

@@ -14,6 +14,7 @@ enum PushNotificationRoute: Equatable, Sendable {
     case memberSession(requestId: String, notificationId: String?)
     case memberRequest(requestId: String, notificationId: String?)
     case notaryRequestReview(requestId: String, notificationId: String?)
+    case notarySession(requestId: String, notificationId: String?)
     case memberDocument(documentId: String, notificationId: String?)
     case memberNotarySelection(documentId: String, notificationId: String?)
     case documentReview(documentId: String, notificationId: String?)
@@ -28,6 +29,8 @@ enum PushNotificationRoute: Equatable, Sendable {
             return "member_request"
         case .notaryRequestReview:
             return "notary_request_review"
+        case .notarySession:
+            return "notary_session"
         case .memberDocument:
             return "member_document"
         case .memberNotarySelection:
@@ -46,6 +49,7 @@ enum PushNotificationRoute: Equatable, Sendable {
         case .memberSession(_, let notificationId),
              .memberRequest(_, let notificationId),
              .notaryRequestReview(_, let notificationId),
+             .notarySession(_, let notificationId),
              .memberDocument(_, let notificationId),
              .memberNotarySelection(_, let notificationId),
              .documentReview(_, let notificationId),
@@ -77,6 +81,9 @@ enum PushNotificationRoute: Equatable, Sendable {
         case "notary_request_review":
             guard let requestId = Self.validIdentifier(userInfo["requestId"]) else { return nil }
             self = .notaryRequestReview(requestId: requestId, notificationId: notificationId)
+        case "notary_session":
+            guard let requestId = Self.validIdentifier(userInfo["requestId"]) else { return nil }
+            self = .notarySession(requestId: requestId, notificationId: notificationId)
         case "member_document":
             guard let documentId = Self.validIdentifier(userInfo["documentId"]) else { return nil }
             self = .memberDocument(documentId: documentId, notificationId: notificationId)

@@ -286,6 +286,7 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
                     displayName: "Morgan Member",
                     fullName: "Morgan Member",
                     email: "member@example.com",
+                    phone: "+15555550100",
                     role: "member",
                     status: "active"
                 ),
@@ -353,6 +354,7 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
                 displayName: "Nora Notary",
                 fullName: "Nora Notary",
                 email: "notary@example.com",
+                phone: "+15555550101",
                 role: "notary",
                 status: "active"
             ),

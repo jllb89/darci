@@ -64,6 +64,8 @@ struct NotificationCenterView: View {
                                 .padding(.top, scaled(90, in: proxy))
                         } else {
                             notificationSections(in: proxy)
+                                .opacity(viewModel.isMarkingAllRead ? 0.48 : 1)
+                                .animation(.easeInOut(duration: 0.16), value: viewModel.isMarkingAllRead)
                         }
                     }
                     .padding(.horizontal, scaled(44, in: proxy))
@@ -104,15 +106,26 @@ struct NotificationCenterView: View {
             Button {
                 Task { await viewModel.markAllRead(for: session) }
             } label: {
-                Text("MARK ALL AS READ")
-                    .font(DARCiFont.maisonNeue(.book, size: 10))
-                    .lineSpacing(14)
-                    .foregroundStyle(.black)
-                    .underline()
+                HStack(spacing: scaled(6, in: proxy)) {
+                    Text("MARK ALL AS READ")
+                        .font(DARCiFont.maisonNeue(.book, size: 10))
+                        .lineSpacing(14)
+                        .foregroundStyle(.black)
+                        .underline()
+
+                    if viewModel.isMarkingAllRead {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.mini)
+                            .tint(.black)
+                            .frame(width: scaled(10, in: proxy), height: scaled(10, in: proxy))
+                    }
+                }
+                .frame(height: scaled(14, in: proxy), alignment: .center)
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.unreadCount == 0)
-            .opacity(viewModel.unreadCount == 0 ? 0.42 : 1)
+            .disabled(viewModel.unreadCount == 0 || viewModel.isMarkingAllRead)
+            .opacity(viewModel.unreadCount == 0 && viewModel.isMarkingAllRead == false ? 0.42 : 1)
         }
     }
 

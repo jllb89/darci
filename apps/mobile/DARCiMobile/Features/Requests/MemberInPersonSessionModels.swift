@@ -41,6 +41,9 @@ struct MemberSessionWorkflow: Decodable, Equatable, Sendable {
 
 struct MemberSessionIdentity: Decodable, Equatable, Sendable {
     let displayName: String?
+    let fullName: String?
+    let email: String?
+    let phone: String?
 }
 
 struct MemberSessionMeeting: Decodable, Equatable, Sendable {
@@ -50,9 +53,18 @@ struct MemberSessionMeeting: Decodable, Equatable, Sendable {
     let samePlaceRequired: Bool
     let samePlaceStatus: String?
     let participants: [NotarySessionParticipant]
+    let checkins: [MemberSessionCheckin]?
     let identityVerifications: [MemberSessionIdentityVerification]
     let proximityEvaluations: [NotaryProximityEvaluation]
     let artifacts: [NotarySessionArtifact]
+}
+
+struct MemberSessionCheckin: Decodable, Equatable, Sendable {
+    let id: String
+    let participantRole: String
+    let checkinKind: String
+    let status: String
+    let recordedAt: String
 }
 
 struct MemberSessionIdentityVerification: Decodable, Equatable, Sendable {

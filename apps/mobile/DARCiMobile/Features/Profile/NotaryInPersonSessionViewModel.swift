@@ -115,6 +115,14 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         ]) ?? "Member"
     }
 
+    var memberEmail: String? {
+        context?.owner?.email?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    var memberPhone: String? {
+        context?.owner?.phone?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
     var screenTitle: String {
         "IN-PERSON SESSION - \(memberName.uppercased())"
     }

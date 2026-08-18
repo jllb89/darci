@@ -139,6 +139,9 @@ struct NotaryInPersonSessionView: View {
         VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
             sessionHeading
             sessionMessages
+            if viewModel.context != nil && viewModel.hasSessionStart == false {
+                contactExchangeCard(in: proxy)
+            }
             progressCard
 
             if viewModel.reviewDocuments.count > 1 {
@@ -321,15 +324,90 @@ struct NotaryInPersonSessionView: View {
 
     private var sessionHeading: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Complete in-person session")
+            Text(viewModel.hasSessionStart ? "Complete in-person session" : "Coordinate with member")
                 .font(DARCiFont.maisonNeue(.demi, size: 13))
                 .foregroundStyle(.black)
 
-            Text("Review the live document while each meeting requirement is recorded.")
+            Text(viewModel.hasSessionStart
+                 ? "Review the live document while each meeting requirement is recorded."
+                 : "Member contact details are ready. Start the live session only when you are together.")
                 .font(DARCiFont.maisonNeue(.book, size: 12))
                 .lineSpacing(4)
                 .foregroundStyle(.black.opacity(0.68))
         }
+    }
+
+    private func contactExchangeCard(in proxy: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
+            Text("MEMBER")
+                .font(DARCiFont.maisonNeue(.mono, size: scaled(9, in: proxy)))
+                .foregroundStyle(.black.opacity(0.48))
+
+            Text(viewModel.memberName)
+                .font(DARCiFont.maisonNeue(.demi, size: scaled(18, in: proxy)))
+                .foregroundStyle(.black)
+                .lineLimit(2)
+
+            HStack(spacing: scaled(10, in: proxy)) {
+                contactButton(title: "Email", systemImage: "envelope", url: contactURL(scheme: "mailto", value: viewModel.memberEmail), in: proxy)
+                contactButton(title: "Call", systemImage: "phone", url: contactURL(scheme: "tel", value: viewModel.memberPhone), in: proxy)
+            }
+
+            Text(contactDetailLine(email: viewModel.memberEmail, phone: viewModel.memberPhone))
+                .font(DARCiFont.maisonNeue(.book, size: scaled(11, in: proxy)))
+                .foregroundStyle(.black.opacity(0.56))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(scaled(18, in: proxy))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.94, green: 0.94, blue: 0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(0.12), lineWidth: 0.5)
+        }
+    }
+
+    private func contactButton(title: String, systemImage: String, url: URL?, in proxy: GeometryProxy) -> some View {
+        Button {
+            guard let url else { return }
+            openURL(url)
+        } label: {
+            HStack(spacing: scaled(7, in: proxy)) {
+                Image(systemName: systemImage)
+                    .font(.system(size: scaled(12, in: proxy), weight: .medium))
+                Text(title)
+                    .font(DARCiFont.maisonNeue(.medium, size: scaled(12, in: proxy)))
+            }
+            .foregroundStyle(title == "Email" ? Color.black : Color.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: scaled(40, in: proxy))
+            .background(title == "Email" ? DARCiTheme.onboardingGreen.opacity(url == nil ? 0.42 : 1) : Color.black.opacity(url == nil ? 0.18 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(url == nil)
+    }
+
+    private func contactDetailLine(email: String?, phone: String?) -> String {
+        [email, phone]
+            .compactMap { nonEmptyContactValue($0) }
+            .joined(separator: "   ")
+    }
+
+    private func nonEmptyContactValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func contactURL(scheme: String, value: String?) -> URL? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), value.isEmpty == false else { return nil }
+        if scheme == "tel" {
+            let allowed = value.filter { $0.isNumber || $0 == "+" }
+            return allowed.isEmpty ? nil : URL(string: "tel:\(allowed)")
+        }
+        return URL(string: "\(scheme):\(value)")
     }
 
     private var documentSelector: some View {

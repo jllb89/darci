@@ -6,6 +6,7 @@ final class NotificationCenterViewModel: ObservableObject {
     @Published private(set) var notifications: [NotificationCenterItem] = []
     @Published private(set) var unreadCount = 0
     @Published private(set) var isLoading = false
+    @Published private(set) var isMarkingAllRead = false
     @Published private(set) var errorMessage: String?
     @Published var selectedCategory: NotificationCenterCategory = .all
 
@@ -54,34 +55,29 @@ final class NotificationCenterViewModel: ObservableObject {
     }
 
     func markAllRead(for session: AuthSession?) async {
-        guard let accessToken = session?.accessToken, accessToken.isEmpty == false, unreadCount > 0 else { return }
+        guard let accessToken = session?.accessToken, accessToken.isEmpty == false, unreadCount > 0, isMarkingAllRead == false else { return }
+
+        let previousNotifications = notifications
+        let previousUnreadCount = unreadCount
+        let readAt = ISO8601DateFormatter().string(from: Date())
+
+        isMarkingAllRead = true
+        errorMessage = nil
+        notifications = notifications.map { Self.markRead($0, readAt: readAt) }
+        unreadCount = 0
+        syncApplicationBadgeCount(0)
 
         do {
             let response = try await apiClient.markAllRead(accessToken: accessToken)
             unreadCount = response.unreadCount
             syncApplicationBadgeCount(response.unreadCount)
-            notifications = notifications.map { item in
-                NotificationCenterItem(
-                    id: item.id,
-                    deliveryId: item.deliveryId,
-                    jobId: item.jobId,
-                    templateKey: item.templateKey,
-                    title: item.title,
-                    body: item.body,
-                    category: item.category,
-                    metadataLabel: item.metadataLabel,
-                    createdAt: item.createdAt,
-                    readAt: item.readAt ?? ISO8601DateFormatter().string(from: Date()),
-                    isRead: true,
-                    route: item.route,
-                    documentId: item.documentId,
-                    documentIdn: item.documentIdn,
-                    channel: item.channel
-                )
-            }
         } catch {
+            notifications = previousNotifications
+            unreadCount = previousUnreadCount
+            syncApplicationBadgeCount(previousUnreadCount)
             errorMessage = Self.displayMessage(for: error)
         }
+        isMarkingAllRead = false
     }
 
     func recordOpen(_ item: NotificationCenterItem, for session: AuthSession?) async -> PushNotificationRoute? {
@@ -171,6 +167,26 @@ final class NotificationCenterViewModel: ObservableObject {
         }
 
         return result
+    }
+
+    private static func markRead(_ item: NotificationCenterItem, readAt: String) -> NotificationCenterItem {
+        NotificationCenterItem(
+            id: item.id,
+            deliveryId: item.deliveryId,
+            jobId: item.jobId,
+            templateKey: item.templateKey,
+            title: item.title,
+            body: item.body,
+            category: item.category,
+            metadataLabel: item.metadataLabel,
+            createdAt: item.createdAt,
+            readAt: item.readAt ?? readAt,
+            isRead: true,
+            route: item.route,
+            documentId: item.documentId,
+            documentIdn: item.documentIdn,
+            channel: item.channel
+        )
     }
 
     private static func parseDate(_ isoString: String) -> Date? {

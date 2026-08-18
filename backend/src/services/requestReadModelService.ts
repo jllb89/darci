@@ -34,11 +34,13 @@ import {
   getMeetingByRequestId,
   listIdentityVerificationEvents,
   listMeetingArtifacts,
+  listMeetingCheckins,
   listMeetingParticipants,
   listMeetingsByRequestIds,
   listProximityEvaluations,
   type IdentityVerificationEventRecord,
   type MeetingArtifactRecord,
+  type MeetingCheckinRecord,
   type MeetingParticipantRecord,
   type MeetingRecord,
   type MeetingStatus,
@@ -162,6 +164,14 @@ type SharedMeetingArtifactResponse = {
   capturedAt: string | null;
 };
 
+type SharedMeetingCheckinResponse = {
+  id: string;
+  participantRole: string;
+  checkinKind: string;
+  status: string;
+  recordedAt: string;
+};
+
 type SharedMeetingResponse = {
   meetingId: string;
   requestId: string;
@@ -177,6 +187,7 @@ type SharedMeetingResponse = {
   identityVerifications: SharedIdentityVerificationResponse[];
   proximityEvaluations: SharedProximityEvaluationResponse[];
   artifacts: SharedMeetingArtifactResponse[];
+  checkins: SharedMeetingCheckinResponse[];
 };
 
 type SharedRequestDocumentResponse = {
@@ -296,6 +307,7 @@ const mapSharedRequestResponse = (
 const mapSharedMeetingResponse = (
   meeting: MeetingRecord,
   participants: MeetingParticipantRecord[],
+  checkins: MeetingCheckinRecord[],
   identityVerifications: IdentityVerificationEventRecord[],
   proximityEvaluations: ProximityEvaluationRecord[],
   artifacts: MeetingArtifactRecord[],
@@ -325,6 +337,13 @@ const mapSharedMeetingResponse = (
       participantLabel: participant.participant_label,
       arrivedAt: participant.arrived_at,
       departedAt: participant.departed_at,
+    })),
+    checkins: checkins.map((checkin) => ({
+      id: checkin.id,
+      participantRole: participantsById.get(checkin.meeting_participant_id)?.participant_role ?? "observer",
+      checkinKind: checkin.checkin_kind,
+      status: checkin.status,
+      recordedAt: checkin.recorded_at,
     })),
     identityVerifications: identityVerifications.map((event) => ({
       id: event.id,
@@ -1028,8 +1047,19 @@ export const getSharedRequestDetail = async (input: {
       : Promise.resolve(null),
     getLatestCodeDeliveryForRequest(resource.request.id),
   ]);
-  const [participants, identityVerifications, proximityEvaluations, artifacts, workflowStatusHistory] = await Promise.all([
+  const [participants, checkins, identityVerifications, proximityEvaluations, artifacts, workflowStatusHistory] = await Promise.all([
     meeting ? listMeetingParticipants(meeting.id) : Promise.resolve([]),
+    meeting
+      ? readModelFallback({
+          operation: "meeting_checkins",
+          fallback: [] as MeetingCheckinRecord[],
+          details: {
+            requestId: resource.request.id,
+            meetingId: meeting.id,
+          },
+          run: () => listMeetingCheckins(meeting.id),
+        })
+      : Promise.resolve([] as MeetingCheckinRecord[]),
     meeting
       ? readModelFallback({
           operation: "meeting_identity_verifications",
@@ -1119,6 +1149,7 @@ export const getSharedRequestDetail = async (input: {
       ? mapSharedMeetingResponse(
           meeting,
           participants,
+          checkins,
           identityVerifications,
           proximityEvaluations,
           artifacts,

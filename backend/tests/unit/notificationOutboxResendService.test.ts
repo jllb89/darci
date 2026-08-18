@@ -1063,6 +1063,88 @@ describe("notification outbox Resend runtime", () => {
     expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).not.toHaveProperty("accessToken");
   });
 
+  it("routes notary approval contact-exchange pushes to pre-session surfaces", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowIso));
+    seedOutbox({
+      job: {
+        id: "job-member",
+        channel: "push",
+        document_id: "doc-1",
+        notarization_request_id: "request-1",
+        payload_json: {
+          requestId: "request-1",
+          documentId: "doc-1",
+        },
+      },
+      delivery: {
+        id: "delivery-member",
+        notification_job_id: "job-member",
+        channel: "push",
+        recipient_address: null,
+        provider: "apns",
+        device_push_token_id: "push-token-1",
+      },
+      template: {
+        template_key: "notary_approval_received_email",
+        channel: "push",
+        subject_template: "Request approved",
+        body_template: "Your Illuminotary approved the request. Open DARCi for next steps.",
+        body_format: "text",
+      },
+      devicePushToken: { id: "push-token-1" },
+    });
+    seedOutbox({
+      job: {
+        id: "job-notary",
+        template_id: "template-notary",
+        channel: "push",
+        document_id: "doc-1",
+        notarization_request_id: "request-1",
+        payload_json: {
+          requestId: "request-1",
+          documentId: "doc-1",
+        },
+      },
+      delivery: {
+        id: "delivery-notary",
+        notification_job_id: "job-notary",
+        channel: "push",
+        recipient_address: null,
+        provider: "apns",
+        device_push_token_id: "push-token-2",
+      },
+      template: {
+        id: "template-notary",
+        template_key: "notary_member_contact_received_email",
+        channel: "push",
+        subject_template: "Request approved",
+        body_template: "Member coordination details are available in DARCi.",
+        body_format: "text",
+      },
+      devicePushToken: { id: "push-token-2", device_token: "b".repeat(64) },
+    });
+    apnsMocks.sendMock.mockResolvedValue({ apnsId: "apns-msg-contact", statusCode: 200 });
+
+    await runDueNotificationJobs({ limit: 5, workerId: "worker-1" });
+
+    expect(apnsMocks.sendMock).toHaveBeenCalledTimes(2);
+    expect(apnsMocks.sendMock.mock.calls[0]?.[0].payload).toEqual(
+      expect.objectContaining({
+        notificationId: "delivery-member",
+        route: "member_request",
+        requestId: "request-1",
+      }),
+    );
+    expect(apnsMocks.sendMock.mock.calls[1]?.[0].payload).toEqual(
+      expect.objectContaining({
+        notificationId: "delivery-notary",
+        route: "notary_session",
+        requestId: "request-1",
+      }),
+    );
+  });
+
   it("routes Wave 2 notary application result pushes to user settings without identifiers", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(nowIso));

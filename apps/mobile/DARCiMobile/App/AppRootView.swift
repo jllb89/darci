@@ -646,6 +646,15 @@ struct AppRootView: View {
             return
         }
 
+        if case .notarySession = route,
+           MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) != .notary {
+            Task {
+                guard await sessionCoordinator.switchActiveRole(to: "notary") else { return }
+                openPushRoute(route, keepUnderlyingHome: shouldReturnToNotificationCenterAfterRoute)
+            }
+            return
+        }
+
         openPushRoute(route, keepUnderlyingHome: shouldReturnToNotificationCenterAfterRoute)
     }
 
@@ -670,6 +679,9 @@ struct AppRootView: View {
         case .notaryRequestReview(let requestId, _):
             selectedTab = keepUnderlyingHome ? .home : .notary
             notaryReviewRoute = NotaryRequestReviewRoute(requestId: requestId)
+        case .notarySession(let requestId, _):
+            selectedTab = keepUnderlyingHome ? .home : .notary
+            notarySessionRoute = NotaryInPersonSessionRoute(requestId: requestId)
         case .memberDocument, .memberNotarySelection:
             selectedTab = keepUnderlyingHome ? .home : .documents
         case .documentSigning(let documentId, _):

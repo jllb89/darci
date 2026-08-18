@@ -122,8 +122,8 @@ extension MemberInPersonSessionResponse {
             )
         ),
         workflow: MemberSessionWorkflow(latestStatus: "in_person_session_started", assignedNotaryUserId: "notary-1"),
-        owner: MemberSessionIdentity(displayName: "Member"),
-        notary: MemberSessionIdentity(displayName: "Illuminotary"),
+        owner: MemberSessionIdentity(displayName: "Member", fullName: "Member", email: "member@example.com", phone: "+15555550100"),
+        notary: MemberSessionIdentity(displayName: "Illuminotary", fullName: "Illuminotary", email: "notary@example.com", phone: "+15555550101"),
         meeting: MemberSessionMeeting(
             meetingId: "meeting-1",
             requestId: "mock-session-request",
@@ -131,6 +131,7 @@ extension MemberInPersonSessionResponse {
             samePlaceRequired: true,
             samePlaceStatus: "pending",
             participants: [],
+            checkins: [],
             identityVerifications: [],
             proximityEvaluations: [],
             artifacts: []

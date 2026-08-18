@@ -6,6 +6,7 @@ export type WorkspaceIdentitySummary = {
   displayName: string;
   fullName: string | null;
   email: string | null;
+  phone: string | null;
   role: string;
   status: string;
 };
@@ -43,6 +44,7 @@ export const getWorkspaceIdentitySummaryByUserId = async (
     displayName: fullName ?? user.email ?? user.id,
     fullName,
     email: user.email,
+    phone: user.phone,
     role: user.role,
     status: user.status,
   } satisfies WorkspaceIdentitySummary;

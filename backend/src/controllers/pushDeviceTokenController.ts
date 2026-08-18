@@ -64,6 +64,7 @@ const pushOpenBodySchema = z.object({
       "member_session",
       "member_request",
       "notary_request_review",
+      "notary_session",
       "member_document",
       "member_notary_selection",
       "document_review",

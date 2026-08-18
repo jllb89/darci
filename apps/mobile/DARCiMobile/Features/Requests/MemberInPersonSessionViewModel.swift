@@ -30,6 +30,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var loadedPreviewURL: String?
     private var didStartRealtime = false
+    private var didAttemptAutomaticLocationShare = false
 
     init(
         requestId: String,
@@ -56,6 +57,23 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     var notaryName: String {
         context?.notary?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? "Your Illuminotary"
+    }
+
+    var notaryEmail: String? {
+        context?.notary?.email?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    var notaryPhone: String? {
+        context?.notary?.phone?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    var isLiveSessionActive: Bool {
+        let status = context?.meeting?.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return status == "in_progress" || status == "completed"
+    }
+
+    var shouldShowContactExchange: Bool {
+        context != nil && isLiveSessionActive == false
     }
 
     var documentTypeLabel: String {
@@ -99,7 +117,9 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     }
 
     var hasMemberCheckIn: Bool {
-        hasParticipantCheckedIn(role: "member")
+        context?.meeting?.checkins?.contains {
+            $0.participantRole == "member" && ["arrival", "proximity", "manual"].contains($0.checkinKind)
+        } ?? false
     }
 
     var timeline: [MemberSessionTimelineItem] {
@@ -122,7 +142,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
 
         return [
             MemberSessionTimelineItem(id: "start", label: "Session started", description: "Your Illuminotary opened the live session.", isComplete: isSessionStarted),
-            MemberSessionTimelineItem(id: "member", label: "Location shared", description: "Your live location has been shared.", isComplete: hasMemberCheckIn),
+            MemberSessionTimelineItem(id: "member", label: "Location shared", description: "Share your live location so your Illuminotary can confirm you are together.", isComplete: hasMemberCheckIn),
             MemberSessionTimelineItem(id: "place", label: "Same-place confirmed", description: "Both live locations are together.", isComplete: hasSamePlace),
             MemberSessionTimelineItem(id: "identity", label: "Identity verified", description: "Your identity has been verified.", isComplete: hasIdentity),
             MemberSessionTimelineItem(id: "venue", label: "Venue recorded", description: "The venue details are recorded.", isComplete: hasVenue),
@@ -136,12 +156,14 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         await refresh(session: session, silent: false)
         startRealtimeIfNeeded(session: session)
         prepareLocationIfHelpful()
+        await shareLocationAutomaticallyIfNeeded(session: session)
     }
 
     func refreshFromForeground(session: AuthSession?) async {
         guard context != nil else { return }
         await refresh(session: session, silent: true)
         prepareLocationIfHelpful()
+        await shareLocationAutomaticallyIfNeeded(session: session)
     }
 
     func stop() {
@@ -193,6 +215,15 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         }
     }
 
+    private func shareLocationAutomaticallyIfNeeded(session: AuthSession?) async {
+        guard didAttemptAutomaticLocationShare == false,
+              context?.meeting?.status == "in_progress",
+              hasMemberCheckIn == false else { return }
+
+        didAttemptAutomaticLocationShare = true
+        await shareLocation(session: session)
+    }
+
     private func prepareLocationIfHelpful() {
         guard context?.meeting?.status == "in_progress" else {
             locationProvider.stopPreparingLocationCapture()
@@ -226,7 +257,10 @@ final class MemberInPersonSessionViewModel: ObservableObject {
                 }
             },
             onInvalidate: { [weak self] in
-                await self?.refresh(session: session, silent: true)
+                guard let self else { return }
+                await refresh(session: session, silent: true)
+                prepareLocationIfHelpful()
+                await shareLocationAutomaticallyIfNeeded(session: session)
             }
         )
     }

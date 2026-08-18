@@ -139,6 +139,7 @@ const meetingGeolocationSchema = z.object({
   sampleKind: z.enum(["device_gps", "network", "manual_pin", "derived"]).optional(),
   captureStage: z.enum([
     "checkin",
+    "member_check_in",
     "checkin_confirmation",
     "proximity_validation",
     "meeting_start",
