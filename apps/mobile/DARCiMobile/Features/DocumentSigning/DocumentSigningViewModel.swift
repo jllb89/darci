@@ -38,11 +38,12 @@ final class DocumentSigningViewModel: ObservableObject {
 
     var visibleSignatures: [DocumentSigningSignature] {
         guard let signing else { return [] }
+        let memberVisibleSignatures = signing.signatures.filter(Self.isMemberVisibleSignature)
         guard let primarySignerName = Self.normalizedPartyName(primarySelfSignature?.partyName), primarySignerName.isEmpty == false else {
-            return signing.signatures
+            return memberVisibleSignatures
         }
 
-        return signing.signatures.filter { Self.normalizedPartyName($0.partyName) == primarySignerName }
+        return memberVisibleSignatures.filter { Self.normalizedPartyName($0.partyName) == primarySignerName }
     }
 
     var activeSignature: DocumentSigningSignature? {
@@ -633,6 +634,19 @@ final class DocumentSigningViewModel: ObservableObject {
         guard signature.status != "captured" else { return false }
         if signature.isRequired { return true }
         return signature.signingGroup != nil && signature.groupMinimumRequired != nil && signature.groupSatisfied == false
+    }
+
+    private static func isMemberVisibleSignature(_ signature: DocumentSigningSignature) -> Bool {
+        normalizedDocumentKey(signature.outputKey) != "trust_certificate"
+            && normalizedDocumentKey(signature.documentKey) != "trust_certificate"
+    }
+
+    private static func normalizedDocumentKey(_ value: String?) -> String {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_") ?? ""
     }
 
     private func schedulePollIfNeeded(session: AuthSession?) {

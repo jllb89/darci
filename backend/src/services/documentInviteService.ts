@@ -1251,6 +1251,7 @@ const createInvitePayload = (input: {
   document: DocumentRecord;
   accessUrl: string;
   expiresAt: string;
+  roleLabel?: string | null | undefined;
   partyRole?: string | null | undefined;
   obligationType?: string | null | undefined;
 }) => {
@@ -1261,7 +1262,7 @@ const createInvitePayload = (input: {
   });
   const documentName = getDocumentLabel(input.document);
   const documentType = resolveDocumentInviteDocumentTypeLabel(input.document);
-  const roleLabel = resolveDocumentInviteRoleLabel({
+  const roleLabel = input.roleLabel?.trim() || resolveDocumentInviteRoleLabel({
     partyRole: input.partyRole,
     obligationType: input.obligationType,
   });
@@ -1748,6 +1749,7 @@ export const createDocumentInvite = async (input: {
   recipientEmail: string;
   recipientName?: string | null;
   inviteLabel?: string | null;
+  roleLabel?: string | null;
   claimMode: InviteClaimMode;
   expiresAt?: string | null;
   idempotencyKey?: string | null;
@@ -1803,6 +1805,10 @@ export const createDocumentInvite = async (input: {
   const documentParty = documentParties.find((party) => party.id === signer.document_party_id) ?? null;
   const recipientName = input.recipientName?.trim() || documentParty?.full_name || signer.party_name;
   const inviteLabel = input.inviteLabel?.trim() || `${signer.party_name} signature request`;
+  const roleLabel = input.roleLabel?.trim() || resolveDocumentInviteRoleLabel({
+    partyRole: signer.party_role,
+    obligationType: signer.obligation_type,
+  });
   const expiresAt = input.expiresAt?.trim() || getDefaultInviteExpiration();
   const templateKey = deriveDocumentSigningTemplateKey({
     hasExistingUser: Boolean(matchedUser),
@@ -1952,17 +1958,13 @@ export const createDocumentInvite = async (input: {
         document,
         accessUrl,
         expiresAt,
-        partyRole: signer.party_role,
-        obligationType: signer.obligation_type,
+        roleLabel,
       }),
       metadata: {
         inviteId: inviteRow.id,
         issuedAt: createdAt,
         documentType: resolveDocumentInviteDocumentTypeLabel(document),
-        roleLabel: resolveDocumentInviteRoleLabel({
-          partyRole: signer.party_role,
-          obligationType: signer.obligation_type,
-        }),
+        roleLabel,
       },
     });
   } catch (error) {

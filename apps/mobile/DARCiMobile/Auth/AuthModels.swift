@@ -119,14 +119,24 @@ struct AuthSession: Codable, Equatable, Sendable {
 }
 
 struct AuthVerifyResponse: Decodable, Equatable, Sendable {
-    let accessToken: String
-    let refreshToken: String
-    let user: AuthenticatedUser
-    let profileCompletionRequired: Bool
+    let accessToken: String?
+    let refreshToken: String?
+    let user: AuthenticatedUser?
+    let profileCompletionRequired: Bool?
+    let stepUp: AuthStepUpChallenge?
 
-    var session: AuthSession {
-        AuthSession(accessToken: accessToken, refreshToken: refreshToken, user: user)
+    var session: AuthSession? {
+        guard let accessToken, let refreshToken, let user else { return nil }
+        return AuthSession(accessToken: accessToken, refreshToken: refreshToken, user: user)
     }
+}
+
+struct AuthStepUpChallenge: Decodable, Equatable, Sendable {
+    let method: AuthIdentifierMethod
+    let identifier: String
+    let otpLength: Int?
+    let cooldownSeconds: Int?
+    let message: String?
 }
 
 struct AuthRefreshResponse: Decodable, Equatable, Sendable {

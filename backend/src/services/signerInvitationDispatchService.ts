@@ -71,6 +71,7 @@ const queueCandidateInvite = async (input: {
     recipientEmail: input.candidate.recipientEmail,
     recipientName: input.candidate.recipientName,
     inviteLabel: null,
+    roleLabel: input.candidate.roleLabel,
     claimMode: input.candidate.claimMode,
     expiresAt: null,
     idempotencyKey: input.candidate.idempotencyKey,

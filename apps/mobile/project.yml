@@ -14,6 +14,9 @@ packages:
   Supabase:
     url: https://github.com/supabase/supabase-swift.git
     exactVersion: 2.54.1
+  PhoneNumberKit:
+    url: https://github.com/PhoneNumberKit/PhoneNumberKit.git
+    from: 5.0.0
 
 settings:
   base:
@@ -75,6 +78,7 @@ targets:
           - "**/.gitkeep"
     dependencies:
       - package: Supabase
+      - package: PhoneNumberKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.illuminote.darci

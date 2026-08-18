@@ -732,6 +732,34 @@ const buildOutputLabelByGenerationRunId = (input: {
   return outputLabelByGenerationRunId;
 };
 
+const buildGenerationRunById = (generationRuns: DocumentGenerationRunRecord[]) => {
+  return new Map(generationRuns.map((run) => [run.id, run]));
+};
+
+const buildOutputOrderByKey = (document: Pick<DocumentRecord, "output_bundle">) => {
+  const outputOrderByKey = new Map<string, number>();
+
+  for (const [index, rawOutput] of (document.output_bundle ?? []).entries()) {
+    const outputKey = asTrimmedString(rawOutput.outputKey);
+    if (outputKey && !outputOrderByKey.has(outputKey)) {
+      outputOrderByKey.set(outputKey, index);
+    }
+  }
+
+  return outputOrderByKey;
+};
+
+const getReviewDocumentGroupKey = (input: {
+  version: DocumentVersionRecord;
+  generationRunById: Map<string, DocumentGenerationRunRecord>;
+}) => {
+  const run = input.version.generation_run_id
+    ? input.generationRunById.get(input.version.generation_run_id)
+    : null;
+
+  return run?.output_key ?? input.version.generation_run_id ?? input.version.file_name ?? input.version.id;
+};
+
 const buildReviewDocumentLabel = (input: {
   version: DocumentVersionRecord;
   index: number;
@@ -790,6 +818,8 @@ const buildReviewDocuments = async (input: {
     document: input.document,
     generationRuns: input.generationRuns,
   });
+  const generationRunById = buildGenerationRunById(input.generationRuns);
+  const outputOrderByKey = buildOutputOrderByKey(input.document);
   const pdfVersions = input.versions
     .filter((version) =>
       isPdfDocumentVersion(version) &&
@@ -800,13 +830,21 @@ const buildReviewDocuments = async (input: {
   const latestByOutput = new Map<string, DocumentVersionRecord>();
 
   for (const version of pdfVersions) {
-    const key = version.generation_run_id ?? version.file_name ?? version.id;
+    const key = getReviewDocumentGroupKey({ version, generationRunById });
     if (!latestByOutput.has(key)) {
       latestByOutput.set(key, version);
     }
   }
 
   const reviewVersions = Array.from(latestByOutput.values()).sort((left, right) => {
+    const leftOrder = outputOrderByKey.get(getReviewDocumentGroupKey({ version: left, generationRunById }))
+      ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = outputOrderByKey.get(getReviewDocumentGroupKey({ version: right, generationRunById }))
+      ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
     const leftTime = Date.parse(left.created_at);
     const rightTime = Date.parse(right.created_at);
     return leftTime - rightTime;

@@ -24,6 +24,7 @@ import {
   recordAuditEvent,
 } from "../services/auditService";
 import { sendValidationError } from "../utils/validation";
+import { normalizePhoneForComparison, normalizePhoneForStorage } from "../utils/phone";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseAnonKey =
@@ -816,6 +817,52 @@ const syncProfileFromAuthUser = async (input: {
   }
 
   return profile;
+};
+
+const findLinkedUserByPhoneForStepUp = async (phone: string) => {
+  if (typeof supabaseAdmin.from !== "function") {
+    return null;
+  }
+
+  const normalizedStoragePhone = normalizePhoneForStorage(phone);
+  const normalizedComparisonPhone = normalizePhoneForComparison(phone);
+  if (!normalizedStoragePhone || !normalizedComparisonPhone) {
+    return null;
+  }
+
+  const nationalDigits = normalizedComparisonPhone.startsWith("1")
+    ? normalizedComparisonPhone.slice(1)
+    : normalizedComparisonPhone;
+  const formattedUsVariants = nationalDigits.length === 10
+    ? [
+        `(${nationalDigits.slice(0, 3)}) ${nationalDigits.slice(3, 6)}-${nationalDigits.slice(6)}`,
+        `${nationalDigits.slice(0, 3)}-${nationalDigits.slice(3, 6)}-${nationalDigits.slice(6)}`,
+        `${nationalDigits.slice(0, 3)} ${nationalDigits.slice(3, 6)} ${nationalDigits.slice(6)}`,
+        `${nationalDigits.slice(0, 3)}.${nationalDigits.slice(3, 6)}.${nationalDigits.slice(6)}`,
+      ]
+    : [];
+  const variants = Array.from(new Set([
+    phone.trim(),
+    normalizedStoragePhone,
+    normalizedStoragePhone.replace(/^\+/, ""),
+    normalizedComparisonPhone,
+    nationalDigits,
+    ...formattedUsVariants,
+  ].filter(Boolean)));
+
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, email, phone")
+    .in("phone", variants)
+    .limit(10);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data as Array<{ id: string; email: string | null; phone: string | null }> | null) ?? []).find(
+    (user) => normalizePhoneForComparison(user.phone) === normalizedComparisonPhone,
+  ) ?? null;
 };
 
 const recordAuthEvent = async (input: {
@@ -2115,6 +2162,62 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
   }
 
   try {
+    const linkedPhoneUser = await findLinkedUserByPhoneForStepUp(phone);
+    const linkedEmail = linkedPhoneUser?.email?.trim().toLowerCase() ?? null;
+    const authEmail = data.user.email?.trim().toLowerCase() ?? null;
+
+    if (linkedEmail && linkedEmail !== authEmail) {
+      const recentSend = await findRecentAuthEmailSend({
+        actions: passwordlessEmailActions,
+        email: linkedEmail,
+      });
+
+      if (!recentSend) {
+        const { error: emailOtpError } = await supabasePublic.auth.signInWithOtp({
+          email: linkedEmail,
+          options: {
+            emailRedirectTo: buildAuthActionRedirectUrl(req, {
+              intent: "otp",
+              returnTo: parsed.data.returnTo ?? null,
+            }),
+            shouldCreateUser: false,
+          },
+        });
+
+        if (emailOtpError) {
+          await recordAuthEvent({
+            action: authAuditActionNames.otpFailed,
+            metadata: {
+              phone,
+              email: linkedEmail,
+              message: emailOtpError.message,
+              stage: "phone_step_up_email_otp_request",
+            },
+          });
+        }
+      }
+
+      await recordAuthEvent({
+        action: authAuditActionNames.otpVerified,
+        actorSupabaseId: data.user.id,
+        metadata: {
+          phone,
+          step_up: "email_otp_required",
+          linked_email: linkedEmail,
+        },
+      });
+
+      return res.status(200).json({
+        stepUp: {
+          method: "email",
+          identifier: linkedEmail,
+          otpLength: 8,
+          cooldownSeconds: authEmailSendCooldownSeconds,
+          message: "We sent a second code to the email already linked to this phone number.",
+        },
+      });
+    }
+
     const profile = await syncProfileFromAuthUser({
       user: data.user,
       phoneFallback: phone,

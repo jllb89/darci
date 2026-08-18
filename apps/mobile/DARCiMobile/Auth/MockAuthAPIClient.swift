@@ -18,7 +18,8 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
             accessToken: "mock-access-token",
             refreshToken: "mock-refresh-token",
             user: Self.mockUser(email: email, phone: nil),
-            profileCompletionRequired: profileCompletionRequired
+            profileCompletionRequired: profileCompletionRequired,
+            stepUp: nil
         )
     }
 
@@ -27,7 +28,8 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
             accessToken: "mock-access-token",
             refreshToken: "mock-refresh-token",
             user: Self.mockUser(email: "", phone: phone),
-            profileCompletionRequired: profileCompletionRequired
+            profileCompletionRequired: profileCompletionRequired,
+            stepUp: nil
         )
     }
 

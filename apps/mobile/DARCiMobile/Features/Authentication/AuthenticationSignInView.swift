@@ -52,40 +52,15 @@ struct AuthenticationSignInContent: Equatable {
     )
 }
 
-private struct AuthenticationPhoneCountry: Identifiable, Equatable {
-    let id: String
-    let name: String
-    let dialCode: String
-    let digitLimit: Int
-}
-
-private let authenticationPhoneCountries: [AuthenticationPhoneCountry] = [
-    AuthenticationPhoneCountry(id: "US", name: "United States", dialCode: "+1", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "PR", name: "Puerto Rico", dialCode: "+1", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "CA", name: "Canada", dialCode: "+1", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "MX", name: "Mexico", dialCode: "+52", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "DO", name: "Dominican Republic", dialCode: "+1", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "CO", name: "Colombia", dialCode: "+57", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "VE", name: "Venezuela", dialCode: "+58", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "PE", name: "Peru", dialCode: "+51", digitLimit: 9),
-    AuthenticationPhoneCountry(id: "CL", name: "Chile", dialCode: "+56", digitLimit: 9),
-    AuthenticationPhoneCountry(id: "AR", name: "Argentina", dialCode: "+54", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "BR", name: "Brazil", dialCode: "+55", digitLimit: 11),
-    AuthenticationPhoneCountry(id: "GB", name: "United Kingdom", dialCode: "+44", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "ES", name: "Spain", dialCode: "+34", digitLimit: 9),
-    AuthenticationPhoneCountry(id: "PH", name: "Philippines", dialCode: "+63", digitLimit: 10),
-    AuthenticationPhoneCountry(id: "IN", name: "India", dialCode: "+91", digitLimit: 10)
-]
-
-private struct AuthenticationPhoneCountryPickerSheet: View {
-    let countries: [AuthenticationPhoneCountry]
-    let selectedCountry: AuthenticationPhoneCountry
-    let onSelect: (AuthenticationPhoneCountry) -> Void
+struct PhoneCountryPickerSheet: View {
+    let countries: [PhoneCountry]
+    let selectedCountry: PhoneCountry
+    let onSelect: (PhoneCountry) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
 
-    private var filteredCountries: [AuthenticationPhoneCountry] {
+    private var filteredCountries: [PhoneCountry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard query.isEmpty == false else { return countries }
 
@@ -212,7 +187,7 @@ struct AuthenticationSignInView: View {
     ]
 
     @State private var phoneNumber = ""
-    @State private var selectedPhoneCountry = authenticationPhoneCountries[0]
+    @State private var selectedPhoneCountry = PhoneNumberFormatting.defaultCountry
     @State private var emailAddress = ""
     @State private var otpCode = ""
     @State private var profileName = ""
@@ -366,12 +341,12 @@ struct AuthenticationSignInView: View {
             }
         }
         .sheet(isPresented: $isPhoneCountryPickerPresented) {
-            AuthenticationPhoneCountryPickerSheet(
-                countries: authenticationPhoneCountries,
+                PhoneCountryPickerSheet(
+                    countries: PhoneNumberFormatting.countries,
                 selectedCountry: selectedPhoneCountry
             ) { country in
                 selectedPhoneCountry = country
-                phoneNumber = formatPhoneNumberInput(phoneNumber, country: country)
+                phoneNumber = PhoneNumberFormatting.formattedNationalNumber(phoneNumber, country: country)
                 focusedField = .phone
                 activatePhoneInputLayout()
             }
@@ -405,19 +380,19 @@ struct AuthenticationSignInView: View {
     }
 
     private var smsDisclosureY: CGFloat {
-        isCompactInputActive ? -72 : 382 - bottomGroupLift
+        isCompactInputActive ? -56 : 407 - bottomGroupLift
     }
 
     private var emailLinkY: CGFloat {
         if shouldShowSmsDisclosure {
-            return isCompactInputActive ? -7.5 : 432.5 - bottomGroupLift
+            return isCompactInputActive ? 14 : 462 - bottomGroupLift
         }
 
         return isCompactInputActive ? -102.5 : 387.5 - bottomGroupLift
     }
 
     private var browseButtonY: CGFloat {
-        shouldShowSmsDisclosure ? 455 - bottomGroupLift : 432.5 - bottomGroupLift
+        shouldShowSmsDisclosure ? 485 - bottomGroupLift : 432.5 - bottomGroupLift
     }
 
     private var entryFeedbackY: CGFloat {
@@ -445,7 +420,7 @@ struct AuthenticationSignInView: View {
     }
 
     private var currentRawIdentifier: String {
-        activeInputMode == .email ? emailAddress : "\(selectedPhoneCountry.dialCode)\(phoneNumber.filter(\.isNumber))"
+        activeInputMode == .email ? emailAddress : PhoneNumberFormatting.e164(phoneNumber, country: selectedPhoneCountry) ?? ""
     }
 
     private var isCompleteInfoReady: Bool {
@@ -490,7 +465,7 @@ struct AuthenticationSignInView: View {
                     .accessibilityIdentifier("phone-number-field")
                     .simultaneousGesture(TapGesture().onEnded(activatePhoneInputLayout))
                     .onChange(of: phoneNumber) { _, newValue in
-                        let formatted = formatPhoneNumberInput(newValue, country: selectedPhoneCountry)
+                        let formatted = PhoneNumberFormatting.formattedNationalNumber(newValue, country: selectedPhoneCountry)
                         if formatted != newValue {
                             phoneNumber = formatted
                         }
@@ -535,24 +510,6 @@ struct AuthenticationSignInView: View {
         .accessibilityLabel("Country code")
         .accessibilityValue("\(selectedPhoneCountry.name), \(selectedPhoneCountry.dialCode)")
         .accessibilityIdentifier("phone-country-selector")
-    }
-
-    private func formatPhoneNumberInput(_ value: String, country: AuthenticationPhoneCountry) -> String {
-        let digits = String(value.filter(\.isNumber).prefix(country.digitLimit))
-        guard digits.isEmpty == false else { return "" }
-
-        if country.id == "US" || country.id == "CA" || country.id == "MX" {
-            switch digits.count {
-            case 0...3:
-                return digits
-            case 4...6:
-                return "(\(digits.prefix(3))) \(digits.dropFirst(3))"
-            default:
-                return "(\(digits.prefix(3))) \(digits.dropFirst(3).prefix(3))-\(digits.dropFirst(6))"
-            }
-        }
-
-        return digits
     }
 
     private func emailInput(in proxy: GeometryProxy) -> some View {
@@ -1077,6 +1034,9 @@ struct AuthenticationSignInView: View {
             switch route {
             case .completeProfile:
                 showCompleteInfo()
+            case .stepUpEmail:
+                otpCode = ""
+                focusedField = .otp
             case .success:
                 showSuccess()
             }

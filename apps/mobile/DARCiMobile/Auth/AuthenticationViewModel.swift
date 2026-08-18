@@ -10,6 +10,7 @@ struct AuthenticationChallenge: Equatable {
 
 enum AuthenticationVerificationRoute: Equatable {
     case completeProfile
+    case stepUpEmail
     case success
 }
 
@@ -111,13 +112,13 @@ final class AuthenticationViewModel: ObservableObject {
 
         clearErrors()
 
-        guard let challenge else {
+        guard let currentChallenge = challenge else {
             globalError = "Start by requesting a verification code."
             return nil
         }
 
         let sanitizedToken = String(token.filter(\.isNumber))
-        guard sanitizedToken.count >= challenge.otpLength else {
+        guard sanitizedToken.count >= currentChallenge.otpLength else {
             fieldError = "Enter the full verification code."
             return nil
         }
@@ -127,23 +128,40 @@ final class AuthenticationViewModel: ObservableObject {
 
         do {
             let response: AuthVerifyResponse
-            switch challenge.method {
+            switch currentChallenge.method {
             case .email:
                 response = try await apiClient.verifyEmailOTP(
-                    email: challenge.identifier,
+                    email: currentChallenge.identifier,
                     token: sanitizedToken,
                     returnTo: returnTo
                 )
             case .phone:
                 response = try await apiClient.verifyPhoneOTP(
-                    phone: challenge.identifier,
+                    phone: currentChallenge.identifier,
                     token: sanitizedToken,
                     returnTo: returnTo
                 )
             }
 
-            try save(session: response.session)
-            return response.profileCompletionRequired ? .completeProfile : .success
+            if let stepUp = response.stepUp {
+                challenge = AuthenticationChallenge(
+                    method: stepUp.method,
+                    identifier: stepUp.identifier,
+                    otpLength: normalizedOTPLength(stepUp.otpLength),
+                    resendCooldownSeconds: stepUp.cooldownSeconds
+                )
+                resendCooldownSeconds = stepUp.cooldownSeconds
+                globalError = stepUp.message
+                return .stepUpEmail
+            }
+
+            guard let session = response.session else {
+                globalError = "Verification needs another step. Request a new code and try again."
+                return nil
+            }
+
+            try save(session: session)
+            return response.profileCompletionRequired == true ? .completeProfile : .success
         } catch {
             apply(error: error, wrongCodeIsFieldError: true)
             return nil

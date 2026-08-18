@@ -33,10 +33,12 @@ struct PersonalInfoView: View {
     @State private var email: String
     @State private var password = ""
     @State private var phone: String
+    @State private var selectedPhoneCountry: PhoneCountry
     @State private var address: String
     @State private var savedSnapshot: Snapshot
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var isPhoneCountryPickerPresented = false
     @FocusState private var focusedField: Field?
 
     init(
@@ -50,7 +52,8 @@ struct PersonalInfoView: View {
             .filter { $0.isEmpty == false }
             .joined(separator: " ")
         let initialEmail = user?.email ?? ""
-        let initialPhone = Self.formattedPhone(user?.phone ?? "")
+        let initialCountry = PhoneNumberFormatting.country(matchingPhone: user?.phone)
+        let initialPhone = PhoneNumberFormatting.formattedNationalNumber(user?.phone ?? "", country: initialCountry)
         let initialAddress = user?.address ?? ""
 
         self.onBack = onBack
@@ -58,6 +61,7 @@ struct PersonalInfoView: View {
         _name = State(initialValue: initialName)
         _email = State(initialValue: initialEmail)
         _phone = State(initialValue: initialPhone)
+        _selectedPhoneCountry = State(initialValue: initialCountry)
         _address = State(initialValue: initialAddress)
         _savedSnapshot = State(initialValue: Snapshot(
             name: initialName,
@@ -114,12 +118,27 @@ struct PersonalInfoView: View {
                     }
 
                     profileField(title: "Phone number", field: .phone, proxy: proxy) {
-                        TextField("", text: $phone)
-                            .textContentType(.telephoneNumber)
-                            .keyboardType(.phonePad)
-                            .onChange(of: phone) { _, nextValue in
-                                phone = Self.formattedPhone(nextValue)
+                        HStack(spacing: scaled(10, in: proxy)) {
+                            Button {
+                                isPhoneCountryPickerPresented = true
+                            } label: {
+                                HStack(spacing: scaled(5, in: proxy)) {
+                                    Text(selectedPhoneCountry.dialCode)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: scaled(8, in: proxy), weight: .bold))
+                                }
+                                .foregroundStyle(.white)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("personal-info-phone-country-selector")
+
+                            TextField("", text: $phone)
+                                .textContentType(.telephoneNumber)
+                                .keyboardType(.phonePad)
+                                .onChange(of: phone) { _, nextValue in
+                                    phone = PhoneNumberFormatting.formattedNationalNumber(nextValue, country: selectedPhoneCountry)
+                                }
+                        }
                     }
 
                     profileField(title: "Address", field: .address, proxy: proxy) {
@@ -172,6 +191,16 @@ struct PersonalInfoView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $isPhoneCountryPickerPresented) {
+            PhoneCountryPickerSheet(
+                countries: PhoneNumberFormatting.countries,
+                selectedCountry: selectedPhoneCountry
+            ) { country in
+                selectedPhoneCountry = country
+                phone = PhoneNumberFormatting.formattedNationalNumber(phone, country: country)
+            }
+            .presentationDetents([.medium, .large])
+        }
     }
 
     private func profileField<Content: View>(
@@ -243,9 +272,8 @@ struct PersonalInfoView: View {
             return nil
         }
 
-        let phoneDigits = phone.filter(\.isNumber)
-        guard phoneDigits.count == 10 || (phoneDigits.count == 11 && phoneDigits.first == "1") else {
-            errorMessage = "Enter a valid US phone number."
+        guard let normalizedPhone = PhoneNumberFormatting.e164(phone, country: selectedPhoneCountry) else {
+            errorMessage = "Enter a valid phone number."
             return nil
         }
 
@@ -254,7 +282,6 @@ struct PersonalInfoView: View {
             return nil
         }
 
-        let normalizedPhone = phoneDigits.count == 10 ? "+1\(phoneDigits)" : "+\(phoneDigits)"
         return PersonalInfoSaveInput(
             firstName: nameParts.first ?? "",
             lastName: nameParts.dropFirst().joined(separator: " "),
@@ -263,25 +290,6 @@ struct PersonalInfoView: View {
             address: address.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             password: password.nilIfEmpty
         )
-    }
-
-    private static func formattedPhone(_ value: String) -> String {
-        var digits = value.filter(\.isNumber)
-        if digits.count > 10, digits.first == "1" {
-            digits.removeFirst()
-        }
-        digits = String(digits.prefix(10))
-
-        switch digits.count {
-        case 0:
-            return ""
-        case 1...3:
-            return "(\(digits)"
-        case 4...6:
-            return "(\(digits.prefix(3))) \(digits.dropFirst(3))"
-        default:
-            return "(\(digits.prefix(3))) \(digits.dropFirst(3).prefix(3))-\(digits.dropFirst(6))"
-        }
     }
 
     private static func message(for error: Error) -> String {

@@ -11,6 +11,7 @@ import {
 } from "./documentService";
 import {
   listDocumentInvites,
+  resolveDocumentInviteRoleLabel,
   type DocumentInviteDetail,
 } from "./documentInviteService";
 import type { DocumentInviteStatus, InviteClaimMode } from "./inviteClaimService";
@@ -49,6 +50,7 @@ export type RemainingSignerInvitationCandidate = {
   obligationType: string;
   recipientEmail: string;
   recipientName: string;
+  roleLabel: string;
   claimMode: InviteClaimMode;
   idempotencyKey: string;
 };
@@ -120,6 +122,23 @@ const normalizeRecipientName = (value?: string | null) =>
 
 const buildIdempotencyKey = (documentId: string, outputSignerId: string) =>
   `signing-remaining:${documentId}:${outputSignerId}`;
+
+const joinRoleLabels = (labels: string[]) => {
+  const uniqueLabels = Array.from(new Set(labels.map((label) => label.trim()).filter(Boolean)));
+  if (uniqueLabels.length === 0) {
+    return "Signer";
+  }
+
+  if (uniqueLabels.length === 1) {
+    return uniqueLabels[0] ?? "Signer";
+  }
+
+  if (uniqueLabels.length === 2) {
+    return `${uniqueLabels[0]} and ${uniqueLabels[1]}`;
+  }
+
+  return `${uniqueLabels.slice(0, -1).join(", ")}, and ${uniqueLabels[uniqueLabels.length - 1]}`;
+};
 
 const getSignatureGroupMinimumRequired = (metadata: Record<string, unknown>) => {
   const candidate = metadata.groupMinimumRequired;
@@ -596,6 +615,40 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
     }
     combinedRecipientKeys.add(combinedRecipientKey);
 
+    const sameRecipientSigners = signers.filter((candidateSigner) => {
+      if (internalInviteOutputKeys.has(candidateSigner.output_key)) {
+        return false;
+      }
+
+      if (capturedAfter.has(candidateSigner.id)) {
+        return false;
+      }
+
+      const candidateGroupKey = getGroupKey(candidateSigner);
+      if (!candidateSigner.is_required && candidateGroupKey && groupSatisfaction.get(candidateGroupKey)) {
+        return false;
+      }
+
+      const candidateParty = candidateSigner.document_party_id
+        ? partyById.get(candidateSigner.document_party_id) ?? null
+        : null;
+      const candidateEmail = normalizeEmail(candidateParty?.email);
+      const candidateName = candidateParty?.full_name?.trim() || candidateSigner.party_name;
+
+      return Boolean(
+        candidateEmail === recipientEmail &&
+          normalizeRecipientName(candidateName) === normalizeRecipientName(recipientName),
+      );
+    });
+    const roleLabel = joinRoleLabels(
+      sameRecipientSigners.map((candidateSigner) =>
+        resolveDocumentInviteRoleLabel({
+          partyRole: candidateSigner.party_role,
+          obligationType: candidateSigner.obligation_type,
+        }),
+      ),
+    );
+
     candidates.push({
       documentId: document.id,
       documentOutputSignerId: signer.id,
@@ -607,6 +660,7 @@ export const resolveRemainingSignerInvitationsAfterCreatorSignature = async (inp
       obligationType: signer.obligation_type,
       recipientEmail,
       recipientName,
+      roleLabel,
       claimMode: "required_signup",
       idempotencyKey,
     });

@@ -645,10 +645,13 @@ const mapDocumentResponse = (document: {
   if (Array.isArray(document.output_bundle) && document.output_bundle.length > 0) {
     const visibleOutputBundle = document.output_bundle.filter((output) => {
       const outputKey = typeof output.outputKey === "string" ? output.outputKey : null;
+      const metadata = isRecordValue(output.metadata) ? output.metadata : {};
       return Boolean(
         outputKey &&
           shouldExposeDocumentReviewOutput({
             outputKey,
+            documentKey: asTrimmedString(metadata.documentKey),
+            baseOutputKey: asTrimmedString(metadata.baseOutputKey),
             viewerRole,
           }),
       );
@@ -2067,6 +2070,8 @@ const resolveVisibleReviewOutputs = (
   return parseOutputBundle(document.output_bundle).filter((output) =>
     shouldExposeDocumentReviewOutput({
       outputKey: output.outputKey,
+      documentKey: asTrimmedString(output.metadata.documentKey),
+      baseOutputKey: asTrimmedString(output.metadata.baseOutputKey),
       viewerRole,
     }),
   );
@@ -2089,6 +2094,8 @@ const resolveApprovedReviewOutputKeys = (input: {
         output.isRequired &&
         !shouldExposeDocumentReviewOutput({
           outputKey: output.outputKey,
+          documentKey: asTrimmedString(output.metadata.documentKey),
+          baseOutputKey: asTrimmedString(output.metadata.baseOutputKey),
           viewerRole: input.viewerRole,
         }),
     )
@@ -4719,7 +4726,12 @@ const getInvitedSignerScopedSignatures = (
   const claimedSignerName = normalizeSigningScopeName(claimedSignature?.partyName ?? inviteAccess.recipientName);
 
   return signing.signatures.filter((signature) => {
-    if (signature.outputKey === "trust_certificate") {
+    if (
+      !shouldExposeDocumentReviewOutput({
+        outputKey: signature.outputKey,
+        documentKey: signature.documentKey,
+      })
+    ) {
       return false;
     }
 
@@ -4822,7 +4834,10 @@ const ensureSigningAccessAllowsSignature = (
 
     return Boolean(
       signer &&
-        signer.output_key !== "trust_certificate" &&
+        shouldExposeDocumentReviewOutput({
+          outputKey: signer.output_key,
+          documentKey: signer.document_key,
+        }) &&
         normalizeSigningScopeName(signer.party_name) === normalizeSigningScopeName(inviteAccess.recipientName),
     );
   }

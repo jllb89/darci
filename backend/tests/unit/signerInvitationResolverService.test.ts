@@ -24,6 +24,19 @@ vi.mock("../../src/services/documentService", () => ({
 
 vi.mock("../../src/services/documentInviteService", () => ({
   listDocumentInvites: mocks.listDocumentInvitesMock,
+  resolveDocumentInviteRoleLabel: ({ partyRole, obligationType }: { partyRole?: string | null; obligationType?: string | null }) => {
+    const labels: Record<string, string> = {
+      grantor: "Trustmaker",
+      trustee: "Trustee",
+      principal: "Principal",
+    };
+    const role = partyRole?.trim() ?? "";
+    if (role) {
+      return labels[role] ?? role;
+    }
+
+    return obligationType?.trim() || "Signer";
+  },
 }));
 
 import {

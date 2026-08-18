@@ -658,9 +658,9 @@ describe("requestReadModelService", () => {
       updated_at: "2026-04-22T09:30:00.000Z",
     });
     mocks.listDocumentGenerationRunsMock.mockResolvedValue([
-      { id: "run-rrr", output_key: "trust_rrr" },
-      { id: "run-cert", output_key: "trust_certificate" },
-      { id: "run-poa-tm2", output_key: "poa_document_tm2" },
+      { id: "run-rrr", output_key: "trust_rrr", document_key: "trust_rrr" },
+      { id: "run-cert", output_key: "trust_certificate", document_key: "trust_certificate" },
+      { id: "run-poa-tm2", output_key: "poa_document_tm2", document_key: "poa_general" },
     ]);
     mocks.listDocumentVersionsMock.mockResolvedValue([
       {
@@ -677,17 +677,30 @@ describe("requestReadModelService", () => {
         created_at: "2026-04-22T09:35:00.000Z",
       },
       {
-        id: "version-rrr",
+        id: "version-rrr-stale",
         document_id: "doc-1",
         version: 4,
-        storage_path: "documents/doc-1/rrr-finalized-v4.pdf",
-        file_name: "rrr-finalized-v4.pdf",
+        storage_path: "documents/doc-1/rrr-stale-signed.pdf",
+        file_name: "rrr-stale-signed.pdf",
         mime_type: "application/pdf",
         size_bytes: 23456,
         is_final: false,
         generation_run_id: "run-rrr",
         created_by: "member-db-1",
         created_at: "2026-04-22T09:36:00.000Z",
+      },
+      {
+        id: "version-rrr-latest",
+        document_id: "doc-1",
+        version: 6,
+        storage_path: "documents/doc-1/rrr-latest-signed.pdf",
+        file_name: "rrr-latest-signed.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 24567,
+        is_final: false,
+        generation_run_id: "run-rrr",
+        created_by: "member-db-1",
+        created_at: "2026-04-22T09:38:00.000Z",
       },
       {
         id: "version-poa-tm2",
@@ -711,9 +724,16 @@ describe("requestReadModelService", () => {
     });
 
     expect(detail?.document.reviewDocuments.map((document) => document.label)).toEqual([
-      "Certificate of Trust",
       "Trust Registration Amendment",
       "Power of Attorney - Mina Patel",
+    ]);
+    expect(detail?.document.reviewDocuments.map((document) => document.versionId)).toEqual([
+      "version-rrr-latest",
+      "version-poa-tm2",
+    ]);
+    expect(detail?.document.outputBundle?.map((output) => output.outputKey)).toEqual([
+      "trust_rrr",
+      "poa_document_tm2",
     ]);
   });
 

@@ -17,7 +17,10 @@ import {
 } from "./documentWorkspaceReadModelService";
 import { listFinalizationStatusHistory } from "./documentFinalizationService";
 import { buildDocumentTimeline } from "./documentTimelineService";
-import { getVisibleDocumentIdn } from "./documentVisibilityService";
+import {
+  getVisibleDocumentIdn,
+  shouldExposeDocumentReviewOutput,
+} from "./documentVisibilityService";
 import {
   getIlluminotarizationWorkflowById,
   getLatestCodeDeliveryForRequest,
@@ -377,6 +380,70 @@ const buildOutputLabelByGenerationRunId = (input: {
   return outputLabelByGenerationRunId;
 };
 
+const buildOutputMetadataByKey = (document: Pick<DocumentRecord, "output_bundle">) => {
+  const outputMetadataByKey = new Map<string, Record<string, unknown>>();
+
+  for (const rawOutput of document.output_bundle ?? []) {
+    const outputKey = asTrimmedString(rawOutput.outputKey);
+    const metadata = rawOutput.metadata;
+    if (outputKey && metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+      outputMetadataByKey.set(outputKey, metadata as Record<string, unknown>);
+    }
+  }
+
+  return outputMetadataByKey;
+};
+
+const buildOutputOrderByKey = (document: Pick<DocumentRecord, "output_bundle">) => {
+  const outputOrderByKey = new Map<string, number>();
+
+  for (const [index, rawOutput] of (document.output_bundle ?? []).entries()) {
+    const outputKey = asTrimmedString(rawOutput.outputKey);
+    if (outputKey && !outputOrderByKey.has(outputKey)) {
+      outputOrderByKey.set(outputKey, index);
+    }
+  }
+
+  return outputOrderByKey;
+};
+
+const buildGenerationRunById = (generationRuns: DocumentGenerationRunRecord[]) => {
+  return new Map(generationRuns.map((run) => [run.id, run]));
+};
+
+const getReviewDocumentGroupKey = (input: {
+  version: DocumentVersionRecord;
+  generationRunById: Map<string, DocumentGenerationRunRecord>;
+}) => {
+  const run = input.version.generation_run_id
+    ? input.generationRunById.get(input.version.generation_run_id)
+    : null;
+
+  return run?.output_key ?? input.version.generation_run_id ?? input.version.file_name ?? input.version.id;
+};
+
+const isVisibleReviewVersion = (input: {
+  version: DocumentVersionRecord;
+  generationRunById: Map<string, DocumentGenerationRunRecord>;
+  outputMetadataByKey: Map<string, Record<string, unknown>>;
+  viewerRole: RequestRole;
+}) => {
+  const run = input.version.generation_run_id
+    ? input.generationRunById.get(input.version.generation_run_id)
+    : null;
+  if (!run?.output_key) {
+    return true;
+  }
+
+  const metadata = input.outputMetadataByKey.get(run.output_key) ?? {};
+  return shouldExposeDocumentReviewOutput({
+    outputKey: run.output_key,
+    documentKey: asTrimmedString(metadata.documentKey) || run.document_key,
+    baseOutputKey: asTrimmedString(metadata.baseOutputKey),
+    viewerRole: input.viewerRole,
+  });
+};
+
 const buildReviewDocumentLabel = (input: {
   version: DocumentVersionRecord;
   index: number;
@@ -431,29 +498,47 @@ const buildReviewDocuments = async (
     document: Pick<DocumentRecord, "document_type" | "output_bundle" | "product_flow_mode">;
     versions: DocumentVersionRecord[];
     generationRuns: DocumentGenerationRunRecord[];
+    viewerRole: RequestRole;
   },
 ): Promise<SharedRequestDocumentResponse["reviewDocuments"]> => {
   const outputLabelByGenerationRunId = buildOutputLabelByGenerationRunId({
     document: input.document,
     generationRuns: input.generationRuns,
   });
+  const outputMetadataByKey = buildOutputMetadataByKey(input.document);
+  const outputOrderByKey = buildOutputOrderByKey(input.document);
+  const generationRunById = buildGenerationRunById(input.generationRuns);
   const pdfVersions = input.versions
     .filter((version) =>
       isPdfDocumentVersion(version) &&
         (isReviewableDocumentVersion(version) ||
-          isUploadedDocumentReviewSource({ document: input.document, version })),
+          isUploadedDocumentReviewSource({ document: input.document, version })) &&
+        isVisibleReviewVersion({
+          version,
+          generationRunById,
+          outputMetadataByKey,
+          viewerRole: input.viewerRole,
+        }),
     )
     .sort((left, right) => right.version - left.version);
   const latestByOutput = new Map<string, DocumentVersionRecord>();
 
   for (const version of pdfVersions) {
-    const key = version.generation_run_id ?? version.file_name ?? version.id;
+    const key = getReviewDocumentGroupKey({ version, generationRunById });
     if (!latestByOutput.has(key)) {
       latestByOutput.set(key, version);
     }
   }
 
   const reviewVersions = Array.from(latestByOutput.values()).sort((left, right) => {
+    const leftOrder = outputOrderByKey.get(getReviewDocumentGroupKey({ version: left, generationRunById }))
+      ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = outputOrderByKey.get(getReviewDocumentGroupKey({ version: right, generationRunById }))
+      ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+
     const leftTime = Date.parse(left.created_at);
     const rightTime = Date.parse(right.created_at);
     return leftTime - rightTime;
@@ -520,7 +605,23 @@ const mapRequestDocumentResponse = (input: {
   }
 
   if (Array.isArray(input.document.output_bundle) && input.document.output_bundle.length > 0) {
-    response.outputBundle = input.document.output_bundle;
+    response.outputBundle = input.document.output_bundle.filter((output) => {
+      const outputKey = asTrimmedString(output.outputKey);
+      const metadata = output.metadata;
+      const metadataRecord = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? metadata as Record<string, unknown>
+        : {};
+
+      return Boolean(
+        outputKey &&
+          shouldExposeDocumentReviewOutput({
+            outputKey,
+            documentKey: asTrimmedString(metadataRecord.documentKey),
+            baseOutputKey: asTrimmedString(metadataRecord.baseOutputKey),
+            viewerRole: input.viewerRole,
+          }),
+      );
+    });
   }
 
   return response;
@@ -915,6 +1016,7 @@ export const getSharedRequestDetail = async (input: {
           document: resource.document,
           versions,
           generationRuns,
+          viewerRole: input.role,
         });
       },
     }),

@@ -1236,7 +1236,7 @@ final class DocumentIntakeViewModel: ObservableObject {
                 productFlowMode: modeKey,
                 jurisdiction: selectedJurisdiction,
                 rulesSnapshotVersion: Self.rulesSnapshotVersion,
-                resumeLatestDraft: false
+                resumeLatestDraft: true
             ),
             accessToken: accessToken
         )
