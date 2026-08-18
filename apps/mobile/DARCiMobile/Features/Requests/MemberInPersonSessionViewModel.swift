@@ -17,6 +17,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     @Published private(set) var isSharingLocation = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var noticeMessage: String?
+    @Published private(set) var noticeToken = 0
     @Published private(set) var shouldShowLocationSettingsAction = false
     @Published private(set) var realtimeState: NotarySessionRealtimeState = .idle
 
@@ -28,6 +29,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     private let urlSession: URLSession
     private var previewTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
+    private var noticeDismissTask: Task<Void, Never>?
     private var loadedPreviewURL: String?
     private var didStartRealtime = false
     private var didAttemptAutomaticLocationShare = false
@@ -95,6 +97,18 @@ final class MemberInPersonSessionViewModel: ObservableObject {
             ?? "PENDING"
     }
 
+    var publicVerificationURL: URL? {
+        guard let path = context?.document.summary.finalization.publicVerifyPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              path.isEmpty == false,
+              context?.document.summary.finalization.isAnchored == true else {
+            return nil
+        }
+        if let absoluteURL = URL(string: path), absoluteURL.scheme != nil {
+            return absoluteURL
+        }
+        return URL(string: "https://app.staging.darciregistry.dev\(path.hasPrefix("/") ? path : "/\(path)")")
+    }
+
     var statusLabel: String {
         let value = context?.meeting?.status
             ?? context?.request.meetingStatus
@@ -150,14 +164,14 @@ final class MemberInPersonSessionViewModel: ObservableObject {
             && context?.document.summary.verification.verifyPath?.nilIfEmpty != nil
 
         return [
-            MemberSessionTimelineItem(id: "start", label: "Session started", description: "Your Illuminotary opened the live session.", isComplete: isSessionStarted),
-            MemberSessionTimelineItem(id: "member", label: "Location shared", description: "Share your live location so your Illuminotary can confirm you are together.", isComplete: hasMemberCheckIn),
+            MemberSessionTimelineItem(id: "start", label: "Session started", description: isSessionStarted ? "Your Illuminotary opened the live session." : "Waiting for your Illuminotary to open the live session.", isComplete: isSessionStarted),
+            MemberSessionTimelineItem(id: "member", label: "Location shared", description: hasMemberCheckIn ? "Your live location was shared." : "Share your live location so your Illuminotary can confirm you are together.", isComplete: hasMemberCheckIn),
             MemberSessionTimelineItem(id: "place", label: "Same-place confirmed", description: samePlaceDescription, isComplete: hasSamePlace),
-            MemberSessionTimelineItem(id: "identity", label: "Identity verified", description: "Your identity has been verified.", isComplete: hasIdentity),
-            MemberSessionTimelineItem(id: "venue", label: "Venue recorded", description: "The venue details are recorded.", isComplete: hasVenue),
-            MemberSessionTimelineItem(id: "seal", label: "Acknowledgment appended", description: "The notarial acknowledgment is on the document.", isComplete: hasAcknowledgment),
-            MemberSessionTimelineItem(id: "complete", label: "Session completed", description: "The in-person session is closed.", isComplete: isMeetingCompleted),
-            MemberSessionTimelineItem(id: "anchor", label: "Verification ready", description: "The final package is verification-ready.", isComplete: isVerificationReady),
+            MemberSessionTimelineItem(id: "identity", label: "Identity verified", description: hasIdentity ? "Your identity has been verified." : "Your Illuminotary is recording the identity verification.", isComplete: hasIdentity),
+            MemberSessionTimelineItem(id: "venue", label: "Venue recorded", description: hasVenue ? "The venue details are recorded." : "Your Illuminotary is recording the acknowledgment venue.", isComplete: hasVenue),
+            MemberSessionTimelineItem(id: "seal", label: "Acknowledgment appended", description: hasAcknowledgment ? "The notarial acknowledgment is on the document." : "Your Illuminotary is appending the notarial acknowledgment.", isComplete: hasAcknowledgment),
+            MemberSessionTimelineItem(id: "complete", label: "Session completed", description: isMeetingCompleted ? "The in-person session is closed." : "Your Illuminotary will close the session after evidence is complete.", isComplete: isMeetingCompleted),
+            MemberSessionTimelineItem(id: "anchor", label: "Verification ready", description: isVerificationReady ? "The final package is verification-ready." : "DARCi is preparing the final public verification package.", isComplete: isVerificationReady),
         ]
     }
     private func samePlaceDescription(
@@ -214,6 +228,8 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         pollTask = nil
         previewTask?.cancel()
         previewTask = nil
+        noticeDismissTask?.cancel()
+        noticeDismissTask = nil
         locationProvider.stopPreparingLocationCapture()
     }
 
@@ -246,13 +262,26 @@ final class MemberInPersonSessionViewModel: ObservableObject {
                 ),
                 accessToken: accessToken
             )
-            noticeMessage = "Location shared. Your Illuminotary can continue the session."
+            showNotice("Location shared. Your Illuminotary can continue the session.")
             shouldShowLocationSettingsAction = false
             await refresh(session: session, silent: true)
             prepareLocationIfHelpful()
         } catch {
             errorMessage = Self.displayMessage(for: error, fallback: "Unable to share your location.")
             shouldShowLocationSettingsAction = (error as? NotarySessionLocationError) == .permissionDenied
+        }
+    }
+
+    private func showNotice(_ message: String) {
+        noticeDismissTask?.cancel()
+        noticeMessage = message
+        noticeToken += 1
+        noticeDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard Task.isCancelled == false else { return }
+            await MainActor.run {
+                self?.noticeMessage = nil
+            }
         }
     }
 

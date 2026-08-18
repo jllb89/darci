@@ -12,6 +12,7 @@ struct MemberInPersonSessionView: View {
     @State private var currentPage = 1
     @State private var zoomInTrigger = 0
     @State private var zoomOutTrigger = 0
+    @State private var isShowingNoticeToast = false
 
     init(
         session: AuthSession?,
@@ -61,6 +62,25 @@ struct MemberInPersonSessionView: View {
                             }
 
                             documentPreview(in: proxy)
+
+                            if let publicVerificationURL = viewModel.publicVerificationURL {
+                                Button {
+                                    openURL(publicVerificationURL)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "arrow.up.right.square")
+                                            .font(.system(size: 14, weight: .medium))
+                                        Text("Open public verification")
+                                            .font(DARCiFont.maisonNeue(.medium, size: 13))
+                                    }
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                                    .background(Color.black)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("member-session-open-public-verification")
+                            }
                         }
                     }
                     .padding(.horizontal, 24)
@@ -81,6 +101,14 @@ struct MemberInPersonSessionView: View {
                             .font(DARCiFont.maisonNeue(.book, size: 12))
                             .tint(.black)
                     }
+                }
+            }
+            .overlay(alignment: .top) {
+                if let noticeMessage = viewModel.noticeMessage, isShowingNoticeToast {
+                    noticeToast(noticeMessage)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -117,6 +145,17 @@ struct MemberInPersonSessionView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await viewModel.refreshFromForeground(session: session) }
+        }
+        .onChange(of: viewModel.noticeToken) { _, _ in
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isShowingNoticeToast = viewModel.noticeMessage != nil
+            }
+        }
+        .onChange(of: viewModel.noticeMessage) { _, message in
+            guard message == nil else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isShowingNoticeToast = false
+            }
         }
         .onDisappear { viewModel.stop() }
     }
@@ -239,9 +278,19 @@ struct MemberInPersonSessionView: View {
                 showsLocationSettingsAction: viewModel.shouldShowLocationSettingsAction
             )
         }
-        if let noticeMessage = viewModel.noticeMessage {
-            message(noticeMessage, color: Color(red: 0.03, green: 0.34, blue: 0.12), background: Color(red: 0.90, green: 0.98, blue: 0.91))
-        }
+    }
+
+    private func noticeToast(_ text: String) -> some View {
+        Text(text)
+            .font(DARCiFont.maisonNeue(.book, size: 12))
+            .foregroundStyle(.white)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
     }
 
     private func message(

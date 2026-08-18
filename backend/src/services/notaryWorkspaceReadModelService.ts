@@ -705,6 +705,17 @@ const asTrimmedString = (value: unknown) => {
   return typeof value === "string" ? value.trim() : "";
 };
 
+const normalizeSessionReviewOutputLabel = (input: { outputKey: string; outputLabel: string }) => {
+  if (
+    input.outputKey === "trust_rrr" ||
+    input.outputLabel.trim().toLowerCase() === "trust registration amendment"
+  ) {
+    return "Trust Registration";
+  }
+
+  return input.outputLabel;
+};
+
 const buildOutputLabelByGenerationRunId = (input: {
   document: Pick<DocumentRecord, "output_bundle">;
   generationRuns: DocumentGenerationRunRecord[];
@@ -716,7 +727,7 @@ const buildOutputLabelByGenerationRunId = (input: {
     const outputLabel = asTrimmedString(rawOutput.outputLabel);
 
     if (outputKey && outputLabel) {
-      outputLabelByKey.set(outputKey, outputLabel);
+      outputLabelByKey.set(outputKey, normalizeSessionReviewOutputLabel({ outputKey, outputLabel }));
     }
   }
 
@@ -734,6 +745,21 @@ const buildOutputLabelByGenerationRunId = (input: {
 
 const buildGenerationRunById = (generationRuns: DocumentGenerationRunRecord[]) => {
   return new Map(generationRuns.map((run) => [run.id, run]));
+};
+
+const hiddenSessionReviewOutputKeys = new Set(["trust_certificate"]);
+
+const isVisibleSessionReviewVersion = (input: {
+  version: DocumentVersionRecord;
+  generationRunById: Map<string, DocumentGenerationRunRecord>;
+}) => {
+  const run = input.version.generation_run_id
+    ? input.generationRunById.get(input.version.generation_run_id)
+    : null;
+  const outputKey = run?.output_key?.trim() ?? "";
+  const documentKey = run?.document_key?.trim() ?? "";
+
+  return ![outputKey, documentKey].some((key) => hiddenSessionReviewOutputKeys.has(key));
 };
 
 const buildOutputOrderByKey = (document: Pick<DocumentRecord, "output_bundle">) => {
@@ -824,7 +850,11 @@ const buildReviewDocuments = async (input: {
     .filter((version) =>
       isPdfDocumentVersion(version) &&
         (isReviewableDocumentVersion(version) ||
-          isUploadedDocumentReviewSource({ document: input.document, version })),
+          isUploadedDocumentReviewSource({ document: input.document, version })) &&
+        isVisibleSessionReviewVersion({
+          version,
+          generationRunById,
+        }),
     )
     .sort((left, right) => right.version - left.version);
   const latestByOutput = new Map<string, DocumentVersionRecord>();

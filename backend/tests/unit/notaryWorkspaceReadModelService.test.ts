@@ -847,8 +847,7 @@ describe("notaryWorkspaceReadModelService", () => {
     });
 
     expect(context?.document.reviewDocuments.map((document) => document.label)).toEqual([
-      "Certificate of Trust",
-      "Trust Registration Amendment",
+      "Trust Registration",
       "Power of Attorney - Jorge Lopez",
     ]);
   });

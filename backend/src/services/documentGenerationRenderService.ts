@@ -2619,7 +2619,8 @@ const drawAcknowledgmentAppendixImages = (
     : right - left;
 
   if (input.signatureImage) {
-    document.image(input.signatureImage.bytes, left, topY, {
+    const centeredSignatureY = topY + (ACKNOWLEDGMENT_SEAL_MAX_HEIGHT - ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT) / 2;
+    document.image(input.signatureImage.bytes, left, centeredSignatureY, {
       fit: [signatureMaxWidth, ACKNOWLEDGMENT_SIGNATURE_MAX_HEIGHT],
     });
   }
