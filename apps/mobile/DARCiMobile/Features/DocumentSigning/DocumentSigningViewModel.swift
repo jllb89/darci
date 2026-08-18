@@ -188,7 +188,8 @@ final class DocumentSigningViewModel: ObservableObject {
                 typedValue: trimmedValue,
                 typedKind: typedKind,
                 imageDataUrl: nil,
-                savedSignatureId: nil
+                savedSignatureId: nil,
+                reuseSourceSignatureId: nil
             ),
             session: session,
             fallback: "Failed to save typed signature."
@@ -211,7 +212,7 @@ final class DocumentSigningViewModel: ObservableObject {
             from: signature,
             session: session,
             fallback: "Failed to save typed signature."
-        ) { targetSignature in
+        ) { targetSignature, reuseSourceSignatureId in
             DocumentSignatureCaptureRequest(
                 generationRunId: targetSignature.generationRunId,
                 outputSignerId: targetSignature.outputSignerId,
@@ -219,7 +220,8 @@ final class DocumentSigningViewModel: ObservableObject {
                 typedValue: trimmedValue,
                 typedKind: typedKind,
                 imageDataUrl: nil,
-                savedSignatureId: nil
+                savedSignatureId: nil,
+                reuseSourceSignatureId: reuseSourceSignatureId
             )
         }
     }
@@ -243,7 +245,8 @@ final class DocumentSigningViewModel: ObservableObject {
                 typedValue: nil,
                 typedKind: nil,
                 imageDataUrl: imageDataUrl,
-                savedSignatureId: nil
+                savedSignatureId: nil,
+                reuseSourceSignatureId: nil
             ),
             session: session,
             fallback: "Failed to save drawn signature."
@@ -264,7 +267,7 @@ final class DocumentSigningViewModel: ObservableObject {
             from: signature,
             session: session,
             fallback: "Failed to save drawn signature."
-        ) { targetSignature in
+        ) { targetSignature, reuseSourceSignatureId in
             DocumentSignatureCaptureRequest(
                 generationRunId: targetSignature.generationRunId,
                 outputSignerId: targetSignature.outputSignerId,
@@ -272,7 +275,8 @@ final class DocumentSigningViewModel: ObservableObject {
                 typedValue: nil,
                 typedKind: nil,
                 imageDataUrl: imageDataUrl,
-                savedSignatureId: nil
+                savedSignatureId: nil,
+                reuseSourceSignatureId: reuseSourceSignatureId
             )
         }
     }
@@ -291,7 +295,8 @@ final class DocumentSigningViewModel: ObservableObject {
                 typedValue: nil,
                 typedKind: nil,
                 imageDataUrl: nil,
-                savedSignatureId: savedSignatureId
+                savedSignatureId: savedSignatureId,
+                reuseSourceSignatureId: nil
             ),
             session: session,
             fallback: "Failed to apply saved signature."
@@ -307,7 +312,7 @@ final class DocumentSigningViewModel: ObservableObject {
             from: signature,
             session: session,
             fallback: "Failed to apply saved signature."
-        ) { targetSignature in
+        ) { targetSignature, _ in
             DocumentSignatureCaptureRequest(
                 generationRunId: targetSignature.generationRunId,
                 outputSignerId: targetSignature.outputSignerId,
@@ -315,7 +320,8 @@ final class DocumentSigningViewModel: ObservableObject {
                 typedValue: nil,
                 typedKind: nil,
                 imageDataUrl: nil,
-                savedSignatureId: savedSignatureId
+                savedSignatureId: savedSignatureId,
+                reuseSourceSignatureId: nil
             )
         }
     }
@@ -343,7 +349,8 @@ final class DocumentSigningViewModel: ObservableObject {
                     outputSignerId: signature.outputSignerId,
                     fileName: fileName,
                     fileSize: data.count,
-                    mimeType: mimeType
+                    mimeType: mimeType,
+                    reuseSourceSignatureId: nil
                 ),
                 accessToken: accessToken
             )
@@ -394,6 +401,7 @@ final class DocumentSigningViewModel: ObservableObject {
 
         do {
             var latestInviteDispatch: RemainingSignerInviteDispatchResponse?
+            var reuseSourceSignatureId: String?
             for targetSignature in targetSignatures {
                 let requestResponse = try await apiClient.requestSignatureUpload(
                     documentId: documentId,
@@ -402,7 +410,8 @@ final class DocumentSigningViewModel: ObservableObject {
                         outputSignerId: targetSignature.outputSignerId,
                         fileName: fileName,
                         fileSize: data.count,
-                        mimeType: mimeType
+                        mimeType: mimeType,
+                        reuseSourceSignatureId: reuseSourceSignatureId
                     ),
                     accessToken: accessToken
                 )
@@ -424,6 +433,9 @@ final class DocumentSigningViewModel: ObservableObject {
                     accessToken: accessToken
                 )
                 latestInviteDispatch = finalizeResponse.remainingSignerInvites
+                if reuseSourceSignatureId == nil {
+                    reuseSourceSignatureId = signatureId
+                }
             }
 
             applyRemainingSignerInviteDispatchSummary(latestInviteDispatch)
@@ -581,7 +593,7 @@ final class DocumentSigningViewModel: ObservableObject {
         from signature: DocumentSigningSignature,
         session: AuthSession?,
         fallback: String,
-        makeRequest: (DocumentSigningSignature) -> DocumentSignatureCaptureRequest
+        makeRequest: (DocumentSigningSignature, String?) -> DocumentSignatureCaptureRequest
     ) async -> Bool {
         guard isReadyForSignatureMutations else {
             errorMessage = nil
@@ -599,10 +611,14 @@ final class DocumentSigningViewModel: ObservableObject {
 
         do {
             var latestInviteDispatch: RemainingSignerInviteDispatchResponse?
+            var reuseSourceSignatureId: String?
             for targetSignature in targetSignatures {
-                let request = makeRequest(targetSignature)
+                let request = makeRequest(targetSignature, reuseSourceSignatureId)
                 let response = try await apiClient.captureSignature(documentId: documentId, request: request, accessToken: accessToken)
                 latestInviteDispatch = response.remainingSignerInvites
+                if reuseSourceSignatureId == nil, let signatureId = response.signature?.id {
+                    reuseSourceSignatureId = signatureId
+                }
             }
 
             applyRemainingSignerInviteDispatchSummary(latestInviteDispatch)

@@ -1604,10 +1604,13 @@ export const queueMemberSignaturesRecordedNotification = async (input: {
 export const queueSignerCompletionConfirmationNotification = async (input: {
   documentId: string;
   documentOutputSignerId: string;
+  documentOutputSignerIds?: string[] | undefined;
   signatureId: string;
   signerEmail: string;
   signerName?: string | null | undefined;
   signerUserId?: string | null | undefined;
+  roleLabel?: string | null | undefined;
+  dedupeKey?: string | null | undefined;
   requestedBySupabaseUserId?: string | undefined;
 }) => {
   try {
@@ -1619,7 +1622,7 @@ export const queueSignerCompletionConfirmationNotification = async (input: {
     return await queueTemplatedNotification({
       templateKey: "signer_completion_confirmation_email",
       jobKind: "completion",
-      dedupeKey: `signer_completion_confirmation:${document.id}:${input.documentOutputSignerId}`,
+      dedupeKey: `signer_completion_confirmation:${document.id}:${input.dedupeKey?.trim() || input.documentOutputSignerId}`,
       documentId: document.id,
       requestedBySupabaseUserId: input.requestedBySupabaseUserId,
       payload: {
@@ -1636,13 +1639,17 @@ export const queueSignerCompletionConfirmationNotification = async (input: {
           displayName: input.signerName ?? null,
           metadata: {
             documentOutputSignerId: input.documentOutputSignerId,
+              documentOutputSignerIds: input.documentOutputSignerIds ?? [input.documentOutputSignerId],
             signatureId: input.signatureId,
+              roleLabel: input.roleLabel ?? null,
           },
         },
       ],
       metadata: {
         documentOutputSignerId: input.documentOutputSignerId,
+          documentOutputSignerIds: input.documentOutputSignerIds ?? [input.documentOutputSignerId],
         signatureId: input.signatureId,
+          roleLabel: input.roleLabel ?? null,
       },
     });
   } catch (error) {
@@ -1658,8 +1665,11 @@ export const queueSignerCompletionConfirmationNotification = async (input: {
 export const queueSignerSignedUpdateNotification = async (input: {
   documentId: string;
   documentOutputSignerId: string;
+  documentOutputSignerIds?: string[] | undefined;
   signatureId: string;
   signerName: string;
+  roleLabel?: string | null | undefined;
+  dedupeKey?: string | null | undefined;
   remainingSignerCount: number;
   requestedBySupabaseUserId?: string | undefined;
 }) => {
@@ -1677,7 +1687,7 @@ export const queueSignerSignedUpdateNotification = async (input: {
     return await queueTemplatedNotification({
       templateKey: "signer_signed_update_email",
       jobKind: "status_update",
-      dedupeKey: `signer_signed_update:${document.id}:${input.documentOutputSignerId}`,
+      dedupeKey: `signer_signed_update:${document.id}:${input.dedupeKey?.trim() || input.documentOutputSignerId}`,
       documentId: document.id,
       requestedBySupabaseUserId: input.requestedBySupabaseUserId,
       payload: {
@@ -1690,7 +1700,9 @@ export const queueSignerSignedUpdateNotification = async (input: {
       recipients: [buildOwnerRecipient(owner)],
       metadata: {
         documentOutputSignerId: input.documentOutputSignerId,
+        documentOutputSignerIds: input.documentOutputSignerIds ?? [input.documentOutputSignerId],
         signatureId: input.signatureId,
+        roleLabel: input.roleLabel ?? null,
         remainingSignerCount: input.remainingSignerCount,
       },
     });

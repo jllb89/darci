@@ -66,7 +66,7 @@ describe("document IDN visibility", () => {
     mocks.buildDocumentActionEnrichmentMock.mockResolvedValue(undefined);
   });
 
-  it("hides IDN in member document lists until post-sign stages", async () => {
+  it("shows IDN in member document lists once signing is prepared", async () => {
     mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
     mocks.listDocumentsMock.mockResolvedValue([
       {
@@ -111,12 +111,12 @@ describe("document IDN visibility", () => {
     expect(response.status).toBe(200);
     expect(response.body.documents).toEqual([
       expect.objectContaining({ id: "doc-1", idn: null, status: "pending_review" }),
-      expect.objectContaining({ id: "doc-2", idn: null, status: "pending_signature" }),
+      expect.objectContaining({ id: "doc-2", idn: "CD34EF56GH78", status: "pending_signature" }),
       expect.objectContaining({ id: "doc-3", idn: "EF56GH78IJ90", status: "pending_notary" }),
     ]);
   });
 
-  it("hides IDN for members on a single document but keeps admin visibility", async () => {
+  it("shows prepared IDN for members on a signing-ready single document", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
@@ -145,7 +145,7 @@ describe("document IDN visibility", () => {
       .set("Authorization", `Bearer ${adminToken}`);
 
     expect(memberResponse.status).toBe(200);
-    expect(memberResponse.body.document.idn).toBeNull();
+    expect(memberResponse.body.document.idn).toBe("AB12CD34EF56");
     expect(adminResponse.status).toBe(200);
     expect(adminResponse.body.document.idn).toBe("AB12CD34EF56");
   });

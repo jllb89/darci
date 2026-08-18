@@ -385,7 +385,7 @@ final class DocumentReviewViewModel: ObservableObject {
         case "trust_certificate":
             return "Trust Certification"
         case "trust_rrr":
-            return "Trust Registration Amendment"
+            return "Trust Registration"
         case "uploaded_document", "notarize_document":
             return "Document Notarization"
         default:

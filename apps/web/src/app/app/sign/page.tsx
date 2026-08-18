@@ -389,6 +389,118 @@ const normalizePartyName = (value: string | null | undefined) => {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 };
 
+const signatureRoleLabels: Record<string, string> = {
+  grantor: "Trustmaker",
+  trustee: "Trustee",
+  principal: "Principal",
+  successor_trustee: "Successor trustee",
+};
+
+const formatSignatureRoleLabel = (partyRole: string | null | undefined) => {
+  const normalizedRole = partyRole?.trim() ?? "";
+  if (!normalizedRole) {
+    return "Signer";
+  }
+
+  return signatureRoleLabels[normalizedRole] ?? normalizedRole.replace(/_/g, " ");
+};
+
+const joinSignatureRoleLabels = (labels: string[]) => {
+  const uniqueLabels = Array.from(new Set(labels.map((label) => label.trim()).filter(Boolean)));
+  if (uniqueLabels.length === 0) {
+    return "Signer";
+  }
+
+  if (uniqueLabels.length === 1) {
+    return uniqueLabels[0] ?? "Signer";
+  }
+
+  if (uniqueLabels.length === 2) {
+    return `${uniqueLabels[0]} and ${uniqueLabels[1]}`;
+  }
+
+  return `${uniqueLabels.slice(0, -1).join(", ")}, and ${uniqueLabels[uniqueLabels.length - 1]}`;
+};
+
+type SidebarSignatureItem = {
+  key: string;
+  signatures: SigningSignature[];
+  primarySignature: SigningSignature;
+  outputLabel: string;
+  roleLabel: string;
+  statusLabel: string;
+  capturedAt: string | null;
+  isBundledSamePersonTrustee: boolean;
+};
+
+const isSamePersonTrustmakerTrusteeBundle = (
+  signatures: SigningSignature[],
+  productFlowMode: string | null | undefined,
+) => {
+  if (productFlowMode !== "trust_bundle") {
+    return false;
+  }
+
+  const roles = new Set(signatures.map((signature) => signature.partyRole));
+  return roles.has("grantor") && roles.has("trustee");
+};
+
+const buildSidebarSignatureItems = (
+  signatures: SigningSignature[],
+  productFlowMode: string | null | undefined,
+): SidebarSignatureItem[] => {
+  const consumedOutputSignerIds = new Set<string>();
+  const items: SidebarSignatureItem[] = [];
+
+  for (const signature of signatures) {
+    if (consumedOutputSignerIds.has(signature.outputSignerId)) {
+      continue;
+    }
+
+    const signerName = normalizePartyName(signature.partyName);
+    const samePersonSignatures = signerName
+      ? signatures.filter((candidate) => normalizePartyName(candidate.partyName) === signerName)
+      : [signature];
+    const isBundledSamePersonTrustee = isSamePersonTrustmakerTrusteeBundle(
+      samePersonSignatures,
+      productFlowMode,
+    );
+    const itemSignatures = isBundledSamePersonTrustee ? samePersonSignatures : [signature];
+
+    itemSignatures.forEach((itemSignature) => {
+      consumedOutputSignerIds.add(itemSignature.outputSignerId);
+    });
+
+    const primarySignature =
+      itemSignatures.find(isActionableSignature) ??
+      itemSignatures.find((itemSignature) => itemSignature.status !== "captured") ??
+      itemSignatures[0] ??
+      signature;
+    const pendingCount = itemSignatures.filter(isActionableSignature).length;
+    const capturedAt = itemSignatures
+      .map((itemSignature) => itemSignature.capturedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+
+    items.push({
+      key: itemSignatures.map((itemSignature) => itemSignature.outputSignerId).sort().join(":"),
+      signatures: itemSignatures,
+      primarySignature,
+      outputLabel: isBundledSamePersonTrustee ? "Document package signatures" : primarySignature.outputLabel,
+      roleLabel: joinSignatureRoleLabels(
+        itemSignatures.map((itemSignature) => formatSignatureRoleLabel(itemSignature.partyRole)),
+      ),
+      statusLabel: pendingCount > 0 && isBundledSamePersonTrustee
+        ? `${pendingCount} pending`
+        : getCaptureStatusLabel(primarySignature),
+      capturedAt,
+      isBundledSamePersonTrustee,
+    });
+  }
+
+  return items;
+};
+
 const buildRemainingSignerInviteMessage = (
   remainingSignerInvites: RemainingSignerInviteDispatchResponse,
 ) => {
@@ -1106,10 +1218,15 @@ export default function SignPage() {
   const selectedSavedSignature = savedSignatures.find(
     (savedSignature) => savedSignature.id === selectedSavedSignatureId,
   ) ?? null;
-  const pendingVisibleSignatures = visibleSignatures.filter(isActionableSignature);
-  const sidebarSignatures = pendingVisibleSignatures.length > 0
-    ? pendingVisibleSignatures
-    : visibleSignatures;
+  const sidebarSignatureItems = useMemo(() => {
+    const items = buildSidebarSignatureItems(
+      visibleSignatures,
+      payload?.document?.productFlowMode,
+    );
+    const pendingItems = items.filter((item) => item.signatures.some(isActionableSignature));
+
+    return pendingItems.length > 0 ? pendingItems : items;
+  }, [payload?.document?.productFlowMode, visibleSignatures]);
 
   const fetchAvailableNotaries = useCallback(async () => {
     if (!accessToken || !documentId) {
@@ -1343,6 +1460,7 @@ export default function SignPage() {
       try {
         let latestFinalizePayload: SignatureResponse | null = null;
         const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
+        let reuseSourceSignatureId: string | null = null;
 
         for (const targetSignature of targetSignatures) {
           const requestResponse = await fetchWithTokenRefresh(
@@ -1359,6 +1477,7 @@ export default function SignPage() {
                 fileName: file.name,
                 fileSize: file.size,
                 mimeType: file.type,
+                reuseSourceSignatureId,
               }),
             },
           );
@@ -1408,6 +1527,9 @@ export default function SignPage() {
           }
 
           latestFinalizePayload = finalizePayload;
+          if (!reuseSourceSignatureId) {
+            reuseSourceSignatureId = requestPayload.signature.id;
+          }
         }
 
         applyRemainingSignerInviteDispatchSummary(latestFinalizePayload?.remainingSignerInvites);
@@ -1499,6 +1621,7 @@ export default function SignPage() {
     try {
       let latestResponsePayload: SignatureResponse | null = null;
       const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
+      let reuseSourceSignatureId: string | null = null;
 
       for (const targetSignature of targetSignatures) {
         const response = await fetchWithTokenRefresh(
@@ -1515,6 +1638,7 @@ export default function SignPage() {
               captureMethod: "type",
               typedValue: nextTypedValue,
               typedKind,
+              reuseSourceSignatureId,
             }),
           },
         );
@@ -1526,6 +1650,9 @@ export default function SignPage() {
         }
 
         latestResponsePayload = responsePayload;
+        if (!reuseSourceSignatureId && responsePayload?.signature?.id) {
+          reuseSourceSignatureId = responsePayload.signature.id;
+        }
       }
 
       applyRemainingSignerInviteDispatchSummary(latestResponsePayload?.remainingSignerInvites);
@@ -1614,6 +1741,7 @@ export default function SignPage() {
     try {
       let latestResponsePayload: SignatureResponse | null = null;
       const targetSignatures = getTargetSignaturesForSharedCapture(activeSignature, visibleSignatures);
+      let reuseSourceSignatureId: string | null = null;
 
       for (const targetSignature of targetSignatures) {
         const response = await fetchWithTokenRefresh(
@@ -1629,6 +1757,7 @@ export default function SignPage() {
               outputSignerId: targetSignature.outputSignerId,
               captureMethod: "draw",
               imageDataUrl,
+              reuseSourceSignatureId,
             }),
           },
         );
@@ -1640,6 +1769,9 @@ export default function SignPage() {
         }
 
         latestResponsePayload = responsePayload;
+        if (!reuseSourceSignatureId && responsePayload?.signature?.id) {
+          reuseSourceSignatureId = responsePayload.signature.id;
+        }
       }
 
       applyRemainingSignerInviteDispatchSummary(latestResponsePayload?.remainingSignerInvites);
@@ -2292,12 +2424,15 @@ export default function SignPage() {
               </div>
 
                 <div className="space-y-3">
-                  {sidebarSignatures.map((signature) => {
-                    const isActive = signature.outputSignerId === activeSignature?.outputSignerId;
+                  {sidebarSignatureItems.map((item) => {
+                    const signature = item.primarySignature;
+                    const isActive = item.signatures.some(
+                      (itemSignature) => itemSignature.outputSignerId === activeSignature?.outputSignerId,
+                    );
 
                     return (
                       <button
-                        key={signature.outputSignerId}
+                        key={item.key}
                         className={`${signCardBaseClass} ${
                           isActive
                             ? "border-Color-Scheme-1-Text"
@@ -2312,14 +2447,14 @@ export default function SignPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="text-sm font-medium text-Color-Scheme-1-Text">
-                              {signature.outputLabel}
+                              {item.outputLabel}
                             </div>
                             <div className="mt-1 text-xs tracking-[0.02em] text-Color-Neutral">
-                              {signature.partyName} · {signature.partyRole.replace(/_/g, " ")}
+                              {signature.partyName} · {item.roleLabel}
                             </div>
                           </div>
                           <div className={`text-xs ${signature.status === "captured" ? "text-emerald-700" : "text-Color-Neutral"}`}>
-                            {getCaptureStatusLabel(signature)}
+                            {item.statusLabel}
                           </div>
                         </div>
                         {signature.signingGroup && signature.groupMinimumRequired ? (
@@ -2329,16 +2464,16 @@ export default function SignPage() {
                               : `${signature.groupMinimumRequired} signature${signature.groupMinimumRequired > 1 ? "s" : ""} still needed in ${signature.signingGroup.replace(/_/g, " ")}.`}
                           </div>
                         ) : null}
-                        {signature.capturedAt ? (
+                        {item.capturedAt ? (
                           <div className="mt-2 text-xs text-emerald-700">
-                            Captured {formatDateLabel(signature.capturedAt) ?? "just now"}
+                            Captured {formatDateLabel(item.capturedAt) ?? "just now"}
                           </div>
                         ) : null}
                       </button>
                     );
                   })}
 
-                  {sidebarSignatures.length === 0 ? (
+                  {sidebarSignatureItems.length === 0 ? (
                     <div className={`${signCardBaseClass} cursor-default`}>
                       <div className="text-sm font-medium text-Color-Scheme-1-Text">
                         No signature is available in this step yet.

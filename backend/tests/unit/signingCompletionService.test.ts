@@ -33,6 +33,14 @@ vi.mock("../../src/services/documentService", () => ({
 vi.mock("../../src/services/documentInviteService", () => ({
   completeDocumentSignerInvitesForOutputSigners:
     mocks.completeDocumentSignerInvitesForOutputSignersMock,
+  resolveDocumentInviteRoleLabel: ({ partyRole, obligationType }: { partyRole?: string | null; obligationType?: string | null }) => {
+    const labels: Record<string, string> = {
+      grantor: "Trustmaker",
+      trustee: "Trustee",
+      principal: "Principal",
+    };
+    return labels[partyRole ?? ""] ?? obligationType ?? "Signer";
+  },
 }));
 
 vi.mock("../../src/services/notificationService", () => ({
@@ -361,6 +369,101 @@ describe("signing completion service", () => {
     expect(mocks.queueAllSignaturesCompleteNotificationMock).not.toHaveBeenCalled();
     expect(mocks.queueSignerSignedUpdateNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({ remainingSignerCount: 1 }),
+    );
+  });
+
+  it("dedupes completion notifications for same-person trustmaker trustee bundles", async () => {
+    const completedSignature = buildSignature({
+      id: "sig-principal",
+      generation_run_id: "run-poa",
+      document_output_signer_id: "principal-1",
+      signer_id: "signer-user-1",
+      typed_value: "Taylor Trust",
+    });
+
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      buildGenerationRun({ id: "run-trust-grantor", output_key: "trust_rrr", document_key: "trust_rrr" }),
+      buildGenerationRun({ id: "run-trust-trustee", output_key: "trust_rrr_trustee", document_key: "trust_rrr" }),
+      buildGenerationRun({ id: "run-poa", output_key: "poa_document_tm1", document_key: "poa_general" }),
+    ]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      buildSigner({
+        id: "grantor-1",
+        generation_run_id: "run-trust-grantor",
+        output_key: "trust_rrr",
+        document_key: "trust_rrr",
+        party_role: "grantor",
+        party_name: "Taylor Trust",
+      }),
+      buildSigner({
+        id: "trustee-1",
+        generation_run_id: "run-trust-trustee",
+        output_key: "trust_rrr_trustee",
+        document_key: "trust_rrr",
+        party_role: "trustee",
+        party_name: "Taylor Trust",
+        sort_order: 1,
+      }),
+      buildSigner({
+        id: "principal-1",
+        generation_run_id: "run-poa",
+        output_key: "poa_document_tm1",
+        document_key: "poa_general",
+        party_role: "principal",
+        party_name: "Taylor Trust",
+        sort_order: 2,
+      }),
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([
+      buildSignature({
+        id: "sig-grantor",
+        generation_run_id: "run-trust-grantor",
+        document_output_signer_id: "grantor-1",
+        typed_value: "Taylor Trust",
+      }),
+      buildSignature({
+        id: "sig-trustee",
+        generation_run_id: "run-trust-trustee",
+        document_output_signer_id: "trustee-1",
+        typed_value: "Taylor Trust",
+      }),
+    ]);
+    mocks.completeDocumentSignerInvitesForOutputSignersMock
+      .mockResolvedValueOnce([
+        buildInvite({
+          id: "invite-principal",
+          documentOutputSignerId: "principal-1",
+          claimedUserId: "signer-user-1",
+          recipientName: "Taylor Trust",
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await completeSigningWorkflowAfterSignatureCapture({
+      documentId: "doc-1",
+      completedOutputSignerId: "principal-1",
+      completedSignatureId: "sig-principal",
+      signatureRecord: completedSignature,
+      actorSupabaseId: "supabase-signer-1",
+      actorRole: "member",
+    });
+
+    expect(result?.allSignerRequirementsSatisfied).toBe(true);
+    expect(mocks.queueSignerCompletionConfirmationNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentOutputSignerId: "principal-1",
+        documentOutputSignerIds: ["grantor-1", "principal-1", "trustee-1"],
+        dedupeKey: "same_person_trust_bundle:grantor-1:principal-1:trustee-1",
+        roleLabel: "Trustmaker, Trustee, and Principal",
+      }),
+    );
+    expect(mocks.queueSignerSignedUpdateNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentOutputSignerId: "principal-1",
+        documentOutputSignerIds: ["grantor-1", "principal-1", "trustee-1"],
+        dedupeKey: "same_person_trust_bundle:grantor-1:principal-1:trustee-1",
+        roleLabel: "Trustmaker, Trustee, and Principal",
+      }),
     );
   });
 

@@ -772,6 +772,7 @@ const signatureRequestSchema = signatureTargetSchema
     fileName: z.string().optional(),
     fileSize: z.number().int().positive().max(MAX_SIGNATURE_BYTES),
     mimeType: z.string().min(1),
+    reuseSourceSignatureId: z.string().trim().min(1).optional(),
   })
   .refine((data) => ALLOWED_SIGNATURE_MIME_TYPES.has(data.mimeType.toLowerCase()), {
     path: ["mimeType"],
@@ -786,6 +787,7 @@ const signatureCaptureSchema = signatureTargetSchema
     typedKind: z.enum(["name", "initials"]).optional(),
     imageDataUrl: z.string().min(1).optional(),
     savedSignatureId: z.string().trim().min(1).optional(),
+    reuseSourceSignatureId: z.string().trim().min(1).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.captureMethod === "type") {
@@ -1995,10 +1997,25 @@ const isSignatureCreatedFromSavedSignature = (signature: SignatureRecord) => {
   return typeof savedSignatureId === "string" && savedSignatureId.trim().length > 0;
 };
 
+const getSignatureMetadataString = (
+  signature: SignatureRecord,
+  key: string,
+) => {
+  const value = signature.metadata?.[key];
+  return typeof value === "string" ? value.trim() : null;
+};
+
+const isSignatureForHiddenSavedSignatureOutput = (signature: SignatureRecord) => {
+  return ["outputKey", "documentKey", "baseOutputKey"].some(
+    (key) => getSignatureMetadataString(signature, key) === "trust_certificate",
+  );
+};
+
 const isReusableSavedSignature = (signature: SignatureRecord) => {
   return (
     !isSavedSignatureRemovedFromReuse(signature) &&
-    !isSignatureCreatedFromSavedSignature(signature)
+    !isSignatureCreatedFromSavedSignature(signature) &&
+    !isSignatureForHiddenSavedSignatureOutput(signature)
   );
 };
 
@@ -2016,7 +2033,8 @@ const getSavedSignatureDedupeKey = (signature: SignatureRecord) => {
     captureMethod,
     signature.mime_type ?? "",
     signature.size_bytes ?? "",
-    signature.storage_path ?? "",
+    signature.document_id ?? "",
+    getSignatureMetadataString(signature, "partyName")?.toLowerCase() ?? "",
   ].join(":");
 };
 
@@ -3518,6 +3536,33 @@ const ensureSigningState = async (input: {
     }
   }
 
+  if (document.status === "pending_signature") {
+    const mirroredSignatures = await repairHiddenTrustCertificateSignatures({
+      document,
+      signingState,
+      actorContext: input.actorContext ?? {},
+    });
+
+    if (mirroredSignatures.length > 0) {
+      const lastMirroredSignature = mirroredSignatures.at(-1);
+      if (lastMirroredSignature?.document_output_signer_id) {
+        await completeSigningWorkflowAfterSignatureCapture({
+          documentId: document.id,
+          completedOutputSignerId: lastMirroredSignature.document_output_signer_id,
+          completedSignatureId: lastMirroredSignature.id,
+          signatureRecord: lastMirroredSignature,
+          actorSupabaseId: input.actorContext?.actorSupabaseId ?? null,
+          actorRole: input.actorContext?.actorRole ?? "system",
+        });
+      }
+
+      signingState = await buildDocumentSigningState({
+        document,
+        ...(input.viewerRole !== undefined ? { viewerRole: input.viewerRole } : {}),
+      });
+    }
+  }
+
   return signingState;
 };
 
@@ -3575,6 +3620,14 @@ const parseOutputBundle = (value: unknown) => {
     return [] as ParsedOutputBundleEntry[];
   }
 
+  const normalizeOutputLabel = (outputKey: string, outputLabel: string) => {
+    if (outputKey === "trust_rrr" || outputLabel.trim().toLowerCase() === "trust registration amendment") {
+      return "Trust Registration";
+    }
+
+    return outputLabel;
+  };
+
   const parsed = value
     .map((item) => {
       if (!item || typeof item !== "object") {
@@ -3591,10 +3644,12 @@ const parseOutputBundle = (value: unknown) => {
 
       return {
         outputKey,
-        outputLabel:
+        outputLabel: normalizeOutputLabel(
+          outputKey,
           typeof asRecord.outputLabel === "string"
             ? asRecord.outputLabel
             : outputKey,
+        ),
         isRequired: asRecord.isRequired !== false,
         sortOrder:
           typeof asRecord.sortOrder === "number" && Number.isFinite(asRecord.sortOrder)
@@ -7217,6 +7272,179 @@ const resolveCompletedSignatureCaptureRetry = async (input: {
   };
 };
 
+const normalizeSignaturePartyName = (value: string | null | undefined) =>
+  value?.trim().replace(/\s+/g, " ").toLowerCase() ?? "";
+
+const getLatestGenerationRunIdsByOutputKey = (runs: DocumentGenerationRunRecord[]) => {
+  const latestRunIdsByOutputKey = new Map<string, string>();
+
+  for (const run of runs) {
+    if (!latestRunIdsByOutputKey.has(run.output_key)) {
+      latestRunIdsByOutputKey.set(run.output_key, run.id);
+    }
+  }
+
+  return latestRunIdsByOutputKey;
+};
+
+const mirrorSignatureToHiddenTrustCertificate = async (input: {
+  document: DocumentRecord;
+  sourceSignatureTask: SigningSignatureResponse;
+  sourceSignatureRecord: SignatureRecord;
+  actorContext: { actorSupabaseId?: string; actorRole?: string };
+}) => {
+  if (
+    input.document.product_flow_mode !== "trust_bundle" ||
+    input.sourceSignatureTask.documentKey !== "trust_rrr"
+  ) {
+    return [] as SignatureRecord[];
+  }
+
+  const sourcePartyName = normalizeSignaturePartyName(input.sourceSignatureTask.partyName);
+  const captureMethod = input.sourceSignatureRecord.capture_method;
+  if (
+    !sourcePartyName ||
+    (captureMethod !== "type" && captureMethod !== "draw" && captureMethod !== "upload")
+  ) {
+    return [] as SignatureRecord[];
+  }
+
+  const [generationRuns, outputSigners, signatures] = await Promise.all([
+    listDocumentGenerationRunsFromDb(input.document.id),
+    listDocumentOutputSigners({ documentId: input.document.id }),
+    listDocumentSignatures({ documentId: input.document.id }),
+  ]);
+  const latestRunIdsByOutputKey = getLatestGenerationRunIdsByOutputKey(generationRuns);
+  const currentRunIds = new Set(latestRunIdsByOutputKey.values());
+  const capturedOutputSignerIds = new Set(
+    signatures
+      .filter((signature) => signature.status === "captured" && signature.document_output_signer_id)
+      .map((signature) => signature.document_output_signer_id as string),
+  );
+  const sourceSavedSignatureId =
+    typeof input.sourceSignatureRecord.metadata?.savedSignatureId === "string"
+      ? input.sourceSignatureRecord.metadata.savedSignatureId
+      : input.sourceSignatureRecord.id;
+  const capturedAt = input.sourceSignatureRecord.captured_at ?? new Date().toISOString();
+  const mirroredSignatures: SignatureRecord[] = [];
+
+  for (const signer of outputSigners) {
+    if (
+      signer.obligation_type !== "signer" ||
+      signer.document_key !== "trust_certificate" ||
+      !currentRunIds.has(signer.generation_run_id) ||
+      capturedOutputSignerIds.has(signer.id) ||
+      normalizeSignaturePartyName(signer.party_name) !== sourcePartyName
+    ) {
+      continue;
+    }
+
+    const signatureId = randomUUID();
+    const mirroredSignature = await createSignatureRecord({
+      signatureId,
+      documentId: input.document.id,
+      generationRunId: signer.generation_run_id,
+      documentOutputSignerId: signer.id,
+      signerId: input.sourceSignatureRecord.signer_id,
+      storagePath: input.sourceSignatureRecord.storage_path,
+      captureMethod,
+      typedValue: input.sourceSignatureRecord.typed_value,
+      typedKind:
+        input.sourceSignatureRecord.typed_kind === "name" ||
+        input.sourceSignatureRecord.typed_kind === "initials"
+          ? input.sourceSignatureRecord.typed_kind
+          : null,
+      mimeType: input.sourceSignatureRecord.mime_type,
+      sizeBytes: input.sourceSignatureRecord.size_bytes,
+      status: "captured",
+      metadata: {
+        outputKey: signer.output_key,
+        outputLabel: signer.output_key,
+        documentKey: signer.document_key,
+        partyName: signer.party_name,
+        partyRole: signer.party_role,
+        savedSignatureId: sourceSavedSignatureId,
+        mirroredFromOutputSignerId: input.sourceSignatureTask.outputSignerId,
+        mirroredFromSignatureId: input.sourceSignatureRecord.id,
+        mirroredReason: "same_person_trust_certificate",
+      },
+      capturedAt,
+    });
+
+    await applySignatureCaptureToDocumentOutput({
+      document: input.document,
+      generationRunId: signer.generation_run_id,
+      outputSignerId: signer.id,
+      signatureRecord: mirroredSignature,
+      actorContext: input.actorContext,
+    });
+
+    mirroredSignatures.push(mirroredSignature);
+    capturedOutputSignerIds.add(signer.id);
+  }
+
+  return mirroredSignatures;
+};
+
+const repairHiddenTrustCertificateSignatures = async (input: {
+  document: DocumentRecord;
+  signingState: DocumentSigningState;
+  actorContext: { actorSupabaseId?: string; actorRole?: string };
+}) => {
+  if (input.document.product_flow_mode !== "trust_bundle") {
+    return [] as SignatureRecord[];
+  }
+
+  const pendingCertificateSignerNames = new Set(
+    input.signingState.signatures
+      .filter(
+        (signature) =>
+          signature.documentKey === "trust_certificate" &&
+          signature.status !== "captured",
+      )
+      .map((signature) => normalizeSignaturePartyName(signature.partyName))
+      .filter((name) => name.length > 0),
+  );
+  if (pendingCertificateSignerNames.size === 0) {
+    return [] as SignatureRecord[];
+  }
+
+  const sourceSignatureTasks = input.signingState.signatures.filter(
+    (signature) =>
+      signature.documentKey === "trust_rrr" &&
+      signature.status === "captured" &&
+      Boolean(signature.signatureId) &&
+      pendingCertificateSignerNames.has(normalizeSignaturePartyName(signature.partyName)),
+  );
+  const mirroredSignatures: SignatureRecord[] = [];
+  const repairedPartyNames = new Set<string>();
+
+  for (const sourceSignatureTask of sourceSignatureTasks) {
+    const partyName = normalizeSignaturePartyName(sourceSignatureTask.partyName);
+    if (!sourceSignatureTask.signatureId || repairedPartyNames.has(partyName)) {
+      continue;
+    }
+
+    const sourceSignatureRecord = await getSignatureRecordById(sourceSignatureTask.signatureId);
+    if (!sourceSignatureRecord || sourceSignatureRecord.status !== "captured") {
+      continue;
+    }
+
+    const mirrored = await mirrorSignatureToHiddenTrustCertificate({
+      document: input.document,
+      sourceSignatureTask,
+      sourceSignatureRecord,
+      actorContext: input.actorContext,
+    });
+    if (mirrored.length > 0) {
+      mirroredSignatures.push(...mirrored);
+      repairedPartyNames.add(partyName);
+    }
+  }
+
+  return mirroredSignatures;
+};
+
 export const captureSignature = async (req: Request, res: Response) => {
   const parsed = signatureCaptureSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -7285,6 +7513,24 @@ export const captureSignature = async (req: Request, res: Response) => {
     partyName: signatureTask.partyName,
     partyRole: signatureTask.partyRole,
   };
+  let reuseSourceSignature: SignatureRecord | null = null;
+
+  if (parsed.data.captureMethod !== "saved" && parsed.data.reuseSourceSignatureId) {
+    reuseSourceSignature = await getSignatureRecordById(parsed.data.reuseSourceSignatureId);
+
+    if (
+      !reuseSourceSignature ||
+      reuseSourceSignature.signer_id !== signingAccess.signerUserId ||
+      reuseSourceSignature.status !== "captured" ||
+      reuseSourceSignature.capture_method !== parsed.data.captureMethod ||
+      !isReusableSavedSignature(reuseSourceSignature)
+    ) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Reusable source signature not found",
+      });
+    }
+  }
 
   await recordAuditEvent({
     ...actorContext,
@@ -7314,7 +7560,9 @@ export const captureSignature = async (req: Request, res: Response) => {
       typedValue: parsed.data.typedValue?.trim() ?? null,
       typedKind: parsed.data.typedKind ?? "name",
       status: "captured",
-      metadata,
+      metadata: reuseSourceSignature
+        ? { ...metadata, savedSignatureId: reuseSourceSignature.id }
+        : metadata,
       capturedAt,
     });
   } else if (parsed.data.captureMethod === "saved") {
@@ -7420,10 +7668,19 @@ export const captureSignature = async (req: Request, res: Response) => {
       mimeType: parsedImage.mimeType,
       sizeBytes: parsedImage.content.byteLength,
       status: "captured",
-      metadata,
+      metadata: reuseSourceSignature
+        ? { ...metadata, savedSignatureId: reuseSourceSignature.id }
+        : metadata,
       capturedAt,
     });
   }
+
+  await mirrorSignatureToHiddenTrustCertificate({
+    document,
+    sourceSignatureTask: signatureTask,
+    sourceSignatureRecord: signatureRecord,
+    actorContext,
+  });
 
   return res.status(201).json(
     await completeSignatureCapture({
@@ -7483,6 +7740,24 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
     });
   }
 
+  let reuseSourceSignature: SignatureRecord | null = null;
+  if (parsed.data.reuseSourceSignatureId) {
+    reuseSourceSignature = await getSignatureRecordById(parsed.data.reuseSourceSignatureId);
+
+    if (
+      !reuseSourceSignature ||
+      reuseSourceSignature.signer_id !== signingAccess.signerUserId ||
+      reuseSourceSignature.status !== "captured" ||
+      reuseSourceSignature.capture_method !== "upload" ||
+      !isReusableSavedSignature(reuseSourceSignature)
+    ) {
+      return res.status(404).json({
+        error: "not_found",
+        message: "Reusable source signature not found",
+      });
+    }
+  }
+
   const signatureId = randomUUID();
   const normalizedMimeType = parsed.data.mimeType.toLowerCase();
   const extension = SIGNATURE_EXTENSION_MAP[normalizedMimeType] ?? "png";
@@ -7506,6 +7781,7 @@ export const requestSignatureUpload = async (req: Request, res: Response) => {
       partyName: signatureTask.partyName,
       partyRole: signatureTask.partyRole,
       fileName: parsed.data.fileName ?? null,
+      ...(reuseSourceSignature ? { savedSignatureId: reuseSourceSignature.id } : {}),
     },
   });
 
@@ -7663,6 +7939,13 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
     sizeBytes: objectMetadata.sizeBytes,
     status: "captured",
     capturedAt,
+  });
+
+  await mirrorSignatureToHiddenTrustCertificate({
+    document,
+    sourceSignatureTask: signatureTask,
+    sourceSignatureRecord: updatedSignature,
+    actorContext,
   });
 
   return res.status(200).json(

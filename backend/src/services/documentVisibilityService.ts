@@ -12,6 +12,7 @@ export const shouldExposeDocumentIdn = (input: {
   }
 
   return (
+    input.status === "pending_signature" ||
     input.status === "pending_notary" ||
     input.status === "completed" ||
     input.status === "notarized"

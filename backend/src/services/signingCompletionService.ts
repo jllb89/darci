@@ -13,6 +13,7 @@ import {
 } from "./documentService";
 import {
   completeDocumentSignerInvitesForOutputSigners,
+  resolveDocumentInviteRoleLabel,
   type DocumentInviteDetail,
 } from "./documentInviteService";
 import {
@@ -335,6 +336,72 @@ const uniqueStrings = (values: Array<string | null | undefined>) => {
   );
 };
 
+const normalizeSignerName = (value?: string | null) =>
+  value?.trim().replace(/\s+/g, " ").toLowerCase() ?? "";
+
+const joinRoleLabels = (labels: string[]) => {
+  const uniqueLabels = Array.from(new Set(labels.map((label) => label.trim()).filter(Boolean)));
+  if (uniqueLabels.length === 0) {
+    return "Signer";
+  }
+
+  if (uniqueLabels.length === 1) {
+    return uniqueLabels[0] ?? "Signer";
+  }
+
+  if (uniqueLabels.length === 2) {
+    return `${uniqueLabels[0]} and ${uniqueLabels[1]}`;
+  }
+
+  return `${uniqueLabels.slice(0, -1).join(", ")}, and ${uniqueLabels[uniqueLabels.length - 1]}`;
+};
+
+const buildSamePersonTrustBundleCompletionGroup = (input: {
+  document: DocumentRecord;
+  tasks: CapturedSignerTask[];
+  completedSignerTask: CapturedSignerTask | null;
+}) => {
+  if (input.document.product_flow_mode !== "trust_bundle" || !input.completedSignerTask) {
+    return null;
+  }
+
+  const completedSignerName = normalizeSignerName(input.completedSignerTask.signer.party_name);
+  if (!completedSignerName) {
+    return null;
+  }
+
+  const samePersonTasks = input.tasks.filter(
+    (task) =>
+      task.signer.obligation_type === "signer" &&
+      normalizeSignerName(task.signer.party_name) === completedSignerName,
+  );
+  const samePersonRoles = new Set(samePersonTasks.map((task) => task.signer.party_role));
+  if (!samePersonRoles.has("grantor") || !samePersonRoles.has("trustee")) {
+    return null;
+  }
+
+  const outputSignerIds = uniqueStrings(samePersonTasks.map((task) => task.signer.id)).sort();
+  if (outputSignerIds.length < 2) {
+    return null;
+  }
+
+  const roleLabel = joinRoleLabels(
+    samePersonTasks.map((task) =>
+      resolveDocumentInviteRoleLabel({
+        partyRole: task.signer.party_role,
+        obligationType: task.signer.obligation_type,
+      }),
+    ),
+  );
+
+  return {
+    dedupeKey: `same_person_trust_bundle:${outputSignerIds.join(":")}`,
+    outputSignerIds,
+    roleLabel,
+    signerName: input.completedSignerTask.signer.party_name,
+  };
+};
+
 const getPrimaryInviteEmailRecipient = (invite: DocumentInviteDetail) => {
   return (
     invite.recipients.find(
@@ -441,6 +508,11 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
   const signerSignedUpdateJobId = { value: null as string | null };
   const allSignaturesCompleteJobId = { value: null as string | null };
   const queuedNotificationJobIds: string[] = [];
+  const samePersonTrustBundleGroup = buildSamePersonTrustBundleCompletionGroup({
+    document,
+    tasks,
+    completedSignerTask,
+  });
 
   const completedInvites = await completeDocumentSignerInvitesForOutputSigners({
     documentId: document.id,
@@ -457,11 +529,14 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
     const notification = await queueSignerCompletionConfirmationNotification({
       documentId: document.id,
       documentOutputSignerId: input.completedOutputSignerId,
+      documentOutputSignerIds: samePersonTrustBundleGroup?.outputSignerIds,
       signatureId: input.completedSignatureId,
       signerUserId: invite.claimedUserId ?? recipient.targetUserId ?? null,
       signerEmail: recipient.deliveryAddress,
       signerName:
-        recipient.displayName ?? invite.recipientName ?? completedSignerTask?.signer.party_name ?? null,
+        recipient.displayName ?? invite.recipientName ?? samePersonTrustBundleGroup?.signerName ?? completedSignerTask?.signer.party_name ?? null,
+      roleLabel: samePersonTrustBundleGroup?.roleLabel,
+      dedupeKey: samePersonTrustBundleGroup?.dedupeKey,
       requestedBySupabaseUserId: input.actorSupabaseId ?? undefined,
     });
 
@@ -475,8 +550,11 @@ export const completeSigningWorkflowAfterSignatureCapture = async (input: {
     const notification = await queueSignerSignedUpdateNotification({
       documentId: document.id,
       documentOutputSignerId: input.completedOutputSignerId,
+      documentOutputSignerIds: samePersonTrustBundleGroup?.outputSignerIds,
       signatureId: input.completedSignatureId,
-      signerName: completedSignerTask.signer.party_name,
+      signerName: samePersonTrustBundleGroup?.signerName ?? completedSignerTask.signer.party_name,
+      roleLabel: samePersonTrustBundleGroup?.roleLabel,
+      dedupeKey: samePersonTrustBundleGroup?.dedupeKey,
       remainingSignerCount,
       requestedBySupabaseUserId: input.actorSupabaseId ?? undefined,
     });

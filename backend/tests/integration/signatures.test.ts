@@ -629,6 +629,443 @@ describe("member signature capture", () => {
     expect(mocks.applySignatureCaptureToDocumentOutputMock).not.toHaveBeenCalled();
   });
 
+  it("marks shared capture rows as derived from the reusable source signature", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.getSignatureRecordByIdMock.mockResolvedValue({
+      id: "source-signature",
+      document_id: "doc-previous",
+      generation_run_id: "run-previous",
+      document_output_signer_id: "signer-previous",
+      signer_id: "owner-1",
+      signature_type: "member",
+      storage_path: null,
+      capture_method: "type",
+      typed_value: "Owner One",
+      typed_kind: "name",
+      mime_type: null,
+      size_bytes: null,
+      status: "captured",
+      metadata: {},
+      captured_at: "2026-03-05T00:00:20.000Z",
+      created_at: "2026-03-05T00:00:20.000Z",
+    });
+    mocks.createSignatureRecordMock.mockResolvedValue({
+      id: "derived-signature",
+      document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
+      signer_id: "owner-1",
+      signature_type: "member",
+      capture_method: "type",
+      storage_path: null,
+      status: "captured",
+      mime_type: null,
+      size_bytes: null,
+      typed_value: "Owner One",
+      typed_kind: "name",
+      metadata: { savedSignatureId: "source-signature" },
+      captured_at: "2026-03-05T00:00:25.000Z",
+      created_at: "2026-03-05T00:00:25.000Z",
+    });
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/signatures",
+      {
+        ...signatureTargetPayload,
+        captureMethod: "type",
+        typedValue: "Owner One",
+        typedKind: "name",
+        reuseSourceSignatureId: "source-signature",
+      },
+      "creates derived shared capture",
+      token,
+    );
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(mocks.createSignatureRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          savedSignatureId: "source-signature",
+        }),
+      }),
+    );
+  });
+
+  it("mirrors same-person trust registration captures to hidden trust certificate signers", async () => {
+    const trustSigner = {
+      ...signerRecord,
+      id: "trust-signer-1",
+      generation_run_id: "run-trust",
+      output_key: "trust_rrr",
+      document_key: "trust_rrr",
+      party_role: "grantor",
+      party_name: "Taylor Trust",
+    };
+    const certificateSigner = {
+      ...signerRecord,
+      id: "certificate-signer-1",
+      generation_run_id: "run-cert",
+      output_key: "trust_certificate",
+      document_key: "trust_certificate",
+      party_role: "trustee",
+      party_name: "Taylor Trust",
+    };
+
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "trust_bundle",
+      selected_families: [],
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: [
+        { outputKey: "trust_rrr", outputLabel: "Trust Registration", sortOrder: 0 },
+        { outputKey: "trust_certificate", outputLabel: "Trust Certificate", sortOrder: 1 },
+      ],
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-cert",
+        output_key: "trust_certificate",
+        status: "rendered",
+        document_version_id: "version-cert",
+        blocking_requirements_json: [],
+        error_message: null,
+        created_at: "2026-03-05T00:00:11.000Z",
+      },
+      {
+        id: "run-trust",
+        output_key: "trust_rrr",
+        status: "rendered",
+        document_version_id: "version-trust",
+        blocking_requirements_json: [],
+        error_message: null,
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "version-trust",
+        generation_run_id: "run-trust",
+        version: 1,
+        file_name: "trust_rrr.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 2048,
+        storage_path: "generated/trust_rrr.pdf",
+        is_final: false,
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+      {
+        id: "version-cert",
+        generation_run_id: "run-cert",
+        version: 1,
+        file_name: "trust_certificate.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 2048,
+        storage_path: "generated/trust_certificate.pdf",
+        is_final: false,
+        created_at: "2026-03-05T00:00:11.000Z",
+      },
+    ]);
+    mocks.listDocumentSignaturesMock.mockResolvedValue([]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([trustSigner, certificateSigner]);
+    mocks.getDocumentOutputSignerByIdMock.mockResolvedValue(trustSigner);
+    mocks.createSignatureRecordMock
+      .mockResolvedValueOnce({
+        id: "visible-signature",
+        document_id: "doc-1",
+        generation_run_id: "run-trust",
+        document_output_signer_id: "trust-signer-1",
+        signer_id: "owner-1",
+        signature_type: "member",
+        capture_method: "type",
+        storage_path: null,
+        status: "captured",
+        mime_type: null,
+        size_bytes: null,
+        typed_value: "Taylor Trust",
+        typed_kind: "name",
+        metadata: {},
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
+      })
+      .mockResolvedValueOnce({
+        id: "certificate-signature",
+        document_id: "doc-1",
+        generation_run_id: "run-cert",
+        document_output_signer_id: "certificate-signer-1",
+        signer_id: "owner-1",
+        signature_type: "member",
+        capture_method: "type",
+        storage_path: null,
+        status: "captured",
+        mime_type: null,
+        size_bytes: null,
+        typed_value: "Taylor Trust",
+        typed_kind: "name",
+        metadata: { mirroredFromSignatureId: "visible-signature" },
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
+      });
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/signatures",
+      {
+        generationRunId: "run-trust",
+        outputSignerId: "trust-signer-1",
+        captureMethod: "type",
+        typedValue: "Taylor Trust",
+        typedKind: "name",
+      },
+      "captures trust registration and mirrors certificate",
+      token,
+    );
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(mocks.createSignatureRecordMock).toHaveBeenCalledTimes(2);
+    expect(mocks.createSignatureRecordMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        generationRunId: "run-cert",
+        documentOutputSignerId: "certificate-signer-1",
+        typedValue: "Taylor Trust",
+        metadata: expect.objectContaining({
+          savedSignatureId: "visible-signature",
+          mirroredFromOutputSignerId: "trust-signer-1",
+          mirroredFromSignatureId: "visible-signature",
+          mirroredReason: "same_person_trust_certificate",
+        }),
+      }),
+    );
+    expect(mocks.applySignatureCaptureToDocumentOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generationRunId: "run-cert",
+        outputSignerId: "certificate-signer-1",
+        signatureRecord: expect.objectContaining({ id: "certificate-signature" }),
+      }),
+    );
+    expect(mocks.completeSigningWorkflowAfterSignatureCaptureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completedOutputSignerId: "trust-signer-1",
+        completedSignatureId: "visible-signature",
+      }),
+    );
+  });
+
+  it("repairs already-captured trust registration signatures for hidden trust certificates", async () => {
+    const trustSigner = {
+      ...signerRecord,
+      id: "trust-signer-1",
+      generation_run_id: "run-trust",
+      output_key: "trust_rrr",
+      document_key: "trust_rrr",
+      party_role: "grantor",
+      party_name: "Taylor Trust",
+    };
+    const certificateSigner = {
+      ...signerRecord,
+      id: "certificate-signer-1",
+      generation_run_id: "run-cert",
+      output_key: "trust_certificate",
+      document_key: "trust_certificate",
+      party_role: "trustee",
+      party_name: "Taylor Trust",
+    };
+    const visibleSignature = {
+      id: "visible-signature",
+      document_id: "doc-1",
+      generation_run_id: "run-trust",
+      document_output_signer_id: "trust-signer-1",
+      signer_id: "owner-1",
+      signature_type: "member",
+      capture_method: "type",
+      storage_path: null,
+      status: "captured",
+      mime_type: null,
+      size_bytes: null,
+      typed_value: "Taylor Trust",
+      typed_kind: "name",
+      metadata: {},
+      captured_at: "2026-03-05T00:00:20.000Z",
+      created_at: "2026-03-05T00:00:20.000Z",
+    };
+    const certificateSignature = {
+      id: "certificate-signature",
+      document_id: "doc-1",
+      generation_run_id: "run-cert",
+      document_output_signer_id: "certificate-signer-1",
+      signer_id: "owner-1",
+      signature_type: "member",
+      capture_method: "type",
+      storage_path: null,
+      status: "captured",
+      mime_type: null,
+      size_bytes: null,
+      typed_value: "Taylor Trust",
+      typed_kind: "name",
+      metadata: { mirroredFromSignatureId: "visible-signature" },
+      captured_at: "2026-03-05T00:00:20.000Z",
+      created_at: "2026-03-05T00:00:20.000Z",
+    };
+
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      product_flow_mode: "trust_bundle",
+      selected_families: [],
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: [
+        { outputKey: "trust_rrr", outputLabel: "Trust Registration", sortOrder: 0 },
+        { outputKey: "trust_certificate", outputLabel: "Trust Certificate", sortOrder: 1 },
+      ],
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([
+      {
+        system_key: "review_approval",
+        value_json: {
+          approvedAt: "2026-03-05T00:00:00.000Z",
+          approvedOutputKeys: ["trust_rrr", "trust_certificate"],
+        },
+      },
+    ]);
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([
+      {
+        id: "run-cert",
+        output_key: "trust_certificate",
+        status: "rendered",
+        document_version_id: "version-cert",
+        blocking_requirements_json: [],
+        error_message: null,
+        created_at: "2026-03-05T00:00:11.000Z",
+      },
+      {
+        id: "run-trust",
+        output_key: "trust_rrr",
+        status: "rendered",
+        document_version_id: "version-trust",
+        blocking_requirements_json: [],
+        error_message: null,
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+    ]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {
+        id: "version-trust",
+        generation_run_id: "run-trust",
+        version: 1,
+        file_name: "trust_rrr.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 2048,
+        storage_path: "generated/trust_rrr.pdf",
+        is_final: false,
+        created_at: "2026-03-05T00:00:10.000Z",
+      },
+      {
+        id: "version-cert",
+        generation_run_id: "run-cert",
+        version: 1,
+        file_name: "trust_certificate.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 2048,
+        storage_path: "generated/trust_certificate.pdf",
+        is_final: false,
+        created_at: "2026-03-05T00:00:11.000Z",
+      },
+    ]);
+    mocks.listDocumentSignaturesMock
+      .mockResolvedValueOnce([visibleSignature])
+      .mockResolvedValueOnce([visibleSignature])
+      .mockResolvedValueOnce([visibleSignature, certificateSignature]);
+    mocks.listDocumentOutputSignersMock.mockImplementation(async (input: { generationRunId?: string }) => {
+      if (input.generationRunId === "run-cert") {
+        return [certificateSigner];
+      }
+
+      if (!input.generationRunId) {
+        return [trustSigner, certificateSigner];
+      }
+
+      return [trustSigner];
+    });
+    mocks.getSignatureRecordByIdMock.mockResolvedValue(visibleSignature);
+    mocks.createSignatureRecordMock.mockResolvedValue(certificateSignature);
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/signing")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(mocks.createSignatureRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generationRunId: "run-cert",
+        documentOutputSignerId: "certificate-signer-1",
+        metadata: expect.objectContaining({
+          savedSignatureId: "visible-signature",
+          mirroredFromSignatureId: "visible-signature",
+        }),
+      }),
+    );
+    expect(mocks.completeSigningWorkflowAfterSignatureCaptureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        completedOutputSignerId: "certificate-signer-1",
+        completedSignatureId: "certificate-signature",
+      }),
+    );
+    expect(response.body.signing.completion.canConfirm).toBe(true);
+    expect(response.body.signing.signatures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          outputSignerId: "certificate-signer-1",
+          status: "captured",
+          signatureId: "certificate-signature",
+        }),
+      ]),
+    );
+  });
+
   it("lists saved signatures when an older saved asset is missing", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.getDocumentByIdMock.mockResolvedValue({
@@ -748,6 +1185,132 @@ describe("member signature capture", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it("dedupes shared capture rows in the saved signature picker", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "generic",
+      jurisdiction: "US-OH",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.listCapturedSignaturesForSignerMock.mockResolvedValue([
+      {
+        id: "shared-certificate",
+        document_id: "doc-1",
+        generation_run_id: "run-certificate",
+        document_output_signer_id: "signer-certificate",
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: "signatures/doc-1/run-certificate/shared-certificate.png",
+        capture_method: "draw",
+        typed_value: null,
+        typed_kind: null,
+        mime_type: "image/png",
+        size_bytes: 13498,
+        status: "captured",
+        metadata: {
+          outputKey: "trust_certificate",
+          documentKey: "trust_certificate",
+          partyName: "Jorge",
+        },
+        captured_at: "2026-03-05T00:00:30.000Z",
+        created_at: "2026-03-05T00:00:30.000Z",
+      },
+      {
+        id: "shared-poa",
+        document_id: "doc-1",
+        generation_run_id: "run-poa",
+        document_output_signer_id: "signer-poa",
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: "signatures/doc-1/run-poa/shared-poa.png",
+        capture_method: "draw",
+        typed_value: null,
+        typed_kind: null,
+        mime_type: "image/png",
+        size_bytes: 13498,
+        status: "captured",
+        metadata: {
+          outputKey: "poa_document_tm1",
+          documentKey: "poa_general",
+          partyName: "Jorge",
+        },
+        captured_at: "2026-03-05T00:00:27.000Z",
+        created_at: "2026-03-05T00:00:27.000Z",
+      },
+      {
+        id: "shared-trust",
+        document_id: "doc-1",
+        generation_run_id: "run-trust",
+        document_output_signer_id: "signer-trust",
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: "signatures/doc-1/run-trust/shared-trust.png",
+        capture_method: "draw",
+        typed_value: null,
+        typed_kind: null,
+        mime_type: "image/png",
+        size_bytes: 13498,
+        status: "captured",
+        metadata: {
+          outputKey: "trust_rrr",
+          documentKey: "trust_rrr",
+          partyName: "Jorge",
+        },
+        captured_at: "2026-03-05T00:00:24.000Z",
+        created_at: "2026-03-05T00:00:24.000Z",
+      },
+      {
+        id: "older-saved",
+        document_id: "old-doc-1",
+        generation_run_id: "old-run",
+        document_output_signer_id: "old-signer",
+        signer_id: "owner-1",
+        signature_type: "member",
+        storage_path: "signatures/old-doc-1/old-run/older-saved.png",
+        capture_method: "draw",
+        typed_value: null,
+        typed_kind: null,
+        mime_type: "image/png",
+        size_bytes: 10956,
+        status: "captured",
+        metadata: {
+          outputKey: "poa_document",
+          documentKey: "poa_general",
+          partyName: "Jorge",
+        },
+        captured_at: "2026-03-04T00:00:20.000Z",
+        created_at: "2026-03-04T00:00:20.000Z",
+      },
+    ]);
+    mocks.createSignatureDownloadUrlMock.mockReset();
+    mocks.createSignatureDownloadUrlMock
+      .mockResolvedValueOnce({ signedUrl: "https://signature.example.com/shared" })
+      .mockResolvedValueOnce({ signedUrl: "https://signature.example.com/older" });
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await request(app)
+      .get("/documents/doc-1/signatures/saved")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body.savedSignatures.map((signature: { id: string }) => signature.id)).toEqual([
+      "shared-poa",
+      "older-saved",
+    ]);
+    expect(mocks.createSignatureDownloadUrlMock).toHaveBeenCalledTimes(2);
   });
 
   it("removes saved signatures from the reuse picker", async () => {

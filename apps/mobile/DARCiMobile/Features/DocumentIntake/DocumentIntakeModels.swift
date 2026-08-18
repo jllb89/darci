@@ -458,6 +458,7 @@ struct DocumentSignatureUploadRequest: Encodable, Equatable, Sendable {
     let fileName: String
     let fileSize: Int
     let mimeType: String
+    let reuseSourceSignatureId: String?
 }
 
 struct DocumentSignatureUploadResponse: Decodable, Equatable, Sendable {
@@ -480,6 +481,7 @@ struct DocumentSignatureCaptureRequest: Encodable, Equatable, Sendable {
     let typedKind: String?
     let imageDataUrl: String?
     let savedSignatureId: String?
+    let reuseSourceSignatureId: String?
 }
 
 struct DocumentSignatureCaptureResponse: Decodable, Equatable, Sendable {
