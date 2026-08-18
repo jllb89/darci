@@ -122,6 +122,10 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         } ?? false
     }
 
+    var latestSamePlaceEvaluation: MemberSessionProximityEvaluation? {
+        context?.meeting?.proximityEvaluations.last(where: { $0.evaluationKind == "same_place" })
+    }
+
     var timeline: [MemberSessionTimelineItem] {
         let meeting = context?.meeting
         let finalization = context?.document.summary.finalization
@@ -130,6 +134,11 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         let isSessionStarted = meeting?.status == "in_progress" || isMeetingCompleted || hasNotaryCheckIn
         let hasSamePlace = meeting?.samePlaceStatus == "passed"
             || (meeting?.proximityEvaluations.contains { $0.evaluationKind == "same_place" && $0.status == "passed" } ?? false)
+        let samePlaceDescription = self.samePlaceDescription(
+            meetingStatus: meeting?.samePlaceStatus,
+            evaluation: latestSamePlaceEvaluation,
+            hasMemberCheckIn: hasMemberCheckIn
+        )
         let hasIdentity = meeting?.identityVerifications.contains {
             ["member", "signer"].contains($0.participantRole) && $0.status == "verified"
         } ?? false
@@ -143,13 +152,45 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         return [
             MemberSessionTimelineItem(id: "start", label: "Session started", description: "Your Illuminotary opened the live session.", isComplete: isSessionStarted),
             MemberSessionTimelineItem(id: "member", label: "Location shared", description: "Share your live location so your Illuminotary can confirm you are together.", isComplete: hasMemberCheckIn),
-            MemberSessionTimelineItem(id: "place", label: "Same-place confirmed", description: "Both live locations are together.", isComplete: hasSamePlace),
+            MemberSessionTimelineItem(id: "place", label: "Same-place confirmed", description: samePlaceDescription, isComplete: hasSamePlace),
             MemberSessionTimelineItem(id: "identity", label: "Identity verified", description: "Your identity has been verified.", isComplete: hasIdentity),
             MemberSessionTimelineItem(id: "venue", label: "Venue recorded", description: "The venue details are recorded.", isComplete: hasVenue),
             MemberSessionTimelineItem(id: "seal", label: "Acknowledgment appended", description: "The notarial acknowledgment is on the document.", isComplete: hasAcknowledgment),
             MemberSessionTimelineItem(id: "complete", label: "Session completed", description: "The in-person session is closed.", isComplete: isMeetingCompleted),
             MemberSessionTimelineItem(id: "anchor", label: "Verification ready", description: "The final package is verification-ready.", isComplete: isVerificationReady),
         ]
+    }
+    private func samePlaceDescription(
+        meetingStatus: String?,
+        evaluation: MemberSessionProximityEvaluation?,
+        hasMemberCheckIn: Bool
+    ) -> String {
+        if meetingStatus == "passed" || evaluation?.status == "passed" {
+            return "Both live locations are together."
+        }
+
+        if meetingStatus == "failed" || evaluation?.status == "failed" {
+            if let distance = evaluation?.observedDistanceMeters {
+                return "Locations are \(Self.distanceLabel(for: distance)) apart. Your Illuminotary may need to refresh location."
+            }
+            return "Locations are not together yet. Your Illuminotary may need to refresh location."
+        }
+
+        if hasMemberCheckIn {
+            return "DARCi is checking whether both live locations are together."
+        }
+
+        return "Waiting for your live location before DARCi checks same-place presence."
+    }
+
+    private static func distanceLabel(for meters: Double) -> String {
+        if meters >= 1000 {
+            return String(format: "%.2f km", meters / 1000)
+        }
+        if meters >= 10 {
+            return "\(Int(meters.rounded())) m"
+        }
+        return String(format: "%.1f m", meters)
     }
 
     func load(session: AuthSession?) async {

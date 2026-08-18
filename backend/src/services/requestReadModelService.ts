@@ -151,10 +151,13 @@ type SharedIdentityVerificationResponse = {
 
 type SharedProximityEvaluationResponse = {
   id: string;
+  meetingId: string;
   evaluationKind: string;
   status: string;
+  thresholdMeters: number;
   observedDistanceMeters: number | null;
   evaluatedAt: string;
+  notes: string | null;
 };
 
 type SharedMeetingArtifactResponse = {
@@ -354,10 +357,13 @@ const mapSharedMeetingResponse = (
     })),
     proximityEvaluations: proximityEvaluations.map((evaluation) => ({
       id: evaluation.id,
+      meetingId: evaluation.meeting_id,
       evaluationKind: evaluation.evaluation_kind,
       status: evaluation.status,
+      thresholdMeters: evaluation.threshold_meters,
       observedDistanceMeters: evaluation.observed_distance_meters,
       evaluatedAt: evaluation.evaluated_at,
+      notes: evaluation.notes,
     })),
     artifacts: artifacts.map((artifact) => ({
       id: artifact.id,

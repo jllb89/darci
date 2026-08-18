@@ -1,3 +1,21 @@
+update public.notification_templates
+set is_active = false,
+    updated_at = now()
+where locale = 'en-US'
+  and channel = 'push'
+  and is_active = true
+  and template_key in (
+    'member_signatures_recorded_email',
+    'signer_invitation_email',
+    'signer_reminder_email',
+    'signer_completion_confirmation_email',
+    'signer_signed_update_email',
+    'notarization_submission_confirmation_email',
+    'notary_request_claimed_email',
+    'notary_application_approved_email',
+    'notary_application_rejected_email'
+  );
+
 insert into public.notification_templates (
   template_key,
   template_version,

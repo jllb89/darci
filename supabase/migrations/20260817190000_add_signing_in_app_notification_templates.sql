@@ -1,3 +1,17 @@
+update public.notification_templates
+set is_active = false,
+    updated_at = now()
+where locale = 'en-US'
+  and is_active = true
+  and (template_key, channel) in (
+    ('creator_remaining_signer_invites_sent_email', 'email'),
+    ('creator_remaining_signer_invites_sent_email', 'in_app'),
+    ('creator_remaining_signer_invites_sent_email', 'push'),
+    ('signer_signed_update_email', 'push'),
+    ('signer_signed_update_email', 'in_app'),
+    ('all_signatures_complete_email', 'in_app')
+  );
+
 insert into public.notification_templates (
   template_key,
   template_version,

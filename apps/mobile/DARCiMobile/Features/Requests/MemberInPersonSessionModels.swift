@@ -55,8 +55,18 @@ struct MemberSessionMeeting: Decodable, Equatable, Sendable {
     let participants: [NotarySessionParticipant]
     let checkins: [MemberSessionCheckin]?
     let identityVerifications: [MemberSessionIdentityVerification]
-    let proximityEvaluations: [NotaryProximityEvaluation]
+    let proximityEvaluations: [MemberSessionProximityEvaluation]
     let artifacts: [NotarySessionArtifact]
+}
+struct MemberSessionProximityEvaluation: Decodable, Equatable, Sendable {
+    let id: String
+    let meetingId: String?
+    let evaluationKind: String
+    let status: String
+    let thresholdMeters: Double?
+    let observedDistanceMeters: Double?
+    let evaluatedAt: String
+    let notes: String?
 }
 
 struct MemberSessionCheckin: Decodable, Equatable, Sendable {
