@@ -1172,8 +1172,13 @@ const getPushRoutePayload = (input: NotificationProviderDispatchInput): PushRout
   const payloadApnsData = objectOrEmpty(payload.apnsData);
   const jobMetadata = objectOrEmpty(input.job.metadata);
   const templateKey = input.template?.template_key ?? jobMetadata.templateKey;
+  const metadataRoute = isPushRouteName(jobMetadata.pushRoute)
+    ? jobMetadata.pushRoute
+    : null;
   const routeCandidate = isPushRouteName(payloadApnsData.route)
     ? payloadApnsData.route
+    : metadataRoute
+      ? metadataRoute
     : typeof templateKey === "string"
       ? pushRouteByTemplateKey[templateKey]
       : undefined;

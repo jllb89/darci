@@ -3,6 +3,7 @@ import SwiftUI
 struct DocumentsView: View {
     private let designSize = CGSize(width: 440, height: 956)
     private let session: AuthSession?
+    private let refreshSession: () async -> AuthSession?
     private let onDocumentSelected: (DocumentsListItem) -> Void
 
     @Binding private var selectedTab: AppTab
@@ -19,9 +20,11 @@ struct DocumentsView: View {
         session: AuthSession?,
         selectedTab: Binding<AppTab>,
         viewModel: DocumentsViewModel = DocumentsViewModel(),
+        refreshSession: @escaping () async -> AuthSession? = { nil },
         onDocumentSelected: @escaping (DocumentsListItem) -> Void = { _ in }
     ) {
         self.session = session
+        self.refreshSession = refreshSession
         self.onDocumentSelected = onDocumentSelected
         _selectedTab = selectedTab
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -87,10 +90,10 @@ struct DocumentsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .task(id: session?.accessToken) {
-            await viewModel.load(session: session)
+            await viewModel.load(session: session, refreshSession: refreshSession)
         }
         .refreshable {
-            await viewModel.load(session: session)
+            await viewModel.load(session: session, refreshSession: refreshSession)
         }
     }
 

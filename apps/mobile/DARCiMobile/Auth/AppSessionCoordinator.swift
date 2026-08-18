@@ -88,6 +88,24 @@ final class AppSessionCoordinator: ObservableObject {
         }
     }
 
+    func refreshCurrentSession() async -> AuthSession? {
+        guard let currentSession else {
+            return nil
+        }
+
+        do {
+            let refreshed = try await apiClient.refresh(refreshToken: currentSession.refreshToken)
+            let session = await restoredSession(from: refreshed.session, storedSession: currentSession)
+            try sessionStore.save(session)
+            self.currentSession = session
+            return session
+        } catch {
+            try? sessionStore.clear()
+            self.currentSession = nil
+            return nil
+        }
+    }
+
     func updatePersonalInfo(_ profile: AuthPersonalInfoUpdateRequest, password: String?) async throws {
         guard let currentSession else {
             throw AuthAPIError.unauthorized(message: "Your session has expired. Sign in again.")

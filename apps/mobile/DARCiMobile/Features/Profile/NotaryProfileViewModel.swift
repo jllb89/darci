@@ -115,9 +115,9 @@ final class NotaryProfileViewModel: ObservableObject {
             case .review:
                 return ["pending", "submitted", "code_delivered"].contains(resolveQueueStatus(request))
             case .inReview:
-                return resolveQueueStatus(request) == "in_review"
+                return resolveQueueStatus(request) == "in_review" && isApprovedForMeeting(request) == false
             case .ready:
-                return resolveQueueStatus(request) == "approved" || isOpenMeetingRequest(request)
+                return isApprovedForMeeting(request) || isOpenMeetingRequest(request)
             case .completed:
                 return resolveQueueStatus(request) == "completed" || request.document.summary?.finalization?.isAnchored == true || request.finalization.isAnchored == true
             }
@@ -127,6 +127,15 @@ final class NotaryProfileViewModel: ObservableObject {
 
     func resolveQueueStatus(_ request: NotaryQueueRequestSummary) -> String {
         normalizedValue(request.request.queueStatus ?? request.workflow?.latestStatus ?? request.workflow?.status ?? request.request.status)
+    }
+
+    private func isApprovedForMeeting(_ request: NotaryQueueRequestSummary) -> Bool {
+        [
+            request.workflow?.status,
+            request.workflow?.latestStatus,
+            request.request.queueStatus,
+            request.request.status,
+        ].map(normalizedValue).contains("approved")
     }
 
     private func isOpenMeetingRequest(_ request: NotaryQueueRequestSummary) -> Bool {

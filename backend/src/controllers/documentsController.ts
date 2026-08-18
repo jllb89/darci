@@ -643,7 +643,20 @@ const mapDocumentResponse = (document: {
   }
 
   if (Array.isArray(document.output_bundle) && document.output_bundle.length > 0) {
-    response.outputBundle = document.output_bundle;
+    const visibleOutputBundle = document.output_bundle.filter((output) => {
+      const outputKey = typeof output.outputKey === "string" ? output.outputKey : null;
+      return Boolean(
+        outputKey &&
+          shouldExposeDocumentReviewOutput({
+            outputKey,
+            viewerRole,
+          }),
+      );
+    });
+
+    if (visibleOutputBundle.length > 0) {
+      response.outputBundle = visibleOutputBundle;
+    }
   }
 
   return response;
@@ -1983,6 +1996,47 @@ const isReusableSavedSignature = (signature: SignatureRecord) => {
   return (
     !isSavedSignatureRemovedFromReuse(signature) &&
     !isSignatureCreatedFromSavedSignature(signature)
+  );
+};
+
+const getSavedSignatureDedupeKey = (signature: SignatureRecord) => {
+  const captureMethod = signature.capture_method ?? "unknown";
+  if (captureMethod === "type") {
+    return [
+      captureMethod,
+      signature.typed_kind ?? "name",
+      signature.typed_value?.trim().toLowerCase() ?? "",
+    ].join(":");
+  }
+
+  return [
+    captureMethod,
+    signature.mime_type ?? "",
+    signature.size_bytes ?? "",
+    signature.storage_path ?? "",
+  ].join(":");
+};
+
+const dedupeReusableSavedSignatures = (signatures: SignatureRecord[]) => {
+  const signaturesByKey = new Map<string, SignatureRecord>();
+
+  for (const signature of signatures) {
+    const key = getSavedSignatureDedupeKey(signature);
+    const existing = signaturesByKey.get(key);
+    if (!existing) {
+      signaturesByKey.set(key, signature);
+      continue;
+    }
+
+    const existingTimestamp = toTimestamp(existing.captured_at ?? existing.created_at);
+    const candidateTimestamp = toTimestamp(signature.captured_at ?? signature.created_at);
+    if (candidateTimestamp >= existingTimestamp) {
+      signaturesByKey.set(key, signature);
+    }
+  }
+
+  return Array.from(signaturesByKey.values()).sort(
+    (left, right) => toTimestamp(right.captured_at ?? right.created_at) - toTimestamp(left.captured_at ?? left.created_at),
   );
 };
 
@@ -6601,8 +6655,7 @@ export const listSavedSignatures = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       savedSignatures: await Promise.all(
-        savedSignatures
-          .filter((signature) => isReusableSavedSignature(signature))
+        dedupeReusableSavedSignatures(savedSignatures.filter((signature) => isReusableSavedSignature(signature)))
           .map((signature) => mapSavedSignatureResponse(signature)),
       ),
     });

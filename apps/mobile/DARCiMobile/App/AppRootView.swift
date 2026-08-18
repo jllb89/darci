@@ -341,6 +341,7 @@ struct AppRootView: View {
                 session: sessionCoordinator.currentSession,
                 selectedTab: $selectedTab,
                 viewModel: DocumentsViewModel(apiClient: documentsAPIClient),
+                refreshSession: { await sessionCoordinator.refreshCurrentSession() },
                 onDocumentSelected: openDocument
             )
         case .requests:

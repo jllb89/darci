@@ -1668,12 +1668,19 @@ export const queueAllSignaturesCompleteNotification = async (input: {
         firstName: toFirstName(owner),
         documentName: getDocumentLabel(document),
         nextStepUrl: buildDocumentDetailsUrl(document.id),
+        nextStepLabel: input.requiresNotarization ? "Choose your illuminotary" : "Open document",
+        nextStepSummary: input.requiresNotarization
+          ? "All required signatures are complete. You can now choose an illuminotary for the next step."
+          : "All required signatures are complete. Your document is ready for the next step.",
+        requiresNotarization: input.requiresNotarization,
+        nextDocumentStatus: input.nextDocumentStatus,
       },
       recipients: [buildOwnerRecipient(owner)],
       metadata: {
         completedAt: input.completedAt,
         requiresNotarization: input.requiresNotarization,
         nextDocumentStatus: input.nextDocumentStatus,
+        pushRoute: input.requiresNotarization ? "member_notary_selection" : "member_document",
       },
     });
   } catch (error) {

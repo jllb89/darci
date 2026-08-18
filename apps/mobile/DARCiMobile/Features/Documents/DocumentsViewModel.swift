@@ -78,7 +78,10 @@ final class DocumentsViewModel: ObservableObject {
         }
     }
 
-    func load(session: AuthSession?) async {
+    func load(
+        session: AuthSession?,
+        refreshSession: (() async -> AuthSession?)? = nil
+    ) async {
         guard let session, session.accessToken.isEmpty == false else {
             errorMessage = "Sign in again to load documents."
             return
@@ -104,15 +107,22 @@ final class DocumentsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let response = try await apiClient.listDocuments(page: firstPage, pageSize: pageSize, accessToken: session.accessToken)
-            let refreshedDocuments = mergedDocuments(primary: response.documents, fallback: documents)
-            let refreshedResponse = response.replacingDocuments(refreshedDocuments)
-            documents = refreshedDocuments
-            facets = response.facets
-            await cacheStore.write(refreshedResponse, cacheKey: cacheKey)
-            errorMessage = nil
-            startPrefetch(after: response, cacheKey: cacheKey, accessToken: session.accessToken)
+            try await loadFirstPage(session: session, cacheKey: cacheKey)
         } catch {
+            if case AuthAPIError.unauthorized = error,
+               let refreshedSession = await refreshSession?(),
+               refreshedSession.accessToken.isEmpty == false {
+                do {
+                    try await loadFirstPage(session: refreshedSession, cacheKey: cacheKey)
+                    return
+                } catch {
+                    if documents.isEmpty {
+                        errorMessage = displayMessage(for: error, fallback: "Failed to load documents.")
+                    }
+                    return
+                }
+            }
+
             if documents.isEmpty {
                 errorMessage = displayMessage(for: error, fallback: "Failed to load documents.")
             }
@@ -237,6 +247,17 @@ final class DocumentsViewModel: ObservableObject {
         }
 
         return fallback
+    }
+
+    private func loadFirstPage(session: AuthSession, cacheKey: DocumentsCacheKey) async throws {
+        let response = try await apiClient.listDocuments(page: firstPage, pageSize: pageSize, accessToken: session.accessToken)
+        let refreshedDocuments = mergedDocuments(primary: response.documents, fallback: documents)
+        let refreshedResponse = response.replacingDocuments(refreshedDocuments)
+        documents = refreshedDocuments
+        facets = response.facets
+        await cacheStore.write(refreshedResponse, cacheKey: cacheKey)
+        errorMessage = nil
+        startPrefetch(after: response, cacheKey: cacheKey, accessToken: session.accessToken)
     }
 
     private func startPrefetch(after initialResponse: DocumentsListResponse, cacheKey: DocumentsCacheKey, accessToken: String) {
