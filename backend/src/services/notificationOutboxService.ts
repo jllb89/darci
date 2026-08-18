@@ -2643,7 +2643,7 @@ export const listUserNotificationCenterItems = async (input: {
     .from("notification_deliveries")
     .select("id", { count: "exact", head: true })
     .eq("target_user_id", input.userId)
-    .eq("channel", "push")
+    .in("channel", ["push", "in_app"])
     .is("opened_at", null);
 
   if (unreadCountError) {
@@ -2654,7 +2654,7 @@ export const listUserNotificationCenterItems = async (input: {
     .from("notification_deliveries")
     .select(notificationDeliverySelect)
     .eq("target_user_id", input.userId)
-    .eq("channel", "push")
+    .in("channel", ["push", "in_app"])
     .order("queued_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .range(offset, offset + fetchLimit - 1);
@@ -2706,7 +2706,7 @@ export const markUserNotificationsRead = async (input: {
     .from("notification_deliveries")
     .select(notificationDeliverySelect)
     .eq("target_user_id", input.userId)
-    .eq("channel", "push")
+    .in("channel", ["push", "in_app"])
     .is("opened_at", null)
     .order("queued_at", { ascending: false, nullsFirst: false })
     .limit(500);
@@ -2721,7 +2721,7 @@ export const markUserNotificationsRead = async (input: {
   for (const delivery of deliveries) {
     await recordNotificationDeliveryEvent({
       deliveryId: delivery.id,
-      provider: "apns",
+      provider: delivery.provider ?? "internal",
       providerMessageId: delivery.provider_message_id,
       providerEventId: `mobile-mark-read:${delivery.id}`,
       eventType: "opened",

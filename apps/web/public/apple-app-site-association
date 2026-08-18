@@ -9,6 +9,18 @@
           {
             "/": "/open/requests/*",
             "comment": "Open member request session links in DARCi on iOS."
+          },
+          {
+            "/": "/app/documents/*",
+            "comment": "Open document status links in DARCi on iOS."
+          },
+          {
+            "/": "/app/sign",
+            "comment": "Open signing links in DARCi on iOS."
+          },
+          {
+            "/": "/app/review",
+            "comment": "Open review links in DARCi on iOS."
           }
         ]
       }

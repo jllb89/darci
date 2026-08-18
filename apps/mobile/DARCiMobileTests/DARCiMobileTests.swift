@@ -574,6 +574,35 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertNil(MemberSessionDeepLink.requestId(from: unrelatedURL))
     }
 
+    func testMemberDocumentDeepLinkParsesDocumentEmailURLs() throws {
+        let documentURL = try XCTUnwrap(URL(string: "https://app.darciregistry.dev/app/documents/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+        let signingURL = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/app/sign?documentId=cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
+        let reviewURL = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/app/review?documentId=dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+
+        XCTAssertEqual(
+            MemberDocumentDeepLink.route(from: documentURL),
+            .memberDocument(documentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", notificationId: nil)
+        )
+        XCTAssertEqual(
+            MemberDocumentDeepLink.route(from: signingURL),
+            .documentSigning(documentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", notificationId: nil)
+        )
+        XCTAssertEqual(
+            MemberDocumentDeepLink.route(from: reviewURL),
+            .documentReview(documentId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", notificationId: nil)
+        )
+    }
+
+    func testMemberDocumentDeepLinkRejectsUntrustedOrInvalidURLs() throws {
+        let untrustedURL = try XCTUnwrap(URL(string: "https://example.com/app/documents/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+        let missingDocumentURL = try XCTUnwrap(URL(string: "https://app.darciregistry.dev/app/documents"))
+        let invalidDocumentURL = try XCTUnwrap(URL(string: "https://app.darciregistry.dev/app/documents/short"))
+
+        XCTAssertNil(MemberDocumentDeepLink.route(from: untrustedURL))
+        XCTAssertNil(MemberDocumentDeepLink.route(from: missingDocumentURL))
+        XCTAssertNil(MemberDocumentDeepLink.route(from: invalidDocumentURL))
+    }
+
     func testPushNotificationRouteParsesAllowlistedRoutes() throws {
         let notaryRoute = PushNotificationRoute(userInfo: [
             "aps": ["alert": ["title": "Ready"]],

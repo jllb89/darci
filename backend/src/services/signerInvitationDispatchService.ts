@@ -1,4 +1,5 @@
 import { createDocumentInvite, resendDocumentInvite } from "./documentInviteService";
+import { queueCreatorSigningInvitesSentNotification } from "./notificationService";
 import { runDueNotificationJobs } from "./notificationOutboxService";
 import { captureMessage } from "../utils/sentry";
 import {
@@ -231,7 +232,20 @@ export const queueRemainingSignerInvitesAfterCreatorSignature = async (input: {
     });
   }
 
-  const notificationJobIds = invited.flatMap((invite) => invite.notificationJobIds);
+  const creatorNotification = invited.length > 0
+    ? await queueCreatorSigningInvitesSentNotification({
+        documentId: input.documentId,
+        completedSignatureId: input.completedSignatureId ?? null,
+        invitedSignerCount: invited.length,
+        invitedSignerNames: invited.map((invite) => invite.recipientName),
+        requestedBySupabaseUserId: undefined,
+      })
+    : null;
+
+  const notificationJobIds = [
+    ...invited.flatMap((invite) => invite.notificationJobIds),
+    ...collectNotificationJobIds(creatorNotification),
+  ];
 
   if (invited.length > 0 && notificationJobIds.length === 0) {
     console.info("Remaining signer invite dispatch produced no notification jobs", {

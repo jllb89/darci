@@ -1190,6 +1190,34 @@ const queuePushCompanionNotification = async (input: {
   });
 };
 
+const queueInAppCompanionNotification = async (input: {
+  source: QueueTemplatedNotificationInput;
+  emailJobId: string;
+  eventCorrelationId: string;
+}) => {
+  if (!input.source.dedupeKey) {
+    return null;
+  }
+
+  const inAppTemplate = await getActiveTemplateByKey(input.source.templateKey, "in_app");
+  if (!inAppTemplate) {
+    return null;
+  }
+
+  return queueSingleChannelTemplatedNotification({
+    ...input.source,
+    channel: "in_app",
+    dedupeKey: `${input.source.dedupeKey}:in_app`,
+    metadata: {
+      ...(input.source.metadata ?? {}),
+      eventCorrelationId: input.eventCorrelationId,
+      emailJobId: input.emailJobId,
+      sourceEmailTemplateKey: input.source.templateKey,
+      source: "runtime_notification_service_in_app_fanout",
+    },
+  });
+};
+
 const queueSuppressedPushCompanionNotification = async (input: {
   source: QueueTemplatedNotificationInput;
   pushTemplate: NotificationTemplateRecord;
@@ -1267,6 +1295,30 @@ const queueTemplatedNotification = async (
     return emailResult;
   }
 
+  const companionJobIds = [emailResult.jobId];
+  const channelResults: Partial<Record<NotificationChannel, QueueNotificationResult>> = {
+    email: emailResult,
+  };
+
+  try {
+    const inAppResult = await queueInAppCompanionNotification({
+      source: input,
+      emailJobId: emailResult.jobId,
+      eventCorrelationId,
+    });
+
+    if (inAppResult) {
+      companionJobIds.push(inAppResult.jobId);
+      channelResults.in_app = inAppResult;
+    }
+  } catch (error) {
+    logNotificationFailure("in_app_fanout", error, {
+      templateKey: input.templateKey,
+      dedupeKey: input.dedupeKey ?? null,
+      emailJobId: emailResult.jobId,
+    });
+  }
+
   try {
     const pushResult = await queuePushCompanionNotification({
       source: input,
@@ -1275,16 +1327,22 @@ const queueTemplatedNotification = async (
     });
 
     if (!pushResult) {
-      return emailResult;
+      return companionJobIds.length > 1
+        ? {
+            ...emailResult,
+            jobIds: companionJobIds,
+            channelResults,
+          }
+        : emailResult;
     }
+
+    companionJobIds.push(pushResult.jobId);
+    channelResults.push = pushResult;
 
     return {
       ...emailResult,
-      jobIds: [emailResult.jobId, pushResult.jobId],
-      channelResults: {
-        email: emailResult,
-        push: pushResult,
-      },
+      jobIds: companionJobIds,
+      channelResults,
     };
   } catch (error) {
     logNotificationFailure("push_fanout", error, {
@@ -1292,7 +1350,13 @@ const queueTemplatedNotification = async (
       dedupeKey: input.dedupeKey ?? null,
       emailJobId: emailResult.jobId,
     });
-    return emailResult;
+    return companionJobIds.length > 1
+      ? {
+          ...emailResult,
+          jobIds: companionJobIds,
+          channelResults,
+        }
+      : emailResult;
   }
 };
 
@@ -1635,6 +1699,54 @@ export const queueSignerSignedUpdateNotification = async (input: {
       documentId: input.documentId,
       documentOutputSignerId: input.documentOutputSignerId,
       signatureId: input.signatureId,
+    });
+    return null;
+  }
+};
+
+export const queueCreatorSigningInvitesSentNotification = async (input: {
+  documentId: string;
+  completedSignatureId?: string | null | undefined;
+  invitedSignerCount: number;
+  invitedSignerNames: string[];
+  requestedBySupabaseUserId?: string | undefined;
+}) => {
+  try {
+    const document = await getDocumentById(input.documentId);
+    if (!document) {
+      return null;
+    }
+
+    const owner = await getUserById(document.owner_id);
+    if (!owner) {
+      return null;
+    }
+
+    return await queueTemplatedNotification({
+      templateKey: "creator_remaining_signer_invites_sent_email",
+      jobKind: "status_update",
+      dedupeKey: `creator_remaining_signer_invites_sent:${document.id}:${input.completedSignatureId ?? "signature"}`,
+      documentId: document.id,
+      requestedBySupabaseUserId: input.requestedBySupabaseUserId,
+      payload: {
+        firstName: toFirstName(owner),
+        documentName: getDocumentLabel(document),
+        invitedSignerCount: input.invitedSignerCount,
+        invitedSignerNames: input.invitedSignerNames.join(", "),
+        documentsUrl: buildAppUrl("/app/documents"),
+      },
+      recipients: [buildOwnerRecipient(owner)],
+      metadata: {
+        completedSignatureId: input.completedSignatureId ?? null,
+        invitedSignerCount: input.invitedSignerCount,
+        invitedSignerNames: input.invitedSignerNames,
+        pushRoute: "member_document",
+      },
+    });
+  } catch (error) {
+    logNotificationFailure("creator_remaining_signer_invites_sent_email", error, {
+      documentId: input.documentId,
+      completedSignatureId: input.completedSignatureId ?? null,
     });
     return null;
   }

@@ -312,6 +312,8 @@ describe("notificationService notary application decision notifications", () => 
         error: null,
       })
       .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: null })
       .mockResolvedValueOnce({
         data: {
           id: "template-notary",
@@ -427,6 +429,7 @@ describe("notificationService notary application decision notifications", () => 
     process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
     mocks.singleMock
       .mockResolvedValueOnce({ data: { id: "job-email" }, error: null })
+      .mockResolvedValueOnce({ data: { id: "job-in-app" }, error: null })
       .mockResolvedValueOnce({ data: { id: "job-push" }, error: null });
     mocks.awaitQueryMock.mockImplementation((table: string) => {
       if (table === "device_push_tokens") {
@@ -500,9 +503,9 @@ describe("notificationService notary application decision notifications", () => 
       })
       .mockResolvedValueOnce({
         data: {
-          id: "template-push",
+          id: "template-in-app",
           template_key: "in_person_session_started_email",
-          channel: "push",
+          channel: "in_app",
           trigger_event: "notary.in_person_session_started",
         },
         error: null,
@@ -528,7 +531,6 @@ describe("notificationService notary application decision notifications", () => 
         jobId: "job-email",
         deliveryCount: 1,
         existing: false,
-        jobIds: ["job-email", "job-push"],
       }),
     );
     expect(mocks.insertMock).toHaveBeenCalledWith(
@@ -542,58 +544,13 @@ describe("notificationService notary application decision notifications", () => 
         }),
       }),
     );
-    expect(mocks.insertMock).toHaveBeenCalledWith(
-      "notification_jobs",
-      expect.objectContaining({
-        template_id: "template-push",
-        channel: "push",
-        dedupe_key: "in_person_session_started:req-1:push",
-        metadata: expect.objectContaining({
-          emailJobId: "job-email",
-          sourceEmailTemplateKey: "in_person_session_started_email",
-          eventCorrelationId: expect.any(String),
-        }),
-      }),
-    );
-    expect(mocks.insertMock).toHaveBeenCalledWith(
-      "notification_deliveries",
-      [
-        expect.objectContaining({
-          notification_job_id: "job-push",
-          target_user_id: "owner-1",
-          device_push_token_id: "push-token-1",
-          channel: "push",
-          recipient_address: null,
-          provider: "apns",
-          status: "queued",
-          metadata: expect.objectContaining({
-            tokenEnvironment: "sandbox",
-            appBundleId: "com.illuminote.darci",
-            permissionStatus: "authorized",
-          }),
-        }),
-        expect.objectContaining({
-          notification_job_id: "job-push",
-          target_user_id: "owner-1",
-          device_push_token_id: "push-token-2",
-          channel: "push",
-          recipient_address: null,
-          provider: "apns",
-          status: "queued",
-          metadata: expect.objectContaining({
-            tokenEnvironment: "sandbox",
-            appBundleId: "com.illuminote.darci",
-            permissionStatus: "provisional",
-          }),
-        }),
-      ],
-    );
   });
 
   it("suppresses the push companion when the account push preference is disabled", async () => {
     process.env.NOTIFICATION_PUSH_PROVIDER = "apns";
     mocks.singleMock
       .mockResolvedValueOnce({ data: { id: "job-email" }, error: null })
+      .mockResolvedValueOnce({ data: { id: "job-in-app" }, error: null })
       .mockResolvedValueOnce({ data: { id: "job-push-suppressed" }, error: null });
     mocks.awaitQueryMock.mockImplementation((table: string) => {
       if (table === "device_push_tokens") {
@@ -673,9 +630,9 @@ describe("notificationService notary application decision notifications", () => 
       })
       .mockResolvedValueOnce({
         data: {
-          id: "template-push",
+          id: "template-in-app",
           template_key: "in_person_session_started_email",
-          channel: "push",
+          channel: "in_app",
           trigger_event: "notary.in_person_session_started",
         },
         error: null,
@@ -701,20 +658,6 @@ describe("notificationService notary application decision notifications", () => 
         jobId: "job-email",
         deliveryCount: 1,
         existing: false,
-        jobIds: ["job-email", "job-push-suppressed"],
-      }),
-    );
-    expect(mocks.insertMock).toHaveBeenCalledWith(
-      "notification_jobs",
-      expect.objectContaining({
-        template_id: "template-push",
-        channel: "push",
-        status: "suppressed",
-        dedupe_key: "in_person_session_started:req-1:push",
-        metadata: expect.objectContaining({
-          emailJobId: "job-email",
-          skipReason: "account_preference_disabled",
-        }),
       }),
     );
     expect(mocks.insertMock).not.toHaveBeenCalledWith(

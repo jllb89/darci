@@ -592,6 +592,12 @@ struct AppRootView: View {
     }
 
     private func handleIncomingURL(_ url: URL) {
+        if let route = MemberDocumentDeepLink.route(from: url) {
+            pendingPushRoute = route
+            openPendingPushRouteIfPossible()
+            return
+        }
+
         guard let requestId = MemberSessionDeepLink.requestId(from: url) else { return }
         pendingMemberSessionRoute = MemberInPersonSessionRoute(requestId: requestId)
         openPendingMemberSessionIfPossible()
@@ -664,7 +670,9 @@ struct AppRootView: View {
         case .notaryRequestReview(let requestId, _):
             selectedTab = keepUnderlyingHome ? .home : .notary
             notaryReviewRoute = NotaryRequestReviewRoute(requestId: requestId)
-        case .memberDocument(let documentId, _), .memberNotarySelection(let documentId, _), .documentSigning(let documentId, _):
+        case .memberDocument, .memberNotarySelection:
+            selectedTab = keepUnderlyingHome ? .home : .documents
+        case .documentSigning(let documentId, _):
             selectedTab = keepUnderlyingHome ? .home : .documents
             signingRoute = DocumentSigningRoute(documentId: documentId)
         case .documentReview(let documentId, _):

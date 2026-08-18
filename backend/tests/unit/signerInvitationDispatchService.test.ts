@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   resolveRemainingSignerInvitationsAfterCreatorSignatureMock: vi.fn(),
   createDocumentInviteMock: vi.fn(),
   resendDocumentInviteMock: vi.fn(),
+  queueCreatorSigningInvitesSentNotificationMock: vi.fn(),
   runDueNotificationJobsMock: vi.fn(),
 }));
 
@@ -20,6 +21,11 @@ vi.mock("../../src/services/signerInvitationResolverService", () => ({
 vi.mock("../../src/services/documentInviteService", () => ({
   createDocumentInvite: mocks.createDocumentInviteMock,
   resendDocumentInvite: mocks.resendDocumentInviteMock,
+}));
+
+vi.mock("../../src/services/notificationService", () => ({
+  queueCreatorSigningInvitesSentNotification:
+    mocks.queueCreatorSigningInvitesSentNotificationMock,
 }));
 
 vi.mock("../../src/services/notificationOutboxService", () => ({
@@ -65,6 +71,13 @@ describe("signer invitation dispatcher", () => {
     mocks.resolveRemainingSignerInvitationsAfterCreatorSignatureMock.mockReset();
     mocks.createDocumentInviteMock.mockReset();
     mocks.resendDocumentInviteMock.mockReset();
+    mocks.queueCreatorSigningInvitesSentNotificationMock.mockReset();
+    mocks.queueCreatorSigningInvitesSentNotificationMock.mockResolvedValue({
+      jobId: "job-creator-invites-sent",
+      jobIds: ["job-creator-invites-sent", "job-creator-invites-sent-in-app"],
+      deliveryCount: 1,
+      existing: false,
+    });
     mocks.runDueNotificationJobsMock.mockReset();
     mocks.runDueNotificationJobsMock.mockResolvedValue({
       scannedCount: 0,
@@ -162,11 +175,23 @@ describe("signer invitation dispatcher", () => {
       },
     ]);
     expect(result.failures).toEqual([]);
+    expect(mocks.queueCreatorSigningInvitesSentNotificationMock).toHaveBeenCalledWith({
+      documentId: "doc-1",
+      completedSignatureId: "sig-1",
+      invitedSignerCount: 1,
+      invitedSignerNames: ["Sara Signer"],
+      requestedBySupabaseUserId: undefined,
+    });
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 2,
+      limit: 4,
       workerId: "signer-invite-immediate",
       documentId: "doc-1",
-      notificationJobIds: ["job-1", "job-1-push"],
+      notificationJobIds: [
+        "job-1",
+        "job-1-push",
+        "job-creator-invites-sent",
+        "job-creator-invites-sent-in-app",
+      ],
     });
   });
 
@@ -225,10 +250,15 @@ describe("signer invitation dispatcher", () => {
       }),
     ]);
     expect(mocks.runDueNotificationJobsMock).toHaveBeenCalledWith({
-      limit: 2,
+      limit: 4,
       workerId: "signer-invite-immediate",
       documentId: "doc-1",
-      notificationJobIds: ["job-reminder-1", "job-reminder-1-push"],
+      notificationJobIds: [
+        "job-reminder-1",
+        "job-reminder-1-push",
+        "job-creator-invites-sent",
+        "job-creator-invites-sent-in-app",
+      ],
     });
   });
 
