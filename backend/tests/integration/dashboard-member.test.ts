@@ -212,7 +212,7 @@ describe("GET /dashboard/member", () => {
         },
         {
           id: "doc-2",
-          idn: null,
+          idn: "IDN-456",
           status: "pending_signature",
           documentType: "generic",
           jurisdiction: "US-OH",

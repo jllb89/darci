@@ -339,7 +339,7 @@ describe("document review approval", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.document.status).toBe("pending_signature");
-    expect(response.body.document.idn).toBeNull();
+    expect(response.body.document.idn).toMatch(/^[A-Z0-9]{12}$/);
     expect(response.body.reviewApproval.signingReady).toBe(true);
     expect(response.body.reviewApproval.approvedOutputKeys).toEqual([
       "trust_rrr",
