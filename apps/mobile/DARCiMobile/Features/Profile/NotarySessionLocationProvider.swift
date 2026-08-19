@@ -66,10 +66,6 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
             throw NotarySessionLocationError.requestInProgress
         }
 
-        if let recentLocation = recentUsableLocation(preferredAccuracyOnly: true) {
-            return Self.payload(from: recentLocation, captureStage: captureStage)
-        }
-
         let location = try await withCheckedThrowingContinuation { continuation in
             pendingContinuation = continuation
             pendingRetryCount = 0
