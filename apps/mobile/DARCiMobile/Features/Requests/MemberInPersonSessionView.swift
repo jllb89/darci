@@ -209,12 +209,6 @@ struct MemberInPersonSessionView: View {
                 contactButton(title: "Email", systemImage: "envelope", value: viewModel.notaryEmail, url: contactURL(scheme: "mailto", value: viewModel.notaryEmail))
                 contactButton(title: "Call", systemImage: "phone", value: viewModel.notaryPhone, url: contactURL(scheme: "tel", value: viewModel.notaryPhone))
             }
-
-            Text(contactDetailLine(email: viewModel.notaryEmail, phone: viewModel.notaryPhone))
-                .font(DARCiFont.maisonNeue(.book, size: 11))
-                .foregroundStyle(.black.opacity(0.56))
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,7 +221,13 @@ struct MemberInPersonSessionView: View {
     }
 
     private func contactButton(title: String, systemImage: String, value: String?, url: URL?) -> some View {
-        Button {
+        let isEmailAction = title == "Email"
+        let foregroundColor = url == nil ? Color.black.opacity(0.42) : (isEmailAction ? Color.black : Color.white)
+        let backgroundColor = isEmailAction
+            ? DARCiTheme.onboardingGreen.opacity(url == nil ? 0.42 : 1)
+            : Color.black.opacity(url == nil ? 0.18 : 1)
+
+        return Button {
             guard let url else { return }
             openURL(url)
         } label: {
@@ -237,26 +237,14 @@ struct MemberInPersonSessionView: View {
                 Text(title)
                     .font(DARCiFont.maisonNeue(.medium, size: 12))
             }
-            .foregroundStyle(url == nil ? Color.black.opacity(0.42) : Color.black)
+            .foregroundStyle(foregroundColor)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
-            .background(title == "Email" ? DARCiTheme.onboardingGreen.opacity(url == nil ? 0.42 : 1) : Color.black.opacity(url == nil ? 0.18 : 1))
-            .foregroundStyle(title == "Email" ? Color.black : Color.white)
+            .background(backgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(value?.isEmpty != false || url == nil)
-    }
-
-    private func contactDetailLine(email: String?, phone: String?) -> String {
-        [email, phone]
-            .compactMap { nonEmptyContactValue($0) }
-            .joined(separator: "   ")
-    }
-
-    private func nonEmptyContactValue(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func contactURL(scheme: String, value: String?) -> URL? {

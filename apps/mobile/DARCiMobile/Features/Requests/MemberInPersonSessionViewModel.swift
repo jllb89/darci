@@ -100,6 +100,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
     var publicVerificationURL: URL? {
         guard let path = context?.document.summary.finalization.publicVerifyPath?.trimmingCharacters(in: .whitespacesAndNewlines),
               path.isEmpty == false,
+              context?.meeting?.status == "completed",
               context?.document.summary.finalization.isAnchored == true else {
             return nil
         }
