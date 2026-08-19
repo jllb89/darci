@@ -1740,7 +1740,7 @@ export const appendAcknowledgmentPageToPdf = async (input: {
   signatureImageDataUrl?: string | null | undefined;
   sealImageDataUrl?: string | null | undefined;
 }) => {
-  const pdf = await PdfLibDocument.load(input.sourcePdfBytes);
+  const pdf = await PdfLibDocument.load(input.sourcePdfBytes, { ignoreEncryption: true });
   const pages = pdf.getPages();
   const referencePage = pages[pages.length - 1];
   const pageSize: [number, number] = referencePage
@@ -1771,7 +1771,7 @@ export const applyFinalizationWatermarkToPdf = async (input: {
   sourcePdfBytes: Buffer;
   watermarkText: string;
 }) => {
-  const pdf = await PdfLibDocument.load(input.sourcePdfBytes);
+  const pdf = await PdfLibDocument.load(input.sourcePdfBytes, { ignoreEncryption: true });
 
   for (const page of pdf.getPages()) {
     await drawWatermarkOnPage({

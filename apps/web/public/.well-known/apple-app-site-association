@@ -21,6 +21,10 @@
           {
             "/": "/app/review",
             "comment": "Open review links in DARCi on iOS."
+          },
+          {
+            "/": "/app/invite",
+            "comment": "Open signer invitation links in DARCi on iOS."
           }
         ]
       }

@@ -120,6 +120,14 @@ struct InviteOpenResponse: Decodable, Equatable, Sendable {
     let message: String?
 }
 
+struct InviteClaimResponse: Decodable, Equatable, Sendable {
+    let invite: InviteClaimDocument
+}
+
+struct InviteClaimDocument: Decodable, Equatable, Sendable {
+    let documentId: String
+}
+
 struct InviteResendResponse: Decodable, Equatable, Sendable {
     let existing: Bool?
 }

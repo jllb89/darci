@@ -3,6 +3,7 @@ import Foundation
 protocol RequestsAPIProviding: Sendable {
     func listSigningRequests(limit: Int, accessToken: String) async throws -> SigningRequestsResponse
     func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse
+    func claimInviteToken(_ token: String, accessToken: String) async throws -> InviteClaimResponse
     func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse
     func getMemberInPersonSession(requestId: String, accessToken: String) async throws -> MemberInPersonSessionResponse
     func recordMemberCheckIn(requestId: String, request: MemberMeetingCheckInRequest, accessToken: String) async throws -> NotarySessionActionResponse
@@ -26,6 +27,14 @@ struct RequestsAPIClient: RequestsAPIProviding, Sendable {
     func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse {
         try await authClient.post(
             path: "/invites/\(inviteId)/open",
+            body: RequestsEmptyRequest(),
+            accessToken: accessToken
+        )
+    }
+
+    func claimInviteToken(_ token: String, accessToken: String) async throws -> InviteClaimResponse {
+        try await authClient.post(
+            path: "/invites/public/\(Self.encodedPathComponent(token))/claim",
             body: RequestsEmptyRequest(),
             accessToken: accessToken
         )
@@ -70,6 +79,10 @@ struct MockRequestsAPIClient: RequestsAPIProviding, Sendable {
 
     func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse {
         InviteOpenResponse(signingHref: "/app/sign?documentId=mock-document", message: nil)
+    }
+
+    func claimInviteToken(_ token: String, accessToken: String) async throws -> InviteClaimResponse {
+        InviteClaimResponse(invite: InviteClaimDocument(documentId: "mock-document"))
     }
 
     func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse {

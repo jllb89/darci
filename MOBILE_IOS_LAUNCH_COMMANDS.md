@@ -229,3 +229,6 @@ xcodebuild -scheme DARCiMobile -destination 'vet' build
 
 aws pinpoint-sms-voice-v2 describe-registrations --region us-east-1
 aws pinpoint-sms-voice-v2 describe-phone-numbers --region us-east-1
+
+
+xcrun simctl location vet set 20.697591,-103.376880

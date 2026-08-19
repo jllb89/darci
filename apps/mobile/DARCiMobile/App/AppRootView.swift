@@ -24,6 +24,7 @@ struct AppRootView: View {
     @State private var memberSessionRoute: MemberInPersonSessionRoute?
     @State private var pendingMemberSessionRoute: MemberInPersonSessionRoute?
     @State private var pendingPushRoute: PushNotificationRoute?
+    @State private var pendingInviteToken: String?
     @State private var isProfileSelectionPresented = false
     @State private var isUserSettingsPresented = false
     @State private var isNotificationCenterPresented = false
@@ -109,13 +110,19 @@ struct AppRootView: View {
             presentPushPermissionPromptIfEligible()
             openPendingMemberSessionIfPossible()
             openPendingPushRouteIfPossible()
-            Task { await notificationCenterViewModel.load(for: sessionCoordinator.currentSession) }
+            Task {
+                await openPendingInviteIfPossible()
+                await notificationCenterViewModel.load(for: sessionCoordinator.currentSession)
+            }
         }
         .onChange(of: sessionCoordinator.currentSession) { _, session in
             pushCoordinator.activate(session: session)
             presentPushPermissionPromptIfEligible()
             openPendingPushRouteIfPossible()
-            Task { await notificationCenterViewModel.load(for: session) }
+            Task {
+                await openPendingInviteIfPossible()
+                await notificationCenterViewModel.load(for: session)
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -406,6 +413,7 @@ struct AppRootView: View {
             memberSessionRoute = nil
             pendingMemberSessionRoute = nil
             pendingPushRoute = nil
+            pendingInviteToken = nil
             isProfileSelectionPresented = false
             isUserSettingsPresented = false
 
@@ -429,6 +437,7 @@ struct AppRootView: View {
         memberSessionRoute = nil
         pendingMemberSessionRoute = nil
         pendingPushRoute = nil
+        pendingInviteToken = nil
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
 
@@ -592,6 +601,12 @@ struct AppRootView: View {
     }
 
     private func handleIncomingURL(_ url: URL) {
+        if let inviteToken = MemberDocumentDeepLink.inviteToken(from: url) {
+            pendingInviteToken = inviteToken
+            Task { await openPendingInviteIfPossible() }
+            return
+        }
+
         if let route = MemberDocumentDeepLink.route(from: url) {
             pendingPushRoute = route
             openPendingPushRouteIfPossible()
@@ -628,6 +643,42 @@ struct AppRootView: View {
         isUserSettingsPresented = false
         isNotificationCenterPresented = false
         shouldReturnToNotificationCenterAfterRoute = false
+    }
+
+    @MainActor
+    private func openPendingInviteIfPossible() async {
+        guard launchPhase == .signedIn,
+              let session = sessionCoordinator.currentSession,
+              let inviteToken = pendingInviteToken else {
+            return
+        }
+
+        do {
+            let result = try await requestsAPIClient.claimInviteToken(inviteToken, accessToken: session.accessToken)
+            let documentId = result.invite.documentId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard documentId.isEmpty == false else {
+                pendingInviteToken = nil
+                showHomeBanner("Document invite could not be opened.")
+                return
+            }
+
+            selectedTab = .documents
+            selectedProductModeKey = nil
+            intakeRoute = nil
+            reviewRoute = nil
+            signingRoute = DocumentSigningRoute(documentId: documentId)
+            notaryReviewRoute = nil
+            notarySessionRoute = nil
+            memberSessionRoute = nil
+            pendingInviteToken = nil
+            isProfileSelectionPresented = false
+            isUserSettingsPresented = false
+            isNotificationCenterPresented = false
+            shouldReturnToNotificationCenterAfterRoute = false
+        } catch {
+            pendingInviteToken = nil
+            showHomeBanner("Document invite could not be opened. Try the link again or open it in the web app.")
+        }
     }
 
     private func openPendingPushRouteIfPossible() {
