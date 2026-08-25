@@ -116,6 +116,54 @@ describe("documentFinalizationService", () => {
     expect(rawPdf).not.toContain("Generated:");
   });
 
+  it("keeps a full California acknowledgment with signature and seal on one page", async () => {
+    const acknowledgment = renderAcknowledgmentContent({
+      ...baseRenderInput,
+      document: {
+        ...baseRenderInput.document,
+        jurisdiction: "US-CA",
+      } as never,
+      config: {
+        acknowledgmentTemplateId: "us_ca_acknowledgment_v1",
+        acknowledgmentTemplateVersion: "2026.04.21.v1",
+        watermarkTextTemplate: "DIGITAL ORIGINAL {{idn}}",
+      },
+      venue: {
+        ...baseRenderInput.venue,
+        state: "CA",
+        county: "Los Angeles",
+        addressLine1: "12345 Acknowledgment Verification Boulevard, Suite 1200",
+      },
+      notaryProfile: {
+        ...baseRenderInput.notaryProfile,
+        jurisdiction: "US-CA",
+        serviceAreaName: "Los Angeles County",
+        commissionNumber: "CA-12345",
+      },
+      documentFamily: "poa_general",
+      acknowledgerNames: [
+        "Alexandra Catherine Montgomery-Worthington",
+        "Benjamin Theodore Montgomery-Worthington",
+      ],
+    });
+
+    const appendixPdfBytes = await renderAcknowledgmentAppendixPdf({
+      pageSize: [612, 792],
+      acknowledgmentContent: acknowledgment.content,
+      signatureImage: {
+        bytes: Buffer.from(onePixelPngDataUrl.split(",")[1], "base64"),
+        format: "png",
+      },
+      sealImage: {
+        bytes: Buffer.from(onePixelPngDataUrl.split(",")[1], "base64"),
+        format: "png",
+      },
+    });
+    const appendixPdf = await PdfLibDocument.load(appendixPdfBytes);
+
+    expect(appendixPdf.getPageCount()).toBe(1);
+  });
+
   it("uses a two-inch notarial seal render box", () => {
     expect(ACKNOWLEDGMENT_SEAL_DIAMETER_POINTS).toBe(144);
   });

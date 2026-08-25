@@ -88,7 +88,7 @@ struct UserSettingsLegalContentView: View {
                         .foregroundStyle(.white)
                         .lineSpacing(5)
 
-                    Text("This summary explains what DARCI collects, why it is used, and the choices available to you.")
+                    Text("This summary explains what DARCi collects, why it is used, and the choices available to you.")
                         .font(DARCiFont.maisonNeue(.book, size: 12.5))
                         .foregroundStyle(secondaryText)
                         .lineSpacing(5.5)
@@ -111,7 +111,7 @@ struct UserSettingsLegalContentView: View {
             titleBlock(title: "Terms & Conditions", subtitle: "LAST UPDATED  AUG 11, 2026")
                 .padding(.top, 42)
 
-            Text("These terms describe the rules for using DARCI and its document services.")
+            Text("These terms describe the rules for using DARCi and its document services.")
                 .font(DARCiFont.maisonNeue(.book, size: 13))
                 .foregroundStyle(secondaryText)
                 .lineSpacing(6)
@@ -147,7 +147,7 @@ struct UserSettingsLegalContentView: View {
                 .foregroundStyle(.white)
                 .padding(.top, 42)
 
-            Text("Find quick answers about DARCI.")
+            Text("Find quick answers about DARCi.")
                 .font(DARCiFont.maisonNeue(.book, size: 13))
                 .foregroundStyle(secondaryText)
                 .lineSpacing(6)
@@ -314,7 +314,7 @@ private let privacySections: [LegalSectionItem] = [
         id: "privacy-data",
         number: "01",
         title: "Data we collect",
-        body: "Account details, document activity, device information, and service interactions needed to operate DARCI."
+        body: "Account details, document activity, device information, and service interactions needed to operate DARCi."
     ),
     LegalSectionItem(
         id: "privacy-use",
@@ -341,13 +341,13 @@ private let termsSections: [LegalSectionItem] = [
         id: "terms-acceptance",
         number: "01",
         title: "Acceptance of terms",
-        body: "By creating an account or using DARCI, you agree to these terms and the policies referenced here."
+        body: "By creating an account or using DARCi, you agree to these terms and the policies referenced here."
     ),
     LegalSectionItem(
         id: "terms-services",
         number: "02",
-        title: "DARCI services",
-        body: "DARCI provides tools to prepare, manage, sign, and track document and notarization requests."
+        title: "DARCi services",
+        body: "DARCi provides tools to prepare, manage, sign, and track document and notarization requests."
     ),
     LegalSectionItem(
         id: "terms-account",
@@ -366,48 +366,48 @@ private let termsSections: [LegalSectionItem] = [
 private let faqs: [FAQItem] = [
     FAQItem(
         id: "what-is-darci",
-        question: "What is DARCI?",
-        answer: "DARCI is a secure document registration platform that protects, authenticates, and verifies important documents. Each registered document receives a unique DARCI Registration Number that can be used to verify its authenticity when needed."
+        question: "What is DARCi?",
+        answer: "DARCi is a secure document registration platform that protects, authenticates, and verifies important documents. Each registered document receives a unique DARCi Registration Number that can be used to verify its authenticity when needed."
     ),
     FAQItem(
         id: "document-registration",
         question: "How does document registration work?",
-        answer: "Register your document with DARCI, where it is assigned a unique DARCI Registration Number and a secure registration record is created. Your document can then be authenticated through DARCI whenever verification is needed."
+        answer: "Register your document with DARCi, where it is assigned a unique DARCi Registration Number and a secure registration record is created. Your document can then be authenticated through DARCi whenever verification is needed."
     ),
     FAQItem(
         id: "document-notarization",
         question: "How does document notarization work?",
-        answer: "Choose a document, confirm the participants, and follow the guided steps. DARCI keeps the request status visible from start to completion."
+        answer: "Choose a document, confirm the participants, and follow the guided steps. DARCi keeps the request status visible from start to completion."
     ),
     FAQItem(
         id: "attorney",
         question: "Do I need an attorney?",
-        answer: "No. You do not need an attorney to register a document with DARCI. If you need legal advice or assistance preparing a document, you should consult a qualified attorney."
+        answer: "No. You do not need an attorney to register a document with DARCi. If you need legal advice or assistance preparing a document, you should consult a qualified attorney."
     ),
     FAQItem(
         id: "trust-registration",
         question: "Why should I register my trust?",
-        answer: "Registering your trust helps protect your intentions. DARCI maintains a registration record for your trust, helping protect it from fraud, unauthorized changes, and confusion over which version is the most current."
+        answer: "Registering your trust helps protect your intentions. DARCi maintains a registration record for your trust, helping protect it from fraud, unauthorized changes, and confusion over which version is the most current."
     ),
     FAQItem(
         id: "trust-storage",
-        question: "Does DARCI store my trust?",
-        answer: "Yes. Your registered trust is securely stored within the DARCI platform. Your document is only accessible to authorized users and is not publicly available."
+        question: "Does DARCi store my trust?",
+        answer: "Yes. Your registered trust is securely stored within the DARCi platform. Your document is only accessible to authorized users and is not publicly available."
     ),
     FAQItem(
         id: "dynamic-poa",
         question: "What makes a Dynamic POA different?",
-        answer: "A DARCI Dynamic POA can be verified through DARCI to help confirm that the document is authentic and current. It gives financial institutions and other third parties greater confidence when relying on a Power of Attorney."
+        answer: "A DARCi Dynamic POA can be verified through DARCi to help confirm that the document is authentic and current. It gives financial institutions and other third parties greater confidence when relying on a Power of Attorney."
     ),
     FAQItem(
         id: "bank-verification",
         question: "How do banks verify my POA?",
-        answer: "Authorized parties can verify a registered Power of Attorney through DARCI using its unique verification information. Verification helps confirm the document's authenticity and registration status."
+        answer: "Authorized parties can verify a registered Power of Attorney through DARCi using its unique verification information. Verification helps confirm the document's authenticity and registration status."
     ),
     FAQItem(
         id: "poa-revoke",
         question: "What happens if I revoke my POA?",
-        answer: "If you revoke your registered Power of Attorney, you can create a new POA in DARCI. Future verifications will reflect the most current registration information."
+        answer: "If you revoke your registered Power of Attorney, you can create a new POA in DARCi. Future verifications will reflect the most current registration information."
     ),
     FAQItem(
         id: "poa-after-death",
@@ -417,17 +417,17 @@ private let faqs: [FAQItem] = [
     FAQItem(
         id: "cancel-request",
         question: "Can I update or cancel a request?",
-        answer: "Some request details may be updated while the request is still in progress. If a request is already assigned, signed, or completed, contact support so DARCI can help review the available options."
+        answer: "Some request details may be updated while the request is still in progress. If a request is already assigned, signed, or completed, contact support so DARCi can help review the available options."
     ),
     FAQItem(
         id: "completed-documents",
         question: "Where can I download completed documents?",
-        answer: "Completed documents are available from your DARCI document list and request details after signing, notarization, or registration is complete."
+        answer: "Completed documents are available from your DARCi document list and request details after signing, notarization, or registration is complete."
     ),
     FAQItem(
         id: "information-protected",
         question: "How is my information protected?",
-        answer: "DARCI limits access by role and purpose, uses technical and administrative safeguards, and does not make your documents publicly available. Public verification is limited to registration and authenticity information."
+        answer: "DARCi limits access by role and purpose, uses technical and administrative safeguards, and does not make your documents publicly available. Public verification is limited to registration and authenticity information."
     ),
     FAQItem(
         id: "document-access",
@@ -437,7 +437,7 @@ private let faqs: [FAQItem] = [
     FAQItem(
         id: "identity-verification",
         question: "How is my identity verified?",
-        answer: "DARCI uses identity verification measures during registration to help protect your account and the integrity of registered documents."
+        answer: "DARCi uses identity verification measures during registration to help protect your account and the integrity of registered documents."
     ),
     FAQItem(
         id: "public-information",
@@ -446,13 +446,13 @@ private let faqs: [FAQItem] = [
     ),
     FAQItem(
         id: "registration-number",
-        question: "What is a DARCI Registration Number?",
-        answer: "A DARCI Registration Number is the unique identifier assigned to each registered document. It is used to support authentication and verification through the DARCI platform."
+        question: "What is a DARCi Registration Number?",
+        answer: "A DARCi Registration Number is the unique identifier assigned to each registered document. It is used to support authentication and verification through the DARCi platform."
     ),
     FAQItem(
         id: "verify-document",
         question: "How does someone verify my document?",
-        answer: "Authorized parties can verify a registered document through DARCI using its unique verification information. Verification confirms the document's registration and authenticity."
+        answer: "Authorized parties can verify a registered document through DARCi using its unique verification information. Verification confirms the document's registration and authenticity."
     ),
     FAQItem(
         id: "anyone-verify",
@@ -467,7 +467,7 @@ private let faqs: [FAQItem] = [
     FAQItem(
         id: "supported-states",
         question: "Which states are currently supported?",
-        answer: "State availability continues to expand. Visit the DARCI website for the most current list of supported states and available services."
+        answer: "State availability continues to expand. Visit the DARCi website for the most current list of supported states and available services."
     ),
     FAQItem(
         id: "paper-documents",
@@ -487,16 +487,16 @@ private let faqs: [FAQItem] = [
     FAQItem(
         id: "legal-advice",
         question: "Is this legal advice?",
-        answer: "No. DARCI provides document registration and verification services, not legal advice. If you have legal questions, you should consult a qualified attorney."
+        answer: "No. DARCi provides document registration and verification services, not legal advice. If you have legal questions, you should consult a qualified attorney."
     ),
     FAQItem(
         id: "registration-attorney",
         question: "Does registration replace an attorney?",
-        answer: "No. Registering a document does not replace legal advice or document preparation by an attorney. DARCI helps protect and verify documents after they have been created."
+        answer: "No. Registering a document does not replace legal advice or document preparation by an attorney. DARCi helps protect and verify documents after they have been created."
     ),
     FAQItem(
         id: "law-changes",
         question: "What happens if state laws change?",
-        answer: "DARCI continually monitors changes in applicable laws and updates the platform as needed to maintain compliance in supported jurisdictions."
+        answer: "DARCi continually monitors changes in applicable laws and updates the platform as needed to maintain compliance in supported jurisdictions."
     ),
 ]

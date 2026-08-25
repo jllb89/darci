@@ -196,7 +196,7 @@ struct MemberInPersonSessionView: View {
 
     private var contactExchangeCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("YOUR ILLUMINOTARY")
+            Text("YOUR illuminotary")
                 .font(DARCiFont.maisonNeue(.mono, size: 9))
                 .foregroundStyle(.black.opacity(0.48))
 

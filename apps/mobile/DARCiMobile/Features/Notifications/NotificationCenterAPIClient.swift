@@ -79,7 +79,7 @@ struct MockNotificationCenterAPIClient: NotificationCenterAPIProviding {
                 jobId: "job-account",
                 templateKey: "notary_application_approved_email",
                 title: "Notary profile approved",
-                body: "Your Illuminotary profile is ready. Open settings to review your account.",
+                body: "Your illuminotary profile is ready. Open settings to review your account.",
                 category: .account,
                 metadataLabel: nil,
                 createdAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7_200)),

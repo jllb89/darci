@@ -709,7 +709,81 @@ describe("member signature capture", () => {
     );
   });
 
-  it("mirrors same-person trust registration captures to hidden trust certificate signers", async () => {
+  it("does not leave a signature captured when applying it to the PDF fails", async () => {
+    mocks.getDocumentByIdMock.mockResolvedValue({
+      id: "doc-1",
+      owner_id: "owner-1",
+      idn: "AB12CD34EF56",
+      status: "pending_signature",
+      document_type: "uploaded_document",
+      jurisdiction: "US-CA",
+      product_flow_mode: "notarize_document",
+      created_at: "2026-03-05T00:00:00.000Z",
+      intake_status: "submitted",
+      intake_submitted_at: "2026-03-05T00:00:00.000Z",
+      output_bundle: outputBundle,
+    });
+    mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.createSignatureRecordMock.mockResolvedValue({
+      id: "signature-application-failed",
+      document_id: "doc-1",
+      generation_run_id: generationRunId,
+      document_output_signer_id: outputSignerId,
+      signer_id: "owner-1",
+      signature_type: "member",
+      capture_method: "type",
+      storage_path: null,
+      status: "captured",
+      mime_type: null,
+      size_bytes: null,
+      typed_value: "Owner One",
+      typed_kind: "name",
+      metadata: {},
+      captured_at: "2026-03-05T00:00:25.000Z",
+      created_at: "2026-03-05T00:00:25.000Z",
+    });
+    mocks.applySignatureCaptureToDocumentOutputMock.mockRejectedValue(
+      new Error("Input document is encrypted"),
+    );
+    mocks.updateSignatureRecordMock.mockResolvedValue({
+      id: "signature-application-failed",
+      status: "upload_pending",
+    });
+
+    const token = signToken({
+      sub: "supabase-owner-1",
+      email: "owner@example.com",
+      app_metadata: { role: "member" },
+    });
+
+    const response = await postWithLog(
+      "/documents/doc-1/signatures",
+      {
+        ...signatureTargetPayload,
+        captureMethod: "type",
+        typedValue: "Owner One",
+        typedKind: "name",
+      },
+      "rolls back failed PDF signature application",
+      token,
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.updateSignatureRecordMock).toHaveBeenCalledWith(
+      "signature-application-failed",
+      "doc-1",
+      expect.objectContaining({
+        status: "upload_pending",
+        capturedAt: null,
+        metadata: expect.objectContaining({
+          documentApplication: expect.objectContaining({ status: "failed" }),
+        }),
+      }),
+    );
+    expect(mocks.completeSigningWorkflowAfterSignatureCaptureMock).not.toHaveBeenCalled();
+  });
+
+  it("mirrors same-person trust captures to trustee and hidden certificate roles", async () => {
     const trustSigner = {
       ...signerRecord,
       id: "trust-signer-1",
@@ -727,6 +801,18 @@ describe("member signature capture", () => {
       document_key: "trust_certificate",
       party_role: "trustee",
       party_name: "Taylor Trust",
+    };
+    const trusteeSigner = {
+      ...signerRecord,
+      id: "trustee-signer-1",
+      generation_run_id: "run-trust",
+      output_key: "trust_rrr",
+      document_key: "trust_rrr",
+      party_role: "trustee",
+      party_name: "Taylor Trust",
+      is_required: false,
+      signing_group: "trustees",
+      group_minimum_required: 1,
     };
 
     mocks.getDocumentByIdMock.mockResolvedValue({
@@ -792,7 +878,11 @@ describe("member signature capture", () => {
       },
     ]);
     mocks.listDocumentSignaturesMock.mockResolvedValue([]);
-    mocks.listDocumentOutputSignersMock.mockResolvedValue([trustSigner, certificateSigner]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([
+      trustSigner,
+      certificateSigner,
+      trusteeSigner,
+    ]);
     mocks.getDocumentOutputSignerByIdMock.mockResolvedValue(trustSigner);
     mocks.createSignatureRecordMock
       .mockResolvedValueOnce({
@@ -830,6 +920,24 @@ describe("member signature capture", () => {
         metadata: { mirroredFromSignatureId: "visible-signature" },
         captured_at: "2026-03-05T00:00:20.000Z",
         created_at: "2026-03-05T00:00:20.000Z",
+      })
+      .mockResolvedValueOnce({
+        id: "trustee-signature",
+        document_id: "doc-1",
+        generation_run_id: "run-trust",
+        document_output_signer_id: "trustee-signer-1",
+        signer_id: "owner-1",
+        signature_type: "member",
+        capture_method: "type",
+        storage_path: null,
+        status: "captured",
+        mime_type: null,
+        size_bytes: null,
+        typed_value: "Taylor Trust",
+        typed_kind: "name",
+        metadata: { mirroredFromSignatureId: "visible-signature" },
+        captured_at: "2026-03-05T00:00:20.000Z",
+        created_at: "2026-03-05T00:00:20.000Z",
       });
 
     const token = signToken({
@@ -852,7 +960,7 @@ describe("member signature capture", () => {
     );
 
     expect(response.status, JSON.stringify(response.body)).toBe(201);
-    expect(mocks.createSignatureRecordMock).toHaveBeenCalledTimes(2);
+    expect(mocks.createSignatureRecordMock).toHaveBeenCalledTimes(3);
     expect(mocks.createSignatureRecordMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -863,7 +971,21 @@ describe("member signature capture", () => {
           savedSignatureId: "visible-signature",
           mirroredFromOutputSignerId: "trust-signer-1",
           mirroredFromSignatureId: "visible-signature",
-          mirroredReason: "same_person_trust_certificate",
+          mirroredReason: "same_person_trust_bundle",
+        }),
+      }),
+    );
+    expect(mocks.createSignatureRecordMock).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        generationRunId: "run-trust",
+        documentOutputSignerId: "trustee-signer-1",
+        typedValue: "Taylor Trust",
+        metadata: expect.objectContaining({
+          savedSignatureId: "visible-signature",
+          mirroredFromOutputSignerId: "trust-signer-1",
+          mirroredFromSignatureId: "visible-signature",
+          mirroredReason: "same_person_trust_bundle",
         }),
       }),
     );
@@ -872,6 +994,13 @@ describe("member signature capture", () => {
         generationRunId: "run-cert",
         outputSignerId: "certificate-signer-1",
         signatureRecord: expect.objectContaining({ id: "certificate-signature" }),
+      }),
+    );
+    expect(mocks.applySignatureCaptureToDocumentOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generationRunId: "run-trust",
+        outputSignerId: "trustee-signer-1",
+        signatureRecord: expect.objectContaining({ id: "trustee-signature" }),
       }),
     );
     expect(mocks.completeSigningWorkflowAfterSignatureCaptureMock).toHaveBeenCalledWith(

@@ -96,7 +96,7 @@ struct NotaryProfileView: View {
             Spacer(minLength: 0)
 
             Button(action: onProfileAction) {
-                Text("Illuminotary")
+                Text("illuminotary")
                     .font(DARCiFont.maisonNeue(.mono, size: 13))
                     .lineSpacing(16.9)
                     .foregroundStyle(Color(red: 0.19, green: 0.19, blue: 0.19))

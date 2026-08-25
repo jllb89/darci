@@ -3537,7 +3537,7 @@ const ensureSigningState = async (input: {
   }
 
   if (document.status === "pending_signature") {
-    const mirroredSignatures = await repairHiddenTrustCertificateSignatures({
+    const mirroredSignatures = await repairSamePersonTrustBundleSignatures({
       document,
       signingState,
       actorContext: input.actorContext ?? {},
@@ -7066,6 +7066,36 @@ const mapCapturedSignatureResponse = async (signatureRecord: SignatureRecord) =>
   };
 };
 
+const markSignatureDocumentApplicationFailed = async (input: {
+  document: DocumentRecord;
+  signatureRecord: SignatureRecord;
+  error: unknown;
+}) => {
+  const failedAt = new Date().toISOString();
+  const errorMessage = input.error instanceof Error ? input.error.message : String(input.error);
+
+  try {
+    await updateSignatureRecord(input.signatureRecord.id, input.document.id, {
+      status: "upload_pending",
+      capturedAt: null,
+      metadata: {
+        ...input.signatureRecord.metadata,
+        documentApplication: {
+          status: "failed",
+          failedAt,
+          error: errorMessage,
+        },
+      },
+    });
+  } catch (rollbackError) {
+    console.error("Failed to roll back unapplied signature capture", {
+      documentId: input.document.id,
+      signatureId: input.signatureRecord.id,
+      error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+    });
+  }
+};
+
 const completeSignatureCapture = async (input: {
   document: DocumentRecord;
   signatureTask: SigningSignatureResponse;
@@ -7074,13 +7104,22 @@ const completeSignatureCapture = async (input: {
   actorUserId: string | null;
   actorEmail: string | null;
 }) => {
-  await applySignatureCaptureToDocumentOutput({
-    document: input.document,
-    generationRunId: input.signatureTask.generationRunId,
-    outputSignerId: input.signatureTask.outputSignerId,
-    signatureRecord: input.signatureRecord,
-    actorContext: input.actorContext,
-  });
+  try {
+    await applySignatureCaptureToDocumentOutput({
+      document: input.document,
+      generationRunId: input.signatureTask.generationRunId,
+      outputSignerId: input.signatureTask.outputSignerId,
+      signatureRecord: input.signatureRecord,
+      actorContext: input.actorContext,
+    });
+  } catch (error) {
+    await markSignatureDocumentApplicationFailed({
+      document: input.document,
+      signatureRecord: input.signatureRecord,
+      error,
+    });
+    throw error;
+  }
 
   await recordAuditEvent({
     ...input.actorContext,
@@ -7287,16 +7326,13 @@ const getLatestGenerationRunIdsByOutputKey = (runs: DocumentGenerationRunRecord[
   return latestRunIdsByOutputKey;
 };
 
-const mirrorSignatureToHiddenTrustCertificate = async (input: {
+const mirrorSignatureToSamePersonTrustBundleSigners = async (input: {
   document: DocumentRecord;
   sourceSignatureTask: SigningSignatureResponse;
   sourceSignatureRecord: SignatureRecord;
   actorContext: { actorSupabaseId?: string; actorRole?: string };
 }) => {
-  if (
-    input.document.product_flow_mode !== "trust_bundle" ||
-    input.sourceSignatureTask.documentKey !== "trust_rrr"
-  ) {
+  if (input.document.product_flow_mode !== "trust_bundle") {
     return [] as SignatureRecord[];
   }
 
@@ -7331,7 +7367,13 @@ const mirrorSignatureToHiddenTrustCertificate = async (input: {
   for (const signer of outputSigners) {
     if (
       signer.obligation_type !== "signer" ||
-      signer.document_key !== "trust_certificate" ||
+      signer.id === input.sourceSignatureTask.outputSignerId ||
+      !(
+        signer.document_key === "trust_certificate" ||
+        (signer.document_key === "trust_rrr" &&
+          signer.party_role === "trustee" &&
+          !signer.is_required)
+      ) ||
       !currentRunIds.has(signer.generation_run_id) ||
       capturedOutputSignerIds.has(signer.id) ||
       normalizeSignaturePartyName(signer.party_name) !== sourcePartyName
@@ -7366,18 +7408,34 @@ const mirrorSignatureToHiddenTrustCertificate = async (input: {
         savedSignatureId: sourceSavedSignatureId,
         mirroredFromOutputSignerId: input.sourceSignatureTask.outputSignerId,
         mirroredFromSignatureId: input.sourceSignatureRecord.id,
-        mirroredReason: "same_person_trust_certificate",
+        mirroredReason: "same_person_trust_bundle",
       },
       capturedAt,
     });
 
-    await applySignatureCaptureToDocumentOutput({
-      document: input.document,
-      generationRunId: signer.generation_run_id,
-      outputSignerId: signer.id,
-      signatureRecord: mirroredSignature,
-      actorContext: input.actorContext,
-    });
+    try {
+      await applySignatureCaptureToDocumentOutput({
+        document: input.document,
+        generationRunId: signer.generation_run_id,
+        outputSignerId: signer.id,
+        signatureRecord: mirroredSignature,
+        actorContext: input.actorContext,
+      });
+    } catch (error) {
+      await Promise.all([
+        markSignatureDocumentApplicationFailed({
+          document: input.document,
+          signatureRecord: mirroredSignature,
+          error,
+        }),
+        markSignatureDocumentApplicationFailed({
+          document: input.document,
+          signatureRecord: input.sourceSignatureRecord,
+          error,
+        }),
+      ]);
+      throw error;
+    }
 
     mirroredSignatures.push(mirroredSignature);
     capturedOutputSignerIds.add(signer.id);
@@ -7386,7 +7444,7 @@ const mirrorSignatureToHiddenTrustCertificate = async (input: {
   return mirroredSignatures;
 };
 
-const repairHiddenTrustCertificateSignatures = async (input: {
+const repairSamePersonTrustBundleSignatures = async (input: {
   document: DocumentRecord;
   signingState: DocumentSigningState;
   actorContext: { actorSupabaseId?: string; actorRole?: string };
@@ -7395,26 +7453,28 @@ const repairHiddenTrustCertificateSignatures = async (input: {
     return [] as SignatureRecord[];
   }
 
-  const pendingCertificateSignerNames = new Set(
+  const pendingSignerNames = new Set(
     input.signingState.signatures
       .filter(
         (signature) =>
-          signature.documentKey === "trust_certificate" &&
-          signature.status !== "captured",
+          signature.status !== "captured" &&
+          (signature.documentKey === "trust_certificate" ||
+            (signature.documentKey === "trust_rrr" &&
+              signature.partyRole === "trustee" &&
+              !signature.isRequired)),
       )
       .map((signature) => normalizeSignaturePartyName(signature.partyName))
       .filter((name) => name.length > 0),
   );
-  if (pendingCertificateSignerNames.size === 0) {
+  if (pendingSignerNames.size === 0) {
     return [] as SignatureRecord[];
   }
 
   const sourceSignatureTasks = input.signingState.signatures.filter(
     (signature) =>
-      signature.documentKey === "trust_rrr" &&
       signature.status === "captured" &&
       Boolean(signature.signatureId) &&
-      pendingCertificateSignerNames.has(normalizeSignaturePartyName(signature.partyName)),
+      pendingSignerNames.has(normalizeSignaturePartyName(signature.partyName)),
   );
   const mirroredSignatures: SignatureRecord[] = [];
   const repairedPartyNames = new Set<string>();
@@ -7430,7 +7490,7 @@ const repairHiddenTrustCertificateSignatures = async (input: {
       continue;
     }
 
-    const mirrored = await mirrorSignatureToHiddenTrustCertificate({
+    const mirrored = await mirrorSignatureToSamePersonTrustBundleSigners({
       document: input.document,
       sourceSignatureTask,
       sourceSignatureRecord,
@@ -7675,7 +7735,7 @@ export const captureSignature = async (req: Request, res: Response) => {
     });
   }
 
-  await mirrorSignatureToHiddenTrustCertificate({
+  await mirrorSignatureToSamePersonTrustBundleSigners({
     document,
     sourceSignatureTask: signatureTask,
     sourceSignatureRecord: signatureRecord,
@@ -7941,7 +8001,7 @@ export const finalizeSignatureUpload = async (req: Request, res: Response) => {
     capturedAt,
   });
 
-  await mirrorSignatureToHiddenTrustCertificate({
+  await mirrorSignatureToSamePersonTrustBundleSigners({
     document,
     sourceSignatureTask: signatureTask,
     sourceSignatureRecord: updatedSignature,

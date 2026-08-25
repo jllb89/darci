@@ -800,7 +800,7 @@ describe("Phase 5 meeting runtime slice", () => {
         notarySampleId: "geo-notary-auto",
         metadata: expect.objectContaining({
           trigger: "automatic_checkin",
-          policy: expect.objectContaining({ policyVersion: "same_place_v1" }),
+          policy: expect.objectContaining({ policyVersion: "same_place_v2_accuracy_aware" }),
         }),
       }),
     );
@@ -1529,7 +1529,7 @@ describe("Phase 5 meeting runtime slice", () => {
         status: "passed",
         thresholdMeters: 100,
         metadata: expect.objectContaining({
-          policy: expect.objectContaining({ policyVersion: "same_place_v1" }),
+          policy: expect.objectContaining({ policyVersion: "same_place_v2_accuracy_aware" }),
           sampleAgesSeconds: expect.objectContaining({ member: 60, notary: 30 }),
           sampleAccuracyMeters: expect.objectContaining({ member: 9, notary: 8 }),
         }),
@@ -1538,6 +1538,93 @@ describe("Phase 5 meeting runtime slice", () => {
     expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
       "meeting-4",
       expect.objectContaining({ same_place_status: "passed" }),
+    );
+  });
+
+  it("passes a borderline raw distance when GPS accuracy puts both samples within the threshold", async () => {
+    setupProximityScenario();
+    mocks.listMeetingGeolocationSamplesMock
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-member-accuracy-aware",
+          captured_at: "2026-05-27T15:04:00.000Z",
+          accuracy_meters: 7.2,
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildProximitySample({
+          id: "geo-notary-accuracy-aware",
+          meeting_participant_id: "participant-notary-4",
+          meeting_checkin_id: "checkin-notary-4",
+          captured_by_user_id: "notary-4",
+          capture_stage: "meeting_start",
+          latitude: 41.50049,
+          longitude: -81.6944,
+          captured_at: "2026-05-27T15:04:30.000Z",
+          accuracy_meters: 100,
+        }),
+      ]);
+    mocks.createProximityEvaluationMock.mockImplementation(async (input) => ({
+      id: "proximity-accuracy-aware-4",
+      meeting_id: input.meetingId,
+      evaluated_by_user_id: input.evaluatedByUserId,
+      member_sample_id: input.memberSampleId,
+      notary_sample_id: input.notarySampleId,
+      evaluation_kind: "same_place",
+      status: input.status,
+      threshold_meters: input.thresholdMeters,
+      observed_distance_meters: input.observedDistanceMeters,
+      evaluated_at: input.evaluatedAt,
+      notes: input.notes,
+      metadata: input.metadata,
+      created_at: input.evaluatedAt,
+      updated_at: input.evaluatedAt,
+    }));
+    mocks.updateMeetingMock.mockImplementation(async (_meetingId, update) => ({
+      id: "meeting-4",
+      request_id: "req-4",
+      workflow_id: "workflow-4",
+      scheduled_at: "2026-05-27T15:00:00.000Z",
+      timezone: null,
+      location: null,
+      status: "in_progress",
+      same_place_required: true,
+      same_place_status: update.same_place_status,
+      evidence_retention_until: null,
+      metadata: update.metadata,
+      created_at: "2026-05-27T15:00:00.000Z",
+      updated_at: "2026-05-27T15:05:00.000Z",
+    }));
+
+    const response = await postProximityEvaluation({
+      evaluatedAt: "2026-05-27T15:05:00.000Z",
+      thresholdMeters: 100,
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.evaluation.status).toBe("passed");
+    expect(response.body.evaluation.observedDistanceMeters).toBeGreaterThan(100);
+    expect(mocks.createProximityEvaluationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "passed",
+        metadata: expect.objectContaining({
+          policy: expect.objectContaining({
+            policyVersion: "same_place_v2_accuracy_aware",
+            accuracyAllowanceMeters: 100,
+            decisionDistanceMeters: expect.any(Number),
+          }),
+        }),
+      }),
+    );
+    expect(mocks.updateMeetingMock).toHaveBeenCalledWith(
+      "meeting-4",
+      expect.objectContaining({
+        same_place_status: "passed",
+        metadata: expect.objectContaining({
+          lastProximityAccuracyAllowanceMeters: 100,
+          lastProximityDecisionDistanceMeters: expect.any(Number),
+        }),
+      }),
     );
   });
 

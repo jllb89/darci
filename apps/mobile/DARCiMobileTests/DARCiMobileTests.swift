@@ -753,7 +753,7 @@ final class DARCiMobileTests: XCTestCase {
             document: initial.document,
             workflow: initial.workflow,
             owner: initial.owner,
-            notary: MemberSessionIdentity(displayName: "Updated Illuminotary"),
+            notary: MemberSessionIdentity(displayName: "Updated illuminotary"),
             meeting: initial.meeting,
             warnings: initial.warnings,
             nextAction: initial.nextAction
@@ -769,14 +769,14 @@ final class DARCiMobileTests: XCTestCase {
 
         await viewModel.load(session: session)
 
-        XCTAssertEqual(viewModel.notaryName, "Illuminotary")
+        XCTAssertEqual(viewModel.notaryName, "illuminotary")
         XCTAssertEqual(realtimeClient.startedRequestId, "request-1")
         XCTAssertEqual(realtimeClient.startedAccessToken, session.accessToken)
 
         realtimeClient.emitState(.live)
         await realtimeClient.emitInvalidation()
 
-        XCTAssertEqual(viewModel.notaryName, "Updated Illuminotary")
+        XCTAssertEqual(viewModel.notaryName, "Updated illuminotary")
         XCTAssertEqual(viewModel.realtimeState, .live)
         let contextCallCount = await apiClient.recordedContextCallCount()
         XCTAssertEqual(contextCallCount, 2)
@@ -808,7 +808,7 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(checkIns.first?.checkinKind, "arrival")
         XCTAssertEqual(checkIns.first?.geolocation.captureStage, "member_check_in")
         XCTAssertEqual(locationProvider.captureStages, ["member_check_in"])
-        XCTAssertEqual(viewModel.noticeMessage, "Location shared. Your Illuminotary can continue the session.")
+        XCTAssertEqual(viewModel.noticeMessage, "Location shared. Your illuminotary can continue the session.")
         XCTAssertEqual(viewModel.shareLocationButtonTitle, "Share location")
         viewModel.stop()
         XCTAssertEqual(locationProvider.stopPreparingCallCount, 1)
@@ -847,11 +847,11 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(OnboardingScreenContent.splash.brand, "DARCi")
         XCTAssertEqual(
             OnboardingScreenContent.splash.headline,
-            "Illuminotarization\nthat keeps up with your workflow."
+            "illuminotarization\nthat keeps up with your workflow."
         )
         XCTAssertEqual(
             OnboardingScreenContent.splash.accessibilityHeadline,
-            "Illuminotarization that keeps up with your workflow."
+            "illuminotarization that keeps up with your workflow."
         )
         XCTAssertEqual(OnboardingScreenContent.splash.ctaTitle, "Start")
     }

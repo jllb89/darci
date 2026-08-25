@@ -231,7 +231,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
 
     var samePlaceMessage: String {
         if hasPassedSamePlace {
-            return "Member and Illuminotary locations are within the required 100-meter threshold."
+            return "Member and illuminotary locations passed the same-place check after GPS accuracy was accounted for."
         }
         if hasMemberCheckIn == false {
             return "Waiting for the member to open the email, sign in, and share their location. This screen updates automatically."
@@ -405,7 +405,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
                 request: NotaryMeetingCheckInRequest(
                     checkinKind: "proximity",
                     recordedAt: Self.isoTimestamp(),
-                    notes: "Illuminotary proximity location refreshed from the DARCi iOS app.",
+                    notes: "illuminotary proximity location refreshed from the DARCi iOS app.",
                     geolocation: geolocation
                 ),
                 accessToken: accessToken
@@ -538,7 +538,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
             let notaryName = Self.firstNonempty([
                 context?.notary?.displayName,
                 context?.notary?.fullName,
-            ]) ?? "Illuminotary signature"
+            ]) ?? "illuminotary signature"
             _ = try await apiClient.signAcknowledgment(
                 requestId: requestId,
                 request: NotarySignRequest(

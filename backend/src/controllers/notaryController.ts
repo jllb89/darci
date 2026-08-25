@@ -254,6 +254,7 @@ const proximityEvaluationSchema = z.object({
 }).passthrough();
 
 const defaultSamePlaceThresholdMeters = 100;
+const maximumSamePlaceAccuracyAllowanceMeters = 100;
 const samePlaceSampleFreshnessMs = 15 * 60 * 1000;
 const samePlaceSampleFreshnessMinutes = samePlaceSampleFreshnessMs / 60_000;
 
@@ -980,7 +981,16 @@ const evaluateSamePlaceEvidence = async (input: {
 
   const thresholdMeters = input.thresholdMeters ?? defaultSamePlaceThresholdMeters;
   const observedDistanceMeters = calculateDistanceMeters(memberSample, notarySample);
-  const evaluationStatus = observedDistanceMeters <= thresholdMeters ? "passed" : "failed";
+  const validAccuracyMeters = [memberSample.accuracy_meters, notarySample.accuracy_meters].filter(
+    (accuracy): accuracy is number =>
+      typeof accuracy === "number" && Number.isFinite(accuracy) && accuracy >= 0,
+  );
+  const accuracyAllowanceMeters = Math.min(
+    maximumSamePlaceAccuracyAllowanceMeters,
+    Math.max(0, ...validAccuracyMeters),
+  );
+  const decisionDistanceMeters = Math.max(0, observedDistanceMeters - accuracyAllowanceMeters);
+  const evaluationStatus = decisionDistanceMeters <= thresholdMeters ? "passed" : "failed";
   const evaluation = await createProximityEvaluation({
     meetingId: input.meeting.id,
     evaluatedByUserId: input.evaluatedByUserId ?? null,
@@ -995,8 +1005,12 @@ const evaluateSamePlaceEvidence = async (input: {
       requestId: input.requestId,
       trigger: input.trigger,
       policy: {
-        policyVersion: "same_place_v1",
+        policyVersion: "same_place_v2_accuracy_aware",
         thresholdMeters,
+        maximumAccuracyAllowanceMeters: maximumSamePlaceAccuracyAllowanceMeters,
+        accuracyAllowanceMeters,
+        decisionDistanceMeters,
+        distanceDecisionRule: "max(0, observed_distance - max_sample_accuracy) <= threshold",
         freshnessWindowSeconds: samePlaceSampleFreshnessMs / 1000,
         requiredActors: {
           memberUserId: input.document.owner_id,
@@ -1024,6 +1038,8 @@ const evaluateSamePlaceEvidence = async (input: {
       lastProximityEvaluationAt: input.evaluatedAt,
       lastProximityEvaluationStatus: evaluationStatus,
       lastProximityDistanceMeters: observedDistanceMeters,
+      lastProximityDecisionDistanceMeters: decisionDistanceMeters,
+      lastProximityAccuracyAllowanceMeters: accuracyAllowanceMeters,
       lastProximityThresholdMeters: thresholdMeters,
       lastProximitySampleAgesSeconds: {
         member: memberSampleAgeSeconds,

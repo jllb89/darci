@@ -40,7 +40,7 @@ struct NotaryInformationSettingsView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Back to user settings")
 
-                Text("Illuminotary Information")
+                Text("illuminotary Information")
                     .font(DARCiFont.maisonNeue(.book, size: scaled(24, in: proxy)))
                     .lineSpacing(scaled(2.4, in: proxy))
                     .foregroundStyle(.white)

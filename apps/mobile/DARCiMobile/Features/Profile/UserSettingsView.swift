@@ -164,7 +164,7 @@ struct UserSettingsView: View {
     private var profileRows: [String] {
         var rows = ["Personal Info", "Membership & Billing"]
         if showsNotaryInformation {
-            rows.append("Illuminotary Information")
+            rows.append("illuminotary Information")
         }
         rows.append("Delete my account")
         return rows
@@ -208,7 +208,7 @@ struct UserSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-personal-info-button")
-                } else if title == "Illuminotary Information" {
+                } else if title == "illuminotary Information" {
                     Button {
                         isNotaryInformationPresented = true
                     } label: {

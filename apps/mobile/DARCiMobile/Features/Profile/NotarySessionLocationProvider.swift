@@ -22,10 +22,12 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
     private var pendingTimeoutTask: Task<Void, Never>?
     private var warmupTimeoutTask: Task<Void, Never>?
     private var cachedLocation: CLLocation?
+    private var pendingBestLocation: CLLocation?
+    private var pendingRequestStartedAt: Date?
     private var pendingRetryCount = 0
     private let maximumLocationUnknownRetries = 8
     private let maximumRecentLocationAge: TimeInterval = 120
-    private let preferredAccuracyMeters: CLLocationAccuracy = 100
+    private let preferredAccuracyMeters: CLLocationAccuracy = 50
 
     override init() {
         manager = CLLocationManager()
@@ -68,11 +70,13 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
 
         let location = try await withCheckedThrowingContinuation { continuation in
             pendingContinuation = continuation
+            pendingBestLocation = nil
+            pendingRequestStartedAt = Date()
             pendingRetryCount = 0
             pendingTimeoutTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(25))
                 guard Task.isCancelled == false else { return }
-                if let recentLocation = self?.recentUsableLocation(preferredAccuracyOnly: false) {
+                if let recentLocation = self?.pendingBestLocation {
                     self?.finish(with: .success(recentLocation))
                 } else {
                     self?.finish(with: .failure(NotarySessionLocationError.unavailable))
@@ -81,7 +85,7 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
 
             switch manager.authorizationStatus {
             case .authorizedAlways, .authorizedWhenInUse:
-                manager.requestLocation()
+                manager.startUpdatingLocation()
             case .notDetermined:
                 manager.requestWhenInUseAuthorization()
             case .denied, .restricted:
@@ -112,7 +116,7 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
 
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
-            manager.requestLocation()
+            manager.startUpdatingLocation()
         case .denied, .restricted:
             finish(with: .failure(NotarySessionLocationError.permissionDenied))
         case .notDetermined:
@@ -123,20 +127,22 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else {
-            if pendingContinuation != nil {
-                finish(with: .failure(NotarySessionLocationError.unavailable))
-            }
-            return
-        }
-
-        if location.horizontalAccuracy >= 0 {
+        for location in locations where location.horizontalAccuracy >= 0 {
             cachedLocation = location
+
+            if let pendingRequestStartedAt,
+               location.timestamp >= pendingRequestStartedAt.addingTimeInterval(-5),
+               pendingBestLocation.map({ location.horizontalAccuracy < $0.horizontalAccuracy }) ?? true {
+                pendingBestLocation = location
+            }
         }
 
-        if pendingContinuation != nil {
-            finish(with: .success(location))
-        } else if location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= preferredAccuracyMeters {
+        if pendingContinuation != nil,
+           let preferredLocation = pendingBestLocation,
+           preferredLocation.horizontalAccuracy <= preferredAccuracyMeters {
+            finish(with: .success(preferredLocation))
+        } else if pendingContinuation == nil,
+                  recentUsableLocation(preferredAccuracyOnly: true) != nil {
             stopPreparingLocationCapture()
         }
     }
@@ -160,9 +166,9 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
                 guard Task.isCancelled == false,
                       let self,
                       self.pendingContinuation != nil else { return }
-                self.manager.requestLocation()
+                self.manager.startUpdatingLocation()
             }
-        } else if let recentLocation = recentUsableLocation(preferredAccuracyOnly: false) {
+        } else if let recentLocation = pendingBestLocation {
             finish(with: .success(recentLocation))
         } else {
             finish(with: .failure(NotarySessionLocationError.unavailable))
@@ -191,6 +197,8 @@ final class CoreLocationNotarySessionProvider: NSObject, NotarySessionLocationPr
         pendingRetryTask = nil
         pendingTimeoutTask?.cancel()
         pendingTimeoutTask = nil
+        pendingBestLocation = nil
+        pendingRequestStartedAt = nil
         stopPreparingLocationCapture()
         pendingRetryCount = 0
         continuation?.resume(with: result)

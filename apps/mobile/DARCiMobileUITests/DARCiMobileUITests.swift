@@ -27,7 +27,7 @@ final class DARCiMobileUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["DARCi"].waitForExistence(timeout: 5))
         XCTAssertTrue(
-            app.staticTexts["Illuminotarization that keeps up with your workflow."]
+            app.staticTexts["illuminotarization that keeps up with your workflow."]
                 .waitForExistence(timeout: 5)
         )
         let startButton = app.buttons["Start"]

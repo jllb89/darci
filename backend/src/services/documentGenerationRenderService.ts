@@ -2642,53 +2642,69 @@ export const renderAcknowledgmentAppendixPdf = async (input: {
   sealImage: PdfAppendixImageAsset | null;
 }) => {
   const brandAssets = await loadPdfBrandAssets();
-  const pdf = new PDFDocument({
-    size: input.pageSize,
-    margins: PDF_PAGE_MARGINS,
-    compress: false,
-    info: {
-      Title: "Notarial acknowledgment appendix",
-      Author: "DARCi",
-      Subject: "Notarial acknowledgment appendix",
-    },
-  });
-  const fonts = registerPdfFonts(pdf, brandAssets);
-  const drawPageChrome = () => {
-    drawBrandHeader(pdf, {
-      logo: brandAssets.logo,
+  const fontSizes = [12, 11, 10, 9, 8];
+
+  for (const fontSize of fontSizes) {
+    const pdf = new PDFDocument({
+      size: input.pageSize,
+      margins: PDF_PAGE_MARGINS,
+      compress: false,
+      info: {
+        Title: "Notarial acknowledgment appendix",
+        Author: "DARCi",
+        Subject: "Notarial acknowledgment appendix",
+      },
+    });
+    const fonts = registerPdfFonts(pdf, brandAssets);
+    let pageCount = 1;
+    const drawPageChrome = () => {
+      drawBrandHeader(pdf, {
+        logo: brandAssets.logo,
+        fonts,
+        templateLabel: "Notarial acknowledgment",
+      });
+    };
+
+    pdf.on("pageAdded", () => {
+      pageCount += 1;
+      drawPageChrome();
+    });
+    drawPageChrome();
+
+    const chunks: Buffer[] = [];
+    const completed = new Promise<Buffer>((resolve, reject) => {
+      pdf.on("data", (chunk: Buffer) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      pdf.on("end", () => {
+        resolve(Buffer.concat(chunks));
+      });
+      pdf.on("error", reject);
+    });
+
+    renderTemplateBlocks(
+      pdf,
+      buildTemplateBlocks(buildAcknowledgmentAppendixTemplate(input.acknowledgmentContent)),
       fonts,
-      templateLabel: "Notarial acknowledgment",
+      { fontSizeOverride: fontSize },
+    );
+    drawAcknowledgmentAppendixImages(pdf, fonts, {
+      signatureImage: input.signatureImage,
+      sealImage: input.sealImage,
     });
-  };
 
-  pdf.on("pageAdded", drawPageChrome);
-  drawPageChrome();
+    pdf.end();
+    const renderedPdf = await completed;
+    if (pageCount === 1) {
+      return renderedPdf;
+    }
+  }
 
-  const chunks: Buffer[] = [];
-  const completed = new Promise<Buffer>((resolve, reject) => {
-    pdf.on("data", (chunk: Buffer) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    pdf.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-    pdf.on("error", reject);
+  throw new DomainError({
+    code: "ACKNOWLEDGMENT_APPENDIX_PAGE_OVERFLOW",
+    family: "generation",
+    message: "Notarial acknowledgment appendix could not fit on one page",
   });
-
-  renderTemplateBlocks(
-    pdf,
-    buildTemplateBlocks(buildAcknowledgmentAppendixTemplate(input.acknowledgmentContent)),
-    fonts,
-    { fontSizeOverride: 12 },
-  );
-  drawAcknowledgmentAppendixImages(pdf, fonts, {
-    signatureImage: input.signatureImage,
-    sealImage: input.sealImage,
-  });
-
-  pdf.end();
-
-  return completed;
 };
 
 export const renderLegalTemplateText = (input: {
@@ -3104,7 +3120,7 @@ const drawUploadedSignatureAddendumLabel = async (input: {
   }
 };
 
-const stampSignatureOnPdf = async (input: {
+export const stampSignatureOnPdf = async (input: {
   pdfBytes: Buffer;
   placement: SignatureFieldPlacement;
   signatureRecord: SignatureRecord;
@@ -3112,7 +3128,7 @@ const stampSignatureOnPdf = async (input: {
     appendPage: boolean;
   };
 }) => {
-  const pdf = await PdfLibDocument.load(input.pdfBytes);
+  const pdf = await PdfLibDocument.load(input.pdfBytes, { ignoreEncryption: true });
   const pages = pdf.getPages();
   const page = input.uploadedNotarizationAddendum
     ? input.uploadedNotarizationAddendum.appendPage

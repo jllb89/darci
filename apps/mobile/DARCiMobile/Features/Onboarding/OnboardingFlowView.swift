@@ -15,7 +15,7 @@ struct OnboardingScreenContent: Equatable {
 
     static let splash = OnboardingScreenContent(
         brand: "DARCi",
-        headline: "Illuminotarization\nthat keeps up with your workflow.",
+        headline: "illuminotarization\nthat keeps up with your workflow.",
         ctaTitle: "Start"
     )
 }

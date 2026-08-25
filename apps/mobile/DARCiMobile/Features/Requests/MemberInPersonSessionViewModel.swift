@@ -58,7 +58,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
 
     var notaryName: String {
         context?.notary?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            ?? "Your Illuminotary"
+            ?? "Your illuminotary"
     }
 
     var notaryEmail: String? {
@@ -165,13 +165,13 @@ final class MemberInPersonSessionViewModel: ObservableObject {
             && context?.document.summary.verification.verifyPath?.nilIfEmpty != nil
 
         return [
-            MemberSessionTimelineItem(id: "start", label: "Session started", description: isSessionStarted ? "Your Illuminotary opened the live session." : "Waiting for your Illuminotary to open the live session.", isComplete: isSessionStarted),
-            MemberSessionTimelineItem(id: "member", label: "Location shared", description: hasMemberCheckIn ? "Your live location was shared." : "Share your live location so your Illuminotary can confirm you are together.", isComplete: hasMemberCheckIn),
+            MemberSessionTimelineItem(id: "start", label: "Session started", description: isSessionStarted ? "Your illuminotary opened the live session." : "Waiting for your illuminotary to open the live session.", isComplete: isSessionStarted),
+            MemberSessionTimelineItem(id: "member", label: "Location shared", description: hasMemberCheckIn ? "Your live location was shared." : "Share your live location so your illuminotary can confirm you are together.", isComplete: hasMemberCheckIn),
             MemberSessionTimelineItem(id: "place", label: "Same-place confirmed", description: samePlaceDescription, isComplete: hasSamePlace),
-            MemberSessionTimelineItem(id: "identity", label: "Identity verified", description: hasIdentity ? "Your identity has been verified." : "Your Illuminotary is recording the identity verification.", isComplete: hasIdentity),
-            MemberSessionTimelineItem(id: "venue", label: "Venue recorded", description: hasVenue ? "The venue details are recorded." : "Your Illuminotary is recording the acknowledgment venue.", isComplete: hasVenue),
-            MemberSessionTimelineItem(id: "seal", label: "Acknowledgment appended", description: hasAcknowledgment ? "The notarial acknowledgment is on the document." : "Your Illuminotary is appending the notarial acknowledgment.", isComplete: hasAcknowledgment),
-            MemberSessionTimelineItem(id: "complete", label: "Session completed", description: isMeetingCompleted ? "The in-person session is closed." : "Your Illuminotary will close the session after evidence is complete.", isComplete: isMeetingCompleted),
+            MemberSessionTimelineItem(id: "identity", label: "Identity verified", description: hasIdentity ? "Your identity has been verified." : "Your illuminotary is recording the identity verification.", isComplete: hasIdentity),
+            MemberSessionTimelineItem(id: "venue", label: "Venue recorded", description: hasVenue ? "The venue details are recorded." : "Your illuminotary is recording the acknowledgment venue.", isComplete: hasVenue),
+            MemberSessionTimelineItem(id: "seal", label: "Acknowledgment appended", description: hasAcknowledgment ? "The notarial acknowledgment is on the document." : "Your illuminotary is appending the notarial acknowledgment.", isComplete: hasAcknowledgment),
+            MemberSessionTimelineItem(id: "complete", label: "Session completed", description: isMeetingCompleted ? "The in-person session is closed." : "Your illuminotary will close the session after evidence is complete.", isComplete: isMeetingCompleted),
             MemberSessionTimelineItem(id: "anchor", label: "Verification ready", description: isVerificationReady ? "The final package is verification-ready." : "DARCi is preparing the final public verification package.", isComplete: isVerificationReady),
         ]
     }
@@ -186,9 +186,9 @@ final class MemberInPersonSessionViewModel: ObservableObject {
 
         if meetingStatus == "failed" || evaluation?.status == "failed" {
             if let distance = evaluation?.observedDistanceMeters {
-                return "Locations are \(Self.distanceLabel(for: distance)) apart. Your Illuminotary may need to refresh location."
+                return "Locations are \(Self.distanceLabel(for: distance)) apart. Your illuminotary may need to refresh location."
             }
-            return "Locations are not together yet. Your Illuminotary may need to refresh location."
+            return "Locations are not together yet. Your illuminotary may need to refresh location."
         }
 
         if hasMemberCheckIn {
@@ -263,7 +263,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
                 ),
                 accessToken: accessToken
             )
-            showNotice("Location shared. Your Illuminotary can continue the session.")
+            showNotice("Location shared. Your illuminotary can continue the session.")
             shouldShowLocationSettingsAction = false
             await refresh(session: session, silent: true)
             prepareLocationIfHelpful()

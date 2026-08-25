@@ -1,4 +1,10 @@
 import { describe, expect, it } from "vitest";
+import {
+  PDFDocument as PdfLibDocument,
+  PDFHexString,
+  PDFName,
+  PDFNumber,
+} from "pdf-lib";
 
 import {
   applyPreviewWatermarkOverlay,
@@ -8,6 +14,7 @@ import {
   loadTemplateSource,
   PREVIEW_WATERMARK_TEXT,
   renderLegalTemplateText,
+  stampSignatureOnPdf,
   stripRenderControlTokens,
   validateSignaturePlacementLayout,
 } from "../../src/services/documentGenerationRenderService";
@@ -886,5 +893,57 @@ describe("documentGenerationRenderService", () => {
         "On this ____ day of ________________ ________, before me, __________________, a notary public, personally appeared __________________, who proved to me on the basis of satisfactory evidence to be the person(s) whose name(s) is/are subscribed to the within instrument and acknowledged to me that he/she/they executed the same in his/her/their authorized capacity(ies), and that by his/her/their signature(s) on the instrument the person(s), or the entity upon behalf of which the person(s) acted, executed the instrument.",
       ),
     ).toBe(true);
+  });
+
+  it("stamps the uploaded-document addendum when the source PDF is protected", async () => {
+    const sourcePdf = await PdfLibDocument.create();
+    sourcePdf.addPage([612, 792]);
+    const encryptionDictionary = sourcePdf.context.obj({
+      Filter: PDFName.of("Standard"),
+      V: PDFNumber.of(1),
+      R: PDFNumber.of(2),
+      Length: PDFNumber.of(40),
+      O: PDFHexString.of("00000000000000000000000000000000"),
+      U: PDFHexString.of("00000000000000000000000000000000"),
+      P: PDFNumber.of(-4),
+    });
+    sourcePdf.context.trailerInfo.Encrypt = sourcePdf.context.register(encryptionDictionary);
+    const protectedPdfBytes = Buffer.from(await sourcePdf.save({ useObjectStreams: false }));
+
+    await expect(PdfLibDocument.load(protectedPdfBytes)).rejects.toThrow(/encrypted/i);
+
+    const stampedPdfBytes = await stampSignatureOnPdf({
+      pdfBytes: protectedPdfBytes,
+      placement: {
+        pageNumber: 1,
+        label: "Document owner",
+        includeDate: true,
+        signatureRect: { x: 72, y: 170, width: 300, height: 44 },
+        dateRect: { x: 390, y: 170, width: 150, height: 44 },
+      },
+      signatureRecord: {
+        id: "signature-protected-pdf",
+        document_id: "document-protected-pdf",
+        generation_run_id: "run-protected-pdf",
+        document_output_signer_id: "signer-protected-pdf",
+        signer_id: "member-protected-pdf",
+        signature_type: "member",
+        storage_path: null,
+        capture_method: "type",
+        typed_value: "Morgan Member",
+        typed_kind: "name",
+        mime_type: null,
+        size_bytes: null,
+        status: "captured",
+        metadata: {},
+        captured_at: "2026-08-25T18:00:00.000Z",
+        created_at: "2026-08-25T18:00:00.000Z",
+      },
+      uploadedNotarizationAddendum: { appendPage: true },
+    });
+    const stampedPdf = await PdfLibDocument.load(stampedPdfBytes, { ignoreEncryption: true });
+
+    expect(stampedPdf.getPageCount()).toBe(2);
+    expect(stampedPdfBytes.byteLength).toBeGreaterThan(protectedPdfBytes.byteLength);
   });
 });
