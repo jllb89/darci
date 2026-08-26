@@ -476,5 +476,5 @@ Use these documents for implementation detail, but defer to this roadmap when ol
 3. Record accepted risks with owner, reason, mitigation, expiry date, and review date.
 4. Keep legal approval separate from engineering completion.
 5. Keep intentional public final-PDF verification visible in privacy and threat-model reviews.
-6. Do not re-enable scheduling, new jurisdictions, remote notarization, paid billing, or real-ledger claims without completing the relevant gate.
-7. Update narrow implementation roadmaps when execution details change, and update this umbrella document when priority or product truth changes.
+6. Do not re-enable scheduling, new jurisdictions, remote notarization, paid billing, or real-ledger claims without completing the relevant gate
+7. Update narrow implementation roadmaps when execution details change, and update this umbrella document when priority or product truth changes
