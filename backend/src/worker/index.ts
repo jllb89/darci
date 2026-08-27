@@ -7,6 +7,7 @@ import { anchorToLedger } from "../services/ledgerService";
 import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import { deliverWebhook } from "../services/webhookService";
 import { captureException, flushSentry } from "../utils/sentry";
+import { runDueStripeWebhookEvents } from "../services/stripeWebhookService";
 
 type HashingJobData = {
   documentId: string;
@@ -37,6 +38,8 @@ const redisConnection = connection;
 const workers: Array<Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>> = [];
 let notificationOutboxInterval: NodeJS.Timeout | null = null;
 let notificationOutboxRunInFlight = false;
+let stripeWebhookInterval: NodeJS.Timeout | null = null;
+let stripeWebhookRunInFlight = false;
 
 const parsePositiveInt = (value: string | undefined, fallback: number, max: number) => {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -51,6 +54,17 @@ const notificationOutboxIntervalMs = parsePositiveInt(
 ) * 1000;
 const notificationOutboxRunLimit = parsePositiveInt(
   process.env.NOTIFICATION_OUTBOX_RUN_LIMIT,
+  25,
+  100,
+);
+const stripeWebhookRunnerEnabled = process.env.STRIPE_WEBHOOK_RUNNER_ENABLED !== "false";
+const stripeWebhookIntervalMs = parsePositiveInt(
+  process.env.STRIPE_WEBHOOK_RUNNER_INTERVAL_SECONDS,
+  30,
+  60 * 60,
+) * 1000;
+const stripeWebhookRunLimit = parsePositiveInt(
+  process.env.STRIPE_WEBHOOK_RUN_LIMIT,
   25,
   100,
 );
@@ -243,10 +257,50 @@ if (notificationOutboxRunnerEnabled) {
   });
 }
 
+const runStripeWebhookInboxOnce = async () => {
+  if (stripeWebhookRunInFlight) return;
+  stripeWebhookRunInFlight = true;
+  try {
+    const result = await runDueStripeWebhookEvents({
+      limit: stripeWebhookRunLimit,
+      workerId: process.env.STRIPE_WEBHOOK_WORKER_ID ?? "worker-scheduled",
+    });
+    if (result.scannedCount > 0) {
+      console.log("Stripe webhook inbox scheduled run complete", {
+        scannedCount: result.scannedCount,
+      });
+    }
+  } catch (error) {
+    captureException(error, {
+      level: "error",
+      tags: { service: "worker", worker_queue: "stripe-webhook-inbox" },
+      fingerprint: ["worker", "stripe-webhook-inbox", "scheduled-run"],
+    });
+    console.error("Stripe webhook inbox scheduled run failed", error instanceof Error ? error.message : error);
+  } finally {
+    stripeWebhookRunInFlight = false;
+  }
+};
+
+if (stripeWebhookRunnerEnabled) {
+  stripeWebhookInterval = setInterval(() => {
+    void runStripeWebhookInboxOnce();
+  }, stripeWebhookIntervalMs);
+  void runStripeWebhookInboxOnce();
+  console.log("Stripe webhook inbox scheduled runner started", {
+    intervalSeconds: stripeWebhookIntervalMs / 1000,
+    limit: stripeWebhookRunLimit,
+  });
+}
+
 const shutdown = async () => {
   if (notificationOutboxInterval) {
     clearInterval(notificationOutboxInterval);
     notificationOutboxInterval = null;
+  }
+  if (stripeWebhookInterval) {
+    clearInterval(stripeWebhookInterval);
+    stripeWebhookInterval = null;
   }
 
   await Promise.all(workers.map((worker) => worker.close()));

@@ -23,6 +23,7 @@ import webhooksRoutes from "./routes/webhooks";
 import dashboardRoutes from "./routes/dashboard";
 import rulesRoutes from "./routes/rules";
 import usersRoutes from "./routes/users";
+import billingRoutes from "./routes/billing";
 
 export const app = express();
 const isDevelopment = process.env.NODE_ENV !== "production";
@@ -190,6 +191,7 @@ app.use(requireAuth);
 app.use("/auth", authRoutes);
 app.use("/admin", adminRoutes);
 app.use("/users", usersRoutes);
+app.use("/billing", billingRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/rules", rulesRoutes);
 app.use("/internal", internalRoutes);

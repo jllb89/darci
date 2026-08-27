@@ -2806,6 +2806,103 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /billing/member-membership/checkout:
+    post:
+      summary: Create a member membership Checkout Session
+      description: |
+        Creates or reuses a Stripe test-mode hosted Checkout Session for one allowlisted DARCi member price. The client cannot supply a Stripe Price ID, amount, allowance, payer, or beneficiary. Redirect completion is display-only; membership activates only through trusted webhook fulfillment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberMembershipCheckoutRequest"
+      responses:
+        "201":
+          description: Checkout Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberMembershipCheckoutResponse"
+        "200":
+          description: Existing idempotent Checkout Session returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberMembershipCheckoutResponse"
+        "400":
+          description: Invalid internal price code or idempotency token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Active confirmed DARCi member profile required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Existing subscription, pending Checkout, or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /billing/customer-portal-session:
+    post:
+      summary: Create a restricted Stripe Customer Portal Session
+      description: Creates a Stripe test-mode Portal Session for payment-method management, invoice history, and period-end cancellation. Plan switching is not exposed by the Portal.
+      responses:
+        "201":
+          description: Portal Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [portalUrl]
+                properties:
+                  portalUrl:
+                    type: string
+                    format: uri
+        "409":
+          description: No Stripe customer exists for the member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhooks/stripe:
+    post:
+      summary: Receive Stripe subscription lifecycle events
+      description: Verifies Stripe-Signature against the exact raw body, durably stores a minimized idempotent event envelope, and schedules leased asynchronous fulfillment.
+      security: []
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Event durably received or already recorded
+        "400":
+          description: Missing or invalid Stripe signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Event could not be durably persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /webhooks/resend:
     post:
       summary: Receive Resend delivery webhook
@@ -13017,6 +13114,46 @@ components:
           type: string
         message:
           type: string
+    MemberMembershipCheckoutRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - priceCode
+        - idempotencyToken
+      properties:
+        priceCode:
+          type: string
+          enum:
+            - member_starter_monthly
+            - member_plus_monthly
+            - member_volume_monthly
+        idempotencyToken:
+          type: string
+          minLength: 8
+          maxLength: 128
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    MemberMembershipCheckoutResponse:
+      type: object
+      required:
+        - orderId
+        - checkoutSessionId
+        - checkoutUrl
+        - expiresAt
+        - reused
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        checkoutSessionId:
+          type: string
+        checkoutUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+        reused:
+          type: boolean
     ErrorResponse:
       type: object
       properties:

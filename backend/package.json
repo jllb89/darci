@@ -22,6 +22,8 @@
     "observability:smoke": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-observability-telemetry.ts",
     "notifications:run-due": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/run-notification-outbox.ts",
     "notifications:run-invites": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/run-notification-outbox.ts --kind=invite --limit=10",
+    "stripe:catalog:sync": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/sync-stripe-member-catalog.ts",
+    "stripe:catalog:verify": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/verify-stripe-member-catalog.ts",
     "test:integration:staging": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
     "test": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run",
     "test:watch": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs"
@@ -55,6 +57,7 @@
     "pg": "^8.18.0",
     "resend": "^6.12.2",
     "standardwebhooks": "^1.0.0",
+    "stripe": "^22.5.0",
     "swagger-ui-express": "^5.0.1",
     "yamljs": "^0.3.0",
     "zod": "^4.3.6"

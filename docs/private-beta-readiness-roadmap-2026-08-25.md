@@ -20,7 +20,7 @@ The immediate goal is not to add more breadth. It is to stabilize the intended C
 
 The most important confirmed decisions are:
 
-1. Public verification intentionally exposes the actual final PDF when a person has the document's IDN.
+1. Public verification intentionally exposes the actual final PDF when a person has the document's IDN, after the package has reached its member/public release state. A finalized package under an approved billing hold is not public until release.
 2. Initial availability is California and Ohio only.
 3. Notarization is in person. DARCi is not currently a remote online notarization product.
 4. The member and notary arrange their meeting outside DARCi.
@@ -75,7 +75,7 @@ DARCi has three primary product flows:
 13. DARCi generates and appends the jurisdiction-specific notarial acknowledgment.
 14. The final document is watermarked and hashed.
 15. A ledger-anchor attempt is recorded. Until a real provider exists, this must not be represented as a completed third-party distributed-ledger anchor.
-16. The final PDF is retrievable through public IDN verification by design.
+16. The final PDF is retrievable through public IDN verification after member/public release by design.
 
 ### Jurisdiction and meeting scope
 
@@ -87,7 +87,7 @@ DARCi has three primary product flows:
 
 ### Access and privacy decisions
 
-- Public IDN verification intentionally includes access to the actual final PDF.
+- Public IDN verification intentionally includes access to the actual final PDF after the package is released. A finalized `billing_held` package is not yet available through member or public-verification surfaces.
 - The IDN therefore functions partly as a bearer secret: anyone who receives it may be able to retrieve the final document.
 - Legal, privacy, help, and product copy must say this clearly and consistently. Copy claiming that documents are never public is inaccurate under the confirmed design.
 - Public verification should still avoid exposing internal database identifiers, private storage paths, identity-session records, raw GPS samples, or unrelated account data.
@@ -106,7 +106,7 @@ DARCi has three primary product flows:
 
 | ID | Topic | Confirmed decision | Consequence |
 | --- | --- | --- | --- |
-| DEC-01 | Public verification | The final PDF is intentionally available through IDN verification. | Preserve the feature; align disclosures, logging, abuse controls, and privacy copy. |
+| DEC-01 | Public verification | A released final PDF is intentionally available through IDN verification; a finalized package under an approved billing hold is not public until release. | Preserve the feature and enforce the release state consistently across member and public surfaces; align disclosures, logging, abuse controls, and privacy copy. |
 | DEC-02 | Jurisdictions | Launch in California and Ohio only. | Disable or label all other jurisdictions as unavailable and limit legal validation to CA/OH. |
 | DEC-03 | Notarization mode | In-person only for initial launch. | Remove or correct RON/remote-notarization claims and unused active paths. |
 | DEC-04 | Scheduling | Parties arrange meetings externally. | Remove or feature-disable in-app scheduling surfaces; retain code only if intentionally dormant. |
@@ -116,14 +116,14 @@ DARCi has three primary product flows:
 | DEC-08 | Trust certificate | Internal artifact that legally must exist. | Keep hidden from ordinary standalone review while preserving it in the required legal processing/package. |
 | DEC-09 | Access codes | Keep for compatibility; notaries normally use authenticated profiles. | Treat codes as fallback/legacy access and test that they cannot broaden authorization. |
 | DEC-10 | Ledger | Provider not yet selected. | Treat ledger work as incomplete and correct marketing/compliance language until implemented. |
-| DEC-11 | Billing | Stripe integration is missing. | Complete the notary subscription MVP or feature-gate paid membership for beta. |
+| DEC-11 | Billing | Stripe integration is missing. Members/document owners are the only current payers; notaries are free. | Implement the three-tier member subscription and document-workflow allowance model in Stripe test mode for private beta. |
 | DEC-12 | Release stage | Internal staging moving toward private beta. | Use controlled users, explicit feature flags, observability, and a written beta go/no-go checklist. |
 
 ## Known Intentional Behavior Versus Defects
 
 ### Intentional and not a defect
 
-- Returning the final PDF from public IDN verification.
+- Returning a released final PDF from public IDN verification.
 - Limiting launch availability to California and Ohio.
 - Requiring an in-person meeting.
 - Letting parties coordinate the meeting outside DARCi.
@@ -265,7 +265,7 @@ Priority meanings:
 - [ ] **INT-01 — P0 — Define fail-closed audit events for legally material transitions.** The generic audit writer currently logs a warning and allows the mutation to continue if persistence fails. Signing, invite acceptance, notary approval/rejection, identity verification, acknowledgment sealing, finalization, hash creation, ledger attempts, and public-package publication need a documented failure policy. Use durable transactional/outbox patterns where required.
 - [ ] **INT-02 — P0 — Make critical multi-step workflows atomic or recoverable.** Review invitation claim, document generation, signature completion, notarization submission, session advancement, acknowledgment, storage/database finalization, and billing fulfillment. Add database transactions, idempotency keys, state-machine preconditions, compensating cleanup, and recovery jobs.
 - [ ] **INT-03 — P1 — Use real content hashes for legal templates.** Current template hash values are labels rather than hashes of the exact Markdown/template bytes. Hash the resolved template content, store version/provenance, verify it during generation, and retain enough metadata to reproduce what was rendered.
-- [ ] **INT-04 — P1 — Lock final-package composition with tests.** Verify CA/OH acknowledgment language, signature/seal placement, watermark, IDN, trust-certificate inclusion/visibility rules, hash source bytes, and final PDF returned by public verification.
+- [ ] **INT-04 — P1 — Lock final-package composition with tests.** Verify CA/OH acknowledgment language, signature/seal placement, watermark, IDN, trust-certificate inclusion/visibility rules, hash source bytes, billing-hold release behavior, and the exact released final PDF returned by public verification.
 - [ ] **INT-05 — P1 — Clarify uploaded-document acknowledgment modeling.** Uploaded-document notarization currently reuses/coerces a POA-oriented internal family. Replace this brittle abstraction with an explicit uploaded-document/notarial-act model before it causes jurisdiction or rendering errors.
 
 ### In-person session and location evidence
@@ -287,10 +287,10 @@ Priority meanings:
 
 ### Stripe and billing
 
-- [ ] **BILL-01 — P0/P1 — Decide the private-beta billing gate.** If beta notaries must pay, Stripe is P0. If private beta is free/invite-only, explicitly feature-disable membership enforcement and make Stripe P1 before paid/public launch.
-- [ ] **BILL-02 — P0/P1 — Implement the illuminotary subscription MVP.** Follow `docs/stripe-implementation-roadmap.md`: Stripe products/prices, verified-notary checkout, signed webhook ingestion, idempotent fulfillment, local billing/subscription state, capacity entitlement, Customer Portal, and reconciliation.
-- [ ] **BILL-03 — P1 — Define capacity and lifecycle policy.** Confirm what counts toward the Basic/Plus limit, reset boundary, upgrade/downgrade behavior, past-due grace, cancellation, refunds, disputes, incomplete sessions, and administrator overrides.
-- [ ] **BILL-04 — P1 — Never trust redirect success for fulfillment.** Grant membership/capacity only from verified Stripe webhooks or trusted server-side Stripe verification, with replay-safe processing and audit events.
+- [ ] **BILL-01 — P0/P1 — Exercise billing in the free private beta.** Run `test + enforced`: members complete the production-shaped Stripe subscription flow with test payment methods, signed test webhooks, and real entitlement/allowance behavior, but no real funds move. Keep controlled `observe` and `disabled` fallbacks.
+- [ ] **BILL-02 — P0/P1 — Implement the member subscription MVP.** Follow `docs/stripe-implementation-roadmap.md`: one member-membership product, three monthly Prices with 3/10/25 workflow allowances, member checkout, signed webhook ingestion, idempotent fulfillment, local subscription/entitlement state, usage ledger, Customer Portal, and reconciliation. Notaries remain free.
+- [ ] **BILL-03 — P1 — Enforce the confirmed usage and continuity policy.** Consume one unit on first successful submission of a Trust package, regular POA, or uploaded-document workflow; do not roll over unused units or charge overages; preserve already submitted work; and hold newly completed member/public packages after subscription lapse until reactivation.
+- [ ] **BILL-04 — P1 — Never trust redirect success for fulfillment.** Grant membership/allowance only from verified Stripe webhooks or trusted server-side Stripe verification, with replay-safe processing and audit events.
 
 ### Platform, CI, operations, and maintainability
 
@@ -313,8 +313,8 @@ Goal: stop ambiguity from generating more incorrect behavior or copy.
 Work:
 
 - Adopt the confirmed product truth and decision register in this document.
-- Treat California/Ohio, in-person notarization, external meeting coordination, email-linked signer accounts, intentional public final PDFs, and the internal trust certificate as locked beta assumptions.
-- Decide whether private-beta notaries are charged. This determines whether Stripe is a beta-entry blocker or a controlled-beta deliverable.
+- Treat California/Ohio, in-person notarization, external meeting coordination, email-linked signer accounts, released public final PDFs, and the internal trust certificate as locked beta assumptions.
+- Record the private-beta billing decision: members use Stripe test-mode subscriptions with enforced 3/10/25 workflow allowances, no real funds move, and notaries never pay.
 - Assign product, engineering, security/privacy, and CA/OH legal owners.
 - Create the staging error register and beta go/no-go checklist.
 
@@ -338,7 +338,7 @@ Recommended P0 sequence:
 5. Make invite claims verified-email-bound and atomic (`AUTH-01`, `AUTH-02`).
 6. Make legally material audit/state transitions fail safely and recoverably (`INT-01`, `INT-02`).
 7. Enforce CA/OH only, remove active RON/scheduling claims, and align public-verification disclosure (`SESSION-04`, `SESSION-05`, `LEGAL-01` through `LEGAL-03`).
-8. Complete Stripe MVP if beta charging is required; otherwise feature-disable charging/membership enforcement with a recorded limitation (`BILL-01`, `BILL-02`).
+8. Complete the Stripe member-subscription MVP in `test + enforced` mode so private beta exercises Checkout, webhook fulfillment, allowance enforcement, and lifecycle recovery without moving real funds (`BILL-01` through `BILL-04`).
 9. Run full real-account CA/OH smoke tests on web and iOS (`BETA-02`).
 
 Exit criteria:
@@ -348,7 +348,7 @@ Exit criteria:
 - Identity retention and access rules exist and are enforced at least for beta data.
 - Invite claims cannot bind to the wrong email-linked account.
 - Critical document states cannot silently advance without required audit/integrity records.
-- Public verification returns the intended final PDF and nothing outside its approved package.
+- Public verification returns the intended released final PDF and nothing outside its approved package; a billing-held package is not publicly retrievable.
 - All P0 tests/builds and staging smoke scenarios pass.
 - Legal/product copy matches the implemented in-person CA/OH workflow.
 
@@ -363,7 +363,7 @@ Work:
 - Complete RLS/service-role negative testing, retention automation, template provenance, final-package composition tests, public-verification safeguards, and operational runbooks.
 - Collect location accuracy/failure evidence before changing the development threshold.
 - Verify notification, universal-link, APNs, email, and recovery behavior with real devices/accounts.
-- Complete Stripe lifecycle/capacity behavior if payments were feature-disabled at beta entry.
+- Stabilize Stripe member-subscription lifecycle, document-workflow allowance, and held-package release behavior before live payment.
 - Maintain a known-issues register and communicate limitations to beta users.
 
 Exit criteria:
@@ -432,9 +432,9 @@ The first private-beta user should not be admitted until every required item bel
 - [ ] Complete identity identifiers are restricted, protected, and excluded from logs/general read models.
 - [ ] Legally material transitions have durable audit/integrity behavior and recovery paths.
 - [ ] Final-package composition and SHA-256 hashing are tested against the exact published bytes.
-- [ ] Public verification disclosure accurately states that the final PDF is available to a holder of the IDN.
+- [ ] Public verification disclosure accurately states that a released final PDF is available to a holder of the IDN and that a finalized billing-held package is not public until release.
 - [ ] Trust-certificate visibility and required package inclusion are tested.
-- [ ] Stripe is production-like in staging, or billing/membership enforcement is explicitly disabled for a free invite-only beta.
+- [ ] Stripe is production-like in test mode with member membership and 3/10/25 workflow allowances enforced, while no real funds move.
 - [ ] Notifications, email, push, deep links, realtime, storage, maps, and queues are verified in staging.
 - [ ] Monitoring, correlation IDs, support escalation, rollback, and incident runbooks are ready.
 - [ ] Known beta limitations are documented for participants.
@@ -443,11 +443,11 @@ The first private-beta user should not be admitted until every required item bel
 
 These are not requests for immediate answers; they are decisions the roadmap must resolve before their respective gate.
 
-1. Is the private beta paid, or free/invite-only with billing disabled?
+1. What are the live monthly prices for the 3/10/25 member plans?
 2. Who owns privacy/retention policy approval and who is the CA/OH legal reviewer?
 3. Which complete identity fields are legally required to be retained after the session, and for how long?
 4. Does the public final PDF include the internal trust certificate as part of the legal package, and is that exact composition approved for anyone holding the IDN?
-5. What event consumes one notary plan unit: accepted request, started session, completed document, or another action?
+5. Who approves the customer terms and CA/OH legal treatment for withholding a newly completed member/public package after subscription lapse?
 6. What manual fallback is allowed when GPS/location evidence is inaccurate or unavailable during an otherwise valid in-person meeting?
 7. Is a production ledger a public-launch requirement, or should launch use document hashing only until a provider is selected?
 8. Who owns security incident response, dependency triage, billing reconciliation, and failed-finalization recovery during beta?
