@@ -6,10 +6,29 @@ import {
   forceReleaseBillingHeldDocument,
   reverseMemberWorkflowUsage,
 } from "../services/billingPolicyService";
+import {
+  BillingOperationsError,
+  getBillingLifecycleAcceptanceReport,
+  getBillingOperationsReport,
+  replayStripeWebhookForAdmin,
+  resyncStripeSubscriptionForAdmin,
+  retryBillingHeldReleasesForAdmin,
+  runStripeWebhookRetentionCleanup,
+} from "../services/billingOperationsService";
 
 const actionSchema = z.object({
   reason: z.string().trim().min(8).max(500),
   idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/).optional(),
+}).strict();
+
+const operationsQuerySchema = z.object({
+  includeProvider: z.enum(["true", "false"]).default("true"),
+  webhookLimit: z.coerce.number().int().min(1).max(500).default(100),
+}).strict();
+
+const retentionActionSchema = z.object({
+  reason: z.string().trim().min(8).max(500),
+  limit: z.number().int().min(1).max(500).default(100),
 }).strict();
 
 const hasRecentReauthentication = (req: Request) => {
@@ -50,11 +69,91 @@ const validateSupportAction = (req: Request, res: Response) => {
 };
 
 const respondWithSupportError = (res: Response, error: unknown) => {
-  if (error instanceof BillingPolicyError) {
+  if (error instanceof BillingPolicyError || error instanceof BillingOperationsError) {
     return res.status(error.statusCode).json({ error: error.code, message: error.message });
   }
   console.error("Billing support action failed", error instanceof Error ? error.message : error);
   return res.status(500).json({ error: "billing_support_action_failed", message: "Billing support action failed" });
+};
+
+export const getBillingOperationsAdmin = async (req: Request, res: Response) => {
+  const parsed = operationsQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "validation_error", message: "Invalid billing operations query", issues: parsed.error.issues });
+  }
+  try {
+    const [report, lifecycleCoverage] = await Promise.all([
+      getBillingOperationsReport({
+        includeProvider: parsed.data.includeProvider === "true",
+        webhookLimit: parsed.data.webhookLimit,
+      }),
+      getBillingLifecycleAcceptanceReport(),
+    ]);
+    return res.status(200).json({ ...report, lifecycleCoverage });
+  } catch (error) {
+    return respondWithSupportError(res, error);
+  }
+};
+
+export const replayStripeWebhookAdmin = async (req: Request, res: Response) => {
+  const input = validateSupportAction(req, res);
+  if (!input) return;
+  try {
+    return res.status(200).json(await replayStripeWebhookForAdmin({
+      storedEventId: String(req.params.eventId),
+      actorUserId: req.user?.dbUserId ?? null,
+      reason: input.reason,
+    }));
+  } catch (error) {
+    return respondWithSupportError(res, error);
+  }
+};
+
+export const resyncStripeSubscriptionAdmin = async (req: Request, res: Response) => {
+  const input = validateSupportAction(req, res);
+  if (!input) return;
+  try {
+    return res.status(200).json(await resyncStripeSubscriptionForAdmin({
+      subscriptionId: String(req.params.subscriptionId),
+      actorUserId: req.user?.dbUserId ?? null,
+      reason: input.reason,
+    }));
+  } catch (error) {
+    return respondWithSupportError(res, error);
+  }
+};
+
+export const retryBillingHeldReleasesAdmin = async (req: Request, res: Response) => {
+  const input = validateSupportAction(req, res);
+  if (!input) return;
+  try {
+    return res.status(200).json(await retryBillingHeldReleasesForAdmin({
+      billingAccountId: String(req.params.billingAccountId),
+      actorUserId: req.user?.dbUserId ?? null,
+      reason: input.reason,
+    }));
+  } catch (error) {
+    return respondWithSupportError(res, error);
+  }
+};
+
+export const cleanupStripeWebhookRetentionAdmin = async (req: Request, res: Response) => {
+  const parsed = retentionActionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "validation_error", message: "A support reason and valid cleanup limit are required", issues: parsed.error.issues });
+  }
+  if (!hasRecentReauthentication(req)) {
+    return res.status(403).json({ error: "recent_reauthentication_required", message: "Reauthenticate before running retention cleanup" });
+  }
+  try {
+    return res.status(200).json(await runStripeWebhookRetentionCleanup({
+      limit: parsed.data.limit,
+      actorUserId: req.user?.dbUserId ?? null,
+      reason: parsed.data.reason,
+    }));
+  } catch (error) {
+    return respondWithSupportError(res, error);
+  }
 };
 
 export const reverseMemberUsageAdmin = async (req: Request, res: Response) => {

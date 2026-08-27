@@ -1,11 +1,11 @@
 # Stripe Phases 4–5: Frontend Completion Status
 
 Date: 2026-08-27  
-Scope: web implementation status after the `/app/billing` pass.
+Scope: web implementation status after the cross-flow billing completion pass.
 
 ## Activation rule
 
-Staging intentionally uses `BILLING_ENFORCEMENT_MODE=observe`. The backend calculates and audits every decision, but it does not block members or hold final packages yet. Switch to `enforced` only after the member billing page, quota errors, and held-package states below are available and tested with Stripe test subscriptions. Migration `20260827120000_backfill_final_package_release_controls.sql` marks existing completed packages as released; enforced mode then fails closed on any new final package that somehow has no release decision, preventing a finalization race from exposing bytes.
+Staging intentionally uses `BILLING_ENFORCEMENT_MODE=observe`. The backend calculates and audits every decision, but it does not block members or hold final packages yet. The member billing page, quota errors, held-package states, pricing cleanup, and active-plan changes are implemented locally; switch to `enforced` only after the Stripe test-mode lifecycle matrix passes in staging. Migration `20260827120000_backfill_final_package_release_controls.sql` marks existing completed packages as released; enforced mode then fails closed on any new final package that somehow has no release decision, preventing a finalization race from exposing bytes.
 
 ## Required screen
 
@@ -26,13 +26,13 @@ Implemented on 2026-08-27. The route consumes `GET /billing/member-membership` a
 - An activation-pending state after Checkout return. It must poll/refetch membership status and must never treat the browser redirect as proof of activation.
 - Past-due, unpaid, paused, cancellation, and renewal guidance driven by server status.
 
-Plan switching should not be presented yet. The API reports `planChangeAvailable: false` because upgrade proration and downgrade timing still require client approval. Portal remains limited to payment-method management, invoice history, and cancellation.
+Active-plan switching is now implemented outside Customer Portal. The member API reports whether plan change is available; `/app/billing` sends only an internal target price code and idempotency token. Upgrades are prorated immediately and remain pending until trusted webhook state catches up. Downgrades are scheduled for the current period end. Portal remains limited to payment-method management, invoice history, and cancellation.
 
-## Remaining member-flow elements
+## Completed member-flow elements
 
 ### Workflow creation and review submission
 
-Handle the shared billing reason codes returned by creation and first submission:
+Implemented. Workflow creation and first submission handle the shared billing reason codes:
 
 - `billing_membership_required`
 - `billing_membership_inactive`
@@ -40,11 +40,11 @@ Handle the shared billing reason codes returned by creation and first submission
 - `billing_workflow_limit_reached`
 - `billing_entitlement_unavailable`
 
-The quota-reached state should offer only **View membership / upgrade** and **Wait for renewal**. It should explain that changing plans will not reset already-used workflows in the current period.
+The quota-reached state links directly to membership/upgrade and explains renewal timing; changing plans does not reset already-used workflows in the current period.
 
 ### Document list and document detail
 
-Use the workspace summary `release` object to show a clear `billing_held` state. For a held document:
+Implemented using the workspace summary `release` object. For a held document:
 
 - Explain that notarization completed successfully and the original finalized package is preserved.
 - Explain that the final sealed/acknowledged package becomes available after membership reactivation.
@@ -55,19 +55,19 @@ The notary workspace must not show a billing block; notaries do not pay and reta
 
 ### Checkout return state
 
-The configured return currently lands on `/app` with a billing result query value. Either route that state to `/app/billing` or show a short result banner with a link to the billing page. Success means “Checkout completed; activation pending,” not “membership active.”
+Implemented. The configured return lands on `/app` with a billing result query value and is forwarded to `/app/billing`. Success means “Checkout completed; activation pending,” not “membership active.”
 
 ## Pricing and navigation cleanup
 
 - [x] Add a member navigation entry to `/app/billing` and hide billing from notary profiles.
 - [x] Forward Stripe result parameters from `/app` to `/app/billing` without treating the redirect as activation proof.
-- Remove obsolete purchasable notary pricing. Notaries do not pay.
-- Remove or hide purchasable claims for standalone Trust registration/activation, Dynamic POA, and Pro credit bundles.
-- Keep future-product copy only when it is clearly non-purchasable and does not conflict with the three current member tiers.
+- [x] Remove obsolete purchasable notary pricing. Notaries do not pay.
+- [x] Remove or hide purchasable claims for standalone Trust registration/activation, Dynamic POA, and Pro credit bundles.
+- [x] Keep public pricing limited to the three current member tiers.
 
-## Optional support UI (backend actions already exist)
+## Billing operations UI
 
-An admin screen is not required to activate member billing, but the backend now provides narrowly scoped actions for usage reversal and forced release. A future support UI would need recent reauthentication, a mandatory reason, an idempotency key for reversals, confirmation, and visible audit results.
+Implemented at `/app/admin/billing`. It presents provider-backed reconciliation, lifecycle evidence, webhook backlog, held-package counts, and narrow replay/resync/release-retry/retention actions. Mutations require recent reauthentication and a mandatory reason and are recorded in the audit log. Usage reversal and exceptional forced release remain backend-only support actions because they require case-specific authorization and should not become casual UI controls.
 
 ## Not part of the billing-screen pass
 

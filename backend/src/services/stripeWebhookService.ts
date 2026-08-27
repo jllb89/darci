@@ -185,6 +185,34 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
   return data;
 };
 
+export const resyncStripeMemberSubscription = async (input: {
+  internalSubscriptionId: string;
+  sourceId: string;
+}) => {
+  const { data: subscription, error } = await supabaseAdmin
+    .from("billing_subscriptions")
+    .select("id, provider_subscription_id, provider_environment, role_context")
+    .eq("id", input.internalSubscriptionId)
+    .single();
+  if (error || !subscription) {
+    throw new Error(`Stripe subscription resync lookup failed: ${error?.message ?? "not_found"}`);
+  }
+  if (
+    subscription.provider_environment !== "test"
+    || subscription.role_context !== "member"
+    || !subscription.provider_subscription_id
+  ) {
+    throw new Error("Only mapped Stripe test member subscriptions may be resynchronized");
+  }
+  const snapshot = await syncSubscription(subscription.provider_subscription_id, input.sourceId);
+  return {
+    internalSubscriptionId: subscription.id,
+    providerSubscriptionId: subscription.provider_subscription_id,
+    sourceId: input.sourceId,
+    snapshot,
+  };
+};
+
 const expireCheckoutOrder = async (session: Stripe.Checkout.Session, eventId: string) => {
   assertStripeObjectIsTestMode(session, "Stripe Checkout Session");
   const orderId = session.metadata?.darci_order_id ?? session.client_reference_id;

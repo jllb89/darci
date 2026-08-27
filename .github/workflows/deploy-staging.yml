@@ -331,6 +331,8 @@ jobs:
             LEDGER_ANCHOR_MODE: "stub",
             LEDGER_ALLOW_STUB_PROVIDER: "true",
             BILLING_ENFORCEMENT_MODE: "observe",
+            IOS_MEMBER_CHECKOUT_ENABLED: "false",
+            BILLING_LIFECYCLE_ACCEPTANCE_ID: "",
             NOTIFICATION_PUSH_PROVIDER: "apns",
           };
 
@@ -404,6 +406,13 @@ jobs:
             LEDGER_ANCHOR_MODE: "stub",
             LEDGER_ALLOW_STUB_PROVIDER: "true",
             NOTIFICATION_PUSH_PROVIDER: "apns",
+            BILLING_ENFORCEMENT_MODE: "observe",
+            BILLING_RECONCILIATION_RUNNER_ENABLED: "true",
+            BILLING_RECONCILIATION_INTERVAL_SECONDS: "900",
+            STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED: "true",
+            STRIPE_WEBHOOK_RETENTION_INTERVAL_SECONDS: "86400",
+            STRIPE_WEBHOOK_RETENTION_RUN_LIMIT: "100",
+            BILLING_LIFECYCLE_ACCEPTANCE_ID: "",
           };
 
           for (const container of nextDefinition.containerDefinitions) {

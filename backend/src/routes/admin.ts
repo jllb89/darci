@@ -40,11 +40,46 @@ import {
 } from "../controllers/notaryProfileController";
 import { requireRole } from "../middleware/roles";
 import {
+  cleanupStripeWebhookRetentionAdmin,
+  getBillingOperationsAdmin,
+  replayStripeWebhookAdmin,
   releaseBillingHeldDocumentAdmin,
+  resyncStripeSubscriptionAdmin,
+  retryBillingHeldReleasesAdmin,
   reverseMemberUsageAdmin,
 } from "../controllers/billingAdminController";
 
 const router = Router();
+
+router.get(
+  "/billing/operations",
+  requireRole(["admin", "service_role"]),
+  getBillingOperationsAdmin,
+);
+
+router.post(
+  "/billing/webhook-events/:eventId/replay",
+  requireRole(["admin", "service_role"]),
+  replayStripeWebhookAdmin,
+);
+
+router.post(
+  "/billing/subscriptions/:subscriptionId/resync",
+  requireRole(["admin", "service_role"]),
+  resyncStripeSubscriptionAdmin,
+);
+
+router.post(
+  "/billing/accounts/:billingAccountId/retry-releases",
+  requireRole(["admin", "service_role"]),
+  retryBillingHeldReleasesAdmin,
+);
+
+router.post(
+  "/billing/webhook-retention/cleanup",
+  requireRole(["admin", "service_role"]),
+  cleanupStripeWebhookRetentionAdmin,
+);
 
 router.post(
   "/billing/usage-events/:usageEventId/reverse",

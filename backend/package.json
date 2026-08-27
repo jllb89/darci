@@ -24,6 +24,8 @@
     "notifications:run-invites": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/run-notification-outbox.ts --kind=invite --limit=10",
     "stripe:catalog:sync": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/sync-stripe-member-catalog.ts",
     "stripe:catalog:verify": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/verify-stripe-member-catalog.ts",
+    "stripe:operations:report": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/report-stripe-billing-readiness.ts",
+    "stripe:acceptance:verify": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/report-stripe-billing-readiness.ts --require-acceptance",
     "test:integration:staging": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
     "test": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run",
     "test:watch": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs"

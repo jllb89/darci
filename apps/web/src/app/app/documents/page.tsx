@@ -24,6 +24,12 @@ type DocumentWorkspaceSummary = {
     idn: string | null;
     verifyPath: string | null;
   };
+  release: {
+    status: "unmanaged" | "pending" | "billing_held" | "released";
+    reasonCode: string | null;
+    heldAt: string | null;
+    releasedAt: string | null;
+  };
 };
 
 type DocumentNextAction = {
@@ -86,7 +92,7 @@ type DocumentFilterFacets = {
 };
 
 type DocumentsCacheEntry = {
-  version: 2;
+  version: 3;
   cachedAt: number;
   documents: DocumentListItem[];
   pagination: DocumentsPagination;
@@ -159,7 +165,7 @@ type PageSize = 10 | 20 | 100;
 
 const pageSizeOptions: PageSize[] = [10, 20, 100];
 const DOCUMENTS_CACHE_KEY_PREFIX = "darci:documents:list:v1";
-const DOCUMENTS_CACHE_VERSION = 2;
+const DOCUMENTS_CACHE_VERSION = 3;
 
 type ActionIconName = "alert" | "arrowRight" | "bell" | "check" | "eye" | "pen" | "send" | "x";
 
@@ -647,6 +653,9 @@ const documentHasCurrentUserPendingSignature = (
 };
 
 const getDocumentActionLabel = (document: DocumentListItem, currentUserName: string) => {
+  if (document.summary?.release.status === "billing_held") {
+    return "View held document";
+  }
   if (
     document.nextAction?.code === "collect_signatures" &&
     !documentHasCurrentUserPendingSignature(document, currentUserName)
@@ -682,6 +691,9 @@ const getDocumentActionClass = (document: DocumentListItem, currentUserName: str
 };
 
 const getDocumentActionHref = (document: DocumentListItem) => {
+  if (document.summary?.release.status === "billing_held") {
+    return `/app/documents/${encodeURIComponent(document.id)}`;
+  }
   if (document.nextAction?.targetPath) {
     return document.nextAction.targetPath;
   }
@@ -714,6 +726,9 @@ const getDocumentActionHref = (document: DocumentListItem) => {
 };
 
 const inferDocumentNextStep = (document: DocumentListItem) => {
+  if (document.summary?.release.status === "billing_held") {
+    return "Notarization is complete. Restore membership to access the preserved sealed final package.";
+  }
   if (document.nextAction?.description) {
     return document.nextAction.description;
   }
@@ -1684,6 +1699,7 @@ export default function DocumentsPage() {
                 const principalName = getDocumentPrincipalDisplayName(document, currentUserName);
                 const documentActionLabel = getDocumentActionLabel(document, currentUserName);
                 const documentActionIcon = getDocumentActionIconName(document, currentUserName);
+                const isBillingHeld = document.summary?.release.status === "billing_held";
 
                 return (
                 <Fragment key={document.id}>
@@ -1696,8 +1712,8 @@ export default function DocumentsPage() {
                     <div className="mt-0.5 text-xs text-Color-Neutral">{document.idn ?? "No IDN yet"}</div>
                   </td>
                   <td className="border-t border-Color-Scheme-1-Border/40 px-4 py-5 text-Color-Neutral">
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${getStatusBadgeClass(document.status)}`}>
-                      {formatStatusLabel(document.status)}
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${isBillingHeld ? "bg-amber-100 text-amber-900" : getStatusBadgeClass(document.status)}`}>
+                      {isBillingHeld ? "Final package held" : formatStatusLabel(document.status)}
                     </span>
                   </td>
                   <td className="border-t border-Color-Scheme-1-Border/40 px-4 py-5 text-Color-Neutral">

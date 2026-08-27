@@ -29,7 +29,7 @@
 	<key>DARCI_SUPABASE_URL</key>
 	<string>$(DARCI_SUPABASE_URL)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>DARCi uses your location to confirm that the member and illuminotary are together for an in-person notarization session.</string>
+	<string>DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>MaisonNeue-Bold.ttf</string>

@@ -31,6 +31,7 @@ struct AppRootView: View {
     @State private var shouldReturnToNotificationCenterAfterRoute = false
     @State private var isPushPermissionPromptPresented = false
     @State private var homeBannerMessage: String?
+    @State private var memberBillingReturnEvent: MemberBillingReturn?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     @StateObject private var notificationCenterViewModel: NotificationCenterViewModel
@@ -41,6 +42,7 @@ struct AppRootView: View {
     private let documentIntakeAPIClient: DocumentIntakeAPIProviding
     private let requestsAPIClient: RequestsAPIProviding
     private let notaryProfileAPIClient: NotaryProfileAPIProviding
+    private let memberBillingAPIClient: MemberBillingAPIProviding
 
     init(
         authenticationViewModel: AuthenticationViewModel? = nil,
@@ -51,6 +53,7 @@ struct AppRootView: View {
         documentIntakeAPIClient: DocumentIntakeAPIProviding? = nil,
         requestsAPIClient: RequestsAPIProviding? = nil,
         notaryProfileAPIClient: NotaryProfileAPIProviding? = nil,
+        memberBillingAPIClient: MemberBillingAPIProviding? = nil,
         notificationCenterAPIClient: NotificationCenterAPIProviding? = nil
     ) {
         let dependencies = AppRootView.makeAuthDependencies()
@@ -63,6 +66,7 @@ struct AppRootView: View {
         self.documentIntakeAPIClient = documentIntakeAPIClient ?? dependencies.documentIntakeAPIClient
         self.requestsAPIClient = requestsAPIClient ?? dependencies.requestsAPIClient
         self.notaryProfileAPIClient = notaryProfileAPIClient ?? dependencies.notaryProfileAPIClient
+        self.memberBillingAPIClient = memberBillingAPIClient ?? dependencies.memberBillingAPIClient
         _notificationCenterViewModel = StateObject(
             wrappedValue: NotificationCenterViewModel(apiClient: notificationCenterAPIClient ?? dependencies.notificationCenterAPIClient)
         )
@@ -192,7 +196,10 @@ struct AppRootView: View {
                         onSignOut: signOut,
                         onDeleteAccount: deleteAccount,
                         onSavePersonalInfo: savePersonalInfo,
-                        notaryProfileAPIClient: notaryProfileAPIClient
+                        notaryProfileAPIClient: notaryProfileAPIClient,
+                        memberBillingAPIClient: memberBillingAPIClient,
+                        refreshSession: { await sessionCoordinator.refreshCurrentSession() },
+                        billingReturnEvent: memberBillingReturnEvent
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.ignoresSafeArea())
@@ -601,6 +608,16 @@ struct AppRootView: View {
     }
 
     private func handleIncomingURL(_ url: URL) {
+        if let billingResult = MemberBillingDeepLink.result(from: url),
+           MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) == .member {
+            memberBillingReturnEvent = MemberBillingReturn(result: billingResult)
+            selectedTab = .home
+            isProfileSelectionPresented = false
+            isNotificationCenterPresented = false
+            isUserSettingsPresented = true
+            return
+        }
+
         if let inviteToken = MemberDocumentDeepLink.inviteToken(from: url) {
             pendingInviteToken = inviteToken
             Task { await openPendingInviteIfPossible() }
@@ -779,6 +796,7 @@ struct AppRootView: View {
         documentIntakeAPIClient: DocumentIntakeAPIProviding,
         requestsAPIClient: RequestsAPIProviding,
         notaryProfileAPIClient: NotaryProfileAPIProviding,
+        memberBillingAPIClient: MemberBillingAPIProviding,
         notificationCenterAPIClient: NotificationCenterAPIProviding,
         sessionStore: AuthSessionStore
     ) {
@@ -793,12 +811,13 @@ struct AppRootView: View {
                 MockDocumentIntakeAPIClient(),
                 MockRequestsAPIClient(),
                 MockNotaryProfileAPIClient(),
+                MockMemberBillingAPIClient(),
                 MockNotificationCenterAPIClient(),
                 InMemoryAuthSessionStore(session: storedSession)
             )
         }
 
-        return (AuthAPIClient(), HomeAPIClient(), DocumentsAPIClient(), DocumentIntakeAPIClient(), RequestsAPIClient(), NotaryProfileAPIClient(), NotificationCenterAPIClient(), KeychainAuthSessionStore())
+        return (AuthAPIClient(), HomeAPIClient(), DocumentsAPIClient(), DocumentIntakeAPIClient(), RequestsAPIClient(), NotaryProfileAPIClient(), MemberBillingAPIClient(), NotificationCenterAPIClient(), KeychainAuthSessionStore())
     }
 }
 

@@ -214,6 +214,7 @@ export type DocumentIntakeSubmitResponsePayload = {
   canonicalPayload?: Record<string, unknown>;
   valid?: boolean;
   message?: string;
+  error?: string;
   errors?: Array<{
     code?: string;
     field?: string;

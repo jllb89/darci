@@ -1,7 +1,7 @@
 # DARCi Stripe Implementation Roadmap
 
 - Status: **active implementation roadmap**
-- Revised: 2026-08-26
+- Revised: 2026-08-27
 - Release authority: `docs/private-beta-readiness-roadmap-2026-08-25.md`
 - Historical client request: `docs/DARCi_Payment_Logic_Spec.md`
 
@@ -156,9 +156,9 @@ Every enforcement-mode change must be restricted and audited. Client application
 
 ## Current Repository Reality
 
-### Existing foundation
+### Historical baseline before this roadmap
 
-The Phase 2 billing migration already provides:
+At the start of this roadmap, the Phase 2 billing migration provided:
 
 - `billing_accounts` and `billing_customers`;
 - catalog products and prices;
@@ -170,7 +170,7 @@ The Phase 2 billing migration already provides:
 
 The backend mounts `/webhooks` before the global JSON parser, so raw-body Stripe signature verification can be added correctly. The web sidebar already links to `/app/billing`, although the page is not implemented, and iOS currently has only a static membership row.
 
-### Incorrect or missing foundation
+### Historical gaps addressed or tracked below
 
 - Existing catalog seeds describe Trust activation, Dynamic POA, Pro credit, and notary membership products that are not in current scope.
 - Catalog constraints do not include a `member_membership` family or `document_workflow_capacity` entitlement.
@@ -179,10 +179,10 @@ The backend mounts `/webhooks` before the global JSON parser, so raw-body Stripe
 - `billing_entitlements.quantity_used` is not an immutable request-level usage ledger and is unsafe as the only concurrency control.
 - No usage record ties one allowance unit to a specific document/workflow and subscription period.
 - No atomic database operation both verifies remaining allowance and records first submission.
-- Stripe SDK, Checkout, Customer Portal, webhook fulfillment, reconciliation, and billing APIs are not implemented.
-- Web and iOS do not have a shared server-derived membership read model.
-- No `billing_held` final-package release state exists.
-- The webhook table lacks robust retry, lease, dead-letter, object-reference, and retention fields.
+- Stripe SDK, Checkout, Customer Portal, webhook fulfillment, and member billing APIs were not implemented. Phases 2–3 now provide them; reconciliation remains Phase 7 work.
+- Web and iOS did not have a shared server-derived membership read model. Both clients now consume the member-membership API and web cross-flow billing states are wired; iOS distribution policy remains open and server-gated.
+- No `billing_held` final-package release state existed. Phase 4 now provides the backend state, protected read models, and member document-list/detail presentation without final-artifact disclosure.
+- The webhook table lacked robust retry, lease, dead-letter, object-reference, and retention fields. The durable inbox now provides those fields; operator replay, alerting, retention cleanup, and reconciliation remain Phase 7 work.
 
 All schema changes must be additive migrations. Do not edit an already-applied migration.
 
@@ -342,7 +342,7 @@ Exit criteria:
 
 ## Phase 3 — Checkout And Durable Webhook Fulfillment
 
-Implementation status: **complete in staging** on 2026-08-27. Authenticated allowlisted Checkout, Portal-session creation, raw-body signed webhook ingress, minimized durable event storage, leased retry processing, and transactional subscription/entitlement/order/invoice fulfillment are implemented. Stripe test endpoint `we_1U96cZETAqmB3GAqH5G2mxZV` is enabled at `https://api.staging.darciregistry.dev/webhooks/stripe`; its signing secret is stored through the staging secret-management path and signed delivery was verified.
+Implementation status: **core runtime and Phase 7 recovery tooling implemented; team acceptance remains** on 2026-08-27. Authenticated allowlisted Checkout, Portal-session creation, raw-body signed webhook ingress, minimized durable event storage, leased retry processing, transactional subscription/entitlement/order/invoice fulfillment, operator replay/resync, drift alerting, and retention cleanup are implemented. Stripe test endpoint `we_1U96cZETAqmB3GAqH5G2mxZV` is enabled at `https://api.staging.darciregistry.dev/webhooks/stripe`; its signing secret is stored through the staging secret-management path and signed delivery was verified. The machine-readable acceptance report now identifies missing lifecycle scenarios; the team still needs to generate that staging evidence after deployment.
 
 Purpose: establish trusted subscription state before enforcing product access.
 
@@ -385,7 +385,7 @@ Fulfillment:
 
 ## Phase 4 — Usage And Product-Workflow Integration
 
-Implementation status: **backend complete; activation gated** on 2026-08-27. The shared policy boundary, atomic consumption, workflow continuity, final-package hold/release controls, protected read surfaces, reactivation release, and recent-reauthenticated support actions are implemented. Migration `20260827120000` is applied in staging and preserved 97 legacy completed packages as released. Staging remains in `observe` mode until the Phase 5 member-facing billing and held-package states exist; changing `BILLING_ENFORCEMENT_MODE` to `enforced` is the explicit activation step.
+Implementation status: **implemented; staging end-to-end acceptance gated** on 2026-08-27. The shared policy boundary, atomic consumption, workflow continuity, final-package hold/release controls, protected read surfaces, reactivation release, recent-reauthenticated support actions, and member-facing denial/held-package states are implemented. Migration `20260827120000` is applied in staging and preserved 97 legacy completed packages as released. Staging remains in `observe` mode until the required Stripe lifecycle and three-product-flow matrix passes. Changing `BILLING_ENFORCEMENT_MODE` to `enforced` is the final private-beta activation step, not evidence by itself that Phase 4 is accepted.
 
 Purpose: enforce member allowance without duplicating business rules or damaging workflow integrity.
 
@@ -412,7 +412,7 @@ Exit criteria:
 
 ## Phase 5 — Web Billing Experience And Pricing Truth
 
-Implementation status: **member billing screen complete; cross-flow frontend work remains** on 2026-08-27. `/app/billing` now consumes the test catalog and membership contract, launches Stripe Checkout and Customer Portal, polls activation after Checkout return, displays allowance and held-package states, and keeps plan switching unavailable. Member navigation and `/app` Checkout-return forwarding are wired, while notary profiles are excluded from billing. Workflow-level quota errors, document-detail held-package presentation, and obsolete public landing-page pricing still remain before enforcement can move beyond `observe`; those gaps are tracked in `docs/stripe-phase-45-frontend-gaps-2026-08-27.md`.
+Implementation status: **implemented locally; staging acceptance pending** on 2026-08-27. `/app/billing` consumes the test catalog and membership contract, launches Stripe Checkout and Customer Portal, polls activation after Checkout return, displays allowance and held-package totals, and supports server-controlled prorated upgrades and period-end downgrades. Workflow creation/review renders the shared billing denial contract; document list/detail renders `billing_held` without download, hash/ledger, or public-verification access; public pricing now contains only the three member volume tiers. Member navigation and `/app` Checkout-return forwarding are wired, while notary profiles remain excluded. Production builds and focused contract tests pass; Stripe staging lifecycle acceptance remains required before enforcement.
 
 Purpose: give members an accurate, minimal subscription experience.
 
@@ -430,6 +430,8 @@ Work:
 - Hide deferred products rather than displaying nonfunctional purchase controls.
 
 ## Phase 6 — iOS Status And Purchase Decision
+
+Implementation status: **technical UI and server release gate implemented locally; distribution approval incomplete** on 2026-08-27. The iOS member billing view consumes the shared API, renders paywall/active/recovery states, opens hosted Checkout and Customer Portal only when the server enables purchase, and handles trusted universal-link returns without activating from the redirect. `IOS_MEMBER_CHECKOUT_ENABLED=false` is now the staging/default release posture, so the shipped screen remains status/management-only while App Review classification is unresolved. The app builds and its focused billing tests pass. The changes are not yet committed, and no repository evidence records App Review classification, storefront approval, or physical-device Apple Pay validation.
 
 Purpose: keep iOS truthful while the hybrid digital/in-person payment classification is resolved.
 
@@ -454,6 +456,8 @@ Exit criteria:
 
 ## Phase 7 — Reconciliation, Support, And Recovery
 
+Implementation status: **implemented locally; deployment and team exercise pending** on 2026-08-27. Durable webhook retry/dead-letter mechanics, provider-backed reconciliation, lifecycle-evidence reporting, audited event replay, subscription resync, eligible-release retry, usage reversal, forced release, a full account/subscription/entitlement/order/invoice/usage operator ledger, scheduled drift alerts, rejected-signature and repeated-Checkout telemetry, minimized-payload retention cleanup, Stripe/DARCi request correlation, CLI readiness checks, and incident/team-testing runbooks are implemented. No new schema migration is required. The read-only pre-deployment report found zero reconciliation drift/backlog and 3 of 15 lifecycle evidence scenarios already present. Staging remains intentionally in `observe`; team evidence and any resulting recovery actions will be evaluated after deployment.
+
 Purpose: make billing explainable and recoverable without direct database edits.
 
 Reconciliation must detect:
@@ -472,7 +476,7 @@ Reconciliation must detect:
 Operations:
 
 - Add operator views for account, order, subscription, invoice/payment, entitlement, usage, webhook attempts, release holds, and reconciliation drift.
-- Add controlled event replay, subscription resync, usage reversal, held-package release retry, cancellation, refund, and support override actions.
+- Add controlled event replay, subscription resync, usage reversal, held-package release retry, cancellation, and support override actions. Cancellation remains in the restricted Customer Portal. Refund execution stays policy-gated in Stripe support tooling until the client approves refund/dispute rules; DARCi reconciliation still detects the resulting provider state.
 - Alert on signature failures, backlog, dead letters, fulfillment failures, counter drift, release failures, and repeated Checkout abuse.
 - Document Stripe outage, webhook outage, queue outage, database outage, failed finalization, duplicate charge, refund/dispute, and account-takeover runbooks.
 - Record Stripe request IDs and DARCi correlation IDs without logging secrets or sensitive document data.
@@ -480,6 +484,8 @@ Operations:
 Stripe Sync Engine may be evaluated later as a reporting/reconciliation mirror. It is not required for the first working slice and must never become the authorization source.
 
 ## Phase 8 — Hardening And Live-Payment Gate
+
+Implementation status: **not started as a live-payment gate** on 2026-08-27. Existing authentication, authorization, RLS, idempotency, and test-mode controls are foundations only. Live mappings and payments remain disabled.
 
 Security and reliability:
 
@@ -511,6 +517,7 @@ Authenticated member endpoints:
 
 - `GET /billing/member-membership`
 - `POST /billing/member-membership/checkout`
+- `POST /billing/member-membership/plan-change`
 - `POST /billing/customer-portal-session`
 - `GET /billing/orders/{id}` when needed for pending activation/support
 
@@ -527,6 +534,18 @@ Internal policy/service operations:
 - reconcile subscription, entitlement, usage, and release state.
 
 Admin/support endpoints should be added only for specific operator workflows and must not expose generic unrestricted mutations.
+
+Implemented Phase 7 admin endpoints:
+
+- `GET /admin/billing/operations`
+- `POST /admin/billing/webhook-events/{eventId}/replay`
+- `POST /admin/billing/subscriptions/{subscriptionId}/resync`
+- `POST /admin/billing/accounts/{billingAccountId}/retry-releases`
+- `POST /admin/billing/webhook-retention/cleanup`
+- `POST /admin/billing/usage-events/{usageEventId}/reverse`
+- `POST /admin/billing/documents/{documentId}/release`
+
+Every mutation is role-restricted, recently reauthenticated, reason-bound, and audited. The endpoints do not accept arbitrary Stripe Price IDs, subscription states, entitlement quantities, usage quantities, or release states.
 
 Do not publish Dynamic POA, Trust-fee, Pro-credit, delegated-payment, or notary-membership Checkout endpoints in the current phase.
 
@@ -584,13 +603,28 @@ Each future phase requires its own estimate, authorization, product rules, check
 
 1. Is a free trial disabled for private beta and initial live launch?
 2. Are promotion codes disabled initially?
-3. Are upgrades prorated immediately through Stripe and downgrades scheduled at period end?
+3. The engineering policy is immediate prorated upgrades and period-end downgrades. Client/product must approve the customer-facing proration wording before live launch; private-beta test-mode implementation may proceed against this locked behavior.
 4. What customer notice and legal terms govern a `billing_held` final package?
 5. What refund/dispute outcomes, if any, permit a usage reversal?
 6. Who owns daily reconciliation and failed-fulfillment/release response?
 7. Which iOS purchase implementation and storefronts receive App Review approval?
 8. Is Stripe Tax required, and who owns taxability and billing-address policy?
 9. How long are minimized Stripe webhook/event records retained?
+
+## 2026-08-27 Reconciliation Audit And Immediate Next Pass
+
+The presence of web and iOS paywall screens does not complete billing enforcement. Current completion and remaining activation work are:
+
+1. [x] Render shared server billing reason codes in web workflow creation and first-submission surfaces with direct membership/renewal actions.
+2. [x] Present `billing_held` in member document list/detail while suppressing final downloads, hashes, ledger values, and public verification links; preserve notary continuity.
+3. [x] Replace the public landing-page Trust, Dynamic POA, Pro-credit, and notary pricing with the three member volume tiers only.
+4. [x] Add a server-controlled active-subscription plan-change endpoint with immediate prorated upgrades, period-end downgrades, preserved current-period usage, webhook-authoritative fulfillment, and idempotent retries.
+5. [x] Reconcile this roadmap and `docs/stripe-phase-45-frontend-gaps-2026-08-27.md` with the implemented cross-flow requirements.
+6. [ ] Complete the remaining staging lifecycle matrix. Local backend/web regressions and focused iOS billing tests pass, but real Stripe test-mode payment recovery, renewal/cancellation, delayed/out-of-order delivery, worker restart, and byte-identical held-package reactivation still require an authenticated staging exercise.
+7. [ ] Run that staging test-mode end-to-end exercise, then change staging to `test + enforced` only when every activation check passes. `observe` remains intentional today.
+8. [x] Implement Phase 7 reconciliation, replay/resync, alerting, retention, lifecycle-evidence reporting, operator recovery, and incident guidance before relying on billing without direct engineering intervention.
+9. [x] Keep the iOS purchase CTA server-disabled until App Review/storefront treatment is recorded. Physical-device validation of the eventual approved hosted or native Apple Pay path remains pending.
+10. [ ] Commit, deploy, and ship the web/backend/iOS/AASA changes through the normal release process.
 
 ## Primary Technical References
 

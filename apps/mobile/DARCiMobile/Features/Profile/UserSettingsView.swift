@@ -8,10 +8,14 @@ struct UserSettingsView: View {
     let onDeleteAccount: () async throws -> Void
     let onSavePersonalInfo: (PersonalInfoSaveInput) async throws -> Void
     let notaryProfileAPIClient: NotaryProfileAPIProviding
+    let memberBillingAPIClient: MemberBillingAPIProviding
+    let refreshSession: () async -> AuthSession?
+    let billingReturnEvent: MemberBillingReturn?
 
     @Environment(\.openURL) private var openURL
     @State private var isPersonalInfoPresented = false
     @State private var isNotaryInformationPresented = false
+    @State private var isMemberBillingPresented = false
     @State private var presentedContent: UserSettingsContentScreen?
     @State private var isDeleteAccountConfirmationPresented = false
     @State private var isDeletingAccount = false
@@ -31,6 +35,10 @@ struct UserSettingsView: View {
         MobileProfileRole.availableRoles(for: session?.user).contains(.notary)
     }
 
+    private var showsMemberBilling: Bool {
+        MobileProfileRole.activeRole(for: session?.user) == .member
+    }
+
     var body: some View {
         ZStack {
             Color.black
@@ -41,6 +49,24 @@ struct UserSettingsView: View {
                     session: session,
                     onBack: { isPersonalInfoPresented = false },
                     onSave: onSavePersonalInfo
+                )
+                .transition(.opacity)
+            } else if isMemberBillingPresented, let session {
+                MemberBillingView(
+                    session: session,
+                    apiClient: memberBillingAPIClient,
+                    refreshSession: refreshSession,
+                    returnEvent: billingReturnEvent,
+                    onBack: { isMemberBillingPresented = false },
+                    onShowTerms: {
+                        isMemberBillingPresented = false
+                        presentedContent = .terms
+                    },
+                    onShowPrivacy: {
+                        isMemberBillingPresented = false
+                        presentedContent = .privacy
+                    },
+                    onContactSupport: openSupportEmail
                 )
                 .transition(.opacity)
             } else if isNotaryInformationPresented {
@@ -64,8 +90,13 @@ struct UserSettingsView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.24), value: isPersonalInfoPresented)
+        .animation(.easeInOut(duration: 0.24), value: isMemberBillingPresented)
         .animation(.easeInOut(duration: 0.24), value: isNotaryInformationPresented)
         .animation(.easeInOut(duration: 0.24), value: presentedContent)
+        .onChange(of: billingReturnEvent?.id, initial: true) { _, _ in
+            guard billingReturnEvent != nil, showsMemberBilling else { return }
+            isMemberBillingPresented = true
+        }
         .alert("Delete account?", isPresented: $isDeleteAccountConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Delete account", role: .destructive) {
@@ -162,7 +193,10 @@ struct UserSettingsView: View {
     }
 
     private var profileRows: [String] {
-        var rows = ["Personal Info", "Membership & Billing"]
+        var rows = ["Personal Info"]
+        if showsMemberBilling {
+            rows.append("Membership & Billing")
+        }
         if showsNotaryInformation {
             rows.append("illuminotary Information")
         }
@@ -208,6 +242,17 @@ struct UserSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-personal-info-button")
+                } else if title == "Membership & Billing" {
+                    Button {
+                        isMemberBillingPresented = true
+                    } label: {
+                        row
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("settings-membership-billing-button")
                 } else if title == "illuminotary Information" {
                     Button {
                         isNotaryInformationPresented = true

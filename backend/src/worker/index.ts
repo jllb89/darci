@@ -8,6 +8,10 @@ import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import { deliverWebhook } from "../services/webhookService";
 import { captureException, flushSentry } from "../utils/sentry";
 import { runDueStripeWebhookEvents } from "../services/stripeWebhookService";
+import {
+  getBillingOperationsReport,
+  runStripeWebhookRetentionCleanup,
+} from "../services/billingOperationsService";
 
 type HashingJobData = {
   documentId: string;
@@ -40,6 +44,10 @@ let notificationOutboxInterval: NodeJS.Timeout | null = null;
 let notificationOutboxRunInFlight = false;
 let stripeWebhookInterval: NodeJS.Timeout | null = null;
 let stripeWebhookRunInFlight = false;
+let billingReconciliationInterval: NodeJS.Timeout | null = null;
+let billingReconciliationRunInFlight = false;
+let stripeRetentionInterval: NodeJS.Timeout | null = null;
+let stripeRetentionRunInFlight = false;
 
 const parsePositiveInt = (value: string | undefined, fallback: number, max: number) => {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -67,6 +75,23 @@ const stripeWebhookRunLimit = parsePositiveInt(
   process.env.STRIPE_WEBHOOK_RUN_LIMIT,
   25,
   100,
+);
+const billingReconciliationRunnerEnabled = process.env.BILLING_RECONCILIATION_RUNNER_ENABLED !== "false";
+const billingReconciliationIntervalMs = parsePositiveInt(
+  process.env.BILLING_RECONCILIATION_INTERVAL_SECONDS,
+  15 * 60,
+  24 * 60 * 60,
+) * 1000;
+const stripeRetentionRunnerEnabled = process.env.STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED !== "false";
+const stripeRetentionIntervalMs = parsePositiveInt(
+  process.env.STRIPE_WEBHOOK_RETENTION_INTERVAL_SECONDS,
+  24 * 60 * 60,
+  7 * 24 * 60 * 60,
+) * 1000;
+const stripeRetentionRunLimit = parsePositiveInt(
+  process.env.STRIPE_WEBHOOK_RETENTION_RUN_LIMIT,
+  100,
+  500,
 );
 
 const summarizeJobData = (data: unknown) => {
@@ -293,6 +318,86 @@ if (stripeWebhookRunnerEnabled) {
   });
 }
 
+const runBillingReconciliationOnce = async () => {
+  if (billingReconciliationRunInFlight) return;
+  billingReconciliationRunInFlight = true;
+  try {
+    const report = await getBillingOperationsReport({ includeProvider: true, webhookLimit: 500 });
+    if (report.readiness.blockingIssueCount > 0) {
+      const error = new Error(`Billing reconciliation found ${report.readiness.blockingIssueCount} blocking issue(s)`);
+      captureException(error, {
+        level: report.counts.critical > 0 ? "error" : "warning",
+        tags: { service: "worker", worker_queue: "billing-reconciliation" },
+        contexts: {
+          billing_reconciliation: {
+            generatedAt: report.generatedAt,
+            critical: report.counts.critical,
+            high: report.counts.high,
+            medium: report.counts.medium,
+            issueCodes: [...new Set(report.issues.slice(0, 25).map((issue) => issue.code))],
+          },
+        },
+        fingerprint: ["worker", "billing-reconciliation", "blocking-drift"],
+      });
+      console.error("Billing reconciliation found blocking drift", {
+        critical: report.counts.critical,
+        high: report.counts.high,
+        issueCodes: [...new Set(report.issues.slice(0, 25).map((issue) => issue.code))],
+      });
+    }
+  } catch (error) {
+    captureException(error, {
+      level: "error",
+      tags: { service: "worker", worker_queue: "billing-reconciliation" },
+      fingerprint: ["worker", "billing-reconciliation", "runner-failed"],
+    });
+    console.error("Billing reconciliation runner failed", error instanceof Error ? error.message : error);
+  } finally {
+    billingReconciliationRunInFlight = false;
+  }
+};
+
+if (billingReconciliationRunnerEnabled) {
+  billingReconciliationInterval = setInterval(() => {
+    void runBillingReconciliationOnce();
+  }, billingReconciliationIntervalMs);
+  void runBillingReconciliationOnce();
+  console.log("Billing reconciliation runner started", {
+    intervalSeconds: billingReconciliationIntervalMs / 1000,
+  });
+}
+
+const runStripeRetentionOnce = async () => {
+  if (stripeRetentionRunInFlight) return;
+  stripeRetentionRunInFlight = true;
+  try {
+    const result = await runStripeWebhookRetentionCleanup({ limit: stripeRetentionRunLimit });
+    if (result.redactedCount > 0) {
+      console.log("Stripe webhook retention cleanup complete", result);
+    }
+  } catch (error) {
+    captureException(error, {
+      level: "error",
+      tags: { service: "worker", worker_queue: "stripe-webhook-retention" },
+      fingerprint: ["worker", "stripe-webhook-retention", "runner-failed"],
+    });
+    console.error("Stripe webhook retention cleanup failed", error instanceof Error ? error.message : error);
+  } finally {
+    stripeRetentionRunInFlight = false;
+  }
+};
+
+if (stripeRetentionRunnerEnabled) {
+  stripeRetentionInterval = setInterval(() => {
+    void runStripeRetentionOnce();
+  }, stripeRetentionIntervalMs);
+  void runStripeRetentionOnce();
+  console.log("Stripe webhook retention runner started", {
+    intervalSeconds: stripeRetentionIntervalMs / 1000,
+    limit: stripeRetentionRunLimit,
+  });
+}
+
 const shutdown = async () => {
   if (notificationOutboxInterval) {
     clearInterval(notificationOutboxInterval);
@@ -301,6 +406,14 @@ const shutdown = async () => {
   if (stripeWebhookInterval) {
     clearInterval(stripeWebhookInterval);
     stripeWebhookInterval = null;
+  }
+  if (billingReconciliationInterval) {
+    clearInterval(billingReconciliationInterval);
+    billingReconciliationInterval = null;
+  }
+  if (stripeRetentionInterval) {
+    clearInterval(stripeRetentionInterval);
+    stripeRetentionInterval = null;
   }
 
   await Promise.all(workers.map((worker) => worker.close()));

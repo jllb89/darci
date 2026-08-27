@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStoredAuth } from "@/lib/auth";
 import {
   FALLBACK_MEMBER_PLANS,
+  changeMemberPlan,
   createMemberCheckout,
   createMemberPortalSession,
   getMemberMembership,
@@ -194,6 +195,8 @@ type ActiveMembershipManagementProps = StatusActionProps & {
   plans: MemberBillingPlan[];
   errorMessage: string | null;
   onRetry: () => void;
+  changingPriceCode: MemberPriceCode | null;
+  onChangePlan: (priceCode: MemberPriceCode) => void;
 };
 
 function ActiveMembershipManagement({
@@ -203,6 +206,8 @@ function ActiveMembershipManagement({
   isOpeningPortal,
   onOpenPortal,
   onRetry,
+  changingPriceCode,
+  onChangePlan,
 }: ActiveMembershipManagementProps) {
   const { membership } = payload;
   const currentPlan = plans.find((plan) => plan.priceCode === membership.priceCode) ?? null;
@@ -210,6 +215,9 @@ function ActiveMembershipManagement({
   const used = membership.allowance.used;
   const remaining = membership.allowance.remaining;
   const progress = total ? Math.min((used / total) * 100, 100) : 0;
+  const pendingTargetPlan = plans.find(
+    (plan) => plan.priceCode === membership.pendingPlanChange?.targetPriceCode,
+  ) ?? null;
 
   return (
     <div className="space-y-8">
@@ -231,6 +239,14 @@ function ActiveMembershipManagement({
       {membership.cancelAtPeriodEnd ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Your membership is scheduled to end on {formatDate(membership.currentPeriodEnd)}. You can manage the cancellation in Stripe.
+        </div>
+      ) : null}
+
+      {membership.pendingPlanChange ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+          {membership.pendingPlanChange.type === "downgrade"
+            ? `${pendingTargetPlan?.displayName ?? "Your new plan"} is scheduled for ${formatDate(membership.pendingPlanChange.effectiveAt)}. Your current allowance remains available until then.`
+            : `Stripe is confirming your upgrade to ${pendingTargetPlan?.displayName ?? "the selected plan"}. Used documents will remain unchanged.`}
         </div>
       ) : null}
 
@@ -305,6 +321,52 @@ function ActiveMembershipManagement({
 
         <div className="border-t border-Color-Scheme-1-Border/50 pt-4 text-xs leading-5 text-Color-Neutral">
           Stripe manages payment methods, invoice history, and cancellation. Plan switching is not available during private beta.
+        </div>
+      </section>
+
+      <section className="max-w-5xl border-t border-Color-Scheme-1-Border/50 pt-7">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-medium">Change monthly allowance</h2>
+            <p className="mt-1 text-sm text-Color-Neutral">
+              Upgrades are prorated immediately. Downgrades begin at the next billing period. Used documents never reset.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          {plans.map((plan) => {
+            const isCurrent = plan.priceCode === membership.priceCode;
+            const isPending = plan.priceCode === membership.pendingPlanChange?.targetPriceCode;
+            return (
+              <div className={`rounded-xl border p-4 ${isCurrent ? "border-Color-Scheme-1-Text" : "border-Color-Scheme-1-Border/60"}`} key={plan.priceCode}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-medium">{plan.displayName}</div>
+                    <div className="mt-1 text-xs text-Color-Neutral">
+                      {plan.documentWorkflowAllowance} documents · {formatMoney(plan)}/month
+                    </div>
+                  </div>
+                  {isCurrent ? <span className="text-[10px] font-medium uppercase tracking-wide">Current</span> : null}
+                </div>
+                {!isCurrent ? (
+                  <button
+                    className="mt-4 inline-flex min-h-9 w-full items-center justify-center rounded-md border border-Color-Scheme-1-Text px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={!payload.actions.planChangeAvailable || Boolean(changingPriceCode) || isPending}
+                    onClick={() => onChangePlan(plan.priceCode)}
+                    type="button"
+                  >
+                    {changingPriceCode === plan.priceCode
+                      ? "Requesting change…"
+                      : isPending
+                        ? "Change pending"
+                        : plan.documentWorkflowAllowance > (total ?? 0)
+                          ? "Upgrade"
+                          : "Schedule downgrade"}
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -428,6 +490,7 @@ export default function BillingPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [startingPlan, setStartingPlan] = useState<MemberPriceCode | null>(null);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
+  const [changingPriceCode, setChangingPriceCode] = useState<MemberPriceCode | null>(null);
   const billingResult = searchParams.get("billing");
   const hasMemberBillingContext = user?.role === "member" || user?.role === "pro";
 
@@ -508,6 +571,20 @@ export default function BillingPage() {
     }
   };
 
+  const handlePlanChange = async (targetPriceCode: MemberPriceCode) => {
+    if (!accessToken || changingPriceCode || !payload?.actions.planChangeAvailable) return;
+    setChangingPriceCode(targetPriceCode);
+    setErrorMessage(null);
+    try {
+      await changeMemberPlan(accessToken, targetPriceCode);
+      await loadMembership(true);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "We could not change your membership plan.");
+    } finally {
+      setChangingPriceCode(null);
+    }
+  };
+
   if (!hasMemberBillingContext) {
     return (
       <div className="mx-auto max-w-2xl bg-white px-8 py-10 text-center">
@@ -534,6 +611,8 @@ export default function BillingPage() {
         isOpeningPortal={isOpeningPortal}
         onOpenPortal={() => void handleOpenPortal()}
         onRetry={() => void loadMembership()}
+        changingPriceCode={changingPriceCode}
+        onChangePlan={(priceCode) => void handlePlanChange(priceCode)}
         payload={payload}
         plans={plans}
       />

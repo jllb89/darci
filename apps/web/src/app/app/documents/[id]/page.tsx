@@ -32,6 +32,12 @@ type DocumentWorkspaceSummary = {
     idn: string | null;
     verifyPath: string | null;
   };
+  release: {
+    status: "unmanaged" | "pending" | "billing_held" | "released";
+    reasonCode: string | null;
+    heldAt: string | null;
+    releasedAt: string | null;
+  };
 };
 
 type DocumentPayload = {
@@ -133,6 +139,7 @@ export default function DocumentWorkspacePage() {
   }, [loadDocument]);
 
   const document = payload?.document;
+  const isBillingHeld = document?.summary.release.status === "billing_held";
 
   return (
     <div className="space-y-6">
@@ -154,6 +161,23 @@ export default function DocumentWorkspacePage() {
         </div>
       ) : null}
 
+      {isBillingHeld ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-5 text-sm text-amber-950">
+          <div className="font-medium">Your notarization is complete and the final package is safely preserved.</div>
+          <p className="mt-2 max-w-3xl leading-6 text-amber-900/75">
+            Restore your membership to access the sealed document and acknowledgment. Final downloads,
+            verification, hash, and ledger information remain private until release. Your notary&apos;s completed
+            record is not affected.
+          </p>
+          <Link
+            className="mt-4 inline-flex min-h-9 items-center justify-center rounded-md bg-Color-Scheme-1-Text px-4 text-xs font-medium text-white"
+            href="/app/billing"
+          >
+            Restore membership
+          </Link>
+        </section>
+      ) : null}
+
       {!isLoading && document ? (
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <div className="space-y-6">
@@ -162,8 +186,10 @@ export default function DocumentWorkspacePage() {
               <div className="mt-4 grid gap-3 text-sm text-Color-Neutral md:grid-cols-2">
                 <div>IDN: {document.idn ?? "-"}</div>
                 <div>Created: {formatDateTime(document.createdAt)}</div>
-                <div>Verification: {document.summary.verification.status}</div>
-                <div>Anchored: {document.summary.finalization.isAnchored ? "Yes" : "No"}</div>
+                <div>Verification: {isBillingHeld ? "Available after membership restoration" : document.summary.verification.status}</div>
+                {!isBillingHeld ? (
+                  <div>Anchored: {document.summary.finalization.isAnchored ? "Yes" : "No"}</div>
+                ) : null}
               </div>
             </div>
 
@@ -199,7 +225,7 @@ export default function DocumentWorkspacePage() {
               </Link>
             ) : null}
 
-            {document.summary.verification.verifyPath ? (
+            {!isBillingHeld && document.summary.verification.verifyPath ? (
               <a
                 className="block rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-sm hover:bg-Color-Neutral-Lightest"
                 href={document.summary.verification.verifyPath}

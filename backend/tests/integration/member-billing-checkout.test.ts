@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   checkout: vi.fn(),
+  planChange: vi.fn(),
   portal: vi.fn(),
   status: vi.fn(),
 }));
 
 vi.mock("../../src/services/memberBillingService", () => ({
   createMemberMembershipCheckout: mocks.checkout,
+  changeMemberMembershipPlan: mocks.planChange,
   createMemberCustomerPortalSession: mocks.portal,
   getMemberMembershipStatus: mocks.status,
   MemberBillingServiceError: class MemberBillingServiceError extends Error {
@@ -108,6 +110,44 @@ describe("member membership Checkout API", () => {
 
     expect(response.status).toBe(201);
     expect(mocks.portal).toHaveBeenCalledWith({ dbUserId: "db-user-1" });
+  });
+
+  it("accepts only a server-catalog plan change for an existing member subscription", async () => {
+    mocks.planChange.mockResolvedValue({
+      changeType: "upgrade",
+      status: "pending_webhook",
+      currentPriceCode: "member_starter_monthly",
+      targetPriceCode: "member_plus_monthly",
+      effectiveAt: null,
+    });
+
+    const response = await request(buildApp())
+      .post("/billing/member-membership/plan-change")
+      .send({
+        targetPriceCode: "member_plus_monthly",
+        idempotencyToken: "plan-change-request-0001",
+      });
+
+    expect(response.status).toBe(202);
+    expect(mocks.planChange).toHaveBeenCalledWith({
+      dbUserId: "db-user-1",
+      targetPriceCode: "member_plus_monthly",
+      idempotencyKey: "plan-change-request-0001",
+    });
+  });
+
+  it("rejects provider IDs and amounts from plan-change requests", async () => {
+    const response = await request(buildApp())
+      .post("/billing/member-membership/plan-change")
+      .send({
+        targetPriceCode: "member_volume_monthly",
+        idempotencyToken: "plan-change-request-0002",
+        providerPriceId: "price_override",
+        amount: 1,
+      });
+
+    expect(response.status).toBe(400);
+    expect(mocks.planChange).not.toHaveBeenCalled();
   });
 
   it("does not expose member Checkout from a notary workspace", async () => {

@@ -172,6 +172,33 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testMemberBillingProposalOneLoadsFromSettings() throws {
+        let app = makeApp(restoreSession: true)
+        app.launch()
+
+        XCTAssertTrue(app.buttons["home-settings-button"].waitForExistence(timeout: 5))
+        if app.buttons["Not now"].waitForExistence(timeout: 1) {
+            app.buttons["Not now"].tap()
+        }
+        app.buttons["home-settings-button"].tap()
+
+        let billingButton = app.buttons["settings-membership-billing-button"]
+        XCTAssertTrue(billingButton.waitForExistence(timeout: 5))
+        billingButton.tap()
+
+        XCTAssertTrue(app.staticTexts["Make it official."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["PRIVATE BETA · TEST MODE"].exists)
+        XCTAssertTrue(app.buttons["member-billing-plan-member_plus_monthly"].isSelected)
+        XCTAssertTrue(app.staticTexts["member-billing-purchase-policy-notice"].exists)
+        XCTAssertTrue(app.staticTexts["Stripe test mode — no real charge"].exists)
+
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "member-billing-proposal-01"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testReadyNotaryRequestOpensInPersonSessionWorkspace() throws {
         let app = makeApp(restoreSession: true, notarySession: true)
         app.launch()

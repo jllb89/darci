@@ -29,4 +29,10 @@ describe("member billing helpers", () => {
     expect(isRecoveryMembershipState("unpaid")).toBe(true);
     expect(isRecoveryMembershipState("active")).toBe(false);
   });
+
+  it("keeps plan prices ordered from Starter through Volume", () => {
+    expect(FALLBACK_MEMBER_PLANS.map((plan) => plan.unitAmountCents)).toEqual([
+      4900, 9900, 19900,
+    ]);
+  });
 });

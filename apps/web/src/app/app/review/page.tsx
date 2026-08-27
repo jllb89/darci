@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { BillingPolicyNotice } from "@/components/app/BillingPolicyNotice";
 import {
   addFeatureBreadcrumb,
   captureAppMessage,
@@ -12,6 +13,10 @@ import {
   getResponseRequestId,
 } from "@/lib/clientTelemetry";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
+import {
+  readMemberBillingReasonCode,
+  type MemberBillingReasonCode,
+} from "@/lib/billingPolicy";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -198,6 +203,7 @@ export default function ReviewPage() {
   const [isApproving, setIsApproving] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [billingDenialReason, setBillingDenialReason] = useState<MemberBillingReasonCode | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [previewErrorMessage, setPreviewErrorMessage] = useState<string | null>(null);
@@ -457,6 +463,7 @@ export default function ReviewPage() {
     }
 
     setIsApproving(true);
+    setBillingDenialReason(null);
     let requestId: string | null = null;
     addFeatureBreadcrumb({
       feature: "document_review",
@@ -478,10 +485,16 @@ export default function ReviewPage() {
       );
       requestId = getResponseRequestId(response);
       const responsePayload = (await response.json().catch(() => null)) as
-        | { message?: string }
+        | { error?: string; message?: string }
         | null;
 
       if (!response.ok) {
+        const billingReasonCode = readMemberBillingReasonCode(responsePayload);
+        if (billingReasonCode) {
+          setBillingDenialReason(billingReasonCode);
+          setErrorMessage(null);
+          return;
+        }
         throw new Error(responsePayload?.message ?? "Failed to approve document review.");
       }
 
@@ -925,6 +938,9 @@ export default function ReviewPage() {
                 <div className="rounded-xl border border-red-200 px-4 py-3 text-sm text-red-700">
                   {errorMessage}
                 </div>
+              ) : null}
+              {billingDenialReason ? (
+                <BillingPolicyNotice reasonCode={billingDenialReason} />
               ) : null}
 
               {payload?.review?.outputs.map((output) => {

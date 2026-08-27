@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { ingestStripeWebhook, processStoredStripeWebhook } from "../services/stripeWebhookService";
+import { captureException, captureMessage } from "../utils/sentry";
 
 const readSignature = (value: string | string[] | undefined) => {
   if (Array.isArray(value)) return value[0]?.trim() ?? null;
@@ -40,6 +41,21 @@ export const receiveStripeWebhook = async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
     const signatureFailure = /signature|No signatures|timestamp/i.test(message);
+    if (signatureFailure) {
+      captureMessage("Stripe webhook signature rejected", {
+        level: "warning",
+        tags: { service: "api", operation: "stripe_webhook_ingress", signature_failure: true },
+        contexts: { stripe_webhook: { requestId: req.requestId ?? null } },
+        fingerprint: ["stripe", "webhook", "signature-rejected"],
+      });
+    } else {
+      captureException(error, {
+        level: "error",
+        tags: { service: "api", operation: "stripe_webhook_ingress" },
+        contexts: { stripe_webhook: { requestId: req.requestId ?? null } },
+        fingerprint: ["stripe", "webhook", "persistence-failed"],
+      });
+    }
     console.warn("Stripe webhook rejected", { requestId: req.requestId, signatureFailure });
     return res.status(signatureFailure ? 400 : 503).json({
       error: signatureFailure ? "invalid_stripe_signature" : "stripe_webhook_unavailable",

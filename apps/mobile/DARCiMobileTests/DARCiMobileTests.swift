@@ -54,7 +54,8 @@ struct TestAuthAPIClient: AuthAPIProviding {
             lastSignInAt: "2026-06-26T00:00:00.000Z",
             lastAuthSyncedAt: "2026-06-26T00:00:00.000Z"
         ),
-        profileCompletionRequired: true
+        profileCompletionRequired: true,
+        stepUp: nil
     )
     var otpStartError: Error?
     var verifyError: Error?
@@ -472,6 +473,10 @@ actor RecordingMemberSessionAPIClient: RequestsAPIProviding {
         throw URLError(.unsupportedURL)
     }
 
+    func claimInviteToken(_ token: String, accessToken: String) async throws -> InviteClaimResponse {
+        throw URLError(.unsupportedURL)
+    }
+
     func resendInvite(inviteId: String, accessToken: String) async throws -> InviteResendResponse {
         throw URLError(.unsupportedURL)
     }
@@ -535,6 +540,10 @@ actor FailingMemberSessionAPIClient: RequestsAPIProviding {
     }
 
     func openInvite(inviteId: String, accessToken: String) async throws -> InviteOpenResponse {
+        throw URLError(.unsupportedURL)
+    }
+
+    func claimInviteToken(_ token: String, accessToken: String) async throws -> InviteClaimResponse {
         throw URLError(.unsupportedURL)
     }
 
@@ -753,7 +762,12 @@ final class DARCiMobileTests: XCTestCase {
             document: initial.document,
             workflow: initial.workflow,
             owner: initial.owner,
-            notary: MemberSessionIdentity(displayName: "Updated illuminotary"),
+            notary: MemberSessionIdentity(
+                displayName: "Updated illuminotary",
+                fullName: "Updated illuminotary",
+                email: nil,
+                phone: nil
+            ),
             meeting: initial.meeting,
             warnings: initial.warnings,
             nextAction: initial.nextAction
@@ -2007,7 +2021,8 @@ final class DARCiMobileTests: XCTestCase {
                 typedValue: "Ada Lovelace",
                 typedKind: "name",
                 imageDataUrl: nil,
-                savedSignatureId: nil
+                savedSignatureId: nil,
+                reuseSourceSignatureId: nil
             ),
             accessToken: "access-token"
         )
@@ -2018,7 +2033,8 @@ final class DARCiMobileTests: XCTestCase {
                 outputSignerId: "output-signer-1",
                 fileName: "signature.png",
                 fileSize: 9,
-                mimeType: "image/png"
+                mimeType: "image/png",
+                reuseSourceSignatureId: nil
             ),
             accessToken: "access-token"
         )
@@ -2139,11 +2155,12 @@ final class DARCiMobileTests: XCTestCase {
 
         let response = try JSONDecoder().decode(AuthVerifyResponse.self, from: data)
 
-        XCTAssertTrue(response.profileCompletionRequired)
-        XCTAssertEqual(response.session.accessToken, "access-token")
-        XCTAssertEqual(response.session.refreshToken, "refresh-token")
-        XCTAssertEqual(response.session.user.email, "member@example.com")
-        XCTAssertEqual(response.session.user.availableRoles, ["member"])
+        XCTAssertEqual(response.profileCompletionRequired, true)
+        let session = try XCTUnwrap(response.session)
+        XCTAssertEqual(session.accessToken, "access-token")
+        XCTAssertEqual(session.refreshToken, "refresh-token")
+        XCTAssertEqual(session.user.email, "member@example.com")
+        XCTAssertEqual(session.user.availableRoles, ["member"])
     }
 
     func testAuthAPIClientMapsWrongCodeError() async throws {
@@ -2305,7 +2322,8 @@ final class DARCiMobileTests: XCTestCase {
             accessToken: "access-token",
             refreshToken: "refresh-token",
             user: makeAuthenticatedUser(),
-            profileCompletionRequired: false
+            profileCompletionRequired: false,
+            stepUp: nil
         )
         let viewModel = AuthenticationViewModel(apiClient: TestAuthAPIClient(verifyResponse: response))
 
@@ -2371,7 +2389,8 @@ final class DARCiMobileTests: XCTestCase {
                 accessToken: "access-token",
                 refreshToken: "refresh-token",
                 user: makeAuthenticatedUser(email: "member@example.com", phone: nil),
-                profileCompletionRequired: true
+                profileCompletionRequired: true,
+                stepUp: nil
             )
         )
         let viewModel = AuthenticationViewModel(apiClient: client, sessionStore: InMemoryAuthSessionStore())
@@ -2834,5 +2853,127 @@ private struct TestHomeAPIClient: HomeAPIProviding {
         }
 
         return response
+    }
+}
+
+final class MemberBillingTests: XCTestCase {
+    override func tearDown() {
+        AuthURLProtocolStub.requestHandler = nil
+        super.tearDown()
+    }
+
+    func testMemberBillingDeepLinkAcceptsStripeReturnOnTrustedAppRoute() throws {
+        let successURL = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/app?billing=success&session_id=cs_test_1"))
+        let canceledURL = try XCTUnwrap(URL(string: "https://app.darciregistry.dev/app?billing=canceled"))
+
+        XCTAssertEqual(MemberBillingDeepLink.result(from: successURL), "success")
+        XCTAssertEqual(MemberBillingDeepLink.result(from: canceledURL), "canceled")
+    }
+
+    func testMemberBillingDeepLinkRejectsUntrustedOrNonBillingLinks() throws {
+        let untrustedURL = try XCTUnwrap(URL(string: "https://example.com/app?billing=success"))
+        let unrelatedURL = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/app?documentId=doc-1"))
+
+        XCTAssertNil(MemberBillingDeepLink.result(from: untrustedURL))
+        XCTAssertNil(MemberBillingDeepLink.result(from: unrelatedURL))
+    }
+
+    func testMemberBillingClientCreatesServerAuthoritativeCheckout() async throws {
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/billing/member-membership/checkout")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+
+            let body = try self.requestBodyData(for: request)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(payload["priceCode"], MemberBillingPriceCode.plus)
+            XCTAssertEqual(payload["idempotencyToken"], "checkout-request-0001")
+            XCTAssertNil(payload["amount"])
+            XCTAssertNil(payload["providerPriceId"])
+
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            let data = Data(#"{"checkoutUrl":"https://checkout.stripe.com/test","checkoutSessionId":"cs_test_1"}"#.utf8)
+            return (response, data)
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = MemberBillingAPIClient(authClient: authClient)
+
+        let response = try await client.createCheckout(
+            priceCode: MemberBillingPriceCode.plus,
+            idempotencyToken: "checkout-request-0001",
+            accessToken: "access-token"
+        )
+
+        XCTAssertEqual(response.checkoutSessionId, "cs_test_1")
+        XCTAssertEqual(response.checkoutUrl, "https://checkout.stripe.com/test")
+    }
+
+    func testMemberBillingClientLoadsAllowanceAndActiveState() async throws {
+        let urlSession = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/billing/member-membership")
+            XCTAssertEqual(request.httpMethod, "GET")
+
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            let data = Data(#"{"providerEnvironment":"test","paymentsReal":false,"enforcementMode":"observe","plans":[],"membership":{"state":"active","subscriptionStatus":"active","priceCode":"member_plus_monthly","planName":"Plus","pendingPlanChange":null,"currentPeriodStart":"2026-08-01T00:00:00.000Z","currentPeriodEnd":"2026-09-01T00:00:00.000Z","cancelAtPeriodEnd":false,"allowance":{"total":10,"used":4,"remaining":6,"exhausted":false},"heldFinalPackageCount":0},"eligibility":{"canCreateWorkflow":true,"entitled":true,"wouldBlock":false,"reasonCode":"billing_allowed"},"actions":{"canCheckout":false,"iosCheckoutAvailable":false,"canOpenPortal":true,"planChangeAvailable":true,"planChangeReason":null}}"#.utf8)
+            return (response, data)
+        }
+        let authClient = AuthAPIClient(
+            config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!),
+            urlSession: urlSession
+        )
+        let client = MemberBillingAPIClient(authClient: authClient)
+
+        let payload = try await client.getMembership(accessToken: "access-token")
+
+        XCTAssertTrue(payload.membership.isActive)
+        XCTAssertEqual(payload.membership.allowance.remaining, 6)
+        XCTAssertTrue(payload.actions.canOpenPortal)
+    }
+
+    private func makeStubbedURLSession(
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> URLSession {
+        AuthURLProtocolStub.requestHandler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AuthURLProtocolStub.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private func requestBodyData(for request: URLRequest) throws -> Data {
+        if let httpBody = request.httpBody {
+            return httpBody
+        }
+
+        guard let stream = request.httpBodyStream else {
+            return Data()
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1_024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                throw stream.streamError ?? URLError(.cannotDecodeContentData)
+            }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
     }
 }

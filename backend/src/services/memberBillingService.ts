@@ -50,6 +50,22 @@ type CatalogPrice = {
   usage_limit_quantity: number;
 };
 
+type MemberSubscriptionRecord = {
+  id: string;
+  provider_subscription_id: string;
+  status: string;
+  current_period_start: string;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+  metadata: Record<string, unknown> | null;
+};
+
+type MemberSubscriptionItemRecord = {
+  id: string;
+  price_code_snapshot: string;
+  usage_limit_quantity: number;
+};
+
 export class MemberBillingServiceError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -157,6 +173,270 @@ const loadPrice = async (priceCode: string) => {
   }
 
   return { price: price as CatalogPrice, mapping };
+};
+
+const loadEffectiveMemberSubscription = async (billingAccountId: string) => {
+  const { data: subscription, error } = await supabaseAdmin
+    .from("billing_subscriptions")
+    .select(
+      "id, provider_subscription_id, status, current_period_start, current_period_end, cancel_at_period_end, metadata",
+    )
+    .eq("billing_account_id", billingAccountId)
+    .eq("provider", "stripe")
+    .eq("provider_environment", "test")
+    .eq("role_context", "member")
+    .in("status", EFFECTIVE_SUBSCRIPTION_STATUSES)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Subscription lookup failed: ${error.message}`);
+  if (!subscription?.provider_subscription_id) {
+    throw new MemberBillingServiceError(
+      409,
+      "billing_active_subscription_required",
+      "An active Stripe membership is required to change plans",
+    );
+  }
+
+  const { data: item, error: itemError } = await supabaseAdmin
+    .from("billing_subscription_items")
+    .select("id, price_code_snapshot, usage_limit_quantity")
+    .eq("subscription_id", subscription.id)
+    .eq("role_context", "member")
+    .single();
+  if (itemError || !item) {
+    throw new Error(`Subscription item lookup failed: ${itemError?.message}`);
+  }
+
+  return {
+    subscription: subscription as MemberSubscriptionRecord,
+    item: item as MemberSubscriptionItemRecord,
+  };
+};
+
+const recordPlanChangeRequest = async (input: {
+  subscription: MemberSubscriptionRecord;
+  actorUserId: string;
+  idempotencyKey: string;
+  changeType: "upgrade" | "downgrade";
+  currentPriceCode: string;
+  targetPriceCode: string;
+  effectiveAt: string | null;
+  stripeScheduleId?: string | null;
+  stripeRequestId?: string | null;
+}) => {
+  const requestedAt = new Date().toISOString();
+  const metadata = {
+    ...(input.subscription.metadata ?? {}),
+    plan_change: {
+      status: input.changeType === "upgrade" ? "pending_webhook" : "scheduled",
+      type: input.changeType,
+      current_price_code: input.currentPriceCode,
+      target_price_code: input.targetPriceCode,
+      effective_at: input.effectiveAt,
+      requested_at: requestedAt,
+      idempotency_key: input.idempotencyKey,
+      stripe_schedule_id: input.stripeScheduleId ?? null,
+      stripe_request_id: input.stripeRequestId ?? null,
+    },
+  };
+  const { error } = await supabaseAdmin
+    .from("billing_subscriptions")
+    .update({ metadata, updated_at: requestedAt })
+    .eq("id", input.subscription.id);
+  if (error) throw new Error(`Plan-change record update failed: ${error.message}`);
+
+  const { error: auditError } = await supabaseAdmin.from("audit_events").insert({
+    actor_id: input.actorUserId,
+    entity_type: "billing_subscription",
+    entity_id: input.subscription.id,
+    action: `billing.member_plan_${input.changeType}_requested`,
+    metadata: {
+      current_price_code: input.currentPriceCode,
+      target_price_code: input.targetPriceCode,
+      effective_at: input.effectiveAt,
+      idempotency_key: input.idempotencyKey,
+      stripe_schedule_id: input.stripeScheduleId ?? null,
+      stripe_request_id: input.stripeRequestId ?? null,
+    },
+  });
+  if (auditError) throw new Error(`Plan-change audit failed: ${auditError.message}`);
+};
+
+export const changeMemberMembershipPlan = async (input: {
+  dbUserId: string;
+  targetPriceCode: string;
+  idempotencyKey: string;
+}) => {
+  const user = await getAppUser(input.dbUserId);
+  const account = await getOrCreateBillingAccount(user);
+  const [{ price: targetPrice, mapping: targetMapping }, current] = await Promise.all([
+    loadPrice(input.targetPriceCode),
+    loadEffectiveMemberSubscription(account.id),
+  ]);
+  const recordedPlanChangeValue = current.subscription.metadata?.plan_change;
+  const recordedPlanChange = recordedPlanChangeValue && typeof recordedPlanChangeValue === "object"
+    ? recordedPlanChangeValue as Record<string, unknown>
+    : null;
+  if (
+    recordedPlanChange
+    && recordedPlanChange.idempotency_key === input.idempotencyKey
+    && recordedPlanChange.target_price_code === targetPrice.price_code
+  ) {
+    const type = recordedPlanChange.type === "upgrade" ? "upgrade" : "downgrade";
+    return {
+      changeType: type,
+      status: type === "upgrade" ? "pending_webhook" as const : "scheduled" as const,
+      currentPriceCode:
+        typeof recordedPlanChange.current_price_code === "string"
+          ? recordedPlanChange.current_price_code
+          : current.item.price_code_snapshot,
+      targetPriceCode: targetPrice.price_code,
+      effectiveAt:
+        typeof recordedPlanChange.effective_at === "string"
+          ? recordedPlanChange.effective_at
+          : null,
+      reused: true,
+    };
+  }
+  if (current.subscription.cancel_at_period_end) {
+    throw new MemberBillingServiceError(
+      409,
+      "billing_plan_change_cancellation_pending",
+      "Resume the membership before changing its plan",
+    );
+  }
+  if (!new Set(["active", "trialing"]).has(current.subscription.status)) {
+    throw new MemberBillingServiceError(
+      409,
+      "billing_plan_change_membership_inactive",
+      "Restore the membership before changing its plan",
+    );
+  }
+  if (current.item.price_code_snapshot === targetPrice.price_code) {
+    throw new MemberBillingServiceError(409, "billing_plan_unchanged", "This is already your current plan");
+  }
+
+  const changeType = targetPrice.usage_limit_quantity > current.item.usage_limit_quantity
+    ? "upgrade" as const
+    : "downgrade" as const;
+  const stripe = getStripeClient();
+  let subscription = await stripe.subscriptions.retrieve(current.subscription.provider_subscription_id);
+  assertStripeObjectIsTestMode(subscription, "Stripe Subscription");
+  if (subscription.items.data.length !== 1) {
+    throw new Error("DARCi member subscription must contain exactly one Stripe item");
+  }
+
+  if (changeType === "upgrade") {
+    if (subscription.schedule) {
+      const scheduleId = typeof subscription.schedule === "string"
+        ? subscription.schedule
+        : subscription.schedule.id;
+      await stripe.subscriptionSchedules.release(scheduleId, {}, {
+        idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:release-schedule`,
+      });
+      subscription = await stripe.subscriptions.retrieve(current.subscription.provider_subscription_id);
+    }
+    const stripeItem = subscription.items.data[0]!;
+    const updated = await stripe.subscriptions.update(
+      subscription.id,
+      {
+        items: [{ id: stripeItem.id, price: targetMapping.provider_price_id, quantity: 1 }],
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
+        metadata: {
+          darci_plan_change_kind: "upgrade",
+          darci_requested_price_code: targetPrice.price_code,
+          darci_plan_change_token: input.idempotencyKey,
+        },
+      },
+      { idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:upgrade` },
+    );
+    assertStripeObjectIsTestMode(updated, "Stripe Subscription");
+    await recordPlanChangeRequest({
+      subscription: current.subscription,
+      actorUserId: user.id,
+      idempotencyKey: input.idempotencyKey,
+      changeType,
+      currentPriceCode: current.item.price_code_snapshot,
+      targetPriceCode: targetPrice.price_code,
+      effectiveAt: null,
+      stripeRequestId: updated.lastResponse?.requestId ?? null,
+    });
+    return {
+      changeType,
+      status: "pending_webhook" as const,
+      currentPriceCode: current.item.price_code_snapshot,
+      targetPriceCode: targetPrice.price_code,
+      effectiveAt: null,
+    };
+  }
+
+  const schedule = subscription.schedule
+    ? await stripe.subscriptionSchedules.retrieve(
+        typeof subscription.schedule === "string" ? subscription.schedule : subscription.schedule.id,
+      )
+    : await stripe.subscriptionSchedules.create(
+        {
+          from_subscription: subscription.id,
+          metadata: {
+            darci_environment: "test",
+            darci_billing_account_id: account.id,
+            darci_plan_change_kind: "downgrade",
+          },
+        },
+        { idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:schedule` },
+      );
+  assertStripeObjectIsTestMode(schedule, "Stripe Subscription Schedule");
+  const phaseStart = schedule.current_phase?.start_date ?? subscription.items.data[0]!.current_period_start;
+  const phaseEnd = schedule.current_phase?.end_date ?? subscription.items.data[0]!.current_period_end;
+  const currentProviderPriceId = subscription.items.data[0]!.price.id;
+  const updatedSchedule = await stripe.subscriptionSchedules.update(
+    schedule.id,
+    {
+      end_behavior: "release",
+      phases: [
+        {
+          start_date: phaseStart,
+          end_date: phaseEnd,
+          items: [{ price: currentProviderPriceId, quantity: 1 }],
+          proration_behavior: "none",
+        },
+        {
+          start_date: phaseEnd,
+          duration: { interval: "month", interval_count: 1 },
+          items: [{ price: targetMapping.provider_price_id, quantity: 1 }],
+          proration_behavior: "none",
+          metadata: {
+            darci_plan_change_kind: "downgrade",
+            darci_requested_price_code: targetPrice.price_code,
+            darci_plan_change_token: input.idempotencyKey,
+          },
+        },
+      ],
+    },
+    { idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:downgrade` },
+  );
+  assertStripeObjectIsTestMode(updatedSchedule, "Stripe Subscription Schedule");
+  const effectiveAt = new Date(phaseEnd * 1000).toISOString();
+  await recordPlanChangeRequest({
+    subscription: current.subscription,
+    actorUserId: user.id,
+    idempotencyKey: input.idempotencyKey,
+    changeType,
+    currentPriceCode: current.item.price_code_snapshot,
+    targetPriceCode: targetPrice.price_code,
+    effectiveAt,
+    stripeScheduleId: updatedSchedule.id,
+    stripeRequestId: updatedSchedule.lastResponse?.requestId ?? null,
+  });
+  return {
+    changeType,
+    status: "scheduled" as const,
+    currentPriceCode: current.item.price_code_snapshot,
+    targetPriceCode: targetPrice.price_code,
+    effectiveAt,
+  };
 };
 
 const getOrCreateStripeCustomer = async (input: {
@@ -399,6 +679,7 @@ export const createMemberMembershipCheckout = async (input: {
       metadata: {
         source: "member_membership_checkout",
         stripe_expires_at: new Date(session.expires_at * 1000).toISOString(),
+        stripe_request_id: session.lastResponse?.requestId ?? null,
       },
     })
     .eq("id", orderId);
@@ -494,7 +775,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
       supabaseAdmin
         .from("billing_subscriptions")
         .select(
-          "id, status, provider_subscription_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, ended_at, updated_at",
+          "id, status, provider_subscription_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, ended_at, metadata, updated_at",
         )
         .eq("billing_account_id", account.id)
         .eq("provider_environment", "test")
@@ -554,6 +835,16 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
   const used = typeof entitlement?.quantity_used === "number" ? entitlement.quantity_used : 0;
   const remaining = total === null ? null : Math.max(total - used, 0);
   const subscriptionStatus = typeof subscription?.status === "string" ? subscription.status : null;
+  const rawPlanChange = subscription?.metadata && typeof subscription.metadata === "object"
+    ? (subscription.metadata as Record<string, unknown>).plan_change
+    : null;
+  const planChange = rawPlanChange && typeof rawPlanChange === "object"
+    ? rawPlanChange as Record<string, unknown>
+    : null;
+  const scheduledTargetPriceCode = typeof planChange?.target_price_code === "string"
+    && planChange.target_price_code !== subscriptionItem?.price_code_snapshot
+      ? planChange.target_price_code
+      : null;
 
   return {
     providerEnvironment: "test" as const,
@@ -578,6 +869,12 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
       planName: typeof subscriptionItem?.display_name_snapshot === "string"
         ? subscriptionItem.display_name_snapshot
         : null,
+      pendingPlanChange: scheduledTargetPriceCode ? {
+        type: planChange?.type === "downgrade" ? "downgrade" : "upgrade",
+        status: planChange?.status === "scheduled" ? "scheduled" : "pending_webhook",
+        targetPriceCode: scheduledTargetPriceCode,
+        effectiveAt: typeof planChange?.effective_at === "string" ? planChange.effective_at : null,
+      } : null,
       currentPeriodStart: typeof subscription?.current_period_start === "string"
         ? subscription.current_period_start
         : null,
@@ -601,9 +898,15 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
     },
     actions: {
       canCheckout: !subscription && !activationPending,
+      iosCheckoutAvailable: process.env.IOS_MEMBER_CHECKOUT_ENABLED === "true",
       canOpenPortal: Boolean(subscription),
-      planChangeAvailable: false,
-      planChangeReason: "plan_change_policy_pending",
+      planChangeAvailable: ["active", "trialing"].includes(subscriptionStatus ?? "")
+        && subscription?.cancel_at_period_end !== true,
+      planChangeReason: subscription?.cancel_at_period_end === true
+        ? "resume_membership_before_plan_change"
+        : subscriptionStatus && !["active", "trialing"].includes(subscriptionStatus)
+          ? "active_membership_required"
+          : null,
     },
   };
 };

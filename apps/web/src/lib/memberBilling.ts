@@ -44,6 +44,12 @@ export type MemberMembershipPayload = {
     subscriptionStatus: string | null;
     priceCode: MemberPriceCode | null;
     planName: string | null;
+    pendingPlanChange: {
+      type: "upgrade" | "downgrade";
+      status: "pending_webhook" | "scheduled";
+      targetPriceCode: MemberPriceCode;
+      effectiveAt: string | null;
+    } | null;
     currentPeriodStart: string | null;
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
@@ -63,9 +69,10 @@ export type MemberMembershipPayload = {
   };
   actions: {
     canCheckout: boolean;
+    iosCheckoutAvailable: boolean;
     canOpenPortal: boolean;
-    planChangeAvailable: false;
-    planChangeReason: string;
+    planChangeAvailable: boolean;
+    planChangeReason: string | null;
   };
 };
 
@@ -188,6 +195,32 @@ export const createMemberPortalSession = async (accessToken: string) => {
     response,
     "We could not open your billing portal.",
   );
+};
+
+export const changeMemberPlan = async (
+  accessToken: string,
+  targetPriceCode: MemberPriceCode,
+) => {
+  const response = await requestWithTokenRefresh(
+    "/billing/member-membership/plan-change",
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetPriceCode,
+        idempotencyToken: createCheckoutIdempotencyToken(),
+      }),
+    },
+  );
+
+  return readResponse<{
+    changeType: "upgrade" | "downgrade";
+    status: "pending_webhook" | "scheduled";
+    currentPriceCode: MemberPriceCode;
+    targetPriceCode: MemberPriceCode;
+    effectiveAt: string | null;
+  }>(response, "We could not change your membership plan.");
 };
 
 export const createCheckoutIdempotencyToken = () => {

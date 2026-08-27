@@ -4,8 +4,13 @@ import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { BillingPolicyNotice } from "@/components/app/BillingPolicyNotice";
 import { captureAppException, captureAppMessage } from "@/lib/clientTelemetry";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
+import {
+  readMemberBillingReasonCode,
+  type MemberBillingReasonCode,
+} from "@/lib/billingPolicy";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
 import ProductSelectionBand from "@/app/app/start/ProductSelectionBand";
 import ProcessBand from "@/app/app/start/ProcessBand";
@@ -991,6 +996,7 @@ const syncTrusteesFromCurrentTrustmakers = (
 
 type DocumentResponsePayload = {
   document?: DocumentSummary;
+  error?: string;
   message?: string;
 };
 
@@ -1035,6 +1041,7 @@ export default function StartDocumentPage() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submissionErrorMessage, setSubmissionErrorMessage] = useState<string | null>(null);
+  const [billingDenialReason, setBillingDenialReason] = useState<MemberBillingReasonCode | null>(null);
   const [showContinueValidationDetails, setShowContinueValidationDetails] = useState(false);
   const [missingRequirements, setMissingRequirements] = useState<MissingRequirement[]>([]);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
@@ -3120,6 +3127,7 @@ export default function StartDocumentPage() {
 
     setIsValidatingMemberFormSubmission(true);
     setSubmissionErrorMessage(null);
+    setBillingDenialReason(null);
 
     try {
       const draftSaveReady = await waitForQueuedDraftSaves();
@@ -3153,6 +3161,13 @@ export default function StartDocumentPage() {
       const payload = (await response.json().catch(() => null)) as
         | DocumentIntakeSubmitResponsePayload
         | null;
+
+      const billingReasonCode = readMemberBillingReasonCode(payload);
+      if (!response.ok && billingReasonCode) {
+        setBillingDenialReason(billingReasonCode);
+        setSubmissionErrorMessage(null);
+        return false;
+      }
 
       if (response.status === 422 || payload?.valid === false) {
         const validationMessages = (payload?.errors ?? [])
@@ -3344,6 +3359,7 @@ export default function StartDocumentPage() {
 
     setIsSubmittingNotarizationUpload(true);
     setSubmissionErrorMessage(null);
+    setBillingDenialReason(null);
 
     try {
       const createResponse = await fetchWithTokenRefresh(`${apiBaseUrl}/documents`, accessToken, {
@@ -3369,6 +3385,12 @@ export default function StartDocumentPage() {
       const createPayload = (await createResponse.json().catch(() => null)) as
         | DocumentUploadCreateResponsePayload
         | null;
+
+      const createBillingReasonCode = readMemberBillingReasonCode(createPayload);
+      if (!createResponse.ok && createBillingReasonCode) {
+        setBillingDenialReason(createBillingReasonCode);
+        return false;
+      }
 
       if (
         !createResponse.ok ||
@@ -5504,6 +5526,9 @@ export default function StartDocumentPage() {
                           {submissionErrorMessage}
                         </div>
                       ) : null}
+                      {billingDenialReason ? (
+                        <BillingPolicyNotice reasonCode={billingDenialReason} />
+                      ) : null}
 
                       {continueValidationPanel}
 
@@ -5588,6 +5613,9 @@ export default function StartDocumentPage() {
                 <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                   {submissionErrorMessage}
                 </div>
+              ) : null}
+              {billingDenialReason ? (
+                <BillingPolicyNotice reasonCode={billingDenialReason} />
               ) : null}
 
               {continueValidationPanel}
