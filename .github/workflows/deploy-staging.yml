@@ -12,7 +12,9 @@ on:
 
 concurrency:
   group: staging-deploy
-  cancel-in-progress: true
+  # Preserve service-specific builds from earlier commits. If a later backend-only
+  # push cancels a web build, path filtering will not rebuild that missed web change.
+  cancel-in-progress: false
 
 permissions:
   contents: read

@@ -112,6 +112,27 @@ function PortalButton({ isOpeningPortal, onOpenPortal }: StatusActionProps) {
   );
 }
 
+function BillingErrorNotice({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:flex-row">
+      <span>{message}</span>
+      <button
+        className="shrink-0 font-medium underline underline-offset-4"
+        onClick={onRetry}
+        type="button"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 type MembershipStatusProps = StatusActionProps & {
   payload: MemberMembershipPayload;
 };
@@ -123,18 +144,15 @@ function MembershipStatus({
 }: MembershipStatusProps) {
   const { membership } = payload;
   const state = membership.state;
-  const total = membership.allowance.total;
-  const used = membership.allowance.used;
-  const progress = total ? Math.min((used / total) * 100, 100) : 0;
 
   if (state === "activation_pending" || state === "pending") {
     return (
       <section className="mx-auto mb-12 max-w-3xl border-y border-Color-Scheme-1-Border bg-white px-6 py-9 text-center md:px-10">
         <div className="mx-auto mb-4 h-7 w-7 animate-spin rounded-full border-2 border-Color-Scheme-1-Border border-t-black" />
-        <p className="text-[11px] font-semibold tracking-[0.18em] text-Color-Neutral">
+        <p className="text-[11px] font-medium tracking-[0.18em] text-Color-Neutral">
           ACTIVATION PENDING
         </p>
-        <h2 className="mt-2 text-2xl font-semibold">Stripe is confirming your membership</h2>
+        <h2 className="mt-2 text-xl font-medium">Stripe is confirming your membership</h2>
         <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-Color-Neutral">
           Checkout is complete, but access activates only after DARCi receives the signed Stripe webhook. This page will update automatically.
         </p>
@@ -147,10 +165,10 @@ function MembershipStatus({
     return (
       <section className="mb-12 border border-[#dfb5b5] bg-[#fff8f8] px-6 py-7 md:flex md:items-center md:justify-between md:gap-8 md:px-8">
         <div>
-          <p className="text-[11px] font-semibold tracking-[0.18em] text-[#8d3838]">
+          <p className="text-[11px] font-medium tracking-[0.18em] text-[#8d3838]">
             {statusLabel(state).toUpperCase()}
           </p>
-          <h2 className="mt-2 text-2xl font-semibold">{copy.title}</h2>
+          <h2 className="mt-2 text-xl font-medium">{copy.title}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-Color-Neutral">{copy.body}</p>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-Color-Neutral">
             A document already accepted by a notary can still finish its scheduled session; its sealed final package stays held until membership is restored.
@@ -168,56 +186,155 @@ function MembershipStatus({
     );
   }
 
-  if (!isActiveMembershipState(state)) {
-    return null;
-  }
+  return null;
+}
+
+type ActiveMembershipManagementProps = StatusActionProps & {
+  payload: MemberMembershipPayload;
+  plans: MemberBillingPlan[];
+  errorMessage: string | null;
+  onRetry: () => void;
+};
+
+function ActiveMembershipManagement({
+  payload,
+  plans,
+  errorMessage,
+  isOpeningPortal,
+  onOpenPortal,
+  onRetry,
+}: ActiveMembershipManagementProps) {
+  const { membership } = payload;
+  const currentPlan = plans.find((plan) => plan.priceCode === membership.priceCode) ?? null;
+  const total = membership.allowance.total;
+  const used = membership.allowance.used;
+  const remaining = membership.allowance.remaining;
+  const progress = total ? Math.min((used / total) * 100, 100) : 0;
 
   return (
-    <section className="mb-12 border-y border-Color-Scheme-1-Border bg-white px-6 py-7 md:px-8">
-      <div className="grid gap-7 lg:grid-cols-[1fr_1.3fr_auto] lg:items-center">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-Green-Secondary" />
-            <span className="text-[11px] font-semibold tracking-[0.16em]">
-              {statusLabel(state).toUpperCase()}
-            </span>
-          </div>
-          <h2 className="mt-2 text-3xl font-semibold">{membership.planName || "Membership"}</h2>
-          <p className="mt-1 text-sm text-Color-Neutral">
-            {membership.cancelAtPeriodEnd
-              ? `Access continues through ${formatDate(membership.currentPeriodEnd)}.`
-              : `Renews ${formatDate(membership.currentPeriodEnd)}.`}
+    <div className="space-y-8">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-medium">Billing</h1>
+          <p className="text-sm text-Color-Neutral">
+            Manage your membership, usage, payment method, invoices, and cancellation.
           </p>
         </div>
+        <span className="inline-flex items-center gap-2 rounded-full border border-Color-Scheme-1-Border/60 bg-white px-3 py-1.5 text-[11px] font-medium text-Color-Neutral-Darkest">
+          <span className="h-1.5 w-1.5 rounded-full bg-Green-Secondary" />
+          Private beta · Stripe test mode
+        </span>
+      </header>
 
-        <div>
-          <div className="flex items-end justify-between gap-4 text-sm">
-            <span className="font-medium">Monthly document allowance</span>
-            <span className="text-Color-Neutral">
-              {total === null ? `${used} used` : `${used} of ${total} used`}
-            </span>
+      {errorMessage ? <BillingErrorNotice message={errorMessage} onRetry={onRetry} /> : null}
+
+      {membership.cancelAtPeriodEnd ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Your membership is scheduled to end on {formatDate(membership.currentPeriodEnd)}. You can manage the cancellation in Stripe.
+        </div>
+      ) : null}
+
+      <section className="max-w-5xl rounded-2xl bg-white p-5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-5 border-b border-Color-Scheme-1-Border/50 pb-5">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-medium">{membership.planName || "DARCi membership"}</h2>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-Color-Neutral-Lightest px-2.5 py-1 text-[11px] font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-Green-Secondary" />
+                {statusLabel(membership.state)}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-Color-Neutral">
+              {currentPlan ? `${formatMoney(currentPlan)} per month · ${currentPlan.documentWorkflowAllowance} documents` : "Monthly membership"}
+            </p>
           </div>
-          <div className="mt-3 h-2 overflow-hidden bg-Color-Neutral-Lightest">
-            <div
-              className="h-full bg-black transition-[width] duration-500"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-Color-Neutral">
-            {membership.allowance.remaining === null
-              ? "Usage updates after each document workflow begins."
-              : `${membership.allowance.remaining} document${membership.allowance.remaining === 1 ? "" : "s"} remaining this period.`}
-          </p>
+          {payload.actions.canOpenPortal ? (
+            <PortalButton isOpeningPortal={isOpeningPortal} onOpenPortal={onOpenPortal} />
+          ) : null}
         </div>
 
-        {payload.actions.canOpenPortal ? (
-          <PortalButton
-            isOpeningPortal={isOpeningPortal}
-            onOpenPortal={onOpenPortal}
-          />
-        ) : null}
+        <div className="grid gap-8 py-6 md:grid-cols-2 md:gap-10">
+          <div>
+            <div className="flex items-end justify-between gap-4 text-sm">
+              <span className="font-medium">Document usage</span>
+              <span className="text-Color-Neutral">
+                {total === null ? `${used} used` : `${used} of ${total} used`}
+              </span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-Color-Neutral-Lightest">
+              <div
+                className="h-full rounded-full bg-Color-Scheme-1-Text transition-[width] duration-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-Color-Neutral">
+              {remaining === null
+                ? "Usage updates whenever a document workflow begins."
+                : `${remaining} document${remaining === 1 ? "" : "s"} remaining in the current period.`}
+            </p>
+            {!membership.allowance.exhausted ? (
+              <Link className="mt-4 inline-block text-xs font-medium underline underline-offset-4" href="/app/start">
+                Start a document
+              </Link>
+            ) : null}
+          </div>
+
+          <dl className="divide-y divide-Color-Scheme-1-Border/50 text-sm">
+            <div className="flex items-center justify-between gap-4 pb-3">
+              <dt className="text-Color-Neutral">Subscription status</dt>
+              <dd className="font-medium">{statusLabel(membership.state)}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-3">
+              <dt className="text-Color-Neutral">Current period</dt>
+              <dd className="text-right font-medium">
+                {formatDate(membership.currentPeriodStart)} – {formatDate(membership.currentPeriodEnd)}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-3">
+              <dt className="text-Color-Neutral">Renewal</dt>
+              <dd className="text-right font-medium">
+                {membership.cancelAtPeriodEnd ? "Will not renew" : formatDate(membership.currentPeriodEnd)}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 pt-3">
+              <dt className="text-Color-Neutral">Billing interval</dt>
+              <dd className="font-medium">Monthly</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="border-t border-Color-Scheme-1-Border/50 pt-4 text-xs leading-5 text-Color-Neutral">
+          Stripe manages payment methods, invoice history, and cancellation. Plan switching is not available during private beta.
+        </div>
+      </section>
+
+      {membership.allowance.exhausted ? (
+        <section className="max-w-5xl rounded-lg border border-Color-Scheme-1-Border/60 bg-white px-4 py-4 text-sm">
+          <div className="font-medium">Monthly allowance reached</div>
+          <p className="mt-1 text-Color-Neutral">
+            New workflows become available when the period renews on {formatDate(membership.currentPeriodEnd)}. Already accepted notary work can still finish.
+          </p>
+        </section>
+      ) : null}
+
+      {membership.heldFinalPackageCount > 0 ? (
+        <section className="max-w-5xl rounded-lg bg-Color-Neutral-Darkest px-5 py-4 text-sm text-white">
+          <div className="font-medium">
+            {membership.heldFinalPackageCount} final package{membership.heldFinalPackageCount === 1 ? " is" : "s are"} safely held
+          </div>
+          <p className="mt-1 leading-6 text-white/65">
+            Completed files remain preserved. Download, hash, ledger, and public verification access resume while membership is active.
+          </p>
+        </section>
+      ) : null}
+
+      <div className="max-w-5xl border-t border-Color-Scheme-1-Border/50 pt-5 text-sm text-Color-Neutral">
+        Need help with your membership?{" "}
+        <a className="font-medium text-Color-Scheme-1-Text underline underline-offset-4" href="mailto:support@darciregistry.com">
+          Contact support
+        </a>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -247,24 +364,24 @@ function PlanCard({
       }`}
     >
       {copy.popular ? (
-        <span className="absolute -right-px -top-px rounded-bl-lg rounded-tr-[14px] bg-black px-3 py-2 text-[10px] font-semibold tracking-[0.16em] text-white">
+        <span className="absolute -right-px -top-px rounded-bl-lg rounded-tr-[14px] bg-black px-3 py-2 text-[10px] font-medium tracking-[0.14em] text-white">
           MOST POPULAR
         </span>
       ) : null}
 
       <div>
-        <h3 className="text-xl font-semibold">{plan.displayName}</h3>
+        <h3 className="text-lg font-medium">{plan.displayName}</h3>
         <p className="mt-2 min-h-10 max-w-[260px] text-sm leading-5 text-Color-Neutral">
           {copy.description}
         </p>
       </div>
 
       <div className="mt-5 flex items-end gap-2 border-b border-Color-Scheme-1-Border pb-5">
-        <span className="text-[38px] font-semibold leading-none">{formatMoney(plan)}</span>
+        <span className="text-3xl font-medium leading-none">{formatMoney(plan)}</span>
         <span className="pb-1 text-sm text-Color-Neutral">/ month</span>
       </div>
 
-      <p className="mt-4 text-sm font-semibold">
+      <p className="mt-4 text-sm font-medium">
         {plan.documentWorkflowAllowance} documents / month
       </p>
       <ul className="mt-4 space-y-3">
@@ -286,7 +403,7 @@ function PlanCard({
       <div className="mt-auto pt-6">
         {canCheckout ? (
           <button
-            className="platform-btn-primary flex w-full items-center justify-center px-4 py-3 text-xs font-semibold tracking-[0.08em] disabled:cursor-not-allowed disabled:opacity-55"
+            className="platform-btn-primary flex w-full items-center justify-center px-4 py-3 text-xs font-medium tracking-[0.06em] disabled:cursor-not-allowed disabled:opacity-55"
             disabled={isStarting}
             onClick={() => onCheckout(plan.priceCode)}
             type="button"
@@ -294,7 +411,7 @@ function PlanCard({
             {isStarting ? "OPENING CHECKOUT…" : "START MEMBERSHIP"}
           </button>
         ) : (
-          <div className="flex min-h-10 items-center justify-center border-t border-Color-Scheme-1-Border pt-4 text-[11px] font-semibold tracking-[0.12em] text-Color-Neutral">
+          <div className="flex min-h-10 items-center justify-center border-t border-Color-Scheme-1-Border pt-4 text-[11px] font-medium tracking-[0.1em] text-Color-Neutral">
             {isCurrent ? "CURRENT PLAN" : "PLAN CHANGES COMING SOON"}
           </div>
         )}
@@ -394,11 +511,11 @@ export default function BillingPage() {
   if (!hasMemberBillingContext) {
     return (
       <div className="mx-auto max-w-2xl bg-white px-8 py-10 text-center">
-        <h1 className="text-3xl font-semibold">Member billing only</h1>
+        <h1 className="text-2xl font-medium">Member billing only</h1>
         <p className="mt-3 text-sm leading-6 text-Color-Neutral">
           Notaries do not pay for DARCi. Switch to a member profile to view a membership.
         </p>
-        <Link className="mt-6 inline-block text-sm font-semibold underline" href="/app">
+        <Link className="mt-6 inline-block text-sm font-medium underline underline-offset-4" href="/app">
           Return to start
         </Link>
       </div>
@@ -410,22 +527,35 @@ export default function BillingPage() {
     payload?.actions.canCheckout && membershipState === "none" && !isLoading,
   );
 
+  if (payload && isActiveMembershipState(membershipState)) {
+    return (
+      <ActiveMembershipManagement
+        errorMessage={errorMessage}
+        isOpeningPortal={isOpeningPortal}
+        onOpenPortal={() => void handleOpenPortal()}
+        onRetry={() => void loadMembership()}
+        payload={payload}
+        plans={plans}
+      />
+    );
+  }
+
   return (
-    <div className="mx-auto -mt-10 w-full max-w-[1216px] pb-10">
-      <header className="relative px-2 pb-12 pt-4 text-center md:px-16 md:pb-14 md:pt-6">
-        <div className="mb-5 inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.2em] text-Color-Neutral">
+    <div className="mx-auto w-full max-w-[1216px] pb-8">
+      <header className="relative px-2 pb-10 text-center md:px-16">
+        <div className="mb-4 inline-flex items-center gap-2 text-[11px] font-medium tracking-[0.16em] text-Color-Neutral">
           <span>DARCi MEMBERSHIP</span>
         </div>
-        <div className="mb-5 md:absolute md:right-0 md:top-6 md:mb-0">
-          <span className="inline-flex items-center gap-2 border border-Color-Scheme-1-Border bg-white px-3 py-2 text-[10px] font-semibold tracking-[0.14em]">
+        <div className="mb-4 md:absolute md:right-0 md:top-0 md:mb-0">
+          <span className="inline-flex items-center gap-2 rounded-full border border-Color-Scheme-1-Border/60 bg-white px-3 py-1.5 text-[10px] font-medium tracking-[0.12em]">
             <span className="h-1.5 w-1.5 rounded-full bg-Green-Secondary" />
             PRIVATE BETA · TEST MODE
           </span>
         </div>
-        <h1 className="mx-auto max-w-[760px] text-3xl font-semibold leading-tight tracking-[-0.025em] md:text-[42px] md:leading-[50px]">
+        <h1 className="mx-auto max-w-[760px] text-2xl font-medium leading-tight md:text-3xl">
           One membership. Every essential document.
         </h1>
-        <p className="mx-auto mt-4 max-w-[710px] text-[15px] leading-6 text-Color-Neutral md:text-base">
+        <p className="mx-auto mt-3 max-w-[710px] text-sm leading-6 text-Color-Neutral">
           Create, sign, notarize, and securely verify trusts, powers of attorney, and uploaded documents. Choose only how many you need each month.
         </p>
         <p className="mt-5 text-xs font-medium text-Color-Neutral">
@@ -446,15 +576,8 @@ export default function BillingPage() {
       ) : null}
 
       {errorMessage ? (
-        <div className="mb-8 flex flex-col items-center justify-between gap-4 border border-[#dfb5b5] bg-[#fff8f8] px-5 py-4 text-sm sm:flex-row">
-          <span>{errorMessage}</span>
-          <button
-            className="shrink-0 font-semibold underline"
-            onClick={() => void loadMembership()}
-            type="button"
-          >
-            Try again
-          </button>
+        <div className="mb-8">
+          <BillingErrorNotice message={errorMessage} onRetry={() => void loadMembership()} />
         </div>
       ) : null}
 
@@ -466,26 +589,9 @@ export default function BillingPage() {
         />
       ) : null}
 
-      {payload?.membership.allowance.exhausted && isActiveMembershipState(membershipState) ? (
-        <section className="mb-12 border-y border-black bg-white px-6 py-6 md:flex md:items-center md:justify-between md:gap-8 md:px-8">
-          <div>
-            <p className="text-[11px] font-semibold tracking-[0.18em] text-Color-Neutral">
-              MONTHLY ALLOWANCE REACHED
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold">You’ve used every document this period</h2>
-            <p className="mt-2 text-sm text-Color-Neutral">
-              New document workflows become available when your allowance renews on {formatDate(payload.membership.currentPeriodEnd)}.
-            </p>
-          </div>
-          <a className="mt-4 inline-block text-sm font-semibold underline md:mt-0" href="#plans">
-            View membership
-          </a>
-        </section>
-      ) : null}
-
       <section id="plans">
         <div className="mb-7 text-center">
-          <h2 className="text-2xl font-semibold md:text-[28px]">Choose your monthly allowance</h2>
+          <h2 className="text-xl font-medium md:text-2xl">Choose your monthly allowance</h2>
           <p className="mt-2 text-sm text-Color-Neutral">
             Every plan includes the same DARCi workflow. Only the number of documents changes.
           </p>
@@ -508,12 +614,12 @@ export default function BillingPage() {
         ) : null}
       </section>
 
-      <section className="scroll-mt-8 py-20 md:py-24" id="membership-workflow">
+      <section className="scroll-mt-8 py-14 md:py-16" id="membership-workflow">
         <div className="text-center">
-          <p className="text-[11px] font-semibold tracking-[0.2em] text-Color-Neutral">
+          <p className="text-[11px] font-medium tracking-[0.16em] text-Color-Neutral">
             EVERY PLAN INCLUDES
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-[-0.02em] md:text-[36px]">
+          <h2 className="mt-2 text-xl font-medium md:text-2xl">
             From first draft to final proof.
           </h2>
         </div>
@@ -540,8 +646,8 @@ export default function BillingPage() {
               className={`px-2 md:px-9 ${index ? "md:border-l md:border-Color-Scheme-1-Border" : ""}`}
               key={benefit.number}
             >
-              <span className="text-xs font-semibold text-Color-Neutral">{benefit.number}</span>
-              <h3 className="mt-4 text-xl font-semibold">{benefit.title}</h3>
+              <span className="text-xs font-medium text-Color-Neutral">{benefit.number}</span>
+              <h3 className="mt-3 text-base font-medium">{benefit.title}</h3>
               <p className="mt-3 text-sm leading-6 text-Color-Neutral">{benefit.body}</p>
             </article>
           ))}
@@ -549,7 +655,7 @@ export default function BillingPage() {
       </section>
 
       <section
-        className="bg-black px-7 py-8 text-white md:flex md:items-center md:justify-between md:gap-10 md:px-10"
+        className="rounded-2xl bg-black px-6 py-6 text-white md:flex md:items-center md:justify-between md:gap-10 md:px-8"
         id="membership-access"
       >
         <div className="flex gap-5">
@@ -557,14 +663,14 @@ export default function BillingPage() {
             ✓
           </div>
           <div>
-            <h2 className="text-xl font-semibold">Your notary appointment stays protected.</h2>
+            <h2 className="text-base font-medium">Your notary appointment stays protected.</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/65">
               Once a notary accepts your document, the scheduled session can finish even if billing changes. The sealed final document, acknowledgment, and verification access resume when membership is active again.
             </p>
           </div>
         </div>
         <a
-          className="mt-5 inline-block shrink-0 text-sm font-semibold underline underline-offset-4 md:mt-0"
+          className="mt-5 inline-block shrink-0 text-sm font-medium underline underline-offset-4 md:mt-0"
           href="#membership-workflow"
         >
           How access works →
@@ -583,7 +689,7 @@ export default function BillingPage() {
       <footer className="flex flex-col items-center justify-center gap-3 py-9 text-sm sm:flex-row sm:gap-8">
         {payload?.actions.canOpenPortal ? (
           <button
-            className="font-semibold underline underline-offset-4 disabled:opacity-50"
+            className="font-medium underline underline-offset-4 disabled:opacity-50"
             disabled={isOpeningPortal}
             onClick={() => void handleOpenPortal()}
             type="button"
@@ -594,7 +700,7 @@ export default function BillingPage() {
           <span className="text-Color-Neutral">Already subscribed? Membership status appears here.</span>
         )}
         <a
-          className="font-semibold underline underline-offset-4"
+          className="font-medium underline underline-offset-4"
           href="mailto:support@darciregistry.com"
         >
           Questions? Contact support
