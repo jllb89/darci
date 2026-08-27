@@ -389,6 +389,7 @@ export type BootstrapDocumentIntakeDraftInput = {
   selectedFamilies?: string[] | null;
   outputBundle?: Array<Record<string, unknown>>;
   createdBy?: string | null;
+  beforeCreate?: () => Promise<void>;
 };
 
 export type BootstrapDocumentIntakeDraftResult = {
@@ -1408,6 +1409,7 @@ export const bootstrapDocumentIntakeDraft = async (
     }
   }
 
+  await input.beforeCreate?.();
   const created = await createDocumentIntakeDraft(input);
 
   return {

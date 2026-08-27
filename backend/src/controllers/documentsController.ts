@@ -164,6 +164,13 @@ import { buildDocumentTimeline } from "../services/documentTimelineService";
 import { getUserIdentityContextByUserId, type RequestRole } from "../services/userRoleService";
 import { logDocumentTrace } from "../utils/documentTrace";
 import { captureException, captureMessage } from "../utils/sentry";
+import {
+  assertMemberCanCreateWorkflow,
+  BillingPolicyError,
+  canViewerAccessFinalPackage,
+  consumeMemberDocumentWorkflow,
+  isFinalPackageDocumentVersion,
+} from "../services/billingPolicyService";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 5 * 1024 * 1024;
@@ -188,6 +195,16 @@ const UPLOADED_DOCUMENT_TEMPLATE_HASH = "uploaded_pdf";
 const RENDERING_RUN_STALE_AFTER_MS = 5 * 60 * 1000;
 const NOTARIZE_DOCUMENT_MODE_KEY = "notarize_document";
 const NOTARIZE_DOCUMENT_INTAKE_SCHEMA_VERSION = "notarize_document_upload_v1";
+
+const sendBillingPolicyError = (res: Response, error: unknown) => {
+  if (!(error instanceof BillingPolicyError)) {
+    throw error;
+  }
+  return res.status(error.statusCode).json({
+    error: error.code,
+    message: error.message,
+  });
+};
 const UPLOADED_DOCUMENT_SIGNATURE_PLACEMENT_STRATEGY = "addendum_page";
 const TRUST_BUNDLE_MODE_KEY = "trust_bundle";
 const BASE_POA_OUTPUT_KEY = "poa_document";
@@ -2455,7 +2472,15 @@ const buildDocumentReviewState = async (input: {
   ]);
 
   const systemValues = Array.isArray(rawSystemValues) ? rawSystemValues : [];
-  const versions = Array.isArray(rawVersions) ? rawVersions : [];
+  const allVersions = Array.isArray(rawVersions) ? rawVersions : [];
+  const hasFinalPackageVersion = allVersions.some(isFinalPackageDocumentVersion);
+  const canAccessFinalPackage = !hasFinalPackageVersion || await canViewerAccessFinalPackage({
+    documentId: input.document.id,
+    viewerRole: input.viewerRole,
+  });
+  const versions = allVersions.filter(
+    (version) => canAccessFinalPackage || !isFinalPackageDocumentVersion(version),
+  );
   const generationRuns = Array.isArray(rawGenerationRuns) ? rawGenerationRuns : [];
   const currentIntakeRevision = currentDraft?.revision ?? null;
   const isCurrentIntakeRun = (run: DocumentGenerationRunRecord) => {
@@ -4050,6 +4075,13 @@ export const createDocument = async (req: Request, res: Response) => {
     req.user.role,
     req.user.phone,
   );
+  if (req.user.role === "member" || req.user.role === "pro") {
+    try {
+      await assertMemberCanCreateWorkflow({ ownerUserId: ownerId });
+    } catch (error) {
+      return sendBillingPolicyError(res, error);
+    }
+  }
   const documentId = randomUUID();
   const storagePath = `${ownerId}/${documentId}/v1/source.pdf`;
   const { document, version } = await createDocumentWithVersion({
@@ -4198,22 +4230,32 @@ export const bootstrapDocumentIntakeDraft = async (req: Request, res: Response) 
   const rulesSnapshotVersion =
     parsed.data.rulesSnapshotVersion ?? "member_form_rules_contract_v1";
 
-  const bootstrapResult = await bootstrapDocumentIntakeDraftFromDb({
-    ownerId,
-    productFlowMode: selection.modeKey,
-    jurisdiction: parsed.data.jurisdiction,
-    rulesSnapshotVersion,
-    resumeLatestDraft: parsed.data.resumeLatestDraft ?? false,
-    selectedFamilies: [...selection.families],
-    outputBundle: expectedOutputs.map((output) => ({
-      outputKey: output.outputKey,
-      outputLabel: output.outputLabel,
-      isRequired: output.isRequired,
-      sortOrder: output.sortOrder,
-      metadata: output.metadata,
-    })),
-    createdBy: ownerId,
-  });
+  let bootstrapResult: Awaited<ReturnType<typeof bootstrapDocumentIntakeDraftFromDb>>;
+  try {
+    bootstrapResult = await bootstrapDocumentIntakeDraftFromDb({
+      ownerId,
+      productFlowMode: selection.modeKey,
+      jurisdiction: parsed.data.jurisdiction,
+      rulesSnapshotVersion,
+      resumeLatestDraft: parsed.data.resumeLatestDraft ?? false,
+      selectedFamilies: [...selection.families],
+      outputBundle: expectedOutputs.map((output) => ({
+        outputKey: output.outputKey,
+        outputLabel: output.outputLabel,
+        isRequired: output.isRequired,
+        sortOrder: output.sortOrder,
+        metadata: output.metadata,
+      })),
+      createdBy: ownerId,
+      ...(req.user.role === "member" || req.user.role === "pro"
+        ? {
+            beforeCreate: () => assertMemberCanCreateWorkflow({ ownerUserId: ownerId }).then(() => undefined),
+          }
+        : {}),
+    });
+  } catch (error) {
+    return sendBillingPolicyError(res, error);
+  }
 
   return res.status(200).json({
     created: bootstrapResult.created,
@@ -5105,9 +5147,25 @@ export const approveDocumentReview = async (req: Request, res: Response) => {
   };
 
   const verificationUrl = buildVerificationUrl(assignedIdn);
+  let billingTransitionHandled = false;
+  if (document.status === "draft" || document.status === "pending_review") {
+    try {
+      const billingResult = await consumeMemberDocumentWorkflow({
+        ownerUserId: document.owner_id,
+        documentId: document.id,
+        expectedDocumentStatus: document.status,
+        nextDocumentStatus: "pending_signature",
+        actorUserId: await resolveRequestActorUserId(req),
+      });
+      billingTransitionHandled = billingResult.transitionHandled;
+    } catch (error) {
+      return sendBillingPolicyError(res, error);
+    }
+  }
+
   const updatedDocument = await updateDocument(document.id, {
     idn: assignedIdn,
-    status: "pending_signature",
+    ...(!billingTransitionHandled ? { status: "pending_signature" } : {}),
     intake_status:
       document.intake_status?.trim().toLowerCase() === "locked"
         ? "locked"
@@ -6582,7 +6640,15 @@ export const listDocumentVersions = async (req: Request, res: Response) => {
     return;
   }
 
-  const versions = await listDocumentVersionsFromDb(document.id);
+  const allVersions = await listDocumentVersionsFromDb(document.id);
+  const hasFinalPackageVersion = allVersions.some(isFinalPackageDocumentVersion);
+  const canAccessFinalPackage = !hasFinalPackageVersion || await canViewerAccessFinalPackage({
+    documentId: document.id,
+    viewerRole: req.user?.role,
+  });
+  const versions = allVersions.filter(
+    (version) => canAccessFinalPackage || !isFinalPackageDocumentVersion(version),
+  );
 
   res.status(200).json({
     versions: versions.map((version) => ({

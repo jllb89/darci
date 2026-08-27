@@ -9,6 +9,10 @@ import {
 } from "./documentFinalizationService";
 import { getVisibleDocumentIdn } from "./documentVisibilityService";
 import { listWorkflowStatusHistory } from "./illuminotarizationWorkflowService";
+import {
+  getDocumentReleaseControl,
+  isFinalPackageReleaseUnavailable,
+} from "./billingPolicyService";
 
 export type DocumentWorkspaceSummary = {
   workflow: {
@@ -54,6 +58,12 @@ export type DocumentWorkspaceSummary = {
     idn: string | null;
     verifyPath: string | null;
   };
+  release: {
+    status: "unmanaged" | "pending" | "billing_held" | "released";
+    reasonCode: string | null;
+    heldAt: string | null;
+    releasedAt: string | null;
+  };
 };
 
 const buildDefaultSummary = (visibleIdn: string | null): DocumentWorkspaceSummary => ({
@@ -86,6 +96,12 @@ const buildDefaultSummary = (visibleIdn: string | null): DocumentWorkspaceSummar
     idn: visibleIdn,
     verifyPath: visibleIdn ? `/verify/${encodeURIComponent(visibleIdn)}` : null,
   },
+  release: {
+    status: "unmanaged",
+    reasonCode: null,
+    heldAt: null,
+    releasedAt: null,
+  },
 });
 
 export const buildDocumentWorkspaceSummary = async (input: {
@@ -103,11 +119,16 @@ export const buildDocumentWorkspaceSummary = async (input: {
   const latestCode = request
     ? await getLatestNotarizationCodeForRequest(request.id)
     : null;
-  const [workflowStatusHistory, finalizationStatusHistory, verificationSnapshot] = await Promise.all([
+  const [workflowStatusHistory, finalizationStatusHistory, verificationSnapshot, releaseControl] = await Promise.all([
     request?.workflow_id ? listWorkflowStatusHistory(request.workflow_id) : Promise.resolve([]),
     listFinalizationStatusHistory(input.document.id),
     getVerificationSnapshotForDocument(input.document as DocumentRecord),
+    getDocumentReleaseControl(input.document.id),
   ]);
+  const heldFromViewer = Boolean(
+    isFinalPackageReleaseUnavailable(releaseControl) &&
+      !["notary", "admin", "service_role"].includes(input.viewerRole ?? ""),
+  );
 
   const latestWorkflowStatus = workflowStatusHistory.at(-1) ?? null;
   const latestFinalizationStatus = finalizationStatusHistory.at(-1) ?? null;
@@ -137,10 +158,10 @@ export const buildDocumentWorkspaceSummary = async (input: {
     isVerificationChecked,
     isWatermarked,
     isHashRecorded,
-    hash: verificationSnapshot.hashRecord?.hash ?? null,
-    ledgerTxId: verificationSnapshot.ledgerEntry?.ledger_tx_id ?? null,
-    anchoredAt: verificationSnapshot.ledgerEntry?.anchored_at ?? null,
-    anchorAttempt: verificationSnapshot.ledgerAnchorAttempt
+    hash: heldFromViewer ? null : verificationSnapshot.hashRecord?.hash ?? null,
+    ledgerTxId: heldFromViewer ? null : verificationSnapshot.ledgerEntry?.ledger_tx_id ?? null,
+    anchoredAt: heldFromViewer ? null : verificationSnapshot.ledgerEntry?.anchored_at ?? null,
+    anchorAttempt: !heldFromViewer && verificationSnapshot.ledgerAnchorAttempt
       ? {
           id: verificationSnapshot.ledgerAnchorAttempt.id,
           status: verificationSnapshot.ledgerAnchorAttempt.status,
@@ -161,9 +182,20 @@ export const buildDocumentWorkspaceSummary = async (input: {
   };
 
   summary.verification = {
-    status: !visibleIdn ? "unavailable" : isAnchored ? "ready" : "pending_finalization",
+    status: heldFromViewer || !visibleIdn ? "unavailable" : isAnchored ? "ready" : "pending_finalization",
     idn: visibleIdn,
-    verifyPath: visibleIdn ? `/verify/${encodeURIComponent(visibleIdn)}` : null,
+    verifyPath: heldFromViewer || !visibleIdn ? null : `/verify/${encodeURIComponent(visibleIdn)}`,
+  };
+
+  summary.release = {
+    status: releaseControl?.release_status ?? (heldFromViewer ? "pending" : "unmanaged"),
+    reasonCode: releaseControl?.release_status === "billing_held"
+      ? "membership_reactivation_required"
+      : heldFromViewer
+        ? "final_package_release_pending"
+        : null,
+    heldAt: releaseControl?.held_at ?? null,
+    releasedAt: releaseControl?.released_at ?? null,
   };
 
   return summary;

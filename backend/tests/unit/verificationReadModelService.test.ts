@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getLatestPublicVerificationCheckByIdnMock: vi.fn(),
   listRecentAuditEventsForDocumentIdsMock: vi.fn(),
   getWorkspaceIdentitySummaryByUserIdMock: vi.fn(),
+  canViewerAccessFinalPackageMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", async () => {
@@ -96,6 +97,10 @@ vi.mock("../../src/services/workspaceIdentitySummaryService", async () => {
   };
 });
 
+vi.mock("../../src/services/billingPolicyService", () => ({
+  canViewerAccessFinalPackage: mocks.canViewerAccessFinalPackageMock,
+}));
+
 import {
   getSharedVerificationDetail,
   listSharedVerifications,
@@ -116,6 +121,7 @@ describe("verificationReadModelService", () => {
     mocks.getLatestPublicVerificationCheckByIdnMock.mockReset();
     mocks.listRecentAuditEventsForDocumentIdsMock.mockReset();
     mocks.getWorkspaceIdentitySummaryByUserIdMock.mockReset();
+    mocks.canViewerAccessFinalPackageMock.mockReset();
     mocks.listDocumentsMock.mockResolvedValue([]);
     mocks.listNotarizationRequestsMock.mockResolvedValue([]);
     mocks.getDocumentByIdMock.mockResolvedValue(null);
@@ -124,6 +130,7 @@ describe("verificationReadModelService", () => {
     mocks.listWorkflowStatusHistoryMock.mockResolvedValue([]);
     mocks.getLatestCodeDeliveryForRequestMock.mockResolvedValue(null);
     mocks.getMeetingByRequestIdMock.mockResolvedValue(null);
+    mocks.canViewerAccessFinalPackageMock.mockResolvedValue(true);
     mocks.getVerificationSnapshotByIdnMock.mockResolvedValue({
       document: null,
       hashRecord: null,

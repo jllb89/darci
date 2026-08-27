@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 
@@ -564,7 +565,11 @@ const formatAlertDocumentLabel = (
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { accessToken, user } = useStoredAuth();
+  const billingResult = searchParams.get("billing");
+  const billingSessionId = searchParams.get("session_id");
   const activeRole = user?.role ?? null;
   const [payload, setPayload] = useState<DashboardPayload | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -577,6 +582,19 @@ export default function DashboardPage() {
   const hasAutoScrolledTimelineRef = useRef(false);
   const activityLoadTimeoutRef = useRef<number | null>(null);
   const dashboardRoleReloadKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (billingResult !== "success" && billingResult !== "canceled") {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams();
+    nextSearchParams.set("billing", billingResult);
+    if (billingSessionId) {
+      nextSearchParams.set("session_id", billingSessionId);
+    }
+    router.replace(`/app/billing?${nextSearchParams.toString()}`);
+  }, [billingResult, billingSessionId, router]);
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {

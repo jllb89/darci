@@ -2806,6 +2806,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /billing/member-membership:
+    get:
+      summary: Get the member membership and workflow allowance
+      description: Returns the server-authoritative Stripe environment, active member catalog, subscription state, current entitlement usage, held-package count, eligibility reason, and currently allowed billing actions.
+      responses:
+        "200":
+          description: Member membership status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberMembershipStatusResponse"
+        "403":
+          description: Active member or Pro workspace required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /billing/member-membership/checkout:
     post:
       summary: Create a member membership Checkout Session
@@ -2866,6 +2883,87 @@ paths:
                     format: uri
         "409":
           description: No Stripe customer exists for the member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/billing/usage-events/{usageEventId}/reverse:
+    post:
+      summary: Reverse one member workflow usage event
+      description: Admin/service support action requiring recent reauthentication, a mandatory reason, and an idempotency key. The immutable reversal is performed by the billing RPC.
+      parameters:
+        - in: path
+          name: usageEventId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingSupportActionRequest"
+      responses:
+        "200":
+          description: Usage reversed or existing idempotent reversal returned
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "403":
+          description: Admin role and recent reauthentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Usage reversal conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /admin/billing/documents/{documentId}/release:
+    post:
+      summary: Release a billing-held final package
+      description: Admin/service support action requiring recent reauthentication and a mandatory reason. It changes only the release control; finalized document bytes and hashes are not regenerated.
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 8
+                  maxLength: 500
+      responses:
+        "200":
+          description: Held final package released
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "403":
+          description: Admin role and recent reauthentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Document is not billing held
           content:
             application/json:
               schema:
@@ -13132,6 +13230,111 @@ components:
           minLength: 8
           maxLength: 128
           pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    BillingSupportActionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+        - idempotencyKey
+      properties:
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 500
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 128
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    MemberMembershipStatusResponse:
+      type: object
+      required:
+        - providerEnvironment
+        - paymentsReal
+        - enforcementMode
+        - plans
+        - membership
+        - eligibility
+        - actions
+      properties:
+        providerEnvironment:
+          type: string
+          enum: [test]
+        paymentsReal:
+          type: boolean
+          enum: [false]
+        enforcementMode:
+          type: string
+          enum: [disabled, observe, enforced]
+        plans:
+          type: array
+          items:
+            type: object
+            required: [priceCode, displayName, currencyCode, unitAmountCents, billingInterval, intervalCount, documentWorkflowAllowance]
+            properties:
+              priceCode:
+                type: string
+                enum: [member_starter_monthly, member_plus_monthly, member_volume_monthly]
+              displayName:
+                type: string
+              currencyCode:
+                type: string
+              unitAmountCents:
+                type: integer
+              billingInterval:
+                type: string
+                enum: [month]
+              intervalCount:
+                type: integer
+              documentWorkflowAllowance:
+                type: integer
+        membership:
+          type: object
+          required: [state, allowance, heldFinalPackageCount]
+          properties:
+            state:
+              type: string
+            subscriptionStatus:
+              type: string
+              nullable: true
+            priceCode:
+              type: string
+              nullable: true
+            planName:
+              type: string
+              nullable: true
+            currentPeriodStart:
+              type: string
+              format: date-time
+              nullable: true
+            currentPeriodEnd:
+              type: string
+              format: date-time
+              nullable: true
+            cancelAtPeriodEnd:
+              type: boolean
+            allowance:
+              type: object
+              required: [total, used, remaining, exhausted]
+              properties:
+                total:
+                  type: integer
+                  nullable: true
+                used:
+                  type: integer
+                remaining:
+                  type: integer
+                  nullable: true
+                exhausted:
+                  type: boolean
+            heldFinalPackageCount:
+              type: integer
+        eligibility:
+          type: object
+          additionalProperties: true
+        actions:
+          type: object
+          additionalProperties: true
     MemberMembershipCheckoutResponse:
       type: object
       required:

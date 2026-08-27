@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   deriveMemberFormRulesByJurisdictionMock: vi.fn(),
   buildMemberFormDocumentExtractionPayloadMock: vi.fn(),
   queueDocumentSigningPreparedNotificationMock: vi.fn(),
+  consumeMemberDocumentWorkflowMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", async (importOriginal) => {
@@ -92,6 +93,14 @@ vi.mock("../../src/services/storageService", () => ({
   createDocumentDownloadUrl: mocks.createDocumentDownloadUrlMock,
 }));
 
+vi.mock("../../src/services/billingPolicyService", () => ({
+  assertMemberCanCreateWorkflow: vi.fn().mockResolvedValue(null),
+  BillingPolicyError: class BillingPolicyError extends Error {},
+  canViewerAccessFinalPackage: vi.fn().mockResolvedValue(true),
+  consumeMemberDocumentWorkflow: mocks.consumeMemberDocumentWorkflowMock,
+  isFinalPackageDocumentVersion: vi.fn().mockReturnValue(false),
+}));
+
 import { app } from "../../src/index";
 
 type TokenPayload = {
@@ -142,6 +151,12 @@ describe("document review approval", () => {
     mocks.deriveMemberFormRulesByJurisdictionMock.mockReset();
     mocks.buildMemberFormDocumentExtractionPayloadMock.mockReset();
     mocks.queueDocumentSigningPreparedNotificationMock.mockReset();
+    mocks.consumeMemberDocumentWorkflowMock.mockReset();
+    mocks.consumeMemberDocumentWorkflowMock.mockResolvedValue({
+      transitionHandled: false,
+      decision: null,
+      usage: null,
+    });
     mocks.createDocumentDownloadUrlMock.mockResolvedValue({
       bucket: "documents",
       path: "owner-1/doc-1/generated/ver-1.pdf",

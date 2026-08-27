@@ -31,6 +31,7 @@ import {
   getWorkspaceIdentitySummaryByUserId,
   type WorkspaceIdentitySummary,
 } from "./workspaceIdentitySummaryService";
+import { canViewerAccessFinalPackage } from "./billingPolicyService";
 
 export type VerificationWorkspaceSummary = {
   idn: string;
@@ -373,6 +374,12 @@ const buildVerificationSummaryForDocument = async (input: {
   if (!visibleIdn) {
     return null as VerificationWorkspaceSummary | null;
   }
+  if (!(await canViewerAccessFinalPackage({
+    documentId: input.document.id,
+    viewerRole: input.viewerRole,
+  }))) {
+    return null;
+  }
 
   const [snapshot, latestCheck, latestRequest, owner] = await Promise.all([
     getVerificationSnapshotForDocument(input.document),
@@ -463,6 +470,12 @@ export const getSharedVerificationDetail = async (input: {
     viewerRole: input.role,
   });
   if (!visibleIdn) {
+    return null;
+  }
+  if (!(await canViewerAccessFinalPackage({
+    documentId: snapshot.document.id,
+    viewerRole: input.role,
+  }))) {
     return null;
   }
 

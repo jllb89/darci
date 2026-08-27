@@ -5,6 +5,10 @@ import {
   buildStripeCheckoutReturnUrls,
   getStripeClient,
 } from "../config/stripe";
+import {
+  evaluateMemberBillingPolicy,
+  getBillingEnforcementMode,
+} from "./billingPolicyService";
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -446,6 +450,162 @@ export const createMemberCustomerPortalSession = async (input: { dbUserId: strin
   });
   assertStripeObjectIsTestMode(session, "Stripe Customer Portal Session");
   return { portalUrl: session.url };
+};
+
+export const getMemberMembershipStatus = async (input: { dbUserId: string }) => {
+  const { data: user, error: userError } = await supabaseAdmin
+    .from("users")
+    .select("id, status")
+    .eq("id", input.dbUserId)
+    .single();
+  if (userError || !user) {
+    throw new MemberBillingServiceError(404, "billing_user_not_found", "DARCi user not found");
+  }
+  if (user.status !== "active") {
+    throw new MemberBillingServiceError(403, "billing_account_inactive", "DARCi account is not active");
+  }
+
+  const { data: rawCatalog, error: catalogError } = await supabaseAdmin
+    .from("billing_catalog_prices")
+    .select(
+      "id, price_code, display_name, currency_code, unit_amount_cents, billing_interval, interval_count, included_entitlement_quantity, usage_limit_quantity, sort_order",
+    )
+    .in("price_code", Array.from(ALLOWED_PRICE_CODES))
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (catalogError) throw new Error(`Billing catalog status lookup failed: ${catalogError.message}`);
+
+  const { data: account, error: accountError } = await supabaseAdmin
+    .from("billing_accounts")
+    .select("id, status")
+    .eq("owner_user_id", input.dbUserId)
+    .eq("account_key", "default")
+    .eq("is_default", true)
+    .maybeSingle();
+  if (accountError) throw new Error(`Billing account status lookup failed: ${accountError.message}`);
+
+  let subscription: Record<string, unknown> | null = null;
+  let subscriptionItem: Record<string, unknown> | null = null;
+  let entitlement: Record<string, unknown> | null = null;
+  let activationPending = false;
+
+  if (account) {
+    const [{ data: subscriptionData, error: subscriptionError }, { count: pendingOrderCount, error: pendingError }] = await Promise.all([
+      supabaseAdmin
+        .from("billing_subscriptions")
+        .select(
+          "id, status, provider_subscription_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, ended_at, updated_at",
+        )
+        .eq("billing_account_id", account.id)
+        .eq("provider_environment", "test")
+        .eq("role_context", "member")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("billing_orders")
+        .select("id", { count: "exact", head: true })
+        .eq("billing_account_id", account.id)
+        .eq("provider_environment", "test")
+        .eq("order_kind", "subscription_checkout")
+        .in("status", ["draft", "pending_payment"]),
+    ]);
+    if (subscriptionError) throw new Error(`Subscription status lookup failed: ${subscriptionError.message}`);
+    if (pendingError) throw new Error(`Pending Checkout status lookup failed: ${pendingError.message}`);
+    subscription = subscriptionData as Record<string, unknown> | null;
+    activationPending = !subscription && (pendingOrderCount ?? 0) > 0;
+
+    if (subscription?.id) {
+      const { data: itemData, error: itemError } = await supabaseAdmin
+        .from("billing_subscription_items")
+        .select("id, price_code_snapshot, display_name_snapshot, status, current_period_start, current_period_end")
+        .eq("subscription_id", String(subscription.id))
+        .eq("role_context", "member")
+        .maybeSingle();
+      if (itemError) throw new Error(`Subscription item status lookup failed: ${itemError.message}`);
+      subscriptionItem = itemData as Record<string, unknown> | null;
+
+      if (subscriptionItem?.id) {
+        const { data: entitlementData, error: entitlementError } = await supabaseAdmin
+          .from("billing_entitlements")
+          .select("id, status, quantity_total, quantity_used, starts_at, ends_at")
+          .eq("subscription_item_id", String(subscriptionItem.id))
+          .eq("entitlement_type", "document_workflow_capacity")
+          .order("starts_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (entitlementError) throw new Error(`Entitlement status lookup failed: ${entitlementError.message}`);
+        entitlement = entitlementData as Record<string, unknown> | null;
+      }
+    }
+  }
+
+  const [{ count: heldFinalPackageCount, error: heldError }, policy] = await Promise.all([
+    supabaseAdmin
+      .from("document_release_controls")
+      .select("id, documents!inner(owner_id)", { count: "exact", head: true })
+      .eq("release_status", "billing_held")
+      .eq("documents.owner_id", input.dbUserId),
+    evaluateMemberBillingPolicy(input.dbUserId),
+  ]);
+  if (heldError) throw new Error(`Held final-package status lookup failed: ${heldError.message}`);
+
+  const total = typeof entitlement?.quantity_total === "number" ? entitlement.quantity_total : null;
+  const used = typeof entitlement?.quantity_used === "number" ? entitlement.quantity_used : 0;
+  const remaining = total === null ? null : Math.max(total - used, 0);
+  const subscriptionStatus = typeof subscription?.status === "string" ? subscription.status : null;
+
+  return {
+    providerEnvironment: "test" as const,
+    paymentsReal: false,
+    enforcementMode: getBillingEnforcementMode(),
+    plans: (rawCatalog ?? []).map((price) => ({
+      priceCode: price.price_code,
+      displayName: price.display_name,
+      currencyCode: price.currency_code,
+      unitAmountCents: price.unit_amount_cents,
+      billingInterval: price.billing_interval,
+      intervalCount: price.interval_count,
+      documentWorkflowAllowance:
+        price.usage_limit_quantity ?? price.included_entitlement_quantity,
+    })),
+    membership: {
+      state: activationPending ? "activation_pending" : subscriptionStatus ?? "none",
+      subscriptionStatus,
+      priceCode: typeof subscriptionItem?.price_code_snapshot === "string"
+        ? subscriptionItem.price_code_snapshot
+        : null,
+      planName: typeof subscriptionItem?.display_name_snapshot === "string"
+        ? subscriptionItem.display_name_snapshot
+        : null,
+      currentPeriodStart: typeof subscription?.current_period_start === "string"
+        ? subscription.current_period_start
+        : null,
+      currentPeriodEnd: typeof subscription?.current_period_end === "string"
+        ? subscription.current_period_end
+        : null,
+      cancelAtPeriodEnd: subscription?.cancel_at_period_end === true,
+      allowance: {
+        total,
+        used,
+        remaining,
+        exhausted: total !== null && used >= total,
+      },
+      heldFinalPackageCount: heldFinalPackageCount ?? 0,
+    },
+    eligibility: {
+      canCreateWorkflow: policy.canProceed,
+      entitled: policy.allowed,
+      wouldBlock: policy.wouldBlock,
+      reasonCode: policy.reasonCode,
+    },
+    actions: {
+      canCheckout: !subscription && !activationPending,
+      canOpenPortal: Boolean(subscription),
+      planChangeAvailable: false,
+      planChangeReason: "plan_change_policy_pending",
+    },
+  };
 };
 
 export const generateCheckoutIdempotencyToken = () => randomUUID();

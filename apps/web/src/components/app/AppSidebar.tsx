@@ -693,23 +693,25 @@ export default function AppSidebar({
               ) : null}
 
               <div className="flex flex-col gap-1">
-                <Link
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
-                  href="/app/billing"
-                  prefetch={false}
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                    <path
-                      d="M4.75 7.25h14.5v9.5H4.75z"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="1.5"
-                    />
-                    <path d="M4.75 10h14.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
-                  </svg>
-                  Billing
-                </Link>
+                {role === "member" || role === "pro" ? (
+                  <Link
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"
+                    href="/app/billing"
+                    prefetch={false}
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                      <path
+                        d="M4.75 7.25h14.5v9.5H4.75z"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                      />
+                      <path d="M4.75 10h14.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+                    </svg>
+                    Billing
+                  </Link>
+                ) : null}
                 {showNotarySignupLink ? (
                   <Link
                     className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-Color-Neutral transition-colors duration-200 ease-in-out hover:bg-Color-Neutral-Lighter/40 hover:text-Color-Scheme-1-Text"

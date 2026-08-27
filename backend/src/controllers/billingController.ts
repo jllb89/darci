@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createMemberCustomerPortalSession,
   createMemberMembershipCheckout,
+  getMemberMembershipStatus,
   MemberBillingServiceError,
 } from "../services/memberBillingService";
 
@@ -53,6 +54,23 @@ export const createMemberCheckout = async (req: Request, res: Response) => {
       idempotencyKey: parsed.data.idempotencyToken,
     });
     return res.status(result.reused ? 200 : 201).json(result);
+  } catch (error) {
+    return respondWithError(res, error);
+  }
+};
+
+export const getMemberMembership = async (req: Request, res: Response) => {
+  if (!req.user?.dbUserId) {
+    return res.status(403).json({ error: "billing_profile_required", message: "DARCi profile is required" });
+  }
+  if (!hasMemberBillingContext(req)) {
+    return res.status(403).json({
+      error: "member_billing_context_required",
+      message: "Switch to a member or Pro workspace to view a member membership",
+    });
+  }
+  try {
+    return res.status(200).json(await getMemberMembershipStatus({ dbUserId: req.user.dbUserId }));
   } catch (error) {
     return respondWithError(res, error);
   }

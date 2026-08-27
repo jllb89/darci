@@ -32,6 +32,10 @@ import { anchorToLedger } from "./ledgerService";
 import { getMeetingByRequestId } from "./meetingService";
 import { isNotaryCommissionCurrent, type NotaryProfileRecord } from "./notaryProfileService";
 import { createDocumentDownloadUrl, downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
+import {
+  applyFinalPackageBillingPolicy,
+  canViewerAccessFinalPackage,
+} from "./billingPolicyService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -2273,11 +2277,24 @@ export const watermarkWithNotice = async (input: {
   });
 
   if (existingWatermarks.length > 0) {
-    return loadExistingWatermarkResult({
+    const existingResult = await loadExistingWatermarkResult({
       document: context.document,
       request: context.request,
       executions: existingWatermarks,
     });
+    const packageAnchored = existingResult.ledgerAnchorAttempts.every(
+      (attempt) => attempt?.status === "anchored",
+    );
+    const releaseControl = packageAnchored
+      ? await applyFinalPackageBillingPolicy({
+          ownerUserId: context.document.owner_id,
+          documentId: context.document.id,
+          documentVersionId: existingResult.version.id,
+          documentHashRecordId: existingResult.hashRecord.id,
+          actorUserId: context.actorUserId,
+        })
+      : null;
+    return { ...existingResult, releaseControl };
   }
 
   const acknowledgmentExecutions = await listCompletedDocumentExecutionRuns({
@@ -2540,6 +2557,16 @@ export const watermarkWithNotice = async (input: {
     });
   }
 
+  const releaseControl = packageAnchored
+    ? await applyFinalPackageBillingPolicy({
+        ownerUserId: context.document.owner_id,
+        documentId: context.document.id,
+        documentVersionId: primaryWatermarkItem.version.id,
+        documentHashRecordId: primaryWatermarkItem.hashRecord.id,
+        actorUserId: context.actorUserId,
+      })
+    : null;
+
   return {
     document: updatedDocument,
     request: updatedRequest,
@@ -2554,6 +2581,7 @@ export const watermarkWithNotice = async (input: {
     hashRecords: watermarkItems.map((item) => item.hashRecord),
     ledgerEntries: watermarkItems.map((item) => item.ledgerEntry),
     ledgerAnchorAttempts: watermarkItems.map((item) => item.ledgerAnchorAttempt),
+    releaseControl,
   };
 };
 
@@ -2691,6 +2719,24 @@ export const verifyDocumentByIdn = async (input: {
       resultStatus: "not_found",
       requestIp: input.requestIp,
       userAgent: input.userAgent,
+    });
+
+    return {
+      verificationCheck,
+      result: null,
+    };
+  }
+
+  if (!(await canViewerAccessFinalPackage({ documentId: snapshot.document.id }))) {
+    const verificationCheck = await createPublicVerificationCheck({
+      documentId: snapshot.document.id,
+      idn: normalizedIdn,
+      resultStatus: "not_found",
+      requestIp: input.requestIp,
+      userAgent: input.userAgent,
+      metadata: {
+        billingHeld: true,
+      },
     });
 
     return {

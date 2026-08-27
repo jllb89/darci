@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   listIdentityVerificationEventsMock: vi.fn(),
   listProximityEvaluationsMock: vi.fn(),
   listMeetingArtifactsMock: vi.fn(),
+  canViewerAccessFinalPackageMock: vi.fn(),
+  isFinalPackageDocumentVersionMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", async () => {
@@ -116,6 +118,11 @@ vi.mock("../../src/services/meetingService", async () => {
   };
 });
 
+vi.mock("../../src/services/billingPolicyService", () => ({
+  canViewerAccessFinalPackage: mocks.canViewerAccessFinalPackageMock,
+  isFinalPackageDocumentVersion: mocks.isFinalPackageDocumentVersionMock,
+}));
+
 import {
   getSharedRequestDetail,
   getSharedRequestTimeline,
@@ -145,6 +152,8 @@ describe("requestReadModelService", () => {
     mocks.listIdentityVerificationEventsMock.mockReset();
     mocks.listProximityEvaluationsMock.mockReset();
     mocks.listMeetingArtifactsMock.mockReset();
+    mocks.canViewerAccessFinalPackageMock.mockReset();
+    mocks.isFinalPackageDocumentVersionMock.mockReset();
     mocks.listDocumentsMock.mockResolvedValue([]);
     mocks.listNotarizationRequestsMock.mockResolvedValue([]);
     mocks.getNotarizationRequestByIdMock.mockResolvedValue(null);
@@ -211,6 +220,8 @@ describe("requestReadModelService", () => {
     mocks.listIdentityVerificationEventsMock.mockResolvedValue([]);
     mocks.listProximityEvaluationsMock.mockResolvedValue([]);
     mocks.listMeetingArtifactsMock.mockResolvedValue([]);
+    mocks.canViewerAccessFinalPackageMock.mockResolvedValue(true);
+    mocks.isFinalPackageDocumentVersionMock.mockReturnValue(false);
   });
 
   it("lists member-owned shared requests with meeting summaries", async () => {

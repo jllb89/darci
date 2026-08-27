@@ -342,7 +342,7 @@ Exit criteria:
 
 ## Phase 3 — Checkout And Durable Webhook Fulfillment
 
-Implementation status: **implemented and staging-schema validated** on 2026-08-26. Authenticated allowlisted Checkout, Portal-session creation, raw-body signed webhook ingress, minimized durable event storage, leased retry processing, and transactional subscription/entitlement/order/invoice fulfillment are implemented. The deployed staging webhook endpoint still must be registered in Stripe after this backend revision is deployed; the current Stripe test account has no registered webhook endpoint, and a new endpoint secret must be stored through the approved staging secret-management path before an end-to-end delivery smoke test.
+Implementation status: **complete in staging** on 2026-08-27. Authenticated allowlisted Checkout, Portal-session creation, raw-body signed webhook ingress, minimized durable event storage, leased retry processing, and transactional subscription/entitlement/order/invoice fulfillment are implemented. Stripe test endpoint `we_1U96cZETAqmB3GAqH5G2mxZV` is enabled at `https://api.staging.darciregistry.dev/webhooks/stripe`; its signing secret is stored through the staging secret-management path and signed delivery was verified.
 
 Purpose: establish trusted subscription state before enforcing product access.
 
@@ -385,6 +385,8 @@ Fulfillment:
 
 ## Phase 4 — Usage And Product-Workflow Integration
 
+Implementation status: **backend complete; activation gated** on 2026-08-27. The shared policy boundary, atomic consumption, workflow continuity, final-package hold/release controls, protected read surfaces, reactivation release, and recent-reauthenticated support actions are implemented. Migration `20260827120000` is applied in staging and preserved 97 legacy completed packages as released. Staging remains in `observe` mode until the Phase 5 member-facing billing and held-package states exist; changing `BILLING_ENFORCEMENT_MODE` to `enforced` is the explicit activation step.
+
 Purpose: enforce member allowance without duplicating business rules or damaging workflow integrity.
 
 Work:
@@ -409,6 +411,8 @@ Exit criteria:
 - Reactivation releases the original finalized bytes exactly once.
 
 ## Phase 5 — Web Billing Experience And Pricing Truth
+
+Implementation status: **member billing screen complete; cross-flow frontend work remains** on 2026-08-27. `/app/billing` now consumes the test catalog and membership contract, launches Stripe Checkout and Customer Portal, polls activation after Checkout return, displays allowance and held-package states, and keeps plan switching unavailable. Member navigation and `/app` Checkout-return forwarding are wired, while notary profiles are excluded from billing. Workflow-level quota errors, document-detail held-package presentation, and obsolete public landing-page pricing still remain before enforcement can move beyond `observe`; those gaps are tracked in `docs/stripe-phase-45-frontend-gaps-2026-08-27.md`.
 
 Purpose: give members an accurate, minimal subscription experience.
 

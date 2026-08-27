@@ -41,6 +41,7 @@ const roleLandingPath: Record<StoredUserRole, string> = {
 
 const notaryBlockedRoutePrefixes = [
   "/app/activity",
+  "/app/billing",
   "/app/documents",
   "/app/requests",
   "/app/review",

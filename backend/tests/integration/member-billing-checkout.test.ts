@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   checkout: vi.fn(),
   portal: vi.fn(),
+  status: vi.fn(),
 }));
 
 vi.mock("../../src/services/memberBillingService", () => ({
   createMemberMembershipCheckout: mocks.checkout,
   createMemberCustomerPortalSession: mocks.portal,
+  getMemberMembershipStatus: mocks.status,
   MemberBillingServiceError: class MemberBillingServiceError extends Error {
     constructor(
       public statusCode: number,
@@ -61,6 +63,26 @@ describe("member membership Checkout API", () => {
       priceCode: "member_plus_monthly",
       idempotencyKey: "checkout-request-0001",
     });
+  });
+
+  it("returns the server-authoritative membership and allowance status", async () => {
+    mocks.status.mockResolvedValue({
+      providerEnvironment: "test",
+      paymentsReal: false,
+      enforcementMode: "observe",
+      plans: [],
+      membership: {
+        state: "active",
+        allowance: { total: 10, used: 4, remaining: 6, exhausted: false },
+      },
+      eligibility: { canCreateWorkflow: true, reasonCode: "billing_allowed" },
+    });
+
+    const response = await request(buildApp()).get("/billing/member-membership");
+
+    expect(response.status).toBe(200);
+    expect(response.body.membership.allowance.remaining).toBe(6);
+    expect(mocks.status).toHaveBeenCalledWith({ dbUserId: "db-user-1" });
   });
 
   it("rejects client-supplied provider prices, amounts, or unknown plans", async () => {

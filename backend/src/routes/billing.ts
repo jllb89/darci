@@ -1,8 +1,13 @@
 import { Router } from "express";
-import { createCustomerPortalSession, createMemberCheckout } from "../controllers/billingController";
+import {
+  createCustomerPortalSession,
+  createMemberCheckout,
+  getMemberMembership,
+} from "../controllers/billingController";
 
 const router = Router();
 
+router.get("/member-membership", getMemberMembership);
 router.post("/member-membership/checkout", createMemberCheckout);
 router.post("/customer-portal-session", createCustomerPortalSession);
 

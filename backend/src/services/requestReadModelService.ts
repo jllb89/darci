@@ -52,6 +52,10 @@ import {
   type WorkspaceIdentitySummary,
 } from "./workspaceIdentitySummaryService";
 import { createDocumentDownloadUrl } from "./storageService";
+import {
+  canViewerAccessFinalPackage,
+  isFinalPackageDocumentVersion,
+} from "./billingPolicyService";
 
 export class RequestReadModelServiceError extends Error {
   constructor(
@@ -520,7 +524,7 @@ const isUploadedDocumentReviewSource = (input: {
 
 const buildReviewDocuments = async (
   input: {
-    document: Pick<DocumentRecord, "document_type" | "output_bundle" | "product_flow_mode">;
+    document: Pick<DocumentRecord, "id" | "document_type" | "output_bundle" | "product_flow_mode">;
     versions: DocumentVersionRecord[];
     generationRuns: DocumentGenerationRunRecord[];
     viewerRole: RequestRole;
@@ -533,9 +537,14 @@ const buildReviewDocuments = async (
   const outputMetadataByKey = buildOutputMetadataByKey(input.document);
   const outputOrderByKey = buildOutputOrderByKey(input.document);
   const generationRunById = buildGenerationRunById(input.generationRuns);
+  const canAccessFinalPackage = await canViewerAccessFinalPackage({
+    documentId: input.document.id,
+    viewerRole: input.viewerRole,
+  });
   const pdfVersions = input.versions
     .filter((version) =>
       isPdfDocumentVersion(version) &&
+        (canAccessFinalPackage || !isFinalPackageDocumentVersion(version)) &&
         (isReviewableDocumentVersion(version) ||
           isUploadedDocumentReviewSource({ document: input.document, version })) &&
         isVisibleReviewVersion({

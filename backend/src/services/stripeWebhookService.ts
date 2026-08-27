@@ -5,6 +5,7 @@ import {
   getStripeClient,
   getStripeWebhookSecret,
 } from "../config/stripe";
+import { releaseMemberBillingHeldDocuments } from "./billingPolicyService";
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -175,6 +176,12 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
     p_event_id: eventId,
   });
   if (error) throw new Error(`Stripe subscription fulfillment failed: ${error.message}`);
+  if (status === "active" || status === "trialing") {
+    await releaseMemberBillingHeldDocuments({
+      billingAccountId,
+      sourceEventId: eventId,
+    });
+  }
   return data;
 };
 

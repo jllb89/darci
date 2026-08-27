@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   recordAuditEventMock: vi.fn(),
   buildSelectionForModeMock: vi.fn(),
   resolveExpectedOutputsForModeMock: vi.fn(),
+  assertMemberCanCreateWorkflowMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", () => ({
@@ -48,6 +49,14 @@ vi.mock("../../src/services/productFlowModeService", () => ({
   productFlowModeKeys: ["poa_only", "trust_bundle", "notarize_document"],
   buildSelectionForMode: mocks.buildSelectionForModeMock,
   resolveExpectedOutputsForMode: mocks.resolveExpectedOutputsForModeMock,
+}));
+
+vi.mock("../../src/services/billingPolicyService", () => ({
+  assertMemberCanCreateWorkflow: mocks.assertMemberCanCreateWorkflowMock,
+  BillingPolicyError: class BillingPolicyError extends Error {},
+  canViewerAccessFinalPackage: vi.fn().mockResolvedValue(true),
+  consumeMemberDocumentWorkflow: vi.fn().mockResolvedValue({ transitionHandled: false }),
+  isFinalPackageDocumentVersion: vi.fn().mockReturnValue(false),
 }));
 
 import { app } from "../../src/index";
@@ -75,6 +84,8 @@ describe("POST /documents with product flow mode", () => {
     mocks.recordAuditEventMock.mockReset();
     mocks.buildSelectionForModeMock.mockReset();
     mocks.resolveExpectedOutputsForModeMock.mockReset();
+    mocks.assertMemberCanCreateWorkflowMock.mockReset();
+    mocks.assertMemberCanCreateWorkflowMock.mockResolvedValue(null);
 
     mocks.getOrCreateUserIdMock.mockResolvedValue("owner-1");
     mocks.buildSelectionForModeMock.mockResolvedValue({

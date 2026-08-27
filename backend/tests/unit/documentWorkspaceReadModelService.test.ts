@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getVerificationSnapshotForDocumentMock: vi.fn(),
   listFinalizationStatusHistoryMock: vi.fn(),
   listWorkflowStatusHistoryMock: vi.fn(),
+  getDocumentReleaseControlMock: vi.fn(),
 }));
 
 vi.mock("../../src/services/documentService", async () => {
@@ -45,6 +46,12 @@ vi.mock("../../src/services/illuminotarizationWorkflowService", async () => {
   };
 });
 
+vi.mock("../../src/services/billingPolicyService", () => ({
+  getDocumentReleaseControl: mocks.getDocumentReleaseControlMock,
+  isFinalPackageReleaseUnavailable: (control: { release_status?: string } | null) =>
+    control?.release_status === "billing_held",
+}));
+
 import {
   buildDocumentWorkspaceSummary,
   buildDocumentWorkspaceSummaries,
@@ -57,6 +64,7 @@ describe("documentWorkspaceReadModelService", () => {
     mocks.getVerificationSnapshotForDocumentMock.mockReset();
     mocks.listFinalizationStatusHistoryMock.mockReset();
     mocks.listWorkflowStatusHistoryMock.mockReset();
+    mocks.getDocumentReleaseControlMock.mockReset();
     mocks.getLatestNotarizationRequestForDocumentMock.mockResolvedValue(null);
     mocks.getLatestNotarizationCodeForRequestMock.mockResolvedValue(null);
     mocks.getVerificationSnapshotForDocumentMock.mockImplementation(async (document) => ({
@@ -67,6 +75,7 @@ describe("documentWorkspaceReadModelService", () => {
     }));
     mocks.listFinalizationStatusHistoryMock.mockResolvedValue([]);
     mocks.listWorkflowStatusHistoryMock.mockResolvedValue([]);
+    mocks.getDocumentReleaseControlMock.mockResolvedValue(null);
   });
 
   it("builds a verification-ready summary for an anchored document", async () => {
@@ -166,6 +175,12 @@ describe("documentWorkspaceReadModelService", () => {
         idn: "IDN-1234",
         verifyPath: "/verify/IDN-1234",
       },
+      release: {
+        status: "unmanaged",
+        reasonCode: null,
+        heldAt: null,
+        releasedAt: null,
+      },
     });
   });
 
@@ -222,6 +237,12 @@ describe("documentWorkspaceReadModelService", () => {
         status: "pending_finalization",
         idn: "IDN-1234",
         verifyPath: "/verify/IDN-1234",
+      },
+      release: {
+        status: "unmanaged",
+        reasonCode: null,
+        heldAt: null,
+        releasedAt: null,
       },
     });
   });

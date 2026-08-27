@@ -39,8 +39,24 @@ import {
   rejectNotaryApplicationAdminHandler,
 } from "../controllers/notaryProfileController";
 import { requireRole } from "../middleware/roles";
+import {
+  releaseBillingHeldDocumentAdmin,
+  reverseMemberUsageAdmin,
+} from "../controllers/billingAdminController";
 
 const router = Router();
+
+router.post(
+  "/billing/usage-events/:usageEventId/reverse",
+  requireRole(["admin", "service_role"]),
+  reverseMemberUsageAdmin,
+);
+
+router.post(
+  "/billing/documents/:documentId/release",
+  requireRole(["admin", "service_role"]),
+  releaseBillingHeldDocumentAdmin,
+);
 
 router.get(
   "/profile/me",
