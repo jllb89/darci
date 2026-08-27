@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
+  getOrCreateUserIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
   listDocumentSystemValuesMock: vi.fn(),
   listDocumentVersionsMock: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("../../src/services/documentService", async (importOriginal) => {
   return {
     ...actual,
     getDocumentById: mocks.getDocumentByIdMock,
+    getOrCreateUserId: mocks.getOrCreateUserIdMock,
     getUserIdBySupabaseId: mocks.getUserIdBySupabaseIdMock,
     listDocumentSystemValues: mocks.listDocumentSystemValuesMock,
     listDocumentVersions: mocks.listDocumentVersionsMock,
@@ -131,6 +133,7 @@ describe("document review approval", () => {
   beforeEach(() => {
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     mocks.getDocumentByIdMock.mockReset();
+    mocks.getOrCreateUserIdMock.mockReset();
     mocks.getUserIdBySupabaseIdMock.mockReset();
     mocks.listDocumentSystemValuesMock.mockReset();
     mocks.listDocumentVersionsMock.mockReset();
@@ -157,6 +160,7 @@ describe("document review approval", () => {
       decision: null,
       usage: null,
     });
+    mocks.getOrCreateUserIdMock.mockResolvedValue("owner-1");
     mocks.createDocumentDownloadUrlMock.mockResolvedValue({
       bucket: "documents",
       path: "owner-1/doc-1/generated/ver-1.pdf",
