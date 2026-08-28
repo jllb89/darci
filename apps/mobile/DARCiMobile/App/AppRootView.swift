@@ -12,6 +12,7 @@ enum AppLaunchPhase: Equatable {
 
 struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var launchPhase = AppLaunchPhase.initial
     @State private var didAttemptSessionRestore = false
     @State private var selectedTab: AppTab = .home
@@ -32,9 +33,11 @@ struct AppRootView: View {
     @State private var isPushPermissionPromptPresented = false
     @State private var homeBannerMessage: String?
     @State private var memberBillingReturnEvent: MemberBillingReturn?
+    @State private var settingsInitialContent: UserSettingsContentScreen?
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     @StateObject private var notificationCenterViewModel: NotificationCenterViewModel
+    @StateObject private var billingPresentationCoordinator: MemberBillingPresentationCoordinator
     @ObservedObject private var pushCoordinator: PushNotificationCoordinator
     private let authenticationViewModel: AuthenticationViewModel
     private let homeAPIClient: HomeAPIProviding
@@ -66,7 +69,8 @@ struct AppRootView: View {
         self.documentIntakeAPIClient = documentIntakeAPIClient ?? dependencies.documentIntakeAPIClient
         self.requestsAPIClient = requestsAPIClient ?? dependencies.requestsAPIClient
         self.notaryProfileAPIClient = notaryProfileAPIClient ?? dependencies.notaryProfileAPIClient
-        self.memberBillingAPIClient = memberBillingAPIClient ?? dependencies.memberBillingAPIClient
+        let resolvedMemberBillingAPIClient = memberBillingAPIClient ?? dependencies.memberBillingAPIClient
+        self.memberBillingAPIClient = resolvedMemberBillingAPIClient
         _notificationCenterViewModel = StateObject(
             wrappedValue: NotificationCenterViewModel(apiClient: notificationCenterAPIClient ?? dependencies.notificationCenterAPIClient)
         )
@@ -75,6 +79,9 @@ struct AppRootView: View {
                 apiClient: dependencies.apiClient,
                 sessionStore: dependencies.sessionStore
             )
+        )
+        _billingPresentationCoordinator = StateObject(
+            wrappedValue: MemberBillingPresentationCoordinator(apiClient: resolvedMemberBillingAPIClient)
         )
         _pushCoordinator = ObservedObject(wrappedValue: pushCoordinator)
     }
@@ -90,10 +97,13 @@ struct AppRootView: View {
                 }
             case .authentication:
                 AuthenticationSignInView(content: .signIn, viewModel: authenticationViewModel) {
-                    _ = sessionCoordinator.acceptAuthenticatedSession(authenticationViewModel.verifiedSession)
+                    let accepted = sessionCoordinator.acceptAuthenticatedSession(authenticationViewModel.verifiedSession)
                     pushCoordinator.activate(session: sessionCoordinator.currentSession)
                     withAnimation(.easeInOut(duration: 0.25)) {
                         launchPhase = .signedIn
+                    }
+                    if accepted {
+                        Task { await handleAuthenticatedMembershipEntry() }
                     }
                 }
             case .signedIn:
@@ -111,7 +121,7 @@ struct AppRootView: View {
         .onChange(of: launchPhase) { _, phase in
             guard phase == .signedIn else { return }
             pushCoordinator.activate(session: sessionCoordinator.currentSession)
-            presentPushPermissionPromptIfEligible()
+            openPendingBillingReturnIfPossible()
             openPendingMemberSessionIfPossible()
             openPendingPushRouteIfPossible()
             Task {
@@ -121,7 +131,7 @@ struct AppRootView: View {
         }
         .onChange(of: sessionCoordinator.currentSession) { _, session in
             pushCoordinator.activate(session: session)
-            presentPushPermissionPromptIfEligible()
+            openPendingBillingReturnIfPossible()
             openPendingPushRouteIfPossible()
             Task {
                 await openPendingInviteIfPossible()
@@ -133,6 +143,10 @@ struct AppRootView: View {
             Task {
                 await pushCoordinator.refreshPermissionAndSync()
                 await notificationCenterViewModel.load(for: sessionCoordinator.currentSession)
+                if billingPresentationCoordinator.activePresentation == nil,
+                   let session = sessionCoordinator.currentSession {
+                    await billingPresentationCoordinator.refresh(session: session)
+                }
             }
         }
         .fullScreenCover(isPresented: $isPushPermissionPromptPresented) {
@@ -197,9 +211,8 @@ struct AppRootView: View {
                         onDeleteAccount: deleteAccount,
                         onSavePersonalInfo: savePersonalInfo,
                         notaryProfileAPIClient: notaryProfileAPIClient,
-                        memberBillingAPIClient: memberBillingAPIClient,
-                        refreshSession: { await sessionCoordinator.refreshCurrentSession() },
-                        billingReturnEvent: memberBillingReturnEvent
+                        initialContent: settingsInitialContent,
+                        onMembershipBilling: showMembershipFromSettings
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.ignoresSafeArea())
@@ -218,10 +231,30 @@ struct AppRootView: View {
                     .transition(.opacity)
                     .zIndex(25)
                 }
+
+                if let presentation = billingPresentationCoordinator.activePresentation,
+                   let session = sessionCoordinator.currentSession {
+                    MemberBillingView(
+                        session: session,
+                        apiClient: memberBillingAPIClient,
+                        refreshSession: { await sessionCoordinator.refreshCurrentSession() },
+                        returnEvent: presentation.returnEvent,
+                        onMembershipUpdated: handleMembershipUpdate,
+                        onBack: dismissMembership,
+                        onShowTerms: { showSettingsContentFromMembership(.terms) },
+                        onShowPrivacy: { showSettingsContentFromMembership(.privacy) },
+                        onContactSupport: contactMembershipSupport
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.white.ignoresSafeArea())
+                    .transition(.opacity)
+                    .zIndex(40)
+                }
             }
             .animation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.42), value: isProfileSelectionPresented)
             .animation(.easeInOut(duration: 0.32), value: isUserSettingsPresented)
             .animation(.easeInOut(duration: 0.28), value: isNotificationCenterPresented)
+            .animation(.easeInOut(duration: 0.24), value: billingPresentationCoordinator.activePresentation?.id)
             .navigationDestination(item: $intakeRoute) { route in
                 ProductIntakeFlowView(
                     session: sessionCoordinator.currentSession,
@@ -324,6 +357,20 @@ struct AppRootView: View {
         }
     }
 
+    private var hasPriorityMembershipRoute: Bool {
+        memberBillingReturnEvent != nil
+            || pendingInviteToken != nil
+            || pendingMemberSessionRoute != nil
+            || pendingPushRoute != nil
+            || intakeRoute != nil
+            || reviewRoute != nil
+            || signingRoute != nil
+            || notaryReviewRoute != nil
+            || notarySessionRoute != nil
+            || memberSessionRoute != nil
+            || isNotificationCenterPresented
+    }
+
     @ViewBuilder
     private var signedInTabContent: some View {
         switch selectedTab {
@@ -347,7 +394,11 @@ struct AppRootView: View {
                     onProfileAction: showProfileSelection,
                     onSettingsAction: showUserSettings,
                     hasUnreadNotifications: notificationCenterViewModel.hasUnreadNotifications,
-                    onNotificationsAction: showNotificationCenter
+                    onNotificationsAction: showNotificationCenter,
+                    membershipPrompt: billingPresentationCoordinator.homePrompt,
+                    onMembershipAction: {
+                        billingPresentationCoordinator.presentFromHome(session: sessionCoordinator.currentSession)
+                    }
                 )
             }
         case .documents:
@@ -398,11 +449,22 @@ struct AppRootView: View {
             withAnimation(.easeInOut(duration: 0.25)) {
                 launchPhase = .signedIn
             }
+            await billingPresentationCoordinator.handleRestoredSession(session)
         case .clearedStoredSession:
             withAnimation(.easeInOut(duration: 0.25)) {
                 launchPhase = .authentication
             }
         }
+    }
+
+    @MainActor
+    private func handleAuthenticatedMembershipEntry() async {
+        guard let session = sessionCoordinator.currentSession else { return }
+        openPendingBillingReturnIfPossible()
+        await billingPresentationCoordinator.handleAuthenticatedEntry(
+            session: session,
+            hasPriorityRoute: hasPriorityMembershipRoute
+        )
     }
 
     private func signOut() {
@@ -423,6 +485,10 @@ struct AppRootView: View {
             pendingInviteToken = nil
             isProfileSelectionPresented = false
             isUserSettingsPresented = false
+            isNotificationCenterPresented = false
+            settingsInitialContent = nil
+            memberBillingReturnEvent = nil
+            billingPresentationCoordinator.reset()
 
             withAnimation(.easeInOut(duration: 0.25)) {
                 launchPhase = .authentication
@@ -447,6 +513,10 @@ struct AppRootView: View {
         pendingInviteToken = nil
         isProfileSelectionPresented = false
         isUserSettingsPresented = false
+        isNotificationCenterPresented = false
+        settingsInitialContent = nil
+        memberBillingReturnEvent = nil
+        billingPresentationCoordinator.reset()
 
         withAnimation(.easeInOut(duration: 0.25)) {
             launchPhase = .authentication
@@ -455,11 +525,44 @@ struct AppRootView: View {
 
     private func showUserSettings() {
         isNotificationCenterPresented = false
+        settingsInitialContent = nil
         isUserSettingsPresented = true
     }
 
     private func hideUserSettings() {
         isUserSettingsPresented = false
+        settingsInitialContent = nil
+    }
+
+    private func showMembershipFromSettings() {
+        isUserSettingsPresented = false
+        settingsInitialContent = nil
+        billingPresentationCoordinator.presentFromSettings(session: sessionCoordinator.currentSession)
+    }
+
+    private func dismissMembership() {
+        memberBillingReturnEvent = nil
+        billingPresentationCoordinator.dismiss()
+    }
+
+    private func handleMembershipUpdate(_ payload: MemberMembershipPayload) {
+        guard let modeKey = billingPresentationCoordinator.recordMembershipUpdate(payload) else { return }
+        memberBillingReturnEvent = nil
+        selectedProductModeKey = nil
+        intakeRoute = ProductIntakeRoute(modeKey: modeKey)
+    }
+
+    private func showSettingsContentFromMembership(_ content: UserSettingsContentScreen) {
+        memberBillingReturnEvent = nil
+        billingPresentationCoordinator.dismiss(recordDismissal: false)
+        settingsInitialContent = content
+        isNotificationCenterPresented = false
+        isUserSettingsPresented = true
+    }
+
+    private func contactMembershipSupport() {
+        guard let url = URL(string: "mailto:support@illuminote.io?subject=DARCi%20membership%20support") else { return }
+        openURL(url)
     }
 
     private func savePersonalInfo(_ input: PersonalInfoSaveInput) async throws {
@@ -537,12 +640,21 @@ struct AppRootView: View {
             memberSessionRoute = nil
             pendingMemberSessionRoute = nil
             isProfileSelectionPresented = false
+            await billingPresentationCoordinator.handleRoleChange(sessionCoordinator.currentSession)
         }
     }
 
     private func beginProductIntake(_ card: HomeProductCard) {
-        selectedProductModeKey = nil
-        intakeRoute = ProductIntakeRoute(modeKey: card.modeKey)
+        Task { @MainActor in
+            let decision = await billingPresentationCoordinator.requestProductCreation(
+                modeKey: card.modeKey,
+                session: sessionCoordinator.currentSession
+            )
+            selectedProductModeKey = nil
+            if decision == .allowed {
+                intakeRoute = ProductIntakeRoute(modeKey: card.modeKey)
+            }
+        }
     }
 
     private func showHomeBanner(_ message: String) {
@@ -608,34 +720,60 @@ struct AppRootView: View {
     }
 
     private func handleIncomingURL(_ url: URL) {
-        if let billingResult = MemberBillingDeepLink.result(from: url),
-           MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) == .member {
+        if let billingResult = MemberBillingDeepLink.result(from: url) {
             memberBillingReturnEvent = MemberBillingReturn(result: billingResult)
-            selectedTab = .home
-            isProfileSelectionPresented = false
-            isNotificationCenterPresented = false
-            isUserSettingsPresented = true
+            openPendingBillingReturnIfPossible()
             return
         }
 
         if let inviteToken = MemberDocumentDeepLink.inviteToken(from: url) {
+            suspendMembershipForPriorityRoute()
             pendingInviteToken = inviteToken
             Task { await openPendingInviteIfPossible() }
             return
         }
 
         if let route = MemberDocumentDeepLink.route(from: url) {
+            suspendMembershipForPriorityRoute()
             pendingPushRoute = route
             openPendingPushRouteIfPossible()
             return
         }
 
         guard let requestId = MemberSessionDeepLink.requestId(from: url) else { return }
+        suspendMembershipForPriorityRoute()
         pendingMemberSessionRoute = MemberInPersonSessionRoute(requestId: requestId)
         openPendingMemberSessionIfPossible()
     }
 
+    private func openPendingBillingReturnIfPossible() {
+        guard launchPhase == .signedIn,
+              let session = sessionCoordinator.currentSession else {
+            return
+        }
+
+        guard MobileProfileRole.activeRole(for: session.user) == .member else {
+            memberBillingReturnEvent = nil
+            return
+        }
+
+        guard let returnEvent = memberBillingReturnEvent else { return }
+
+        selectedTab = .home
+        isProfileSelectionPresented = false
+        isNotificationCenterPresented = false
+        isUserSettingsPresented = false
+        settingsInitialContent = nil
+        billingPresentationCoordinator.presentBillingReturn(returnEvent, session: session)
+    }
+
+    private func suspendMembershipForPriorityRoute() {
+        memberBillingReturnEvent = nil
+        billingPresentationCoordinator.suspendForPriorityRoute()
+    }
+
     private func handleIncomingPushRoute(_ route: PushNotificationRoute) {
+        suspendMembershipForPriorityRoute()
         pendingPushRoute = route
         openPendingPushRouteIfPossible()
     }
@@ -647,6 +785,7 @@ struct AppRootView: View {
             return
         }
 
+        suspendMembershipForPriorityRoute()
         selectedTab = .requests
         selectedProductModeKey = nil
         intakeRoute = nil
@@ -670,6 +809,7 @@ struct AppRootView: View {
             return
         }
 
+        suspendMembershipForPriorityRoute()
         do {
             let result = try await requestsAPIClient.claimInviteToken(inviteToken, accessToken: session.accessToken)
             let documentId = result.invite.documentId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -705,6 +845,7 @@ struct AppRootView: View {
             return
         }
 
+        suspendMembershipForPriorityRoute()
         if case .notaryRequestReview = route,
            MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) != .notary {
             Task {

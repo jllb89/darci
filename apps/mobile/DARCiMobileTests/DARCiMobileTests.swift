@@ -2977,3 +2977,225 @@ final class MemberBillingTests: XCTestCase {
         return data
     }
 }
+
+@MainActor
+final class MemberBillingPresentationCoordinatorTests: XCTestCase {
+    func testAuthenticationPresentsAvailableMembershipOnce() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+
+        await coordinator.handleAuthenticatedEntry(session: session(), hasPriorityRoute: false)
+
+        XCTAssertEqual(coordinator.activePresentation?.trigger, .authenticationCompleted)
+        XCTAssertEqual(coordinator.homePrompt?.kind, .subscribe)
+    }
+
+    func testPriorityRouteSuppressesAutomaticPresentation() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+
+        await coordinator.handleAuthenticatedEntry(session: session(), hasPriorityRoute: true)
+
+        XCTAssertNil(coordinator.activePresentation)
+        XCTAssertEqual(coordinator.homePrompt?.kind, .subscribe)
+    }
+
+    func testRestoredSessionRefreshesHomePromptWithoutInterrupting() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+
+        await coordinator.handleRestoredSession(session())
+
+        XCTAssertNil(coordinator.activePresentation)
+        XCTAssertEqual(coordinator.homePrompt?.actionTitle, "View plans")
+    }
+
+    func testAutomaticPresentationHonorsSevenDayDismissalCooldown() async {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let store = InMemoryMemberBillingPresentationStore()
+        let coordinator = makeCoordinator(
+            payload: payload(state: "none", checkoutAvailable: true),
+            store: store,
+            now: { now }
+        )
+
+        await coordinator.handleAuthenticatedEntry(session: session(), hasPriorityRoute: false)
+        coordinator.dismiss()
+        await coordinator.handleAuthenticatedEntry(session: session(), hasPriorityRoute: false)
+
+        XCTAssertNil(coordinator.activePresentation)
+    }
+
+    func testProductCreationIsGatedOnlyWhenMembershipCanBeResolved() async {
+        let availableCoordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+        let unavailableCoordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: false))
+        let activeCoordinator = makeCoordinator(payload: payload(state: "active", checkoutAvailable: false))
+
+        let gated = await availableCoordinator.requestProductCreation(modeKey: "poa_only", session: session())
+        let unavailable = await unavailableCoordinator.requestProductCreation(modeKey: "poa_only", session: session())
+        let active = await activeCoordinator.requestProductCreation(modeKey: "poa_only", session: session())
+
+        XCTAssertEqual(gated, .presentedMembership)
+        XCTAssertEqual(availableCoordinator.activePresentation?.trigger, .productCreation)
+        XCTAssertEqual(unavailable, .allowed)
+        XCTAssertNil(unavailableCoordinator.activePresentation)
+        XCTAssertEqual(active, .allowed)
+        XCTAssertNil(activeCoordinator.activePresentation)
+    }
+
+    func testNotaryProductAccessBypassesMemberBilling() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+
+        let decision = await coordinator.requestProductCreation(
+            modeKey: "poa_only",
+            session: session(role: "notary")
+        )
+
+        XCTAssertEqual(decision, .allowed)
+        XCTAssertNil(coordinator.activePresentation)
+        XCTAssertNil(coordinator.homePrompt)
+    }
+
+    func testExhaustedActiveAllowancePresentsUsageWithoutQueuingProduct() async {
+        let coordinator = makeCoordinator(
+            payload: payload(
+                state: "active",
+                checkoutAvailable: false,
+                canCreateWorkflow: false,
+                allowanceExhausted: true
+            )
+        )
+
+        let decision = await coordinator.requestProductCreation(modeKey: "poa_only", session: session())
+        let resumedModeKey = coordinator.recordMembershipUpdate(
+            payload(
+                state: "active",
+                checkoutAvailable: false,
+                canCreateWorkflow: false,
+                allowanceExhausted: true
+            )
+        )
+
+        XCTAssertEqual(decision, .presentedMembership)
+        XCTAssertEqual(coordinator.activePresentation?.trigger, .productCreation)
+        XCTAssertNil(resumedModeKey)
+    }
+
+    func testActivatedMembershipResumesPendingProduct() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+        _ = await coordinator.requestProductCreation(modeKey: "trust_bundle", session: session())
+
+        let resumedModeKey = coordinator.recordMembershipUpdate(payload(state: "active", checkoutAvailable: false))
+
+        XCTAssertEqual(resumedModeKey, "trust_bundle")
+        XCTAssertNil(coordinator.activePresentation)
+        XCTAssertNil(coordinator.homePrompt)
+    }
+
+    private func makeCoordinator(
+        payload: MemberMembershipPayload,
+        store: MemberBillingPresentationStoring = InMemoryMemberBillingPresentationStore(),
+        now: @escaping () -> Date = Date.init
+    ) -> MemberBillingPresentationCoordinator {
+        MemberBillingPresentationCoordinator(
+            apiClient: PresentationMemberBillingAPIClient(payload: payload),
+            store: store,
+            now: now
+        )
+    }
+
+    private func session(role: String = "member") -> AuthSession {
+        AuthSession(
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            user: AuthenticatedUser(
+                id: "member-1",
+                email: "member@example.com",
+                phone: nil,
+                role: role,
+                availableRoles: role == "notary" ? ["member", "notary"] : ["member"],
+                status: "active",
+                firstName: "Darci",
+                lastName: "Member",
+                emailConfirmedAt: nil,
+                phoneConfirmedAt: nil,
+                lastSignInAt: nil,
+                lastAuthSyncedAt: nil
+            )
+        )
+    }
+
+    private func payload(
+        state: String,
+        checkoutAvailable: Bool,
+        canCreateWorkflow: Bool = true,
+        allowanceExhausted: Bool = false
+    ) -> MemberMembershipPayload {
+        let isActive = state == "active" || state == "trialing"
+        return MemberMembershipPayload(
+            providerEnvironment: "test",
+            paymentsReal: false,
+            enforcementMode: "observe",
+            plans: MemberBillingPlan.fallbackPlans,
+            membership: .init(
+                state: state,
+                subscriptionStatus: isActive ? state : nil,
+                priceCode: isActive ? MemberBillingPriceCode.plus : nil,
+                planName: isActive ? "Plus" : nil,
+                pendingPlanChange: nil,
+                currentPeriodStart: nil,
+                currentPeriodEnd: nil,
+                cancelAtPeriodEnd: false,
+                allowance: .init(
+                    total: isActive ? 10 : nil,
+                    used: allowanceExhausted ? 10 : 0,
+                    remaining: isActive ? (allowanceExhausted ? 0 : 10) : nil,
+                    exhausted: allowanceExhausted
+                ),
+                heldFinalPackageCount: 0
+            ),
+            eligibility: .init(
+                canCreateWorkflow: canCreateWorkflow,
+                entitled: isActive,
+                wouldBlock: false,
+                reasonCode: isActive ? "billing_allowed" : "billing_observe_mode"
+            ),
+            actions: .init(
+                canCheckout: isActive == false,
+                iosCheckoutAvailable: checkoutAvailable,
+                canOpenPortal: isActive,
+                planChangeAvailable: isActive,
+                planChangeReason: nil
+            )
+        )
+    }
+}
+
+private struct PresentationMemberBillingAPIClient: MemberBillingAPIProviding {
+    let payload: MemberMembershipPayload
+
+    func getMembership(accessToken: String) async throws -> MemberMembershipPayload {
+        payload
+    }
+
+    func createCheckout(
+        priceCode: String,
+        idempotencyToken: String,
+        accessToken: String
+    ) async throws -> MemberCheckoutResponse {
+        MemberCheckoutResponse(checkoutUrl: "https://checkout.stripe.com/test", checkoutSessionId: "cs_test")
+    }
+
+    func createPortalSession(accessToken: String) async throws -> MemberBillingPortalResponse {
+        MemberBillingPortalResponse(portalUrl: "https://billing.stripe.com/test")
+    }
+}
+
+private final class InMemoryMemberBillingPresentationStore: MemberBillingPresentationStoring {
+    private var dismissedDates: [String: Date] = [:]
+
+    func dismissedAt(for userId: String) -> Date? {
+        dismissedDates[userId]
+    }
+
+    func setDismissedAt(_ date: Date, for userId: String) {
+        dismissedDates[userId] = date
+    }
+}

@@ -6,7 +6,12 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
-    private func makeApp(restoreSession: Bool = false, notarySession: Bool = false) -> XCUIApplication {
+    private func makeApp(
+        restoreSession: Bool = false,
+        notarySession: Bool = false,
+        billingCheckoutEnabled: Bool = false,
+        existingUser: Bool = false
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["DARCI_MOCK_AUTH"] = "1"
         if restoreSession {
@@ -14,6 +19,13 @@ final class DARCiMobileUITests: XCTestCase {
         }
         if notarySession {
             app.launchEnvironment["DARCI_MOCK_NOTARY_SESSION"] = "1"
+        }
+        if billingCheckoutEnabled {
+            app.launchEnvironment["DARCI_MOCK_IOS_CHECKOUT_ENABLED"] = "1"
+            app.launchArguments += ["-darci.memberBilling.lastDismissedAt.mock-user", "0"]
+        }
+        if existingUser {
+            app.launchEnvironment["DARCI_MOCK_AUTH_EXISTING_USER"] = "1"
         }
         return app
     }
@@ -196,6 +208,56 @@ final class DARCiMobileUITests: XCTestCase {
         attachment.name = "member-billing-proposal-01"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    func testFreshAuthenticationAutomaticallyPresentsAvailableMembership() throws {
+        let app = makeApp(billingCheckoutEnabled: true, existingUser: true)
+        app.launch()
+
+        app.buttons["Start"].tap()
+        XCTAssertTrue(app.buttons["Close onboarding"].waitForExistence(timeout: 5))
+        app.buttons["Close onboarding"].tap()
+        XCTAssertTrue(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 5))
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.76)).tap()
+        app.typeText("2025550147")
+        app.buttons["Continue"].tap()
+
+        let otpField = app.textFields["One-time code"]
+        XCTAssertTrue(otpField.waitForExistence(timeout: 5))
+        otpField.tap()
+        app.typeText("12345678")
+        app.buttons["Verify code"].tap()
+
+        XCTAssertTrue(app.staticTexts["Welcome to DARCi!"].waitForExistence(timeout: 5))
+        app.buttons["Continue"].tap()
+        XCTAssertTrue(app.staticTexts["Make it official."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["member-billing-not-now-button"].exists)
+    }
+
+    @MainActor
+    func testRestoredMemberSeesPersistentPromptAndProductCreationGate() throws {
+        let app = makeApp(restoreSession: true, billingCheckoutEnabled: true)
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Welcome to DARCi."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Make it official."].exists)
+        XCTAssertTrue(app.buttons["home-membership-prompt"].waitForExistence(timeout: 5))
+
+        let powerOfAttorneyCard = app.buttons["home-product-card-poa_only"]
+        XCTAssertTrue(powerOfAttorneyCard.waitForExistence(timeout: 5))
+        if powerOfAttorneyCard.isHittable == false {
+            app.swipeUp()
+        }
+        powerOfAttorneyCard.tap()
+
+        XCTAssertTrue(app.staticTexts["Make it official."].waitForExistence(timeout: 5))
+        let notNowButton = app.buttons["member-billing-not-now-button"]
+        XCTAssertTrue(notNowButton.waitForExistence(timeout: 5))
+        notNowButton.tap()
+        XCTAssertTrue(app.buttons["home-membership-prompt"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["New power of attorney."].exists)
     }
 
     @MainActor

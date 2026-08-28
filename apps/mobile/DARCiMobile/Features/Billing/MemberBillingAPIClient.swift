@@ -46,34 +46,44 @@ struct MemberBillingAPIClient: MemberBillingAPIProviding, Sendable {
 
 struct MockMemberBillingAPIClient: MemberBillingAPIProviding, Sendable {
     func getMembership(accessToken: String) async throws -> MemberMembershipPayload {
-        MemberMembershipPayload(
+        let environment = ProcessInfo.processInfo.environment
+        let checkoutEnabled = environment["DARCI_MOCK_IOS_CHECKOUT_ENABLED"] == "1"
+        let state = environment["DARCI_MOCK_MEMBER_BILLING_STATE"] ?? "none"
+        let isActive = state == "active" || state == "trialing"
+
+        return MemberMembershipPayload(
             providerEnvironment: "test",
             paymentsReal: false,
             enforcementMode: "observe",
             plans: MemberBillingPlan.fallbackPlans,
             membership: .init(
-                state: "none",
-                subscriptionStatus: nil,
-                priceCode: nil,
-                planName: nil,
+                state: state,
+                subscriptionStatus: isActive ? state : nil,
+                priceCode: isActive ? MemberBillingPriceCode.plus : nil,
+                planName: isActive ? "Plus" : nil,
                 pendingPlanChange: nil,
                 currentPeriodStart: nil,
                 currentPeriodEnd: nil,
                 cancelAtPeriodEnd: false,
-                allowance: .init(total: nil, used: 0, remaining: nil, exhausted: false),
+                allowance: .init(
+                    total: isActive ? 10 : nil,
+                    used: 0,
+                    remaining: isActive ? 10 : nil,
+                    exhausted: false
+                ),
                 heldFinalPackageCount: 0
             ),
             eligibility: .init(
                 canCreateWorkflow: true,
-                entitled: false,
+                entitled: isActive,
                 wouldBlock: false,
-                reasonCode: "billing_observe_mode"
+                reasonCode: isActive ? "billing_allowed" : "billing_observe_mode"
             ),
             actions: .init(
-                canCheckout: true,
-                iosCheckoutAvailable: false,
-                canOpenPortal: false,
-                planChangeAvailable: false,
+                canCheckout: isActive == false,
+                iosCheckoutAvailable: checkoutEnabled,
+                canOpenPortal: isActive,
+                planChangeAvailable: isActive,
                 planChangeReason: nil
             )
         )

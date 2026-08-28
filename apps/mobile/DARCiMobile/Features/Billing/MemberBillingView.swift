@@ -19,6 +19,7 @@ struct MemberBillingView: View {
         apiClient: MemberBillingAPIProviding,
         refreshSession: @escaping () async -> AuthSession?,
         returnEvent: MemberBillingReturn?,
+        onMembershipUpdated: @escaping (MemberMembershipPayload) -> Void = { _ in },
         onBack: @escaping () -> Void,
         onShowTerms: @escaping () -> Void,
         onShowPrivacy: @escaping () -> Void,
@@ -34,7 +35,8 @@ struct MemberBillingView: View {
             wrappedValue: MemberBillingViewModel(
                 accessToken: session.accessToken,
                 apiClient: apiClient,
-                refreshSession: refreshSession
+                refreshSession: refreshSession,
+                onMembershipUpdated: onMembershipUpdated
             )
         )
     }
@@ -313,6 +315,13 @@ struct MemberBillingView: View {
             .buttonStyle(.plain)
             .padding(.top, 10 * scale)
             .accessibilityIdentifier("member-billing-existing-subscription-button")
+
+            Button("Not now", action: onBack)
+                .buttonStyle(.plain)
+                .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
+                .foregroundStyle(Color.black.opacity(0.55))
+                .padding(.top, 12 * scale)
+                .accessibilityIdentifier("member-billing-not-now-button")
 
             HStack(spacing: 5 * scale) {
                 Button("Terms", action: onShowTerms)

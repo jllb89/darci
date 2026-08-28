@@ -3,7 +3,7 @@ import Foundation
 struct MockAuthAPIClient: AuthAPIProviding, Sendable {
     var otpLength = 8
     var cooldownSeconds = 60
-    var profileCompletionRequired = true
+    var profileCompletionRequired = ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH_EXISTING_USER"] != "1"
 
     func requestEmailOTP(email: String, returnTo: String?) async throws -> AuthOTPStartResponse {
         AuthOTPStartResponse(status: "ok", message: "Email code sent", otpLength: otpLength, cooldownSeconds: cooldownSeconds)

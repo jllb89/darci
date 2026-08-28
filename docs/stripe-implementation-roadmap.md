@@ -431,7 +431,7 @@ Work:
 
 ## Phase 6 — iOS Status And Purchase Decision
 
-Implementation status: **technical UI and server release gate implemented locally; distribution approval incomplete** on 2026-08-27. The iOS member billing view consumes the shared API, renders paywall/active/recovery states, opens hosted Checkout and Customer Portal only when the server enables purchase, and handles trusted universal-link returns without activating from the redirect. `IOS_MEMBER_CHECKOUT_ENABLED=false` is now the staging/default release posture, so the shipped screen remains status/management-only while App Review classification is unresolved. The app builds and its focused billing tests pass. The changes are not yet committed, and no repository evidence records App Review classification, storefront approval, or physical-device Apple Pay validation.
+Implementation status: **technical UI, centralized presentation policy, and server release gate implemented locally; distribution approval incomplete** on 2026-08-27. The iOS member billing view consumes the shared API, renders paywall/active/activation-pending/recovery states, opens hosted Checkout and Customer Portal only when the server enables purchase, and handles trusted universal-link returns without activating from the redirect. A root membership coordinator now presents once after fresh member authentication, applies a seven-day dismissal cooldown, uses a persistent nonblocking Home prompt after restored sessions, gates only new product creation, explains exhausted active allowances, resumes the intended product after webhook-confirmed activation, and yields to invites, signing, existing documents, in-person sessions, push routes, and notary work. `IOS_MEMBER_CHECKOUT_ENABLED=false` remains the staging/default release posture, so members may inspect status without being trapped behind an unavailable purchase path while App Review classification is unresolved. The app builds; eight coordinator tests and focused simulator UI tests for fresh-auth presentation, reopen behavior, product gating, dismissal, and Settings routing pass. The changes are not yet committed, and no repository evidence records App Review classification, storefront approval, or physical-device Apple Pay validation.
 
 Purpose: keep iOS truthful while the hybrid digital/in-person payment classification is resolved.
 
@@ -624,7 +624,8 @@ The presence of web and iOS paywall screens does not complete billing enforcemen
 7. [ ] Run that staging test-mode end-to-end exercise, then change staging to `test + enforced` only when every activation check passes. `observe` remains intentional today.
 8. [x] Implement Phase 7 reconciliation, replay/resync, alerting, retention, lifecycle-evidence reporting, operator recovery, and incident guidance before relying on billing without direct engineering intervention.
 9. [x] Keep the iOS purchase CTA server-disabled until App Review/storefront treatment is recorded. Physical-device validation of the eventual approved hosted or native Apple Pay path remains pending.
-10. [ ] Commit, deploy, and ship the web/backend/iOS/AASA changes through the normal release process.
+10. [x] Centralize iOS membership presentation: fresh-auth prompt, restored-session Home CTA, new-creation gate, seven-day cooldown, priority-route/notary bypass, activation resume, quota explanation, and centralized Settings/return handling.
+11. [ ] Commit, deploy, and ship the web/backend/iOS/AASA changes through the normal release process.
 
 ## Primary Technical References
 

@@ -13,17 +13,20 @@ final class MemberBillingViewModel: ObservableObject {
 
     private let apiClient: MemberBillingAPIProviding
     private let refreshSession: () async -> AuthSession?
+    private let onMembershipUpdated: (MemberMembershipPayload) -> Void
     private var accessToken: String
     private var pollingTask: Task<Void, Never>?
 
     init(
         accessToken: String,
         apiClient: MemberBillingAPIProviding,
-        refreshSession: @escaping () async -> AuthSession? = { nil }
+        refreshSession: @escaping () async -> AuthSession? = { nil },
+        onMembershipUpdated: @escaping (MemberMembershipPayload) -> Void = { _ in }
     ) {
         self.accessToken = accessToken
         self.apiClient = apiClient
         self.refreshSession = refreshSession
+        self.onMembershipUpdated = onMembershipUpdated
     }
 
     deinit {
@@ -67,6 +70,7 @@ final class MemberBillingViewModel: ObservableObject {
                 try await apiClient.getMembership(accessToken: accessToken)
             }
             payload = nextPayload
+            onMembershipUpdated(nextPayload)
             errorMessage = nil
 
             if nextPayload.membership.isPendingActivation {

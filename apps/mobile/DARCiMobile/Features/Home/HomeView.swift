@@ -8,6 +8,8 @@ struct HomeView: View {
     private let onSettingsAction: () -> Void
     private let hasUnreadNotifications: Bool
     private let onNotificationsAction: () -> Void
+    private let membershipPrompt: MemberBillingHomePrompt?
+    private let onMembershipAction: () -> Void
 
     @StateObject private var viewModel: HomeViewModel
     @Binding private var selectedProductModeKey: String?
@@ -24,7 +26,9 @@ struct HomeView: View {
         onProfileAction: @escaping () -> Void = {},
         onSettingsAction: @escaping () -> Void = {},
         hasUnreadNotifications: Bool = false,
-        onNotificationsAction: @escaping () -> Void = {}
+        onNotificationsAction: @escaping () -> Void = {},
+        membershipPrompt: MemberBillingHomePrompt? = nil,
+        onMembershipAction: @escaping () -> Void = {}
     ) {
         self.session = session
         self.onProductSelected = onProductSelected
@@ -32,6 +36,8 @@ struct HomeView: View {
         self.onSettingsAction = onSettingsAction
         self.hasUnreadNotifications = hasUnreadNotifications
         self.onNotificationsAction = onNotificationsAction
+        self.membershipPrompt = membershipPrompt
+        self.onMembershipAction = onMembershipAction
         _viewModel = StateObject(wrappedValue: viewModel)
         _selectedProductModeKey = selectedProductModeKey
         _selectedTab = selectedTab
@@ -51,16 +57,23 @@ struct HomeView: View {
                         .padding(.horizontal, scaled(33, in: proxy))
                         .homeRevealOrder(1, visibleGroupCount: visibleGroupCount)
 
+                    if let membershipPrompt {
+                        membershipCard(membershipPrompt, in: proxy)
+                            .padding(.top, scaled(24, in: proxy))
+                            .padding(.horizontal, scaled(14, in: proxy))
+                            .homeRevealOrder(2, visibleGroupCount: visibleGroupCount)
+                    }
+
                     productStatus(in: proxy)
-                        .padding(.top, scaled(34, in: proxy))
+                        .padding(.top, scaled(membershipPrompt == nil ? 34 : 24, in: proxy))
                         .padding(.horizontal, scaled(14, in: proxy))
-                        .homeRevealOrder(2, visibleGroupCount: visibleGroupCount)
+                        .homeRevealOrder(3, visibleGroupCount: visibleGroupCount)
 
                     productGrid(in: proxy)
                         .padding(.top, scaled(34, in: proxy))
                         .padding(.horizontal, scaled(14, in: proxy))
                         .padding(.bottom, scaled(64, in: proxy))
-                        .homeRevealOrder(3, visibleGroupCount: visibleGroupCount, verticalOffset: 14)
+                        .homeRevealOrder(4, visibleGroupCount: visibleGroupCount, verticalOffset: 14)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -142,6 +155,57 @@ struct HomeView: View {
             .accessibilityIdentifier("home-welcome-title")
     }
 
+    private func membershipCard(_ prompt: MemberBillingHomePrompt, in proxy: GeometryProxy) -> some View {
+        Button(action: onMembershipAction) {
+            HStack(alignment: .center, spacing: scaled(18, in: proxy)) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(prompt.eyebrow)
+                        .font(DARCiFont.maisonNeue(.mono, size: 9))
+                        .tracking(0.35)
+                        .foregroundStyle(DARCiTheme.onboardingGreen)
+
+                    Text(prompt.title)
+                        .font(DARCiFont.maisonNeue(.medium, size: 18))
+                        .foregroundStyle(.white)
+                        .padding(.top, scaled(8, in: proxy))
+
+                    Text(prompt.message)
+                        .font(DARCiFont.maisonNeue(.book, size: 11))
+                        .lineSpacing(3)
+                        .foregroundStyle(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, scaled(7, in: proxy))
+
+                    Text(prompt.actionTitle)
+                        .font(DARCiFont.maisonNeue(.medium, size: 11))
+                        .foregroundStyle(.white)
+                        .underline()
+                        .padding(.top, scaled(14, in: proxy))
+                }
+
+                Spacer(minLength: 0)
+
+                ZStack {
+                    Circle()
+                        .fill(DARCiTheme.onboardingGreen)
+
+                    HomeResourceIconGlyph(icon: .smallArrow)
+                        .stroke(.black, style: StrokeStyle(lineWidth: 1.6, lineCap: .butt, lineJoin: .miter))
+                        .padding(scaled(12, in: proxy))
+                }
+                .frame(width: scaled(42, in: proxy), height: scaled(42, in: proxy))
+            }
+            .padding(.horizontal, scaled(20, in: proxy))
+            .padding(.vertical, scaled(21, in: proxy))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home-membership-prompt")
+        .accessibilityLabel("\(prompt.title). \(prompt.actionTitle)")
+    }
+
     @ViewBuilder
     private func productStatus(in proxy: GeometryProxy) -> some View {
         if viewModel.isLoadingProducts {
@@ -203,7 +267,7 @@ struct HomeView: View {
             .padding(.top, scaled(10, in: proxy))
             .padding(.bottom, scaled(12, in: proxy))
             .background(Color.white)
-            .homeRevealOrder(4, visibleGroupCount: visibleGroupCount, verticalOffset: 6)
+            .homeRevealOrder(5, visibleGroupCount: visibleGroupCount, verticalOffset: 6)
     }
 
     private func startEntranceAnimation() {
@@ -211,7 +275,7 @@ struct HomeView: View {
         entranceAnimationID = animationID
         visibleGroupCount = 0
 
-        for groupIndex in 1...5 {
+        for groupIndex in 1...6 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(groupIndex - 1) * 0.09) {
                 guard entranceAnimationID == animationID else {
                     return

@@ -8,14 +8,12 @@ struct UserSettingsView: View {
     let onDeleteAccount: () async throws -> Void
     let onSavePersonalInfo: (PersonalInfoSaveInput) async throws -> Void
     let notaryProfileAPIClient: NotaryProfileAPIProviding
-    let memberBillingAPIClient: MemberBillingAPIProviding
-    let refreshSession: () async -> AuthSession?
-    let billingReturnEvent: MemberBillingReturn?
+    let initialContent: UserSettingsContentScreen?
+    let onMembershipBilling: () -> Void
 
     @Environment(\.openURL) private var openURL
     @State private var isPersonalInfoPresented = false
     @State private var isNotaryInformationPresented = false
-    @State private var isMemberBillingPresented = false
     @State private var presentedContent: UserSettingsContentScreen?
     @State private var isDeleteAccountConfirmationPresented = false
     @State private var isDeletingAccount = false
@@ -51,24 +49,6 @@ struct UserSettingsView: View {
                     onSave: onSavePersonalInfo
                 )
                 .transition(.opacity)
-            } else if isMemberBillingPresented, let session {
-                MemberBillingView(
-                    session: session,
-                    apiClient: memberBillingAPIClient,
-                    refreshSession: refreshSession,
-                    returnEvent: billingReturnEvent,
-                    onBack: { isMemberBillingPresented = false },
-                    onShowTerms: {
-                        isMemberBillingPresented = false
-                        presentedContent = .terms
-                    },
-                    onShowPrivacy: {
-                        isMemberBillingPresented = false
-                        presentedContent = .privacy
-                    },
-                    onContactSupport: openSupportEmail
-                )
-                .transition(.opacity)
             } else if isNotaryInformationPresented {
                 NotaryInformationSettingsView(
                     session: session,
@@ -90,12 +70,12 @@ struct UserSettingsView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.24), value: isPersonalInfoPresented)
-        .animation(.easeInOut(duration: 0.24), value: isMemberBillingPresented)
         .animation(.easeInOut(duration: 0.24), value: isNotaryInformationPresented)
         .animation(.easeInOut(duration: 0.24), value: presentedContent)
-        .onChange(of: billingReturnEvent?.id, initial: true) { _, _ in
-            guard billingReturnEvent != nil, showsMemberBilling else { return }
-            isMemberBillingPresented = true
+        .onChange(of: initialContent, initial: true) { _, nextContent in
+            if let nextContent {
+                presentedContent = nextContent
+            }
         }
         .alert("Delete account?", isPresented: $isDeleteAccountConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
@@ -244,7 +224,7 @@ struct UserSettingsView: View {
                     .accessibilityIdentifier("settings-personal-info-button")
                 } else if title == "Membership & Billing" {
                     Button {
-                        isMemberBillingPresented = true
+                        onMembershipBilling()
                     } label: {
                         row
                             .contentShape(Rectangle())
