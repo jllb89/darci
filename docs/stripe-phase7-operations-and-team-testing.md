@@ -2,8 +2,8 @@
 
 - Status: build-ready implementation
 - Environment: Stripe test mode
-- Staging enforcement: `observe`
-- iOS purchase availability: disabled until App Review classification
+- Staging enforcement: `enforced`
+- iOS purchase availability: enabled for controlled Stripe test-mode acceptance
 
 ## What ships
 
@@ -29,8 +29,8 @@ No new migration is required. Phase 7 uses the durable inbox, entitlement ledger
 Deploy API, worker, web, and iOS normally with:
 
 ```text
-BILLING_ENFORCEMENT_MODE=observe
-IOS_MEMBER_CHECKOUT_ENABLED=false
+BILLING_ENFORCEMENT_MODE=enforced
+IOS_MEMBER_CHECKOUT_ENABLED=true
 BILLING_RECONCILIATION_RUNNER_ENABLED=true
 BILLING_RECONCILIATION_INTERVAL_SECONDS=900
 STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED=true
@@ -39,7 +39,7 @@ STRIPE_WEBHOOK_RETENTION_RUN_LIMIT=100
 BILLING_LIFECYCLE_ACCEPTANCE_ID=
 ```
 
-`observe` is intentional. Billing decisions are calculated and audited, but they do not block member workflows or place new final packages on hold. Automated tests continue to exercise enforced-mode denial and release protections separately.
+Staging now runs in the private-beta target posture: Stripe test mode with DARCi billing enforcement enabled. Stripe cannot collect a live payment, but DARCi blocks new workflows without entitlement, rejects submissions above the allowance, and holds finalized member packages when release eligibility is lost. Use controlled test accounts because these restrictions are real within staging.
 
 Do not populate `BILLING_LIFECYCLE_ACCEPTANCE_ID` merely to make the readiness display green. The lifecycle report generates an acceptance ID only after it finds evidence for every required staging scenario.
 
@@ -100,9 +100,9 @@ Use dedicated staging member accounts and Stripe test payment methods. Do not us
 ### 1. Baseline
 
 1. Confirm `/app/billing` says private beta / Stripe test mode.
-2. Confirm `/app/admin/billing` says `observe`.
+2. Confirm `/app/admin/billing` says `enforced`.
 3. Run `npm run stripe:operations:report` and record any pre-existing drift.
-4. Confirm iOS displays membership status but does not display a purchase CTA.
+4. Confirm iOS displays the membership purchase CTA and opens Stripe test Checkout.
 
 ### 2. Checkout and activation
 
@@ -128,7 +128,7 @@ With an active test membership, submit one workflow of each kind:
 
 Confirm each first submission consumes exactly one unit. Saving drafts, signer activity, retries, rendering, signatures, finalization, and ledger retries must not consume another unit.
 
-Because staging remains in `observe`, an exhausted allowance is reported and audited but does not block. Enforced denial behavior remains covered by automated policy/database tests until the explicit activation deployment.
+After consuming the plan allowance, start and submit one additional workflow. Confirm the server rejects it with `billing_workflow_limit_reached`, the web and iOS clients present the upgrade/renewal path, and no additional usage entry is written.
 
 ### 5. Plan changes
 
@@ -147,13 +147,14 @@ Because staging remains in `observe`, an exhausted allowance is reported and aud
 
 ### 7. Final-package continuity
 
-In `observe`, complete a workflow after making its subscription inactive and confirm:
+In `enforced`, complete a workflow after making its subscription inactive and confirm:
 
 - the notary workflow is never interrupted;
-- the finalization policy audit records what enforcement would have decided; and
-- the team can still complete the notarization.
+- the team can still complete the notarization;
+- the finalized package enters `billing_held`; and
+- member download, hash/ledger, and public-verification surfaces remain unavailable until reactivation.
 
-The actual `billing_held` state, protected reads, immutable release transition, and notary bypass are verified in the automated SQL/backend test suites. A real staging hold should be tested only during the later explicit enforced-mode activation exercise, not by altering production-shaped records manually.
+Reactivate the test membership through Stripe, wait for webhook fulfillment, and confirm the original finalized bytes are released exactly once. Use only disposable staging subscriptions and non-legal test documents.
 
 ### 8. Acceptance report
 
@@ -163,13 +164,13 @@ Run:
 npm run stripe:acceptance:verify -- --since=<start-of-team-test-ISO-timestamp>
 ```
 
-The report lists every missing scenario and generates an `acceptanceId` only when the evidence set is complete. Keep staging in `observe` even when complete; moving to `enforced` is a separate deployment decision.
+The report lists every missing scenario and generates an `acceptanceId` only when the evidence set is complete. Keep staging in `enforced` throughout final-behavior acceptance so the report reflects the configuration being validated.
 
 ## Incident playbooks
 
 ### Stripe API outage
 
-- Leave staging in `observe`.
+- Leave staging in `enforced`; use controlled test accounts and pause testing if Stripe is unavailable.
 - Do not infer activation from Checkout return parameters.
 - Let signed deliveries remain in the durable inbox and automatic backoff.
 - After recovery, run reconciliation and resync affected subscriptions.
@@ -210,7 +211,7 @@ The report lists every missing scenario and generates an `acceptanceId` only whe
 
 ## Known external gate
 
-iOS is build-ready in status/management mode. Enabling hosted Checkout or a native Apple Pay path still requires recorded App Review/storefront treatment and physical-device validation. That external gate does not block deployment or team testing of the current server-disabled iOS build.
+iOS hosted Checkout is enabled only for the controlled staging/test build so the team can validate the complete purchase flow. Public App Store distribution still requires recorded App Review/storefront treatment and physical-device Apple Pay validation; staging enablement is not evidence of production approval.
 
 ## Pre-deployment reconciliation baseline
 
@@ -221,6 +222,6 @@ The read-only report was run against staging on 2026-08-27 after implementation:
 - 0 webhook backlog events;
 - 1 internal and 1 matching Stripe test subscription;
 - lifecycle evidence at 3/15: Checkout completed, subscription created, and invoice paid; and
-- recommendation: remain in `observe` until the team generates the remaining evidence.
+- recommendation at the time of the baseline: remain in `observe` until the team begins controlled final-behavior acceptance. Staging was moved to `enforced` on 2026-08-28 for that exercise.
 
 This is a baseline, not post-deployment acceptance. Run the report again after API/worker/web deployment and after every team test batch.

@@ -188,6 +188,29 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testHomeMastheadRemainsFixedWhileContentScrolls() throws {
+        let app = makeApp(restoreSession: true)
+        app.launch()
+
+        let welcome = app.staticTexts["home-welcome-title"]
+        let settings = app.buttons["home-settings-button"]
+        let membershipPrompt = app.buttons["home-membership-prompt"]
+        XCTAssertTrue(welcome.waitForExistence(timeout: 5))
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        XCTAssertTrue(membershipPrompt.waitForExistence(timeout: 5))
+
+        let initialWelcomeY = welcome.frame.minY
+        let initialSettingsY = settings.frame.minY
+        let initialPromptY = membershipPrompt.frame.minY
+
+        app.swipeUp()
+
+        XCTAssertEqual(welcome.frame.minY, initialWelcomeY, accuracy: 1)
+        XCTAssertEqual(settings.frame.minY, initialSettingsY, accuracy: 1)
+        XCTAssertLessThan(membershipPrompt.frame.minY, initialPromptY)
+    }
+
+    @MainActor
     func testMemberBillingProposalOneLoadsFromSettings() throws {
         let app = makeApp(restoreSession: true)
         app.launch()

@@ -5,7 +5,7 @@ Scope: web implementation status after the cross-flow billing completion pass.
 
 ## Activation rule
 
-Staging intentionally uses `BILLING_ENFORCEMENT_MODE=observe`. The backend calculates and audits every decision, but it does not block members or hold final packages yet. The member billing page, quota errors, held-package states, pricing cleanup, and active-plan changes are implemented locally; switch to `enforced` only after the Stripe test-mode lifecycle matrix passes in staging. Migration `20260827120000_backfill_final_package_release_controls.sql` marks existing completed packages as released; enforced mode then fails closed on any new final package that somehow has no release decision, preventing a finalization race from exposing bytes.
+As of 2026-08-28, staging uses `BILLING_ENFORCEMENT_MODE=enforced` with Stripe test credentials so the team can exercise the private-beta behavior end to end without real charges. The backend blocks missing/inactive memberships and exhausted allowances, while accepted work continues through notarization and an ineligible final package remains held until reactivation. Migration `20260827120000_backfill_final_package_release_controls.sql` marks existing completed packages as released; enforced mode fails closed on any new final package that somehow has no release decision, preventing a finalization race from exposing bytes.
 
 ## Required screen
 

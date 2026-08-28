@@ -385,7 +385,7 @@ Fulfillment:
 
 ## Phase 4 — Usage And Product-Workflow Integration
 
-Implementation status: **implemented; staging end-to-end acceptance gated** on 2026-08-27. The shared policy boundary, atomic consumption, workflow continuity, final-package hold/release controls, protected read surfaces, reactivation release, recent-reauthenticated support actions, and member-facing denial/held-package states are implemented. Migration `20260827120000` is applied in staging and preserved 97 legacy completed packages as released. Staging remains in `observe` mode until the required Stripe lifecycle and three-product-flow matrix passes. Changing `BILLING_ENFORCEMENT_MODE` to `enforced` is the final private-beta activation step, not evidence by itself that Phase 4 is accepted.
+Implementation status: **implemented; staging final-behavior acceptance in progress** on 2026-08-28. The shared policy boundary, atomic consumption, workflow continuity, final-package hold/release controls, protected read surfaces, reactivation release, recent-reauthenticated support actions, and member-facing denial/held-package states are implemented. Migration `20260827120000` is applied in staging and preserved 97 legacy completed packages as released. Staging is configured as `test + enforced` so the required Stripe lifecycle, allowance denial, held-package recovery, and three-product-flow matrix can now be exercised without real charges. Configuration alone is not evidence that Phase 4 is accepted.
 
 Purpose: enforce member allowance without duplicating business rules or damaging workflow integrity.
 
@@ -431,7 +431,7 @@ Work:
 
 ## Phase 6 — iOS Status And Purchase Decision
 
-Implementation status: **technical UI, centralized presentation policy, and server release gate implemented locally; distribution approval incomplete** on 2026-08-27. The iOS member billing view consumes the shared API, renders paywall/active/activation-pending/recovery states, opens hosted Checkout and Customer Portal only when the server enables purchase, and handles trusted universal-link returns without activating from the redirect. A root membership coordinator now presents once after fresh member authentication, applies a seven-day dismissal cooldown, uses a persistent nonblocking Home prompt after restored sessions, gates only new product creation, explains exhausted active allowances, resumes the intended product after webhook-confirmed activation, and yields to invites, signing, existing documents, in-person sessions, push routes, and notary work. `IOS_MEMBER_CHECKOUT_ENABLED=false` remains the staging/default release posture, so members may inspect status without being trapped behind an unavailable purchase path while App Review classification is unresolved. The app builds; eight coordinator tests and focused simulator UI tests for fresh-auth presentation, reopen behavior, product gating, dismissal, and Settings routing pass. The changes are not yet committed, and no repository evidence records App Review classification, storefront approval, or physical-device Apple Pay validation.
+Implementation status: **technical UI, centralized presentation policy, and server release gate implemented; staging purchase acceptance enabled; public distribution approval incomplete** on 2026-08-28. The iOS member billing view consumes the shared API, renders paywall/active/activation-pending/recovery states, opens hosted Checkout and Customer Portal only when the server enables purchase, and handles trusted universal-link returns without activating from the redirect. A root membership coordinator presents once after fresh member authentication, applies a seven-day dismissal cooldown, uses a persistent nonblocking Home prompt after restored sessions, gates only new product creation, explains exhausted active allowances, resumes the intended product after webhook-confirmed activation, and yields to invites, signing, existing documents, in-person sessions, push routes, and notary work. `IOS_MEMBER_CHECKOUT_ENABLED=true` is now the controlled staging posture so the team can test Stripe-hosted Checkout with test payment methods. This does not resolve App Review classification, storefront approval, or physical-device Apple Pay validation for a public production build.
 
 Purpose: keep iOS truthful while the hybrid digital/in-person payment classification is resolved.
 
@@ -451,12 +451,12 @@ Work:
 Exit criteria:
 
 - Web and iOS display identical trusted membership and usage state.
-- No iOS purchase CTA ships without an approved policy path.
+- No iOS purchase CTA ships in a public production build without an approved policy path; controlled staging/test distribution may exercise the server-enabled test flow.
 - Universal-link return cannot activate a subscription before webhook fulfillment.
 
 ## Phase 7 — Reconciliation, Support, And Recovery
 
-Implementation status: **implemented locally; deployment and team exercise pending** on 2026-08-27. Durable webhook retry/dead-letter mechanics, provider-backed reconciliation, lifecycle-evidence reporting, audited event replay, subscription resync, eligible-release retry, usage reversal, forced release, a full account/subscription/entitlement/order/invoice/usage operator ledger, scheduled drift alerts, rejected-signature and repeated-Checkout telemetry, minimized-payload retention cleanup, Stripe/DARCi request correlation, CLI readiness checks, and incident/team-testing runbooks are implemented. No new schema migration is required. The read-only pre-deployment report found zero reconciliation drift/backlog and 3 of 15 lifecycle evidence scenarios already present. Staging remains intentionally in `observe`; team evidence and any resulting recovery actions will be evaluated after deployment.
+Implementation status: **implemented; final-behavior staging deployment and team exercise pending** on 2026-08-28. Durable webhook retry/dead-letter mechanics, provider-backed reconciliation, lifecycle-evidence reporting, audited event replay, subscription resync, eligible-release retry, usage reversal, forced release, a full account/subscription/entitlement/order/invoice/usage operator ledger, scheduled drift alerts, rejected-signature and repeated-Checkout telemetry, minimized-payload retention cleanup, Stripe/DARCi request correlation, CLI readiness checks, and incident/team-testing runbooks are implemented. No new schema migration is required. The read-only pre-deployment report found zero reconciliation drift/backlog and 3 of 15 lifecycle evidence scenarios already present. Staging is configured as `test + enforced`; team evidence and any resulting recovery actions must now be evaluated after deployment.
 
 Purpose: make billing explainable and recoverable without direct database edits.
 
@@ -621,9 +621,9 @@ The presence of web and iOS paywall screens does not complete billing enforcemen
 4. [x] Add a server-controlled active-subscription plan-change endpoint with immediate prorated upgrades, period-end downgrades, preserved current-period usage, webhook-authoritative fulfillment, and idempotent retries.
 5. [x] Reconcile this roadmap and `docs/stripe-phase-45-frontend-gaps-2026-08-27.md` with the implemented cross-flow requirements.
 6. [ ] Complete the remaining staging lifecycle matrix. Local backend/web regressions and focused iOS billing tests pass, but real Stripe test-mode payment recovery, renewal/cancellation, delayed/out-of-order delivery, worker restart, and byte-identical held-package reactivation still require an authenticated staging exercise.
-7. [ ] Run that staging test-mode end-to-end exercise, then change staging to `test + enforced` only when every activation check passes. `observe` remains intentional today.
+7. [ ] Run the staging test-mode end-to-end exercise under the configured `test + enforced` posture, including real sixth-workflow denial and held-package reactivation.
 8. [x] Implement Phase 7 reconciliation, replay/resync, alerting, retention, lifecycle-evidence reporting, operator recovery, and incident guidance before relying on billing without direct engineering intervention.
-9. [x] Keep the iOS purchase CTA server-disabled until App Review/storefront treatment is recorded. Physical-device validation of the eventual approved hosted or native Apple Pay path remains pending.
+9. [ ] Validate the server-enabled iOS hosted Checkout path in controlled staging/TestFlight distribution. Keep it disabled in any public production build until App Review/storefront treatment is recorded; physical-device Apple Pay validation remains pending.
 10. [x] Centralize iOS membership presentation: fresh-auth prompt, restored-session Home CTA, new-creation gate, seven-day cooldown, priority-route/notary bypass, activation resume, quota explanation, and centralized Settings/return handling.
 11. [ ] Commit, deploy, and ship the web/backend/iOS/AASA changes through the normal release process.
 

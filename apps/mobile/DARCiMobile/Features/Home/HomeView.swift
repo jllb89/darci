@@ -45,37 +45,39 @@ struct HomeView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    header(in: proxy)
-                        .padding(.top, scaled(46, in: proxy))
-                        .padding(.horizontal, scaled(33, in: proxy))
-                        .homeRevealOrder(0, visibleGroupCount: visibleGroupCount)
+            VStack(alignment: .leading, spacing: 0) {
+                header(in: proxy)
+                    .padding(.top, scaled(46, in: proxy))
+                    .padding(.horizontal, scaled(33, in: proxy))
+                    .homeRevealOrder(0, visibleGroupCount: visibleGroupCount)
 
-                    welcome(in: proxy)
-                        .padding(.top, scaled(44, in: proxy))
-                        .padding(.horizontal, scaled(33, in: proxy))
-                        .homeRevealOrder(1, visibleGroupCount: visibleGroupCount)
+                welcome(in: proxy)
+                    .padding(.top, scaled(44, in: proxy))
+                    .padding(.horizontal, scaled(33, in: proxy))
+                    .homeRevealOrder(1, visibleGroupCount: visibleGroupCount)
 
-                    if let membershipPrompt {
-                        membershipCard(membershipPrompt, in: proxy)
-                            .padding(.top, scaled(24, in: proxy))
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let membershipPrompt {
+                            membershipCard(membershipPrompt, in: proxy)
+                                .padding(.top, scaled(24, in: proxy))
+                                .padding(.horizontal, scaled(14, in: proxy))
+                                .homeRevealOrder(2, visibleGroupCount: visibleGroupCount)
+                        }
+
+                        productStatus(in: proxy)
+                            .padding(.top, scaled(membershipPrompt == nil ? 34 : 24, in: proxy))
                             .padding(.horizontal, scaled(14, in: proxy))
-                            .homeRevealOrder(2, visibleGroupCount: visibleGroupCount)
+                            .homeRevealOrder(3, visibleGroupCount: visibleGroupCount)
+
+                        productGrid(in: proxy)
+                            .padding(.top, scaled(34, in: proxy))
+                            .padding(.horizontal, scaled(14, in: proxy))
+                            .padding(.bottom, scaled(64, in: proxy))
+                            .homeRevealOrder(4, visibleGroupCount: visibleGroupCount, verticalOffset: 14)
                     }
-
-                    productStatus(in: proxy)
-                        .padding(.top, scaled(membershipPrompt == nil ? 34 : 24, in: proxy))
-                        .padding(.horizontal, scaled(14, in: proxy))
-                        .homeRevealOrder(3, visibleGroupCount: visibleGroupCount)
-
-                    productGrid(in: proxy)
-                        .padding(.top, scaled(34, in: proxy))
-                        .padding(.horizontal, scaled(14, in: proxy))
-                        .padding(.bottom, scaled(64, in: proxy))
-                        .homeRevealOrder(4, visibleGroupCount: visibleGroupCount, verticalOffset: 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color.white.ignoresSafeArea())
             .safeAreaInset(edge: .bottom) {
