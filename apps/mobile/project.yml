@@ -55,6 +55,7 @@ targets:
         NSLocationWhenInUseUsageDescription: DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.
         UILaunchScreen: {}
         UIAppFonts:
+          - FavoritMono-Regular.otf
           - MaisonNeue-Bold.ttf
           - MaisonNeue-BoldItalic.ttf
           - MaisonNeue-Book.ttf

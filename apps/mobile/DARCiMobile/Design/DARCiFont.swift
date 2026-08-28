@@ -5,6 +5,18 @@ import UIKit
 #endif
 
 enum DARCiFont {
+    enum ABC: String, CaseIterable {
+        case favoritMonoRegular = "FavoritMono-Regular"
+
+        var postScriptName: String {
+            rawValue
+        }
+
+        var fileName: String {
+            "\(rawValue).otf"
+        }
+    }
+
     enum MaisonNeue: String, CaseIterable {
         case bold = "MaisonNeue-Bold"
         case boldItalic = "MaisonNeue-BoldItalic"
@@ -44,6 +56,19 @@ enum DARCiFont {
     }
 
     static let maisonNeueFontFiles = MaisonNeue.allCases.map(\.fileName)
+    static let abcFontFiles = ABC.allCases.map(\.fileName)
+
+    static func abcMono(size: CGFloat) -> Font {
+        let face = ABC.favoritMonoRegular
+
+        #if canImport(UIKit)
+        if UIFont(name: face.postScriptName, size: size) != nil {
+            return .custom(face.postScriptName, size: size)
+        }
+        #endif
+
+        return .system(size: size, weight: .regular, design: .monospaced)
+    }
 
     static func maisonNeue(_ face: MaisonNeue, size: CGFloat) -> Font {
         #if canImport(UIKit)

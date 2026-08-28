@@ -62,13 +62,13 @@ struct MockMemberBillingAPIClient: MemberBillingAPIProviding, Sendable {
                 priceCode: isActive ? MemberBillingPriceCode.plus : nil,
                 planName: isActive ? "Plus" : nil,
                 pendingPlanChange: nil,
-                currentPeriodStart: nil,
-                currentPeriodEnd: nil,
+                currentPeriodStart: isActive ? "2026-08-01T00:00:00.000Z" : nil,
+                currentPeriodEnd: isActive ? "2026-09-01T00:00:00.000Z" : nil,
                 cancelAtPeriodEnd: false,
                 allowance: .init(
                     total: isActive ? 10 : nil,
-                    used: 0,
-                    remaining: isActive ? 10 : nil,
+                    used: isActive ? 4 : 0,
+                    remaining: isActive ? 6 : nil,
                     exhausted: false
                 ),
                 heldFinalPackageCount: 0

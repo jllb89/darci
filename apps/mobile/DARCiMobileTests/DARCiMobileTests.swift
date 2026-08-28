@@ -941,7 +941,18 @@ final class DARCiMobileTests: XCTestCase {
         )
     }
 
+    func testABCFavoritMonoFontFileIsKnown() {
+        XCTAssertEqual(DARCiFont.abcFontFiles, ["FavoritMono-Regular.otf"])
+    }
+
     #if canImport(UIKit)
+    func testABCFavoritMonoFontIsRegistered() {
+        XCTAssertNotNil(
+            UIFont(name: DARCiFont.ABC.favoritMonoRegular.postScriptName, size: 12),
+            "Expected ABC Favorit Mono to be registered from app resources."
+        )
+    }
+
     func testMaisonNeueFontsAreRegistered() {
         for face in DARCiFont.MaisonNeue.allCases {
             XCTAssertNotNil(
@@ -3004,7 +3015,20 @@ final class MemberBillingPresentationCoordinatorTests: XCTestCase {
         await coordinator.handleRestoredSession(session())
 
         XCTAssertNil(coordinator.activePresentation)
+        XCTAssertEqual(coordinator.homePrompt?.eyebrow, "DARCi MEMBERSHIP")
+        XCTAssertEqual(coordinator.homePrompt?.title, "Make it official.")
         XCTAssertEqual(coordinator.homePrompt?.actionTitle, "View plans")
+    }
+
+    func testUnavailableCheckoutKeepsTheSameMembershipMessage() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: false))
+
+        await coordinator.handleRestoredSession(session())
+
+        XCTAssertEqual(coordinator.homePrompt?.kind, .unavailable)
+        XCTAssertEqual(coordinator.homePrompt?.eyebrow, "DARCi MEMBERSHIP")
+        XCTAssertEqual(coordinator.homePrompt?.title, "Make it official.")
+        XCTAssertEqual(coordinator.homePrompt?.actionTitle, "View membership")
     }
 
     func testAutomaticPresentationHonorsSevenDayDismissalCooldown() async {

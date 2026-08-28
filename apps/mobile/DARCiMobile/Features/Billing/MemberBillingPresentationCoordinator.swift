@@ -89,7 +89,7 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
         if payload.membership.isPendingActivation {
             return MemberBillingHomePrompt(
                 kind: .activationPending,
-                eyebrow: "MEMBERSHIP",
+                eyebrow: "DARCi MEMBERSHIP",
                 title: "Activation pending",
                 message: "Stripe is confirming your membership. We’ll update access after the signed webhook arrives.",
                 actionTitle: "View status"
@@ -99,7 +99,7 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
         if payload.membership.needsRecovery {
             return MemberBillingHomePrompt(
                 kind: .recovery,
-                eyebrow: "MEMBERSHIP",
+                eyebrow: "DARCi MEMBERSHIP",
                 title: "Your membership needs attention",
                 message: "Restore billing to create new document workflows. Existing accepted documents remain available.",
                 actionTitle: "Restore membership"
@@ -110,7 +110,7 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
             return MemberBillingHomePrompt(
                 kind: .subscribe,
                 eyebrow: "DARCi MEMBERSHIP",
-                title: "Ready to make it official?",
+                title: "Make it official.",
                 message: "Choose a monthly allowance for Trusts, POAs, and document notarization.",
                 actionTitle: "View plans"
             )
@@ -119,7 +119,7 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
         return MemberBillingHomePrompt(
             kind: .unavailable,
             eyebrow: "DARCi MEMBERSHIP",
-            title: "Explore membership",
+            title: "Make it official.",
             message: "View plans and membership status. Purchase remains unavailable in this iOS build.",
             actionTitle: "View membership"
         )

@@ -63,7 +63,7 @@ struct MemberBillingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color.white.ignoresSafeArea())
+        .background((viewModel.membership?.isActive == true ? Color.black : Color.white).ignoresSafeArea())
         .task {
             await viewModel.load()
             if let result = returnEvent?.result {
@@ -145,14 +145,14 @@ struct MemberBillingView: View {
         .background(Color.white)
     }
 
-    private func billingNavigation(proxy: GeometryProxy) -> some View {
+    private func billingNavigation(proxy: GeometryProxy, onDark: Bool = false) -> some View {
         let scale = widthScale(in: proxy)
 
         return HStack(spacing: 0) {
             Button(action: onBack) {
                 Image(systemName: "xmark")
                     .font(.system(size: 14 * scale, weight: .light))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(onDark ? Color.white : Color.black)
                     .frame(width: 40 * scale, height: 40 * scale)
                     .contentShape(Rectangle())
             }
@@ -166,11 +166,11 @@ struct MemberBillingView: View {
                 Text("PRIVATE BETA · TEST MODE")
                     .font(DARCiFont.maisonNeue(.mono, size: 9 * scale))
                     .tracking(0.35 * scale)
-                    .foregroundStyle(.black.opacity(0.78))
+                    .foregroundStyle(onDark ? Color.white.opacity(0.72) : Color.black.opacity(0.78))
             }
             .padding(.horizontal, 11 * scale)
             .frame(height: 24 * scale)
-            .background(Color(red: 0.94, green: 0.94, blue: 0.94))
+            .background(onDark ? Color.white.opacity(0.12) : Color(red: 0.94, green: 0.94, blue: 0.94))
             .clipShape(Capsule())
         }
         .frame(height: 40 * scale)
@@ -350,22 +350,23 @@ struct MemberBillingView: View {
         let progress = total.map { $0 > 0 ? min(CGFloat(used) / CGFloat($0), 1) : 0 } ?? 0
 
         return VStack(spacing: 0) {
-            billingNavigation(proxy: proxy)
+            billingNavigation(proxy: proxy, onDark: true)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("BILLING")
-                        .font(DARCiFont.maisonNeue(.book, size: 9 * scale))
+                        .font(DARCiFont.maisonNeue(.light, size: 9 * scale))
+                        .foregroundStyle(Color.white.opacity(0.62))
 
                     Text("Your membership.")
-                        .font(DARCiFont.maisonNeue(.medium, size: 32 * scale))
-                        .tracking(-0.35 * scale)
+                        .font(DARCiFont.maisonNeue(.book, size: 32 * scale))
+                        .foregroundStyle(.white)
                         .padding(.top, 10 * scale)
 
                     Text("Manage usage, payment methods, invoices and cancellation from one place.")
                         .font(DARCiFont.maisonNeue(.book, size: 13 * scale))
                         .lineSpacing(5 * scale)
-                        .foregroundStyle(Color.black.opacity(0.47))
+                        .foregroundStyle(Color.white.opacity(0.52))
                         .padding(.top, 7 * scale)
 
                     if membership.cancelAtPeriodEnd {
@@ -373,49 +374,49 @@ struct MemberBillingView: View {
                             title: "Membership scheduled to end",
                             body: "Your plan will remain active through \(formattedDate(membership.currentPeriodEnd)).",
                             foreground: .black,
-                            background: Color(red: 1, green: 0.96, blue: 0.82),
+                            background: DARCiTheme.onboardingGreen,
                             scale: scale
                         )
                         .padding(.top, 22 * scale)
                     }
 
                     VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .top) {
+                        HStack(alignment: .top, spacing: 12 * scale) {
                             VStack(alignment: .leading, spacing: 4 * scale) {
                                 Text(membership.planName ?? plan?.displayName ?? "DARCi membership")
-                                    .font(DARCiFont.maisonNeue(.medium, size: 20 * scale))
+                                    .font(DARCiFont.maisonNeue(.book, size: 20 * scale))
 
                                 Text(plan.map { "\(formattedPrice($0)) per month" } ?? "Monthly membership")
                                     .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
-                                    .foregroundStyle(Color.white.opacity(0.58))
+                                    .foregroundStyle(Color.black.opacity(0.55))
                             }
 
-                            Spacer(minLength: 12 * scale)
+                            Spacer(minLength: 0)
 
                             HStack(spacing: 6 * scale) {
                                 Circle()
-                                    .fill(DARCiTheme.onboardingGreen)
+                                    .fill(.black)
                                     .frame(width: 6 * scale, height: 6 * scale)
                                 Text(statusLabel(membership.state).uppercased())
-                                    .font(DARCiFont.maisonNeue(.mono, size: 9 * scale))
+                                    .font(DARCiFont.abcMono(size: 9 * scale))
                             }
                         }
 
                         HStack(alignment: .lastTextBaseline) {
                             Text("Document usage")
-                                .font(DARCiFont.maisonNeue(.medium, size: 12 * scale))
+                                .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
                             Spacer()
                             Text(total.map { "\(used) of \($0) used" } ?? "\(used) used")
                                 .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
-                                .foregroundStyle(Color.white.opacity(0.58))
+                                .foregroundStyle(Color.black.opacity(0.55))
                         }
                         .padding(.top, 30 * scale)
 
                         GeometryReader { barProxy in
                             ZStack(alignment: .leading) {
-                                Capsule().fill(Color.white.opacity(0.18))
+                                Capsule().fill(Color.black.opacity(0.16))
                                 Capsule()
-                                    .fill(DARCiTheme.onboardingGreen)
+                                    .fill(.black)
                                     .frame(width: barProxy.size.width * progress)
                             }
                         }
@@ -424,50 +425,50 @@ struct MemberBillingView: View {
 
                         Text(remainingCopy(membership.allowance))
                             .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
-                            .foregroundStyle(Color.white.opacity(0.58))
+                            .foregroundStyle(Color.black.opacity(0.55))
                             .padding(.top, 8 * scale)
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.black)
                     .padding(20 * scale)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                            .stroke(DARCiTheme.onboardingGreen, lineWidth: 2 * scale)
-                    }
+                    .background(DARCiTheme.onboardingGreen)
                     .padding(.top, 27 * scale)
+                    .accessibilityIdentifier("member-billing-active-plan-card")
+
+                    Text("MEMBERSHIP DETAILS")
+                        .font(DARCiFont.abcMono(size: 9 * scale))
+                        .foregroundStyle(Color.white.opacity(0.52))
+                        .padding(.top, 30 * scale)
 
                     VStack(spacing: 0) {
                         statusRow("Subscription status", value: statusLabel(membership.state), scale: scale)
-                        Divider().overlay(Color.black.opacity(0.12))
+                        Rectangle()
+                            .fill(Color.white.opacity(0.22))
+                            .frame(height: 0.5)
                         statusRow(
                             "Current period",
                             value: "\(formattedDate(membership.currentPeriodStart)) – \(formattedDate(membership.currentPeriodEnd))",
                             scale: scale
                         )
-                        Divider().overlay(Color.black.opacity(0.12))
+                        Rectangle()
+                            .fill(Color.white.opacity(0.22))
+                            .frame(height: 0.5)
                         statusRow(
                             "Renewal",
                             value: membership.cancelAtPeriodEnd ? "Will not renew" : formattedDate(membership.currentPeriodEnd),
                             scale: scale
                         )
                     }
-                    .padding(.horizontal, 16 * scale)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
-                            .stroke(Color.black.opacity(0.20), lineWidth: 1 * scale)
-                    }
-                    .padding(.top, 13 * scale)
+                    .padding(.top, 10 * scale)
 
                     if membership.allowance.exhausted {
                         billingNotice(
                             title: "Monthly allowance reached",
                             body: "New workflows become available when the period renews. Already accepted notary work can still finish.",
-                            foreground: .black,
-                            background: Color(red: 0.95, green: 0.95, blue: 0.95),
+                            foreground: .white,
+                            background: Color.white.opacity(0.10),
                             scale: scale
                         )
-                        .padding(.top, 13 * scale)
+                        .padding(.top, 18 * scale)
                     }
 
                     if membership.heldFinalPackageCount > 0 {
@@ -475,15 +476,15 @@ struct MemberBillingView: View {
                             title: "\(membership.heldFinalPackageCount) final package\(membership.heldFinalPackageCount == 1 ? " is" : "s are") safely held",
                             body: "Completed files remain preserved. Access resumes while membership is active.",
                             foreground: .white,
-                            background: .black,
+                            background: Color.white.opacity(0.10),
                             scale: scale
                         )
-                        .padding(.top, 13 * scale)
+                        .padding(.top, 18 * scale)
                     }
 
                     if let errorMessage = viewModel.errorMessage {
                         billingError(errorMessage, scale: scale)
-                            .padding(.top, 13 * scale)
+                            .padding(.top, 18 * scale)
                     }
 
                     Button {
@@ -493,28 +494,30 @@ struct MemberBillingView: View {
                         }
                     } label: {
                         Text(viewModel.isOpeningPortal ? "Opening Stripe…" : "Manage billing in Stripe")
-                            .font(DARCiFont.maisonNeue(.medium, size: 15 * scale))
-                            .foregroundStyle(.white)
+                            .font(DARCiFont.maisonNeue(.book, size: 15 * scale))
+                            .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
                             .frame(height: 56 * scale)
-                            .background(Color.black)
+                            .background(DARCiTheme.onboardingGreen)
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.isOpeningPortal || viewModel.payload?.actions.canOpenPortal != true)
-                    .padding(.top, 20 * scale)
+                    .opacity(viewModel.isOpeningPortal || viewModel.payload?.actions.canOpenPortal != true ? 0.48 : 1)
+                    .padding(.top, 26 * scale)
                     .accessibilityIdentifier("member-billing-portal-button")
 
                     Text("Stripe manages payment methods, invoice history and cancellation. Plan switching is unavailable during private beta.")
                         .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
                         .lineSpacing(3 * scale)
-                        .foregroundStyle(Color.black.opacity(0.45))
+                        .foregroundStyle(Color.white.opacity(0.42))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 12 * scale)
 
                     Button("Need help? Contact support", action: onContactSupport)
                         .buttonStyle(.plain)
-                        .font(DARCiFont.maisonNeue(.medium, size: 11 * scale))
+                        .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
+                        .foregroundStyle(.white)
                         .underline()
                         .frame(maxWidth: .infinity)
                         .padding(.top, 14 * scale)
@@ -525,8 +528,9 @@ struct MemberBillingView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .padding(.horizontal, 29 * scale)
-        .background(Color.white)
+        .padding(.horizontal, 25 * scale)
+        .background(Color.black)
+        .accessibilityIdentifier("member-billing-active-screen")
     }
 
     private func recoveryScreen(
@@ -630,10 +634,11 @@ struct MemberBillingView: View {
         HStack(alignment: .center, spacing: 16 * scale) {
             Text(title)
                 .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
-                .foregroundStyle(Color.black.opacity(0.48))
+                .foregroundStyle(Color.white.opacity(0.52))
             Spacer(minLength: 0)
             Text(value)
-                .font(DARCiFont.maisonNeue(.medium, size: 11 * scale))
+                .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
+                .foregroundStyle(.white)
                 .multilineTextAlignment(.trailing)
         }
         .frame(minHeight: 47 * scale)
@@ -648,7 +653,7 @@ struct MemberBillingView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 5 * scale) {
             Text(title)
-                .font(DARCiFont.maisonNeue(.medium, size: 12 * scale))
+                .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
             Text(body)
                 .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
                 .lineSpacing(3 * scale)
@@ -658,7 +663,6 @@ struct MemberBillingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16 * scale)
         .background(background)
-        .clipShape(RoundedRectangle(cornerRadius: 10 * scale, style: .continuous))
     }
 
     private func billingError(_ message: String, scale: CGFloat) -> some View {
@@ -705,8 +709,12 @@ struct MemberBillingView: View {
 
     private func formattedDate(_ value: String?) -> String {
         guard let value else { return "Not available" }
-        let parser = ISO8601DateFormatter()
-        guard let date = parser.date(from: value) else { return "Not available" }
+        let fractionalParser = ISO8601DateFormatter()
+        fractionalParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standardParser = ISO8601DateFormatter()
+        guard let date = fractionalParser.date(from: value) ?? standardParser.date(from: value) else {
+            return "Not available"
+        }
         return date.formatted(.dateTime.month(.abbreviated).day().year())
     }
 

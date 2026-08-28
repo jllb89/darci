@@ -160,25 +160,24 @@ struct HomeView: View {
             HStack(alignment: .center, spacing: scaled(18, in: proxy)) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(prompt.eyebrow)
-                        .font(DARCiFont.maisonNeue(.mono, size: 9))
-                        .tracking(0.35)
-                        .foregroundStyle(DARCiTheme.onboardingGreen)
+                        .font(DARCiFont.abcMono(size: 9))
+                        .foregroundStyle(Color.black.opacity(0.72))
 
                     Text(prompt.title)
-                        .font(DARCiFont.maisonNeue(.medium, size: 18))
-                        .foregroundStyle(.white)
+                        .font(DARCiFont.maisonNeue(.book, size: 18))
+                        .foregroundStyle(.black)
                         .padding(.top, scaled(8, in: proxy))
 
                     Text(prompt.message)
                         .font(DARCiFont.maisonNeue(.book, size: 11))
                         .lineSpacing(3)
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(Color.black.opacity(0.55))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, scaled(7, in: proxy))
 
                     Text(prompt.actionTitle)
-                        .font(DARCiFont.maisonNeue(.medium, size: 11))
-                        .foregroundStyle(.white)
+                        .font(DARCiFont.maisonNeue(.book, size: 11))
+                        .foregroundStyle(.black)
                         .underline()
                         .padding(.top, scaled(14, in: proxy))
                 }
@@ -187,10 +186,10 @@ struct HomeView: View {
 
                 ZStack {
                     Circle()
-                        .fill(DARCiTheme.onboardingGreen)
+                        .fill(.black)
 
                     HomeResourceIconGlyph(icon: .smallArrow)
-                        .stroke(.black, style: StrokeStyle(lineWidth: 1.6, lineCap: .butt, lineJoin: .miter))
+                        .stroke(DARCiTheme.onboardingGreen, style: StrokeStyle(lineWidth: 1.6, lineCap: .butt, lineJoin: .miter))
                         .padding(scaled(12, in: proxy))
                 }
                 .frame(width: scaled(42, in: proxy), height: scaled(42, in: proxy))
@@ -198,7 +197,7 @@ struct HomeView: View {
             .padding(.horizontal, scaled(20, in: proxy))
             .padding(.vertical, scaled(21, in: proxy))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.black)
+            .background(DARCiTheme.onboardingGreen)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -32,6 +32,7 @@
 	<string>DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.</string>
 	<key>UIAppFonts</key>
 	<array>
+		<string>FavoritMono-Regular.otf</string>
 		<string>MaisonNeue-Bold.ttf</string>
 		<string>MaisonNeue-BoldItalic.ttf</string>
 		<string>MaisonNeue-Book.ttf</string>

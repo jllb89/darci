@@ -246,7 +246,6 @@ struct AppRootView: View {
                         onContactSupport: contactMembershipSupport
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white.ignoresSafeArea())
                     .transition(.opacity)
                     .zIndex(40)
                 }

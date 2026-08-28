@@ -10,6 +10,7 @@ final class DARCiMobileUITests: XCTestCase {
         restoreSession: Bool = false,
         notarySession: Bool = false,
         billingCheckoutEnabled: Bool = false,
+        billingState: String? = nil,
         existingUser: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
@@ -23,6 +24,9 @@ final class DARCiMobileUITests: XCTestCase {
         if billingCheckoutEnabled {
             app.launchEnvironment["DARCI_MOCK_IOS_CHECKOUT_ENABLED"] = "1"
             app.launchArguments += ["-darci.memberBilling.lastDismissedAt.mock-user", "0"]
+        }
+        if let billingState {
+            app.launchEnvironment["DARCI_MOCK_MEMBER_BILLING_STATE"] = billingState
         }
         if existingUser {
             app.launchEnvironment["DARCI_MOCK_AUTH_EXISTING_USER"] = "1"
@@ -211,6 +215,31 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testActiveMembershipBillingMatchesTheDarkProfileExperience() throws {
+        let app = makeApp(restoreSession: true, billingState: "active")
+        app.launch()
+
+        XCTAssertTrue(app.buttons["home-settings-button"].waitForExistence(timeout: 5))
+        app.buttons["home-settings-button"].tap()
+
+        let billingButton = app.buttons["settings-membership-billing-button"]
+        XCTAssertTrue(billingButton.waitForExistence(timeout: 5))
+        billingButton.tap()
+
+        XCTAssertTrue(app.staticTexts["Your membership."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Plus"].exists)
+        XCTAssertTrue(app.staticTexts["ACTIVE"].exists)
+        XCTAssertTrue(app.staticTexts["4 of 10 used"].exists)
+        XCTAssertFalse(app.staticTexts["Not available"].exists)
+        XCTAssertTrue(app.buttons["member-billing-portal-button"].exists)
+
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "member-billing-active-dark"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testFreshAuthenticationAutomaticallyPresentsAvailableMembership() throws {
         let app = makeApp(billingCheckoutEnabled: true, existingUser: true)
         app.launch()
@@ -242,8 +271,9 @@ final class DARCiMobileUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Welcome to DARCi."].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Make it official."].exists)
         XCTAssertTrue(app.buttons["home-membership-prompt"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Make it official."].exists)
+        XCTAssertFalse(app.buttons["member-billing-not-now-button"].exists)
 
         let powerOfAttorneyCard = app.buttons["home-product-card-poa_only"]
         XCTAssertTrue(powerOfAttorneyCard.waitForExistence(timeout: 5))
