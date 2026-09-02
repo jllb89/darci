@@ -24,6 +24,10 @@
 	<string>$(DARCI_API_BASE_URL)</string>
 	<key>DARCI_APNS_ENVIRONMENT</key>
 	<string>$(APS_ENVIRONMENT)</string>
+	<key>DARCI_SENTRY_DSN</key>
+	<string>$(DARCI_SENTRY_DSN)</string>
+	<key>DARCI_SENTRY_ENVIRONMENT</key>
+	<string>$(DARCI_SENTRY_ENVIRONMENT)</string>
 	<key>DARCI_SUPABASE_ANON_KEY</key>
 	<string>$(DARCI_SUPABASE_ANON_KEY)</string>
 	<key>DARCI_SUPABASE_URL</key>

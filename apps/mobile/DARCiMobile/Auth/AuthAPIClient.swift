@@ -86,17 +86,23 @@ struct AuthAPIClient: Sendable {
             body: AuthLogoutRequest(refreshToken: refreshToken),
             accessToken: accessToken
         )
-        let (data, response) = try await urlSession.data(for: request)
+        var statusCode: Int?
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AuthAPIError.invalidResponse
+            }
+            statusCode = httpResponse.statusCode
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AuthAPIError.invalidResponse
+            if httpResponse.statusCode == 401 {
+                return
+            }
+
+            try validateEmptyResponse(data: data, response: response)
+        } catch {
+            reportFailure(error, for: request, statusCode: statusCode)
+            throw error
         }
-
-        if httpResponse.statusCode == 401 {
-            return
-        }
-
-        try validateEmptyResponse(data: data, response: response)
     }
 
     func completeProfile(_ profile: AuthProfileCompletionRequest, accessToken: String) async throws -> AuthUserResponse {
@@ -140,8 +146,7 @@ struct AuthAPIClient: Sendable {
 
     func checkHealth() async throws {
         let request = try makeRequest(path: "/health", method: "GET")
-        let (data, response) = try await urlSession.data(for: request)
-        try validateEmptyResponse(data: data, response: response)
+        try await performEmptyRequest(request)
     }
 
     func get<Response: Decodable>(
@@ -150,8 +155,7 @@ struct AuthAPIClient: Sendable {
         accessToken: String? = nil
     ) async throws -> Response {
         let request = try makeRequest(path: path, method: "GET", queryItems: queryItems, accessToken: accessToken)
-        let (data, response) = try await urlSession.data(for: request)
-        return try decode(data: data, response: response)
+        return try await performDecodedRequest(request)
     }
 
     func post<Response: Decodable, Body: Encodable>(
@@ -183,8 +187,7 @@ struct AuthAPIClient: Sendable {
         accessToken: String? = nil
     ) async throws -> Response {
         let request = try makeRequest(path: path, method: "DELETE", accessToken: accessToken)
-        let (data, response) = try await urlSession.data(for: request)
-        return try decode(data: data, response: response)
+        return try await performDecodedRequest(request)
     }
 
     func makeRequest(
@@ -197,6 +200,7 @@ struct AuthAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Request-Id")
 
         if let accessToken, accessToken.isEmpty == false {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -225,8 +229,57 @@ struct AuthAPIClient: Sendable {
         accessToken: String? = nil
     ) async throws -> Response {
         let request = try makeJSONRequest(path: path, method: method, body: body, accessToken: accessToken)
-        let (data, response) = try await urlSession.data(for: request)
-        return try decode(data: data, response: response)
+        return try await performDecodedRequest(request)
+    }
+
+    private func performDecodedRequest<Response: Decodable>(_ request: URLRequest) async throws -> Response {
+        var statusCode: Int?
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            statusCode = (response as? HTTPURLResponse)?.statusCode
+            return try decode(data: data, response: response)
+        } catch {
+            reportFailure(error, for: request, statusCode: statusCode)
+            throw error
+        }
+    }
+
+    private func performEmptyRequest(_ request: URLRequest) async throws {
+        var statusCode: Int?
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            statusCode = (response as? HTTPURLResponse)?.statusCode
+            try validateEmptyResponse(data: data, response: response)
+        } catch {
+            reportFailure(error, for: request, statusCode: statusCode)
+            throw error
+        }
+    }
+
+    private func reportFailure(_ error: Error, for request: URLRequest, statusCode: Int?) {
+        let path = request.url?.path ?? ""
+        let hasAccessCredential = request.value(forHTTPHeaderField: "Authorization") != nil
+        guard path.contains("/auth/") || hasAccessCredential else {
+            return
+        }
+
+        MobileAuthTelemetry.reportRequestFailure(
+            operation: telemetryOperation(for: path, hasAccessCredential: hasAccessCredential),
+            error: error,
+            requestID: request.value(forHTTPHeaderField: "X-Request-Id"),
+            statusCode: statusCode
+        )
+    }
+
+    private func telemetryOperation(for path: String, hasAccessCredential: Bool) -> String {
+        if path.hasSuffix("/auth/otp/phone/start") { return "phone_otp_start" }
+        if path.hasSuffix("/auth/otp/phone/verify") { return "phone_otp_verify" }
+        if path.hasSuffix("/auth/otp/start") { return "email_otp_start" }
+        if path.hasSuffix("/auth/otp/verify") { return "email_otp_verify" }
+        if path.hasSuffix("/auth/refresh") { return "session_refresh" }
+        if path.hasSuffix("/auth/logout") { return "logout" }
+        if path.hasSuffix("/auth/password/reset") { return "password_reset" }
+        return hasAccessCredential ? "authenticated_request" : "auth_request"
     }
 
     private func makeURL(path: String, queryItems: [URLQueryItem] = []) throws -> URL {

@@ -1014,6 +1014,7 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertNotNil(UUID(uuidString: try XCTUnwrap(request.value(forHTTPHeaderField: "X-Request-Id"))))
         XCTAssertNil(request.value(forHTTPHeaderField: "Origin"))
         XCTAssertNil(request.value(forHTTPHeaderField: "X-CSRF-Token"))
 
@@ -2336,7 +2337,10 @@ final class DARCiMobileTests: XCTestCase {
             profileCompletionRequired: false,
             stepUp: nil
         )
-        let viewModel = AuthenticationViewModel(apiClient: TestAuthAPIClient(verifyResponse: response))
+        let viewModel = AuthenticationViewModel(
+            apiClient: TestAuthAPIClient(verifyResponse: response),
+            sessionStore: InMemoryAuthSessionStore()
+        )
 
         let didStart = await viewModel.requestOTP(method: .email, rawIdentifier: "member@example.com")
         XCTAssertTrue(didStart)

@@ -25,18 +25,31 @@ final class AppSessionCoordinator: ObservableObject {
                 return .noStoredSession
             }
 
+            var restorationStage = "refresh"
             do {
                 let refreshed = try await apiClient.refresh(refreshToken: storedSession.refreshToken)
                 let session = await restoredSession(from: refreshed.session, storedSession: storedSession)
+                restorationStage = "save"
                 try sessionStore.save(session)
                 currentSession = session
                 return .restored(session)
             } catch {
+                MobileAuthTelemetry.reportSessionFailure(
+                    operation: "restore_session",
+                    reason: "\(restorationStage)_failed",
+                    error: error
+                )
                 try? sessionStore.clear()
                 currentSession = nil
                 return .clearedStoredSession
             }
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "restore_session",
+                reason: "load_failed",
+                error: error,
+                level: .error
+            )
             try? sessionStore.clear()
             currentSession = nil
             return .clearedStoredSession
@@ -53,6 +66,11 @@ final class AppSessionCoordinator: ObservableObject {
         do {
             response = try await apiClient.switchActiveRole(role, accessToken: currentSession.accessToken)
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "switch_role",
+                reason: "request_failed",
+                error: error
+            )
             return false
         }
 
@@ -67,6 +85,12 @@ final class AppSessionCoordinator: ObservableObject {
             try sessionStore.save(session)
             return true
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "switch_role",
+                reason: "save_failed",
+                error: error,
+                level: .error
+            )
             return false
         }
     }
@@ -84,6 +108,12 @@ final class AppSessionCoordinator: ObservableObject {
             try sessionStore.save(normalizedSession)
             return true
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "accept_session",
+                reason: "save_failed",
+                error: error,
+                level: .error
+            )
             return false
         }
     }
@@ -93,13 +123,20 @@ final class AppSessionCoordinator: ObservableObject {
             return nil
         }
 
+        var refreshStage = "refresh"
         do {
             let refreshed = try await apiClient.refresh(refreshToken: currentSession.refreshToken)
             let session = await restoredSession(from: refreshed.session, storedSession: currentSession)
+            refreshStage = "save"
             try sessionStore.save(session)
             self.currentSession = session
             return session
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "refresh_session",
+                reason: "\(refreshStage)_failed",
+                error: error
+            )
             try? sessionStore.clear()
             self.currentSession = nil
             return nil
@@ -150,7 +187,18 @@ final class AppSessionCoordinator: ObservableObject {
         let session = currentSession
 
         if let session {
-            try? await apiClient.logout(refreshToken: session.refreshToken, accessToken: session.accessToken)
+            do {
+                try await apiClient.logout(
+                    refreshToken: session.refreshToken,
+                    accessToken: session.accessToken
+                )
+            } catch {
+                MobileAuthTelemetry.reportSessionFailure(
+                    operation: "logout",
+                    reason: "request_failed",
+                    error: error
+                )
+            }
         }
 
         currentSession = nil
@@ -159,6 +207,12 @@ final class AppSessionCoordinator: ObservableObject {
             try sessionStore.clear()
             return true
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "logout",
+                reason: "keychain_clear_failed",
+                error: error,
+                level: .error
+            )
             return false
         }
     }
@@ -182,6 +236,11 @@ final class AppSessionCoordinator: ObservableObject {
                 user: response.user
             ).normalizedForMobileProfile()
         } catch {
+            MobileAuthTelemetry.reportSessionFailure(
+                operation: "restore_role",
+                reason: "request_failed",
+                error: error
+            )
             return serverSession
         }
     }

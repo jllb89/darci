@@ -10,6 +10,7 @@ import {
   shouldFailClosedOnMissingIdentity,
 } from "../auth/authPolicy";
 import { getUserIdentityContextBySupabaseId, normalizeRuntimeRole } from "../services/userRoleService";
+import { reportAuthIssue } from "../telemetry/authTelemetry";
 
 const publicPaths = [
   "/health",
@@ -42,6 +43,21 @@ const isPublicPath = (path: string) => {
   return path.startsWith("/verify/") || path.startsWith("/invites/public/");
 };
 
+const getTokenFailureReason = (error: unknown) => {
+  const name = error instanceof Error ? error.name : "";
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+
+  if (/expired/i.test(name) || /expired/i.test(code)) {
+    return "expired";
+  }
+  if (/signature|claim|jwt|jws|jwk|jose/i.test(`${name} ${code}`)) {
+    return "invalid";
+  }
+  return "provider_failed";
+};
+
 export const requireAuth = async (
   req: Request,
   res: Response,
@@ -60,6 +76,16 @@ export const requireAuth = async (
     }
 
     console.warn("Auth missing bearer token", { path: req.path });
+    reportAuthIssue({
+      area: "token",
+      operation: "verify",
+      reason: "missing",
+      level: "info",
+      requestId: req.requestId,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: 401,
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: "Missing or invalid authorization header",
@@ -82,6 +108,17 @@ export const requireAuth = async (
     if (isHs256) {
       if (!secret) {
         console.error("SUPABASE_JWT_SECRET is not configured");
+        reportAuthIssue({
+          area: "token",
+          operation: "verify",
+          reason: "server_config_missing",
+          level: "error",
+          requestId: req.requestId,
+          method: req.method,
+          path: req.originalUrl,
+          statusCode: 500,
+          details: { algorithm: tokenAlg ?? "unknown" },
+        });
         return res.status(500).json({
           error: "internal_error",
           message: "Auth configuration missing",
@@ -92,6 +129,17 @@ export const requireAuth = async (
     } else {
       if (!supabaseUrl && !jwksUrlOverride) {
         console.error("SUPABASE_URL is not configured");
+        reportAuthIssue({
+          area: "token",
+          operation: "verify",
+          reason: "server_config_missing",
+          level: "error",
+          requestId: req.requestId,
+          method: req.method,
+          path: req.originalUrl,
+          statusCode: 500,
+          details: { algorithm: tokenAlg ?? "unknown" },
+        });
         return res.status(500).json({
           error: "internal_error",
           message: "Auth configuration missing",
@@ -163,6 +211,17 @@ export const requireAuth = async (
             path: req.path,
             supabaseUserId: user.id,
           });
+          reportAuthIssue({
+            area: "session",
+            operation: "identity_lookup",
+            reason: "profile_missing",
+            level: "warning",
+            requestId: req.requestId,
+            method: req.method,
+            path: req.originalUrl,
+            statusCode: 403,
+            identifier: user.id,
+          });
           return res.status(403).json(missingAppProfileError);
         } else if (!user.role || user.role === "authenticated") {
           user.role = "member";
@@ -175,6 +234,19 @@ export const requireAuth = async (
           !message.includes("invalid input syntax for type uuid") &&
           !message.includes("fetch failed")
         ) {
+          reportAuthIssue({
+            area: "session",
+            operation: "identity_lookup",
+            reason: "dependency_failed",
+            level: "error",
+            requestId: req.requestId,
+            method: req.method,
+            path: req.originalUrl,
+            statusCode: 500,
+            identifier: user.id,
+            error,
+            provider: "supabase",
+          });
           throw error;
         }
 
@@ -196,6 +268,18 @@ export const requireAuth = async (
         supabaseUserId: user.id,
         status: user.status,
       });
+      reportAuthIssue({
+        area: "session",
+        operation: "authorize",
+        reason: "account_inactive",
+        level: "warning",
+        requestId: req.requestId,
+        method: req.method,
+        path: req.originalUrl,
+        statusCode: 403,
+        identifier: user.id,
+        details: { accountStatus: user.status ?? "unknown" },
+      });
       return res.status(403).json(appAccountInactiveError);
     }
 
@@ -204,6 +288,18 @@ export const requireAuth = async (
     console.warn("Auth token verification failed", {
       path: req.path,
       error: error instanceof Error ? error.message : "unknown_error",
+    });
+    reportAuthIssue({
+      area: "token",
+      operation: "verify",
+      reason: getTokenFailureReason(error),
+      level: "warning",
+      requestId: req.requestId,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: 401,
+      error,
+      provider: "supabase",
     });
     return res.status(401).json({
       error: "unauthorized",

@@ -17,6 +17,9 @@ packages:
   PhoneNumberKit:
     url: https://github.com/PhoneNumberKit/PhoneNumberKit.git
     from: 5.0.0
+  Sentry:
+    url: https://github.com/getsentry/sentry-apple-binaries.git
+    exactVersion: 9.24.0
 
 settings:
   base:
@@ -52,6 +55,8 @@ targets:
         DARCI_APNS_ENVIRONMENT: $(APS_ENVIRONMENT)
         DARCI_SUPABASE_URL: $(DARCI_SUPABASE_URL)
         DARCI_SUPABASE_ANON_KEY: $(DARCI_SUPABASE_ANON_KEY)
+        DARCI_SENTRY_DSN: $(DARCI_SENTRY_DSN)
+        DARCI_SENTRY_ENVIRONMENT: $(DARCI_SENTRY_ENVIRONMENT)
         NSLocationWhenInUseUsageDescription: DARCi uses your location to confirm that the member and Illuminotary are together for an in-person notarization session.
         UILaunchScreen: {}
         UIAppFonts:
@@ -80,6 +85,8 @@ targets:
     dependencies:
       - package: Supabase
       - package: PhoneNumberKit
+      - package: Sentry
+        product: Sentry-Static
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.illuminote.darci

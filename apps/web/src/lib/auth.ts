@@ -1,6 +1,13 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import {
+  captureAppException,
+  captureAppMessage,
+  getResponseRequestId,
+  sanitizeTelemetryData,
+  type ClientTelemetryContext,
+} from "@/lib/clientTelemetry";
 
 export const ACCESS_TOKEN_KEY = "darci.accessToken";
 export const REFRESH_TOKEN_KEY = "darci.refreshToken";
@@ -53,6 +60,51 @@ type CachedStoredAuth = {
 
 const isBrowser = () => typeof window !== "undefined";
 
+export const reportWebAuthIssue = (input: {
+  operation: string;
+  reason: string;
+  error?: unknown;
+  response?: Response | null;
+  level?: "error" | "warning" | "info";
+  details?: Record<string, unknown>;
+}) => {
+  const errorName = input.error instanceof Error ? input.error.name : input.error ? "Error" : null;
+  const safeDetails = sanitizeTelemetryData(input.details ?? {});
+  const context: ClientTelemetryContext = {
+    level: input.level ?? "warning",
+    tags: {
+      service: "web",
+      telemetry_area: "auth",
+      auth_operation: input.operation,
+      auth_reason: input.reason,
+      ...(input.response ? { http_status: input.response.status } : {}),
+      ...(getResponseRequestId(input.response)
+        ? { request_id: getResponseRequestId(input.response) }
+        : {}),
+    },
+    contexts: {
+      auth: {
+        operation: input.operation,
+        reason: input.reason,
+        statusCode: input.response?.status ?? null,
+        requestId: getResponseRequestId(input.response),
+        errorName,
+        ...safeDetails,
+      },
+    },
+    fingerprint: ["web", "auth", input.operation, input.reason],
+  };
+
+  if (input.error) {
+    captureAppException(
+      new Error(`web.auth.${input.operation}.${input.reason}`),
+      context,
+    );
+  } else {
+    captureAppMessage(`web.auth.${input.operation}.${input.reason}`, context);
+  }
+};
+
 const emptyAuth: StoredAuth = {
   accessToken: null,
   refreshToken: null,
@@ -102,8 +154,19 @@ export const getStoredAuth = (): StoredAuth => {
   if (rawUser) {
     try {
       user = JSON.parse(rawUser) as StoredUser;
-    } catch {
+    } catch (error) {
       user = null;
+      reportWebAuthIssue({
+        operation: "storage_restore",
+        reason: "user_payload_invalid",
+        error,
+        level: "warning",
+        details: {
+          hasAccessCredential: Boolean(accessToken),
+          hasRefreshCredential: Boolean(refreshToken),
+          userPayloadLength: rawUser.length,
+        },
+      });
     }
   }
 
@@ -235,17 +298,33 @@ export const syncStoredAuthFromSession = async (input: {
   }
 
   const promise = (async () => {
-    const response = await fetch(`${getApiBaseUrl()}/auth/session/sync`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${input.accessToken}`,
-      },
-      body: JSON.stringify({
-        refreshToken: input.refreshToken ?? null,
-        ...(input.intent ? { intent: input.intent } : {}),
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${getApiBaseUrl()}/auth/session/sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.accessToken}`,
+        },
+        body: JSON.stringify({
+          refreshToken: input.refreshToken ?? null,
+          ...(input.intent ? { intent: input.intent } : {}),
+        }),
+      });
+    } catch (error) {
+      reportWebAuthIssue({
+        operation: "session_sync",
+        reason: "network_failed",
+        error,
+        level: "error",
+        details: {
+          hasAccessCredential: true,
+          hasRefreshCredential: Boolean(input.refreshToken),
+          intent: input.intent ?? null,
+        },
+      });
+      throw error;
+    }
 
     const payload = (await response.json().catch(() => null)) as
       | {
@@ -257,6 +336,18 @@ export const syncStoredAuthFromSession = async (input: {
       | null;
 
     if (!response.ok || !payload?.accessToken || !payload.user) {
+      reportWebAuthIssue({
+        operation: "session_sync",
+        reason: response.ok ? "contract_invalid" : "rejected",
+        response,
+        level: response.status >= 500 ? "error" : "warning",
+        details: {
+          hasAccessCredential: Boolean(payload?.accessToken),
+          hasRefreshCredential: Boolean(payload?.refreshToken ?? input.refreshToken),
+          hasUser: Boolean(payload?.user),
+          intent: input.intent ?? null,
+        },
+      });
       if (response.status === 400 || response.status === 401) {
         clearStoredAuth();
       }
@@ -295,14 +386,26 @@ export const logoutStoredAuth = async () => {
     return;
   }
 
-  const response = await fetch(`${getApiBaseUrl()}/auth/logout`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ refreshToken }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}/auth/logout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+  } catch (error) {
+    reportWebAuthIssue({
+      operation: "logout",
+      reason: "network_failed",
+      error,
+      level: "error",
+      details: { hasAccessCredential: true, hasRefreshCredential: true },
+    });
+    throw error;
+  }
 
   if (response.ok || response.status === 401) {
     clearStoredAuth();
@@ -312,6 +415,14 @@ export const logoutStoredAuth = async () => {
   const payload = (await response.json().catch(() => null)) as
     | { message?: string }
     | null;
+
+  reportWebAuthIssue({
+    operation: "logout",
+    reason: "rejected",
+    response,
+    level: response.status >= 500 ? "error" : "warning",
+    details: { hasAccessCredential: true, hasRefreshCredential: true },
+  });
 
   throw new Error(payload?.message || "Failed to sign out");
 };
@@ -326,13 +437,25 @@ const runRefreshStoredAuth = async (): Promise<StoredAuth | null> => {
     return null;
   }
 
-  const response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ refreshToken }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+  } catch (error) {
+    reportWebAuthIssue({
+      operation: "refresh",
+      reason: "network_failed",
+      error,
+      level: "error",
+      details: { hasRefreshCredential: true },
+    });
+    throw error;
+  }
 
   const payload = (await response.json().catch(() => null)) as
     | {
@@ -349,6 +472,17 @@ const runRefreshStoredAuth = async (): Promise<StoredAuth | null> => {
     !payload.refreshToken ||
     !payload.user
   ) {
+    reportWebAuthIssue({
+      operation: "refresh",
+      reason: response.ok ? "contract_invalid" : "rejected",
+      response,
+      level: response.status >= 500 ? "error" : "warning",
+      details: {
+        hasAccessCredential: Boolean(payload?.accessToken),
+        hasRefreshCredential: Boolean(payload?.refreshToken),
+        hasUser: Boolean(payload?.user),
+      },
+    });
     if (response.status === 400 || response.status === 401) {
       clearStoredAuth();
       return null;

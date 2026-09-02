@@ -736,6 +736,107 @@ describe("auth controller Phase 1", () => {
     });
   });
 
+  it("sends a linked-account phone step-up through the tracked Resend OTP path", async () => {
+    const verifyOtpMock = vi.fn().mockResolvedValue({
+      data: {
+        session: {
+          access_token: "phone-access-token",
+          refresh_token: "phone-refresh-token",
+        },
+        user: {
+          id: "phone-auth-user",
+          email: null,
+          phone: "+15551234567",
+          app_metadata: { role: "member" },
+          user_metadata: {},
+          email_confirmed_at: null,
+          phone_confirmed_at: "2026-05-07T12:00:00.000Z",
+          confirmed_at: "2026-05-07T12:00:00.000Z",
+          last_sign_in_at: "2026-05-07T12:01:00.000Z",
+        },
+      },
+      error: null,
+    });
+    const generateLinkMock = vi.fn().mockResolvedValue({
+      data: { properties: { email_otp: "12345678" } },
+      error: null,
+    });
+    const limitMock = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "linked-db-user",
+          email: "linked@example.com",
+          phone: "+15551234567",
+        },
+      ],
+      error: null,
+    });
+    const inMock = vi.fn(() => ({ limit: limitMock }));
+    const selectMock = vi.fn(() => ({ in: inMock }));
+    const fromMock = vi.fn(() => ({ select: selectMock }));
+
+    mocks.resendSendMock.mockResolvedValue({
+      data: { id: "resend-step-up-message" },
+      error: null,
+    });
+    mocks.createClientMock
+      .mockReturnValueOnce({ auth: { verifyOtp: verifyOtpMock } })
+      .mockReturnValueOnce({
+        auth: { admin: { generateLink: generateLinkMock } },
+        from: fromMock,
+      });
+
+    const { verifyPhoneOtp } = await import("../../src/controllers/authController.ts");
+    const { res, status, json } = buildResponse();
+    const req = {
+      headers: { "x-request-id": "request-phone-step-up" },
+      method: "POST",
+      path: "/auth/phone/verify",
+      originalUrl: "/auth/phone/verify",
+      body: { phone: "+15551234567", token: "12345678", returnTo: "/mobile" },
+    } as unknown as Request;
+
+    await verifyPhoneOtp(req, res);
+
+    expect(generateLinkMock).toHaveBeenCalledWith({
+      type: "magiclink",
+      email: "linked@example.com",
+      options: {
+        redirectTo:
+          "https://app.example.com/auth/callback?intent=otp&returnTo=%2Fapp",
+      },
+    });
+    expect(mocks.resendSendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "DARCi <verified@example.com>",
+        to: "linked@example.com",
+        subject: "Your DARCi verification code",
+        text: expect.stringContaining("12345678"),
+      }),
+    );
+    expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "auth.otp_requested",
+        metadata: expect.objectContaining({
+          request_id: "request-phone-step-up",
+          auth_flow: "phone_step_up",
+          delivery: "custom_email_otp",
+          resend_message_id: "resend-step-up-message",
+        }),
+      }),
+    );
+    expect(status).toHaveBeenCalledWith(200);
+    expect(json).toHaveBeenCalledWith({
+      stepUp: {
+        method: "email",
+        identifier: "linked@example.com",
+        otpLength: 8,
+        cooldownSeconds: 60,
+        message: "We sent a second code to the email already linked to this phone number.",
+      },
+    });
+  });
+
   it("resets a password through an authenticated recovery session", async () => {
     const setSessionMock = vi.fn().mockResolvedValue({ error: null });
     const updateUserMock = vi.fn().mockResolvedValue({

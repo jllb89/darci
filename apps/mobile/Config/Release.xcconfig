@@ -1,4 +1,6 @@
 APS_ENVIRONMENT = production
 DARCI_API_BASE_URL = https:/$()/api.staging.darciregistry.dev
+DARCI_SENTRY_DSN =
+DARCI_SENTRY_ENVIRONMENT = staging
 
 #include? "Release.local.xcconfig"

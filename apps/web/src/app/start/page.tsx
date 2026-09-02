@@ -14,6 +14,7 @@ import {
   hasCompleteStoredUserProfile,
   logoutStoredAuth,
   refreshStoredAuth,
+  reportWebAuthIssue,
   setStoredAuth,
   switchStoredUserRole,
   syncStoredAuthFromSession,
@@ -54,6 +55,13 @@ type AuthSessionResponsePayload = {
   profileCompletionRequired?: boolean;
   message?: string;
   details?: Array<{ message?: string }>;
+  stepUp?: {
+    method: "email";
+    identifier: string;
+    otpLength?: number | null;
+    cooldownSeconds?: number | null;
+    message?: string;
+  };
 };
 type PendingAuthSession = {
   accessToken: string;
@@ -524,6 +532,13 @@ function StartAuthPageContent() {
         otpInputRefs.current[0]?.focus();
       });
     } catch (error) {
+      reportWebAuthIssue({
+        operation: "otp_resend",
+        reason: "failed",
+        error,
+        level: "warning",
+        details: { authMethod: challenge.kind },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Request failed");
     } finally {
       setIsSubmitting(false);
@@ -555,6 +570,33 @@ function StartAuthPageContent() {
       const payload = (await response.json().catch(() => null)) as
         | AuthSessionResponsePayload
         | null;
+
+      if (response.ok && payload?.stepUp?.method === "email") {
+        const stepUpEmail = normalizeEmail(payload.stepUp.identifier);
+        if (!emailPattern.test(stepUpEmail)) {
+          throw new Error("The linked account email could not be verified. Sign in with email instead.");
+        }
+
+        const stepUpOtpLength = normalizeOtpLength(payload.stepUp.otpLength);
+        setChallenge({
+          kind: "email",
+          value: stepUpEmail,
+          displayValue: stepUpEmail,
+        });
+        setPasswordEmail(stepUpEmail);
+        setOtpDigits(Array.from({ length: stepUpOtpLength }, () => ""));
+        setResendCountdownSeconds(
+          normalizeResendCooldownSeconds(payload.stepUp.cooldownSeconds),
+        );
+        setNoticeMessage(
+          payload.stepUp.message ?? "Enter the code sent to the email linked to this phone number.",
+        );
+        lastAutoSubmittedOtpCodeRef.current = null;
+        requestAnimationFrame(() => {
+          otpInputRefs.current[0]?.focus();
+        });
+        return;
+      }
 
       if (!response.ok || !payload?.accessToken || !payload.user) {
         const validationMessage = payload?.details?.[0]?.message;
@@ -703,6 +745,13 @@ function StartAuthPageContent() {
         await verifyOtpChallenge();
       } catch (error) {
         if (!cancelled) {
+          reportWebAuthIssue({
+            operation: "otp_verify",
+            reason: "failed",
+            error,
+            level: "warning",
+            details: { authMethod: challenge?.kind ?? "unknown", autoSubmitted: true },
+          });
           setErrorMessage(error instanceof Error ? error.message : "Request failed");
         }
       } finally {
@@ -878,6 +927,23 @@ function StartAuthPageContent() {
         await signInWithPassword();
       }
     } catch (error) {
+      reportWebAuthIssue({
+        operation: authStep === "identifier"
+          ? "otp_start"
+          : authStep === "otp"
+            ? "otp_verify"
+            : authStep === "profile"
+              ? "profile_completion"
+              : "password_login",
+        reason: "failed",
+        error,
+        level: "warning",
+        details: {
+          authStep,
+          authMethod: challenge?.kind ?? null,
+          autoSubmitted: false,
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Request failed");
     } finally {
       setIsSubmitting(false);
@@ -899,6 +965,13 @@ function StartAuthPageContent() {
         throw error;
       }
     } catch (error) {
+      reportWebAuthIssue({
+        operation: "oauth_start",
+        reason: "failed",
+        error,
+        level: "warning",
+        details: { provider: "google" },
+      });
       setErrorMessage(error instanceof Error ? error.message : "Google login failed");
       setIsSubmitting(false);
     }
@@ -933,6 +1006,12 @@ function StartAuthPageContent() {
 
       setNoticeMessage(payload?.message ?? "Password reset email sent.");
     } catch (error) {
+      reportWebAuthIssue({
+        operation: "password_recovery",
+        reason: "failed",
+        error,
+        level: "warning",
+      });
       setErrorMessage(error instanceof Error ? error.message : "Request failed");
     } finally {
       setIsRecoverySubmitting(false);

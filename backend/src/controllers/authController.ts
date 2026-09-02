@@ -25,6 +25,7 @@ import {
 } from "../services/auditService";
 import { sendValidationError } from "../utils/validation";
 import { normalizePhoneForComparison, normalizePhoneForStorage } from "../utils/phone";
+import { reportAuthIssue } from "../telemetry/authTelemetry";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseAnonKey =
@@ -165,6 +166,11 @@ const hashEmailForLogs = (email: string) => {
   return createHash("sha256").update(email).digest("hex").slice(0, 16);
 };
 
+const hashPhoneForLogs = (phone: string) => {
+  const normalized = normalizePhoneForComparison(phone) || phone.trim();
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+};
+
 const getRequestTraceId = (req: Request) => {
   const requestWithTrace = req as Request & { authOtpRequestId?: string };
   if (requestWithTrace.authOtpRequestId) {
@@ -241,6 +247,34 @@ const logAuthOtpEvent = (
     ...metadata,
   };
 
+  if (level !== "info") {
+    reportAuthIssue({
+      area: "email_otp",
+      operation: event,
+      reason: level === "error" ? "failed" : "warning",
+      level: level === "error" ? "error" : "warning",
+      requestId: typeof metadata.requestId === "string" ? metadata.requestId : null,
+      method: typeof metadata.method === "string" ? metadata.method : null,
+      path: typeof metadata.path === "string" ? metadata.path : null,
+      provider: event.includes("resend") || event.includes("custom_otp")
+        ? "resend"
+        : event.includes("supabase") || event.includes("provider")
+          ? "supabase"
+          : null,
+      error: metadata.error,
+      details: {
+        identityHash: typeof metadata.emailHash === "string" ? metadata.emailHash : null,
+        delivery: typeof metadata.delivery === "string" ? metadata.delivery : null,
+        resendFailureMode: typeof metadata.resendFailureMode === "string"
+          ? metadata.resendFailureMode
+          : null,
+        fallbackBlocked: typeof metadata.fallbackBlocked === "boolean"
+          ? metadata.fallbackBlocked
+          : null,
+      },
+    });
+  }
+
   if (level === "error") {
     console.error("[auth.email_otp]", payload);
     return;
@@ -265,6 +299,21 @@ const logPasswordRecoveryEvent = (
     ...metadata,
   };
 
+  if (level !== "info") {
+    reportAuthIssue({
+      area: "credentials",
+      operation: `password_recovery_${event}`,
+      reason: level === "error" ? "failed" : "warning",
+      level: level === "error" ? "error" : "warning",
+      requestId: typeof metadata.requestId === "string" ? metadata.requestId : null,
+      provider: event.includes("resend") ? "resend" : "supabase",
+      error: metadata.error,
+      details: {
+        identityHash: typeof metadata.emailHash === "string" ? metadata.emailHash : null,
+      },
+    });
+  }
+
   if (level === "error") {
     console.error("[auth.password_recovery]", payload);
     return;
@@ -276,6 +325,57 @@ const logPasswordRecoveryEvent = (
   }
 
   console.info("[auth.password_recovery]", payload);
+};
+
+const logPhoneOtpEvent = (
+  level: "info" | "warn" | "error",
+  event: string,
+  req: Request,
+  input: {
+    phone?: string | null;
+    error?: unknown;
+    statusCode?: number;
+    provider?: string;
+    details?: Record<string, string | number | boolean | null | undefined>;
+  } = {},
+) => {
+  const requestId = getRequestTraceId(req);
+  const phoneHash = input.phone ? hashPhoneForLogs(input.phone) : null;
+  const payload = {
+    component: "auth.phone_otp",
+    event,
+    requestId,
+    phoneHash,
+    error: input.error ? getErrorLogDetails(input.error) : null,
+    ...input.details,
+  };
+
+  if (level === "error") {
+    console.error("[auth.phone_otp]", payload);
+  } else if (level === "warn") {
+    console.warn("[auth.phone_otp]", payload);
+  } else {
+    console.info("[auth.phone_otp]", payload);
+  }
+
+  if (level !== "info") {
+    reportAuthIssue({
+      area: "phone_otp",
+      operation: event,
+      reason: level === "error" ? "failed" : "warning",
+      level: level === "error" ? "error" : "warning",
+      requestId,
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: input.statusCode,
+      provider: input.provider,
+      error: input.error,
+      details: {
+        identityHash: phoneHash,
+        ...input.details,
+      },
+    });
+  }
 };
 
 const passwordlessEmailActions = [
@@ -680,6 +780,96 @@ const sendCustomOtpEmail = async (input: {
   return { resendMessageId: messageId };
 };
 
+const generateAndSendCustomOtpEmail = async (input: {
+  email: string;
+  redirectTo: string;
+  logContext: AuthOtpLogContext;
+  senderConfig?: ConfiguredOtpEmailSenderConfig;
+}) => {
+  let providerError: string | null = null;
+  let generatedOtp = "";
+
+  logAuthOtpEvent("info", "supabase_generate_link_start", {
+    ...input.logContext,
+    linkType: "magiclink",
+  });
+
+  try {
+    const generated = await supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
+      email: input.email,
+      options: {
+        redirectTo: input.redirectTo,
+      },
+    });
+
+    generatedOtp = generated.data.properties?.email_otp?.trim() ?? "";
+    if (generated.error) {
+      providerError = generated.error.message ?? "supabase_generate_link_failed";
+      logAuthOtpEvent("error", "supabase_generate_link_failed", {
+        ...input.logContext,
+        error: getErrorLogDetails(generated.error),
+        hasEmailOtp: false,
+      });
+    } else {
+      logAuthOtpEvent(generatedOtp ? "info" : "warn", "supabase_generate_link_completed", {
+        ...input.logContext,
+        hasEmailOtp: Boolean(generatedOtp),
+        otpLength: generatedOtp.length || null,
+      });
+    }
+  } catch (generateError) {
+    providerError =
+      generateError instanceof Error ? generateError.message : "supabase_generate_link_threw";
+    logAuthOtpEvent("error", "supabase_generate_link_threw", {
+      ...input.logContext,
+      error: getErrorLogDetails(generateError),
+    });
+  }
+
+  if (!generatedOtp) {
+    providerError = providerError ?? "otp_generation_missing_email_otp";
+    logAuthOtpEvent("warn", "custom_otp_delivery_skipped_no_code", {
+      ...input.logContext,
+      reason: providerError,
+    });
+    return {
+      delivered: false as const,
+      otpLength: null,
+      resendMessageId: null,
+      error: providerError,
+    };
+  }
+
+  try {
+    const result = await sendCustomOtpEmail({
+      email: input.email,
+      otp: generatedOtp,
+      logContext: input.logContext,
+      ...(input.senderConfig ? { senderConfig: input.senderConfig } : {}),
+    });
+    return {
+      delivered: true as const,
+      otpLength: generatedOtp.length,
+      resendMessageId: result.resendMessageId,
+      error: null,
+    };
+  } catch (customEmailError) {
+    providerError =
+      customEmailError instanceof Error ? customEmailError.message : "custom_otp_email_failed";
+    logAuthOtpEvent("error", "custom_otp_delivery_failed", {
+      ...input.logContext,
+      error: getErrorLogDetails(customEmailError),
+    });
+    return {
+      delivered: false as const,
+      otpLength: generatedOtp.length,
+      resendMessageId: null,
+      error: providerError,
+    };
+  }
+};
+
 const sendPasswordRecoveryEmail = async (input: {
   email: string;
   resetUrl: string;
@@ -917,6 +1107,19 @@ export const login = async (req: Request, res: Response) => {
   });
 
   if (error || !data.session || !data.user) {
+    reportAuthIssue({
+      area: "credentials",
+      operation: "login",
+      reason: "rejected",
+      level: "info",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 401,
+      provider: "supabase",
+      identifier: parsed.data.email,
+      error,
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: error?.message ?? "Invalid email or password",
@@ -945,6 +1148,20 @@ export const login = async (req: Request, res: Response) => {
     const statusCode = syncError instanceof Error && "statusCode" in syncError
       ? Number((syncError as { statusCode?: number }).statusCode) || 500
       : 500;
+
+    reportAuthIssue({
+      area: "session",
+      operation: "login_profile_sync",
+      reason: "failed",
+      level: "error",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode,
+      provider: "supabase",
+      identifier: parsed.data.email,
+      error: syncError,
+    });
 
     return res.status(statusCode).json({
       error: statusCode >= 500 ? "internal_error" : "validation_error",
@@ -986,6 +1203,19 @@ export const logout = async (req: Request, res: Response) => {
   });
 
   if (sessionError) {
+    reportAuthIssue({
+      area: "session",
+      operation: "logout_set_session",
+      reason: "rejected",
+      level: "warning",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 401,
+      provider: "supabase",
+      identifier: req.user.id,
+      error: sessionError,
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: sessionError.message,
@@ -997,6 +1227,19 @@ export const logout = async (req: Request, res: Response) => {
   });
 
   if (signOutError) {
+    reportAuthIssue({
+      area: "session",
+      operation: "logout",
+      reason: "provider_failed",
+      level: "error",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 500,
+      provider: "supabase",
+      identifier: req.user.id,
+      error: signOutError,
+    });
     return res.status(500).json({
       error: "internal_error",
       message: signOutError.message,
@@ -1032,6 +1275,19 @@ export const refresh = async (req: Request, res: Response) => {
       event: "refresh_session_failed",
       error: getErrorLogDetails(refreshError),
     });
+    reportAuthIssue({
+      area: "session",
+      operation: "refresh",
+      reason: "provider_threw",
+      level: "warning",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 401,
+      provider: "supabase",
+      error: refreshError,
+      details: { hasRefreshCredential: true },
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: "Invalid or expired session",
@@ -1041,6 +1297,23 @@ export const refresh = async (req: Request, res: Response) => {
   const { data, error } = refreshedSession;
 
   if (error || !data.session || !data.user) {
+    reportAuthIssue({
+      area: "session",
+      operation: "refresh",
+      reason: "rejected",
+      level: "warning",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 401,
+      provider: "supabase",
+      error,
+      details: {
+        hasSession: Boolean(data.session),
+        hasUser: Boolean(data.user),
+        hasRefreshCredential: true,
+      },
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: error?.message ?? "Invalid or expired session",
@@ -1067,6 +1340,19 @@ export const refresh = async (req: Request, res: Response) => {
     const statusCode = syncError instanceof Error && "statusCode" in syncError
       ? Number((syncError as { statusCode?: number }).statusCode) || 500
       : 500;
+
+    reportAuthIssue({
+      area: "session",
+      operation: "refresh_profile_sync",
+      reason: "failed",
+      level: "error",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode,
+      provider: "supabase",
+      error: syncError,
+    });
 
     return res.status(statusCode).json({
       error: "internal_error",
@@ -1687,78 +1973,17 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
     redirectPath: new URL(redirectTo).pathname,
   });
 
-  let usedCustomOtpEmail = false;
-  let fallbackSupabaseError: string | null = null;
-  let resendMessageId: string | null = null;
-  let generatedOtp = "";
-
-  logAuthOtpEvent("info", "supabase_generate_link_start", {
-    ...logContext,
-    linkType: "magiclink",
+  const customDelivery = await generateAndSendCustomOtpEmail({
+    email,
+    redirectTo,
+    logContext,
+    ...(isConfiguredOtpEmailSenderConfig(otpEmailSenderConfig)
+      ? { senderConfig: otpEmailSenderConfig }
+      : {}),
   });
-
-  try {
-    const generated = await supabaseAdmin.auth.admin.generateLink({
-      type: "magiclink",
-      email,
-      options: {
-        redirectTo,
-      },
-    });
-
-    generatedOtp = generated.data.properties?.email_otp?.trim() ?? "";
-    if (generated.error) {
-      fallbackSupabaseError = generated.error.message ?? "supabase_generate_link_failed";
-      logAuthOtpEvent("error", "supabase_generate_link_failed", {
-        ...logContext,
-        error: getErrorLogDetails(generated.error),
-        hasEmailOtp: false,
-      });
-    } else {
-      logAuthOtpEvent(generatedOtp ? "info" : "warn", "supabase_generate_link_completed", {
-        ...logContext,
-        hasEmailOtp: Boolean(generatedOtp),
-        otpLength: generatedOtp.length || null,
-      });
-    }
-  } catch (generateError) {
-    fallbackSupabaseError =
-      generateError instanceof Error ? generateError.message : "supabase_generate_link_threw";
-    logAuthOtpEvent("error", "supabase_generate_link_threw", {
-      ...logContext,
-      error: getErrorLogDetails(generateError),
-    });
-  }
-
-  if (generatedOtp) {
-    try {
-      const customOtpEmailResult = await sendCustomOtpEmail({
-        email,
-        otp: generatedOtp,
-        logContext,
-        ...(isConfiguredOtpEmailSenderConfig(otpEmailSenderConfig)
-          ? { senderConfig: otpEmailSenderConfig }
-          : {}),
-      });
-      usedCustomOtpEmail = true;
-      resendMessageId = customOtpEmailResult.resendMessageId;
-    } catch (customEmailError) {
-      fallbackSupabaseError =
-        customEmailError instanceof Error ? customEmailError.message : "custom_otp_email_failed";
-      logAuthOtpEvent("error", "custom_otp_delivery_failed", {
-        ...logContext,
-        error: getErrorLogDetails(customEmailError),
-        resendFailureMode,
-      });
-    }
-  } else {
-    fallbackSupabaseError = fallbackSupabaseError ?? "otp_generation_missing_email_otp";
-    logAuthOtpEvent("warn", "custom_otp_delivery_skipped_no_code", {
-      ...logContext,
-      resendFailureMode,
-      reason: fallbackSupabaseError,
-    });
-  }
+  const usedCustomOtpEmail = customDelivery.delivered;
+  const fallbackSupabaseError = customDelivery.error;
+  const resendMessageId = customDelivery.resendMessageId;
 
   if (!usedCustomOtpEmail) {
     if (resendFailureMode === "strict") {
@@ -1871,13 +2096,13 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
     ...logContext,
     delivery: usedCustomOtpEmail ? "custom_email_otp" : "supabase_fallback",
     resendMessageId,
-    otpLength: usedCustomOtpEmail ? generatedOtp.length : null,
+    otpLength: usedCustomOtpEmail ? customDelivery.otpLength : null,
   });
 
   return res.status(200).json({
     status: "ok",
     message: "Email code sent",
-    otpLength: usedCustomOtpEmail ? generatedOtp.length : null,
+    otpLength: usedCustomOtpEmail ? customDelivery.otpLength : null,
     cooldownSeconds: authEmailSendCooldownSeconds,
   });
 };
@@ -1955,6 +2180,12 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   const { data, error } = verificationResult;
 
   if (error || !data.session || !data.user) {
+    logAuthOtpEvent("warn", "verify_rejected", {
+      ...buildAuthOtpLogContext(req, { email, returnTo: parsed.data.returnTo ?? null }),
+      error: getErrorLogDetails(error ?? new Error("Missing OTP session")),
+      hasSession: Boolean(data.session),
+      hasUser: Boolean(data.user),
+    });
     await recordAuthEvent({
       action: authAuditActionNames.otpFailed,
       metadata: {
@@ -2045,6 +2276,11 @@ export const requestPhoneOtp = async (req: Request, res: Response) => {
 
   const { returnTo } = parsed.data;
   const phone = parsed.data.phone.trim();
+  const requestId = getRequestTraceId(req);
+  logPhoneOtpEvent("info", "request_received", req, {
+    phone,
+    provider: "supabase",
+  });
   const recentSend = await findRecentAuditEventByEmail({
     actions: passwordlessEmailActions,
     email: phone,
@@ -2052,39 +2288,83 @@ export const requestPhoneOtp = async (req: Request, res: Response) => {
   });
 
   if (recentSend) {
+    logPhoneOtpEvent("warn", "cooldown_hit_before_provider_call", req, {
+      phone,
+      statusCode: 200,
+      provider: "supabase",
+      details: { recentAuditAction: recentSend.action },
+    });
     return sendRecentAuthEmailResponse(
       res,
       "Passwordless sign-in SMS already requested recently. Please use the latest code or try again shortly.",
     );
   }
 
-  const { error } = await supabasePublic.auth.signInWithOtp({
-    phone,
-    options: {
-      shouldCreateUser: true,
-    },
-  });
+  let phoneOtpResult: Awaited<ReturnType<typeof supabasePublic.auth.signInWithOtp>>;
+  try {
+    phoneOtpResult = await supabasePublic.auth.signInWithOtp({
+      phone,
+      options: {
+        shouldCreateUser: true,
+      },
+    });
+  } catch (providerError) {
+    logPhoneOtpEvent("error", "request_provider_threw", req, {
+      phone,
+      error: providerError,
+      statusCode: 503,
+      provider: "supabase",
+    });
+    await recordAuthEvent({
+      action: authAuditActionNames.otpFailed,
+      metadata: {
+        phone,
+        request_id: requestId,
+        message: providerError instanceof Error ? providerError.message : "Phone OTP provider failed",
+        stage: "phone_otp_request",
+      },
+    });
+    return res.status(503).json({
+      error: "delivery_failed",
+      message: "Unable to send verification code. Please try again later.",
+    });
+  }
+
+  const { error } = phoneOtpResult;
 
   if (error) {
     await recordAuthEvent({
       action: authAuditActionNames.otpFailed,
       metadata: {
         phone,
+        request_id: requestId,
         message: error.message,
         stage: "phone_otp_request",
       },
     });
 
     if (isSupabaseEmailRateLimitError(error.message)) {
+      logPhoneOtpEvent("warn", "request_rate_limited", req, {
+        phone,
+        error,
+        statusCode: 429,
+        provider: "supabase",
+      });
       return sendAuthEmailRateLimitResponse(
         res,
         "SMS sends are temporarily rate limited. Please try again in about an hour.",
       );
     }
 
-    return res.status(200).json({
-      status: "ok",
-      message: "If this phone can use passwordless sign-in, a verification code will arrive shortly.",
+    logPhoneOtpEvent("error", "request_provider_failed", req, {
+      phone,
+      error,
+      statusCode: 503,
+      provider: "supabase",
+    });
+    return res.status(503).json({
+      error: "delivery_failed",
+      message: "Unable to send verification code. Please try again later.",
     });
   }
 
@@ -2092,6 +2372,7 @@ export const requestPhoneOtp = async (req: Request, res: Response) => {
     action: authAuditActionNames.otpRequested,
     metadata: {
       phone,
+      request_id: requestId,
       return_to: sanitizeReturnTo(returnTo),
       delivery: "phone_sms",
     },
@@ -2138,23 +2419,56 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
 
   const phone = parsed.data.phone.trim();
   const token = normalizeOtpToken(parsed.data.token);
+  const requestId = getRequestTraceId(req);
 
-  const { data, error } = await supabasePublic.auth.verifyOtp({
-    phone,
-    token,
-    type: "sms",
-  });
+  let phoneVerification: Awaited<ReturnType<typeof supabasePublic.auth.verifyOtp>>;
+  try {
+    phoneVerification = await supabasePublic.auth.verifyOtp({
+      phone,
+      token,
+      type: "sms",
+    });
+  } catch (providerError) {
+    logPhoneOtpEvent("error", "verify_provider_threw", req, {
+      phone,
+      error: providerError,
+      statusCode: 503,
+      provider: "supabase",
+    });
+    await recordAuthEvent({
+      action: authAuditActionNames.otpFailed,
+      metadata: {
+        phone,
+        request_id: requestId,
+        message: providerError instanceof Error ? providerError.message : "Phone OTP provider failed",
+        stage: "phone_otp_verify_provider",
+      },
+    });
+    return res.status(503).json({
+      error: "dependency_unavailable",
+      message: "Unable to verify the code right now. Please try again later.",
+    });
+  }
+
+  const { data, error } = phoneVerification;
 
   if (error || !data.session || !data.user) {
     await recordAuthEvent({
       action: authAuditActionNames.otpFailed,
       metadata: {
         phone,
+        request_id: requestId,
         message: error?.message ?? "Missing OTP session",
         stage: "phone_otp_verify",
       },
     });
 
+    logPhoneOtpEvent("warn", "verify_rejected", req, {
+      phone,
+      error: error ?? new Error("Missing OTP session"),
+      statusCode: 401,
+      provider: "supabase",
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: "Invalid or expired code",
@@ -2167,34 +2481,71 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
     const authEmail = data.user.email?.trim().toLowerCase() ?? null;
 
     if (linkedEmail && linkedEmail !== authEmail) {
+      const emailLogContext = buildAuthOtpLogContext(req, {
+        email: linkedEmail,
+        returnTo: parsed.data.returnTo ?? null,
+      });
       const recentSend = await findRecentAuthEmailSend({
         actions: passwordlessEmailActions,
         email: linkedEmail,
       });
 
+      let stepUpDelivery = "recent_email_otp";
+      let stepUpOtpLength = 8;
+      let stepUpResendMessageId: string | null = null;
+
       if (!recentSend) {
-        const { error: emailOtpError } = await supabasePublic.auth.signInWithOtp({
+        const redirectTo = buildAuthActionRedirectUrl(req, {
+          intent: "otp",
+          returnTo: parsed.data.returnTo ?? null,
+        });
+        const senderConfig = getOtpEmailSenderConfig();
+        const delivery = await generateAndSendCustomOtpEmail({
           email: linkedEmail,
-          options: {
-            emailRedirectTo: buildAuthActionRedirectUrl(req, {
-              intent: "otp",
-              returnTo: parsed.data.returnTo ?? null,
-            }),
-            shouldCreateUser: false,
-          },
+          redirectTo,
+          logContext: emailLogContext,
+          ...(isConfiguredOtpEmailSenderConfig(senderConfig) ? { senderConfig } : {}),
         });
 
-        if (emailOtpError) {
+        if (!delivery.delivered) {
           await recordAuthEvent({
             action: authAuditActionNames.otpFailed,
             metadata: {
               phone,
               email: linkedEmail,
-              message: emailOtpError.message,
+              request_id: requestId,
+              message: delivery.error,
               stage: "phone_step_up_email_otp_request",
+              delivery: "custom_email_otp",
             },
           });
+          logPhoneOtpEvent("error", "step_up_email_delivery_failed", req, {
+            phone,
+            error: new Error(delivery.error ?? "Step-up email delivery failed"),
+            statusCode: 503,
+            provider: "resend",
+          });
+          return res.status(503).json({
+            error: "delivery_failed",
+            message: "Unable to send the account verification email. Please try signing in with email.",
+          });
         }
+
+        stepUpDelivery = "custom_email_otp";
+        stepUpOtpLength = delivery.otpLength;
+        stepUpResendMessageId = delivery.resendMessageId;
+        await recordAuthEvent({
+          action: authAuditActionNames.otpRequested,
+          metadata: {
+            phone,
+            email: linkedEmail,
+            request_id: requestId,
+            return_to: sanitizeReturnTo(parsed.data.returnTo),
+            delivery: stepUpDelivery,
+            auth_flow: "phone_step_up",
+            resend_message_id: stepUpResendMessageId,
+          },
+        });
       }
 
       await recordAuthEvent({
@@ -2202,18 +2553,29 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
         actorSupabaseId: data.user.id,
         metadata: {
           phone,
+          request_id: requestId,
           step_up: "email_otp_required",
           linked_email: linkedEmail,
+          step_up_delivery: stepUpDelivery,
+          resend_message_id: stepUpResendMessageId,
         },
+      });
+
+      logPhoneOtpEvent("info", "step_up_email_required", req, {
+        phone,
+        provider: stepUpDelivery === "custom_email_otp" ? "resend" : "audit_cooldown",
+        details: { stepUpDelivery },
       });
 
       return res.status(200).json({
         stepUp: {
           method: "email",
           identifier: linkedEmail,
-          otpLength: 8,
+          otpLength: stepUpOtpLength,
           cooldownSeconds: authEmailSendCooldownSeconds,
-          message: "We sent a second code to the email already linked to this phone number.",
+          message: recentSend
+            ? "Use the latest code sent to the email already linked to this phone number."
+            : "We sent a second code to the email already linked to this phone number.",
         },
       });
     }
@@ -2232,7 +2594,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
     await recordAuthEvent({
       action: authAuditActionNames.otpVerified,
       actorSupabaseId: data.user.id,
-      metadata: { phone },
+      metadata: { phone, request_id: requestId },
     });
 
     return res.status(200).json({
@@ -2242,6 +2604,12 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
       profileCompletionRequired,
     });
   } catch (syncError) {
+    logPhoneOtpEvent("error", "profile_sync_failed", req, {
+      phone,
+      error: syncError,
+      statusCode: 500,
+      provider: "supabase",
+    });
     const statusCode = syncError instanceof Error && "statusCode" in syncError
       ? Number((syncError as { statusCode?: number }).statusCode) || 500
       : 500;
@@ -2366,6 +2734,16 @@ export const syncSession = async (req: Request, res: Response) => {
 
   const accessToken = getBearerToken(req);
   if (!accessToken) {
+    reportAuthIssue({
+      area: "session",
+      operation: "sync",
+      reason: "access_credential_missing",
+      level: "info",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 401,
+    });
     return res.status(401).json({
       error: "unauthorized",
       message: "Missing or invalid authorization header",
@@ -2387,6 +2765,23 @@ export const syncSession = async (req: Request, res: Response) => {
       intent: parsed.data.intent ?? null,
       origin: req.headers.origin ?? null,
       userAgent: req.headers["user-agent"] ?? null,
+    });
+
+    reportAuthIssue({
+      area: "session",
+      operation: "sync",
+      reason: "access_credential_rejected",
+      level: "warning",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode: 401,
+      provider: "supabase",
+      error: error ?? new Error("Missing auth user"),
+      details: {
+        hasRefreshCredential: Boolean(parsed.data.refreshToken),
+        intent: parsed.data.intent ?? null,
+      },
     });
 
     return res.status(401).json({
@@ -2443,6 +2838,21 @@ export const syncSession = async (req: Request, res: Response) => {
     const statusCode = syncError instanceof Error && "statusCode" in syncError
       ? Number((syncError as { statusCode?: number }).statusCode) || 500
       : 500;
+
+    reportAuthIssue({
+      area: "session",
+      operation: "sync_profile",
+      reason: "failed",
+      level: "error",
+      requestId: getRequestTraceId(req),
+      method: req.method,
+      path: req.originalUrl ?? req.path,
+      statusCode,
+      provider: "supabase",
+      identifier: data.user.id,
+      error: syncError,
+      details: { intent: parsed.data.intent ?? null },
+    });
 
     return res.status(statusCode).json({
       error: "internal_error",
