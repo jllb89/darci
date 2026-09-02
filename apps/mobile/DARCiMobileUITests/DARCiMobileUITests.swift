@@ -65,8 +65,9 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["To access the app, continue below."].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))
 
-        XCTAssertTrue(app.textFields.firstMatch.waitForExistence(timeout: 5))
-        app.buttons["Phone number"].tap()
+        let phoneField = app.textFields["phone-number-field"]
+        XCTAssertTrue(phoneField.waitForExistence(timeout: 5))
+        phoneField.tap()
         XCTAssertFalse(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["I just want to browse the app."].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 2))
@@ -102,8 +103,9 @@ final class DARCiMobileUITests: XCTestCase {
         app.textFields["Email"].tap()
         app.typeText("lopezb.jl@gmail.com")
         XCTAssertTrue(app.buttons["Continue"].isEnabled)
-        if app.buttons["Done"].waitForExistence(timeout: 2) {
-            app.buttons["Done"].tap()
+        let keyboardDoneButton = app.buttons.matching(identifier: "Done").firstMatch
+        if keyboardDoneButton.waitForExistence(timeout: 2) {
+            keyboardDoneButton.tap()
         }
         app.buttons["Continue"].tap()
         XCTAssertTrue(app.staticTexts["Welcome to DARCi!"].waitForExistence(timeout: 5))
@@ -134,7 +136,7 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Enter your email here"].waitForExistence(timeout: 5))
         app.buttons["Use phone number instead."].tap()
         XCTAssertTrue(app.buttons["Use email instead."].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Phone number"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["phone-number-field"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -208,6 +210,73 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertEqual(welcome.frame.minY, initialWelcomeY, accuracy: 1)
         XCTAssertEqual(settings.frame.minY, initialSettingsY, accuracy: 1)
         XCTAssertLessThan(membershipPrompt.frame.minY, initialPromptY)
+    }
+
+    @MainActor
+    func testPersonalInfoKeepsSaveActionReachableWithKeyboardOpen() throws {
+        let app = makeApp(restoreSession: true)
+        app.launch()
+
+        if app.buttons["Not now"].waitForExistence(timeout: 1) {
+            app.buttons["Not now"].tap()
+        }
+
+        XCTAssertTrue(app.buttons["home-settings-button"].waitForExistence(timeout: 5))
+        app.buttons["home-settings-button"].tap()
+
+        let personalInfoButton = app.buttons["settings-personal-info-button"]
+        XCTAssertTrue(personalInfoButton.waitForExistence(timeout: 5))
+        if personalInfoButton.isHittable == false {
+            app.swipeUp()
+        }
+        personalInfoButton.tap()
+
+        let addressField = app.textFields["personal-info-address-field"]
+        XCTAssertTrue(addressField.waitForExistence(timeout: 5))
+        for _ in 0..<4 where addressField.isHittable == false {
+            app.swipeUp()
+        }
+        XCTAssertTrue(addressField.isHittable)
+        addressField.tap()
+        app.typeText("123 Main Street")
+
+        let saveButton = app.buttons["personal-info-save-button"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(saveButton.isHittable)
+        XCTAssertTrue(saveButton.isEnabled)
+    }
+
+    @MainActor
+    func testDocumentAndRequestFiltersKeepPrimaryActionsReachable() throws {
+        let app = makeApp(restoreSession: true)
+        app.launch()
+
+        if app.buttons["Not now"].waitForExistence(timeout: 1) {
+            app.buttons["Not now"].tap()
+        }
+
+        let documentsTab = app.buttons["Documents"]
+        XCTAssertTrue(documentsTab.waitForExistence(timeout: 5))
+        documentsTab.tap()
+
+        let documentsFilter = app.buttons["Filter documents"]
+        XCTAssertTrue(documentsFilter.waitForExistence(timeout: 5))
+        documentsFilter.tap()
+        let documentsApply = app.buttons["Apply"]
+        XCTAssertTrue(documentsApply.waitForExistence(timeout: 5))
+        XCTAssertTrue(documentsApply.isHittable)
+        documentsApply.tap()
+
+        let requestsTab = app.buttons["Requests"]
+        XCTAssertTrue(requestsTab.waitForExistence(timeout: 5))
+        requestsTab.tap()
+
+        let requestsFilter = app.buttons["Filter requests"]
+        XCTAssertTrue(requestsFilter.waitForExistence(timeout: 5))
+        requestsFilter.tap()
+        let requestsApply = app.buttons["Apply"]
+        XCTAssertTrue(requestsApply.waitForExistence(timeout: 5))
+        XCTAssertTrue(requestsApply.isHittable)
     }
 
     @MainActor

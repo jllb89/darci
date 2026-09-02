@@ -1,3 +1,4 @@
+import Combine
 import PDFKit
 import SwiftUI
 
@@ -21,6 +22,7 @@ struct NotaryInPersonSessionView: View {
     @State private var zoomOutTrigger = 0
     @State private var activePicker: ActivePicker?
     @State private var isStepCardMinimized = false
+    @State private var keyboardOverlap: CGFloat = 0
 
     init(
         session: AuthSession?,
@@ -86,8 +88,10 @@ struct NotaryInPersonSessionView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, keyboardOverlap)
                     .ignoresSafeArea(.container, edges: .bottom)
                     .animation(.easeInOut(duration: 0.24), value: isStepCardMinimized)
+                    .animation(.easeOut(duration: 0.25), value: keyboardOverlap)
                 }
             }
             .overlay {
@@ -101,8 +105,17 @@ struct NotaryInPersonSessionView: View {
                 }
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    dismissKeyboard()
+                }
+            }
+        }
         .task {
             await viewModel.load(session: session)
         }
@@ -112,6 +125,12 @@ struct NotaryInPersonSessionView: View {
         }
         .onChange(of: viewModel.step) { _, _ in
             isStepCardMinimized = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) {
+            updateKeyboardOverlap(from: $0)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardOverlap = 0
         }
         .onDisappear {
             viewModel.stop()
@@ -184,7 +203,7 @@ struct NotaryInPersonSessionView: View {
                 .accessibilityIdentifier("notary-session-step-card-minimize")
             }
 
-            ScrollView(showsIndicators: false) {
+            ScrollView(showsIndicators: true) {
                 VStack(alignment: .leading, spacing: scaled(14, in: proxy)) {
                     if viewModel.step == .start,
                        viewModel.missingCompletionProfileFields.isEmpty == false {
@@ -202,12 +221,17 @@ struct NotaryInPersonSessionView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollDismissesKeyboard(.interactively)
+
+            if hasPinnedStepAction {
+                pinnedStepAction
+            }
         }
         .padding(.horizontal, scaled(24, in: proxy))
         .padding(.top, scaled(24, in: proxy))
-        .padding(.bottom, scaled(20, in: proxy) + proxy.safeAreaInsets.bottom)
+        .padding(.bottom, scaled(20, in: proxy) + activeBottomInset(in: proxy))
         .frame(maxWidth: .infinity)
-        .frame(height: expandedStepCardHeight(in: proxy) + proxy.safeAreaInsets.bottom, alignment: .top)
+        .frame(height: expandedStepCardHeight(in: proxy) + activeBottomInset(in: proxy), alignment: .top)
         .background(Color(red: 0.90, green: 0.90, blue: 0.90))
         .clipShape(.rect(topLeadingRadius: 36, topTrailingRadius: 36))
         .shadow(color: .black.opacity(0.06), radius: 16, y: -4)
@@ -258,16 +282,66 @@ struct NotaryInPersonSessionView: View {
     }
 
     private func expandedStepCardHeight(in proxy: GeometryProxy) -> CGFloat {
+        let preferredRatio: CGFloat
+        let minimumHeight: CGFloat
+        let maximumHeight: CGFloat
+
         switch viewModel.step {
         case .start:
-            return scaled(230, in: proxy)
+            preferredRatio = 0
+            minimumHeight = scaled(230, in: proxy)
+            maximumHeight = scaled(230, in: proxy)
         case .samePlace, .complete:
-            return min(max(proxy.size.height * 0.48, 400), 500)
+            preferredRatio = 0.48
+            minimumHeight = 400
+            maximumHeight = 500
         case .done:
-            return min(max(proxy.size.height * 0.52, 430), 540)
+            preferredRatio = 0.52
+            minimumHeight = 430
+            maximumHeight = 540
         case .identity, .venue, .seal, .finalize:
-            return min(max(proxy.size.height * 0.66, 520), 680)
+            preferredRatio = 0.66
+            minimumHeight = 520
+            maximumHeight = 680
         }
+
+        return DARCiAdaptiveLayout.boundedPanelHeight(
+            viewportHeight: max(0, proxy.size.height - keyboardOverlap),
+            bottomInset: activeBottomInset(in: proxy),
+            preferredRatio: preferredRatio,
+            minimumHeight: minimumHeight,
+            maximumHeight: maximumHeight,
+            topClearance: scaled(8, in: proxy)
+        )
+    }
+
+    private func activeBottomInset(in proxy: GeometryProxy) -> CGFloat {
+        keyboardOverlap > 0 ? 0 : proxy.safeAreaInsets.bottom
+    }
+
+    private func updateKeyboardOverlap(from notification: Notification) {
+        guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let windowScene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })
+        else {
+            keyboardOverlap = 0
+            return
+        }
+
+        keyboardOverlap = DARCiAdaptiveLayout.dockedKeyboardOverlap(
+            screenBounds: windowScene.screen.bounds,
+            keyboardFrame: keyboardFrame
+        )
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private func startDocumentPreviewHeight(in proxy: GeometryProxy) -> CGFloat {
@@ -309,7 +383,7 @@ struct NotaryInPersonSessionView: View {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 23, weight: .regular))
                     .foregroundStyle(.black)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Back to notary requests")
@@ -638,14 +712,6 @@ struct NotaryInPersonSessionView: View {
                 statusMessage(validationMessage, tone: .warning)
             }
 
-            NotarySessionPrimaryButton(
-                title: viewModel.activeAction == "identity" ? "Recording identity" : "Record identity",
-                systemImage: "checkmark",
-                isEnabled: viewModel.canRecordIdentity
-            ) {
-                Task { await viewModel.recordIdentity(session: session) }
-            }
-            .accessibilityIdentifier("notary-session-record-identity-button")
         }
     }
 
@@ -731,14 +797,6 @@ struct NotaryInPersonSessionView: View {
                 Task { await viewModel.prefillVenue(session: session) }
             }
 
-            NotarySessionPrimaryButton(
-                title: viewModel.activeAction == "venue" ? "Capturing venue" : "Confirm acknowledgment venue",
-                systemImage: "checkmark",
-                isEnabled: viewModel.canRecordVenue
-            ) {
-                Task { await viewModel.recordVenue(session: session) }
-            }
-            .accessibilityIdentifier("notary-session-record-venue-button")
         }
     }
 
@@ -762,14 +820,6 @@ struct NotaryInPersonSessionView: View {
 
             NotarySessionNotesField(text: $viewModel.notarialNotes)
 
-            NotarySessionPrimaryButton(
-                title: viewModel.activeAction == "seal" ? "Appending acknowledgment" : "Seal acknowledgment",
-                systemImage: "seal.fill",
-                isEnabled: viewModel.canSealAcknowledgment
-            ) {
-                Task { await viewModel.sealAcknowledgment(session: session) }
-            }
-            .accessibilityIdentifier("notary-session-seal-button")
         }
     }
 
@@ -783,14 +833,6 @@ struct NotaryInPersonSessionView: View {
 
             NotarySessionNotesField(text: $viewModel.notarialNotes)
 
-            NotarySessionPrimaryButton(
-                title: viewModel.activeAction == "complete" ? "Completing and anchoring" : "Complete and submit package",
-                systemImage: "checkmark",
-                isEnabled: viewModel.hasRunningAction == false
-            ) {
-                Task { await viewModel.completeSession(session: session) }
-            }
-            .accessibilityIdentifier("notary-session-complete-button")
         }
     }
 
@@ -805,6 +847,62 @@ struct NotaryInPersonSessionView: View {
                 tone: viewModel.hasLedgerFailure ? .warning : .neutral
             )
 
+        }
+    }
+
+    private var hasPinnedStepAction: Bool {
+        switch viewModel.step {
+        case .identity, .venue, .seal, .complete, .finalize:
+            true
+        case .start, .samePlace, .done:
+            false
+        }
+    }
+
+    @ViewBuilder
+    private var pinnedStepAction: some View {
+        switch viewModel.step {
+        case .identity:
+            NotarySessionPrimaryButton(
+                title: viewModel.activeAction == "identity" ? "Recording identity" : "Record identity",
+                systemImage: "checkmark",
+                isEnabled: viewModel.canRecordIdentity
+            ) {
+                dismissKeyboard()
+                Task { await viewModel.recordIdentity(session: session) }
+            }
+            .accessibilityIdentifier("notary-session-record-identity-button")
+        case .venue:
+            NotarySessionPrimaryButton(
+                title: viewModel.activeAction == "venue" ? "Capturing venue" : "Confirm acknowledgment venue",
+                systemImage: "checkmark",
+                isEnabled: viewModel.canRecordVenue
+            ) {
+                dismissKeyboard()
+                Task { await viewModel.recordVenue(session: session) }
+            }
+            .accessibilityIdentifier("notary-session-record-venue-button")
+        case .seal:
+            NotarySessionPrimaryButton(
+                title: viewModel.activeAction == "seal" ? "Appending acknowledgment" : "Seal acknowledgment",
+                systemImage: "seal.fill",
+                isEnabled: viewModel.canSealAcknowledgment
+            ) {
+                dismissKeyboard()
+                Task { await viewModel.sealAcknowledgment(session: session) }
+            }
+            .accessibilityIdentifier("notary-session-seal-button")
+        case .complete:
+            NotarySessionPrimaryButton(
+                title: viewModel.activeAction == "complete" ? "Completing and anchoring" : "Complete and submit package",
+                systemImage: "checkmark",
+                isEnabled: viewModel.hasRunningAction == false
+            ) {
+                dismissKeyboard()
+                Task { await viewModel.completeSession(session: session) }
+            }
+            .accessibilityIdentifier("notary-session-complete-button")
+        case .finalize:
             NotarySessionPrimaryButton(
                 title: viewModel.activeAction == "finalize" ? "Submitting final package" : "Submit final notarized package",
                 systemImage: "arrow.up.doc.fill",
@@ -812,6 +910,8 @@ struct NotaryInPersonSessionView: View {
             ) {
                 Task { await viewModel.submitFinalPackage(session: session) }
             }
+        case .start, .samePlace, .done:
+            EmptyView()
         }
     }
 

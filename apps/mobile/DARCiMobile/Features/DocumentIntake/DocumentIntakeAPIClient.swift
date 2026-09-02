@@ -181,6 +181,7 @@ struct DocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
 
 struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     var jurisdictions = [IntakeJurisdictionOption(code: "CA", label: "California")]
+    var resumedDraft: DocumentIntakeDraft? = nil
 
     func listMemberFormJurisdictions(modeKey: String, accessToken: String) async throws -> MemberFormJurisdictionsResponse {
         MemberFormJurisdictionsResponse(mode: nil, jurisdictions: jurisdictions, message: nil)
@@ -212,7 +213,7 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     }
 
     func getDocumentIntakeDraft(documentId: String, accessToken: String) async throws -> DocumentIntakeDraftResponse {
-        DocumentIntakeDraftResponse(draft: nil, message: nil, currentRevision: nil, intakeStatus: nil)
+        DocumentIntakeDraftResponse(draft: resumedDraft, message: nil, currentRevision: nil, intakeStatus: nil)
     }
 
     func saveDocumentIntakeDraft(documentId: String, request: DocumentIntakeDraftUpsertRequest, accessToken: String) async throws -> DocumentIntakeDraftResponse {
@@ -703,6 +704,16 @@ extension MemberFormRulesContract {
                                         "taxes": .string("Tax matters")
                                     ])
                                 ]
+                            ),
+                            MemberFacingField(
+                                canonicalKey: "special_instructions_text",
+                                label: "Special instructions",
+                                semanticType: "text",
+                                dataType: "string",
+                                required: false,
+                                repeatable: false,
+                                helpText: "Keep this concise and directive. These instructions are copied into the final document package.",
+                                validation: nil
                             )
                         ]
                     )

@@ -6,6 +6,7 @@ struct NotaryRequestReviewView: View {
     let onDecisionRecorded: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.openURL) private var openURL
     @StateObject private var viewModel: NotaryRequestReviewViewModel
     @State private var pageCount = 1
@@ -71,9 +72,10 @@ struct NotaryRequestReviewView: View {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 24, weight: .regular))
                     .foregroundStyle(.black)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Back")
 
             Text(viewModel.screenTitle.uppercased())
                 .font(DARCiFont.maisonNeue(.medium, size: 15))
@@ -210,7 +212,14 @@ struct NotaryRequestReviewView: View {
     }
 
     private func actionBar(proxy: GeometryProxy) -> some View {
-        HStack(spacing: scaled(10, in: proxy)) {
+        let actionLayout = DARCiAdaptiveLayout.shouldStackActions(
+            viewportWidth: proxy.size.width,
+            isAccessibilityText: dynamicTypeSize.isAccessibilitySize
+        )
+            ? AnyLayout(VStackLayout(spacing: scaled(10, in: proxy)))
+            : AnyLayout(HStackLayout(spacing: scaled(10, in: proxy)))
+
+        return actionLayout {
             Button {
                 Task { await submitDecision("rejected") }
             } label: {
@@ -224,6 +233,7 @@ struct NotaryRequestReviewView: View {
                 .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
                 .lineSpacing(scaled(1.6, in: proxy))
                 .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
                 .background(viewModel.canSubmitDecision ? Color.black : Color.black.opacity(0.42))
             }
@@ -244,6 +254,7 @@ struct NotaryRequestReviewView: View {
                 .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
                 .lineSpacing(scaled(1.6, in: proxy))
                 .foregroundStyle(.black)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
                 .background(viewModel.canSubmitDecision ? DARCiTheme.onboardingGreen : Color.black.opacity(0.18))
             }

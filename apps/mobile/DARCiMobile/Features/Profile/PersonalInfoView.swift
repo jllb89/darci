@@ -86,7 +86,7 @@ struct PersonalInfoView: View {
                     DARCiArrowLeftIcon()
                         .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
                         .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
-                        .frame(width: scaled(34, in: proxy), height: scaled(34, in: proxy), alignment: .leading)
+                        .frame(width: 44, height: 44, alignment: .leading)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Back to user settings")
@@ -97,67 +97,70 @@ struct PersonalInfoView: View {
                     .foregroundStyle(.white)
                     .padding(.top, scaled(52, in: proxy))
 
-                VStack(alignment: .leading, spacing: scaled(33, in: proxy)) {
-                    profileField(title: "Name", field: .name, proxy: proxy) {
-                        TextField("", text: $name)
-                            .textContentType(.name)
-                            .textInputAutocapitalization(.words)
-                    }
+                ScrollView(showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: scaled(33, in: proxy)) {
+                        profileField(title: "Name", field: .name, proxy: proxy) {
+                            TextField("", text: $name)
+                                .textContentType(.name)
+                                .textInputAutocapitalization(.words)
+                        }
 
-                    profileField(title: "Email", field: .email, proxy: proxy) {
-                        TextField("", text: $email)
-                            .textContentType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                    }
+                        profileField(title: "Email", field: .email, proxy: proxy) {
+                            TextField("", text: $email)
+                                .textContentType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.emailAddress)
+                                .autocorrectionDisabled()
+                        }
 
-                    profileField(title: "Password", field: .password, proxy: proxy) {
-                        SecureField("*********", text: $password)
-                            .textContentType(.newPassword)
-                    }
+                        profileField(title: "Password", field: .password, proxy: proxy) {
+                            SecureField("*********", text: $password)
+                                .textContentType(.newPassword)
+                        }
 
-                    profileField(title: "Phone number", field: .phone, proxy: proxy) {
-                        HStack(spacing: scaled(10, in: proxy)) {
-                            Button {
-                                isPhoneCountryPickerPresented = true
-                            } label: {
-                                HStack(spacing: scaled(5, in: proxy)) {
-                                    Text(selectedPhoneCountry.dialCode)
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: scaled(8, in: proxy), weight: .bold))
+                        profileField(title: "Phone number", field: .phone, proxy: proxy) {
+                            HStack(spacing: scaled(10, in: proxy)) {
+                                Button {
+                                    isPhoneCountryPickerPresented = true
+                                } label: {
+                                    HStack(spacing: scaled(5, in: proxy)) {
+                                        Text(selectedPhoneCountry.dialCode)
+                                        Image(systemName: "chevron.down")
+                                            .font(.system(size: scaled(8, in: proxy), weight: .bold))
+                                    }
+                                    .foregroundStyle(.white)
+                                    .frame(minHeight: 44)
+                                    .contentShape(Rectangle())
                                 }
-                                .foregroundStyle(.white)
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("personal-info-phone-country-selector")
+
+                                TextField("", text: $phone)
+                                    .textContentType(.telephoneNumber)
+                                    .keyboardType(.phonePad)
+                                    .onChange(of: phone) { _, nextValue in
+                                        phone = PhoneNumberFormatting.formattedNationalNumber(nextValue, country: selectedPhoneCountry)
+                                    }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("personal-info-phone-country-selector")
+                        }
 
-                            TextField("", text: $phone)
-                                .textContentType(.telephoneNumber)
-                                .keyboardType(.phonePad)
-                                .onChange(of: phone) { _, nextValue in
-                                    phone = PhoneNumberFormatting.formattedNationalNumber(nextValue, country: selectedPhoneCountry)
-                                }
+                        profileField(title: "Address", field: .address, proxy: proxy) {
+                            TextField("", text: $address)
+                                .textContentType(.fullStreetAddress)
+                                .textInputAutocapitalization(.words)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(DARCiFont.maisonNeue(.book, size: scaled(11, in: proxy)))
+                                .foregroundStyle(Color(red: 1, green: 0.42, blue: 0.42))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-
-                    profileField(title: "Address", field: .address, proxy: proxy) {
-                        TextField("", text: $address)
-                            .textContentType(.fullStreetAddress)
-                            .textInputAutocapitalization(.words)
-                    }
+                    .padding(.top, scaled(46, in: proxy))
+                    .padding(.bottom, scaled(18, in: proxy))
                 }
-                .padding(.top, scaled(46, in: proxy))
-
-                Spacer(minLength: scaled(18, in: proxy))
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(DARCiFont.maisonNeue(.book, size: scaled(11, in: proxy)))
-                        .foregroundStyle(Color(red: 1, green: 0.42, blue: 0.42))
-                        .lineLimit(2)
-                        .padding(.bottom, scaled(8, in: proxy))
-                }
+                .scrollDismissesKeyboard(.interactively)
 
                 Button(action: save) {
                     HStack(spacing: scaled(12, in: proxy)) {
@@ -173,7 +176,7 @@ struct PersonalInfoView: View {
                     }
                     .foregroundStyle(.black)
                     .padding(.horizontal, scaled(22, in: proxy))
-                    .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy), maxHeight: scaled(54, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
                     .background(hasChanges && isSaving == false ? DARCiTheme.onboardingGreen : Color(red: 0.21, green: 0.21, blue: 0.21))
                 }
                 .buttonStyle(.plain)
@@ -187,10 +190,15 @@ struct PersonalInfoView: View {
             .background(Color.black.ignoresSafeArea())
             .clipped()
         }
-        .ignoresSafeArea(.keyboard)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
+        }
         .sheet(isPresented: $isPhoneCountryPickerPresented) {
             PhoneCountryPickerSheet(
                 countries: PhoneNumberFormatting.countries,
@@ -223,7 +231,7 @@ struct PersonalInfoView: View {
                 .focused($focusedField, equals: field)
                 .accessibilityIdentifier("personal-info-\(field.rawValue)-field")
                 .padding(.horizontal, focusedField == field ? scaled(11, in: proxy) : scaled(10, in: proxy))
-                .frame(maxWidth: .infinity, minHeight: scaled(43, in: proxy), maxHeight: scaled(43, in: proxy), alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: scaled(43, in: proxy), alignment: .leading)
                 .background(focusedField == field ? Color(red: 0.10, green: 0.10, blue: 0.10) : .clear)
                 .overlay(alignment: .bottom) {
                     if focusedField == field {

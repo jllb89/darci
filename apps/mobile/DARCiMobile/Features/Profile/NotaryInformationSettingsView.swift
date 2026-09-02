@@ -35,7 +35,7 @@ struct NotaryInformationSettingsView: View {
                     DARCiArrowLeftIcon()
                         .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
                         .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
-                        .frame(width: scaled(34, in: proxy), height: scaled(34, in: proxy), alignment: .leading)
+                        .frame(width: 44, height: 44, alignment: .leading)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Back to user settings")
@@ -85,6 +85,7 @@ struct NotaryInformationSettingsView: View {
                     .padding(.top, scaled(46, in: proxy))
                     .padding(.bottom, scaled(28, in: proxy))
                 }
+                .scrollDismissesKeyboard(.interactively)
 
                 Spacer(minLength: scaled(12, in: proxy))
 
@@ -97,7 +98,7 @@ struct NotaryInformationSettingsView: View {
                     Text(statusMessage)
                         .font(DARCiFont.maisonNeue(.book, size: scaled(11, in: proxy)))
                         .foregroundStyle(viewModel.statusTone == .success ? DARCiTheme.onboardingGreen : Color(red: 1, green: 0.42, blue: 0.42))
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.bottom, scaled(8, in: proxy))
                 }
 
@@ -115,7 +116,7 @@ struct NotaryInformationSettingsView: View {
                     }
                     .foregroundStyle(.black)
                     .padding(.horizontal, scaled(22, in: proxy))
-                    .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy), maxHeight: scaled(54, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
                     .background(viewModel.canSave ? DARCiTheme.onboardingGreen : Color(red: 0.21, green: 0.21, blue: 0.21))
                 }
                 .buttonStyle(.plain)
@@ -129,7 +130,6 @@ struct NotaryInformationSettingsView: View {
             .background(Color.black.ignoresSafeArea())
             .clipped()
         }
-        .ignoresSafeArea(.keyboard)
         .task { await viewModel.load(session: session) }
         .onChange(of: viewModel.jurisdiction) { _, _ in
             if expandedSelectKey == "serviceArea" {
@@ -139,6 +139,12 @@ struct NotaryInformationSettingsView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
+        }
     }
 
     private func selectField(title: String, key: String, proxy: GeometryProxy) -> some View {
@@ -187,7 +193,7 @@ struct NotaryInformationSettingsView: View {
                 .focused($focusedField, equals: field)
                 .accessibilityIdentifier("notary-information-\(field.rawValue)-field")
                 .padding(.horizontal, focusedField == field ? scaled(11, in: proxy) : scaled(10, in: proxy))
-                .frame(maxWidth: .infinity, minHeight: scaled(43, in: proxy), maxHeight: scaled(43, in: proxy), alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: scaled(43, in: proxy), alignment: .leading)
                 .background(focusedField == field ? Color(red: 0.10, green: 0.10, blue: 0.10) : .clear)
                 .overlay(alignment: .bottom) {
                     if focusedField == field {
@@ -219,7 +225,7 @@ struct NotaryInformationSettingsView: View {
                     .stroke(.white, style: StrokeStyle(lineWidth: 1.7, lineCap: .square, lineJoin: .miter))
                     .frame(width: chevronWidth, height: chevronHeight)
             }
-            .frame(height: rowHeight)
+            .frame(minHeight: rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -294,6 +300,7 @@ private struct NotarySettingsSelectInput: View {
     @Binding var expandedKey: String?
     let isDisabled: Bool
     let onSelect: (String) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var isExpanded: Bool {
         expandedKey == key
@@ -346,9 +353,10 @@ private struct NotarySettingsSelectInput: View {
                                 Text(option.label)
                                     .font(DARCiFont.maisonNeue(.book, size: 14))
                                     .foregroundStyle(.white)
-                                    .lineLimit(2)
-                                    .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                     .padding(.horizontal, 16)
+                                    .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 8 : 0)
                             }
                             .buttonStyle(.plain)
                         }

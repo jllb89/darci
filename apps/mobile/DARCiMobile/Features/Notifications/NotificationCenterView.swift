@@ -7,6 +7,7 @@ struct NotificationCenterView: View {
     private let onOpenRoute: (PushNotificationRoute) -> Void
 
     @ObservedObject private var viewModel: NotificationCenterViewModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         session: AuthSession?,
@@ -27,7 +28,7 @@ struct NotificationCenterView: View {
                     DARCiArrowLeftIcon()
                         .stroke(.black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
                         .frame(width: scaled(28, in: proxy), height: scaled(28, in: proxy))
-                        .frame(width: scaled(36, in: proxy), height: scaled(36, in: proxy))
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, scaled(37, in: proxy))
@@ -121,7 +122,7 @@ struct NotificationCenterView: View {
                             .frame(width: scaled(10, in: proxy), height: scaled(10, in: proxy))
                     }
                 }
-                .frame(height: scaled(14, in: proxy), alignment: .center)
+                .frame(minHeight: 44, alignment: .center)
             }
             .buttonStyle(.plain)
             .disabled(viewModel.unreadCount == 0 || viewModel.isMarkingAllRead)
@@ -171,7 +172,7 @@ struct NotificationCenterView: View {
                 .minimumScaleFactor(0.9)
                 .allowsTightening(true)
                 .frame(width: width, alignment: alignment)
-                .frame(height: scaled(31, in: proxy), alignment: .topLeading)
+                .frame(minHeight: 44, alignment: .center)
         }
         .buttonStyle(.plain)
     }
@@ -261,7 +262,7 @@ struct NotificationCenterView: View {
                             .font(DARCiFont.maisonNeue(item.isRead ? .book : .medium, size: 15))
                             .lineSpacing(19)
                             .foregroundStyle(NotificationCenterPalette.primaryText)
-                            .lineLimit(2)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                             .minimumScaleFactor(0.82)
 
                         HStack(alignment: .firstTextBaseline, spacing: scaled(10, in: proxy)) {
@@ -269,7 +270,7 @@ struct NotificationCenterView: View {
                                 .font(DARCiFont.maisonNeue(.book, size: 11.5))
                                 .lineSpacing(3)
                                 .foregroundStyle(NotificationCenterPalette.bodyText)
-                                .lineLimit(2)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                 .fixedSize(horizontal: false, vertical: true)
 
                             Spacer(minLength: scaled(8, in: proxy))
@@ -278,7 +279,7 @@ struct NotificationCenterView: View {
                                 .font(DARCiFont.maisonNeue(.book, size: 9))
                                 .lineSpacing(12)
                                 .foregroundStyle(NotificationCenterPalette.secondaryText)
-                                .lineLimit(1)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         }
 
                         if let metadataLabel = item.metadataLabel, metadataLabel.isEmpty == false {

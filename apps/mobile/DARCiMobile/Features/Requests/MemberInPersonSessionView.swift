@@ -7,6 +7,7 @@ struct MemberInPersonSessionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var viewModel: MemberInPersonSessionViewModel
     @State private var pageCount = 1
     @State private var currentPage = 1
@@ -121,6 +122,8 @@ struct MemberInPersonSessionView: View {
                                 .font(.system(size: 14, weight: .medium))
                             Text(viewModel.shareLocationButtonTitle)
                                 .font(DARCiFont.maisonNeue(.medium, size: 14))
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .foregroundStyle(viewModel.canShareLocation ? Color.black : Color.white.opacity(0.64))
                         .frame(maxWidth: .infinity, minHeight: 52)
@@ -166,7 +169,7 @@ struct MemberInPersonSessionView: View {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 23, weight: .regular))
                     .foregroundStyle(.black)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Back to requests")
@@ -174,7 +177,8 @@ struct MemberInPersonSessionView: View {
             Text(viewModel.screenTitle)
                 .font(DARCiFont.maisonNeue(.medium, size: 14))
                 .foregroundStyle(.black)
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
         }
@@ -205,7 +209,11 @@ struct MemberInPersonSessionView: View {
                 .foregroundStyle(.black)
                 .lineLimit(2)
 
-            HStack(spacing: 10) {
+            let contactLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 10))
+
+            contactLayout {
                 contactButton(title: "Email", systemImage: "envelope", value: viewModel.notaryEmail, url: contactURL(scheme: "mailto", value: viewModel.notaryEmail))
                 contactButton(title: "Call", systemImage: "phone", value: viewModel.notaryPhone, url: contactURL(scheme: "tel", value: viewModel.notaryPhone))
             }

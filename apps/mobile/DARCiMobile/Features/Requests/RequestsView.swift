@@ -55,7 +55,7 @@ struct RequestsView: View {
             .safeAreaInset(edge: .bottom) {
                 if isSearchPresented == false && isFilterPresented == false {
                     RequestsBottomToolbar(selectedTab: $selectedTab)
-                        .frame(width: scaled(241, in: proxy), height: scaled(25, in: proxy))
+                        .frame(width: scaled(241, in: proxy), height: scaled(44, in: proxy))
                         .frame(maxWidth: .infinity)
                         .padding(.top, scaled(10, in: proxy))
                         .padding(.bottom, scaled(12, in: proxy))
@@ -216,6 +216,8 @@ private struct RequestsTopBar: View {
                 }
             }
             .buttonStyle(.plain)
+            .frame(minHeight: 44)
+            .accessibilityLabel("Search requests")
 
             Spacer(minLength: 0)
 
@@ -226,6 +228,7 @@ private struct RequestsTopBar: View {
                         .foregroundStyle(Color.black.opacity(0.55))
                 }
                 .buttonStyle(.plain)
+                .frame(minWidth: 44, minHeight: 44)
                 .transition(.opacity)
             }
 
@@ -233,11 +236,12 @@ private struct RequestsTopBar: View {
                 RequestsFilterIcon()
                     .stroke(.black, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
                     .frame(width: 19, height: 15)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Filter requests")
         }
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
     }
 }
 
@@ -406,9 +410,10 @@ private struct RequestsSearchView: View {
                             RequestsBackIcon()
                                 .stroke(.white, style: StrokeStyle(lineWidth: 1.8, lineCap: .square, lineJoin: .miter))
                                 .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
-                                .frame(width: scaled(24, in: proxy), height: scaled(24, in: proxy))
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Back")
 
                         HStack(spacing: scaled(22, in: proxy)) {
                             RequestsSearchIcon()
@@ -461,6 +466,7 @@ private struct RequestsSearchView: View {
                             .padding(.horizontal, scaled(10, in: proxy))
                             .padding(.bottom, scaled(80, in: proxy))
                         }
+                        .scrollDismissesKeyboard(.interactively)
                         .padding(.top, scaled(76, in: proxy))
                         .transition(.opacity)
                     }
@@ -532,48 +538,53 @@ private struct RequestsFilterView: View {
                 DARCiTheme.onboardingGreen.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 0) {
-                    Button(action: onBack) {
-                        RequestsBackIcon()
-                            .stroke(.black, style: StrokeStyle(lineWidth: 1.8, lineCap: .square, lineJoin: .miter))
-                            .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
-                            .frame(width: scaled(24, in: proxy), height: scaled(24, in: proxy))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, scaled(89, in: proxy))
+                    ScrollView(showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Button(action: onBack) {
+                                RequestsBackIcon()
+                                    .stroke(.black, style: StrokeStyle(lineWidth: 1.8, lineCap: .square, lineJoin: .miter))
+                                    .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Back")
+                            .padding(.top, scaled(67, in: proxy))
 
-                    HStack(spacing: scaled(15, in: proxy)) {
-                        RequestsFilterIcon()
-                            .stroke(.black, style: StrokeStyle(lineWidth: 1.7, lineCap: .butt, lineJoin: .miter))
-                            .frame(width: scaled(22, in: proxy), height: scaled(18, in: proxy))
+                            HStack(spacing: scaled(15, in: proxy)) {
+                                RequestsFilterIcon()
+                                    .stroke(.black, style: StrokeStyle(lineWidth: 1.7, lineCap: .butt, lineJoin: .miter))
+                                    .frame(width: scaled(22, in: proxy), height: scaled(18, in: proxy))
 
-                        Text("Filter")
-                            .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
-                            .tracking(0.24)
-                            .lineSpacing(4.8)
-                            .foregroundStyle(.black)
-                    }
-                    .padding(.top, scaled(82, in: proxy))
+                                Text("Filter")
+                                    .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
+                                    .tracking(0.24)
+                                    .lineSpacing(4.8)
+                                    .foregroundStyle(.black)
+                            }
+                            .padding(.top, scaled(60, in: proxy))
 
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(RequestsFilterSection.allCases) { section in
-                            RequestsFilterSectionRow(
-                                section: section,
-                                isExpanded: expandedSection == section,
-                                summary: summary(for: section),
-                                content: { filterOptions(for: section) }
-                            ) {
-                                withAnimation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.42)) {
-                                    expandedSection = expandedSection == section ? nil : section
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(RequestsFilterSection.allCases) { section in
+                                    RequestsFilterSectionRow(
+                                        section: section,
+                                        isExpanded: expandedSection == section,
+                                        summary: summary(for: section),
+                                        content: { filterOptions(for: section) }
+                                    ) {
+                                        withAnimation(.timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.42)) {
+                                            expandedSection = expandedSection == section ? nil : section
+                                        }
+                                    }
+                                    .opacity(revealedSections.contains(section) ? 1 : 0)
+                                    .offset(y: revealedSections.contains(section) ? 0 : 12)
+                                    .animation(.easeOut(duration: 0.34).delay(Double(section.index) * 0.055), value: revealedSections)
                                 }
                             }
-                            .opacity(revealedSections.contains(section) ? 1 : 0)
-                            .offset(y: revealedSections.contains(section) ? 0 : 12)
-                            .animation(.easeOut(duration: 0.34).delay(Double(section.index) * 0.055), value: revealedSections)
+                            .padding(.top, scaled(96, in: proxy))
                         }
+                        .padding(.horizontal, scaled(23, in: proxy))
+                        .padding(.bottom, scaled(24, in: proxy))
                     }
-                    .padding(.top, scaled(134, in: proxy))
-
-                    Spacer(minLength: 0)
 
                     Button(action: onApply) {
                         HStack(spacing: scaled(18, in: proxy)) {
@@ -592,9 +603,11 @@ private struct RequestsFilterView: View {
                         .background(Color.black)
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, scaled(120, in: proxy))
+                    .padding(.horizontal, scaled(23, in: proxy))
+                    .padding(.top, scaled(12, in: proxy))
+                    .padding(.bottom, max(proxy.safeAreaInsets.bottom, scaled(24, in: proxy)))
+                    .background(DARCiTheme.onboardingGreen)
                 }
-                .padding(.horizontal, scaled(23, in: proxy))
             }
             .onAppear(perform: revealSections)
         }
@@ -791,12 +804,12 @@ private struct RequestsBottomToolbar: View {
     @Binding var selectedTab: AppTab
 
     var body: some View {
-        HStack(spacing: 83) {
+        HStack(spacing: 54.5) {
             toolbarButton(tab: .home, icon: .home)
             toolbarButton(tab: .documents, icon: .file)
             toolbarButton(tab: .requests, icon: .mail)
         }
-        .frame(width: 241, height: 25)
+        .frame(width: 241, height: 44)
         .accessibilityElement(children: .contain)
     }
 
@@ -807,6 +820,7 @@ private struct RequestsBottomToolbar: View {
             RequestsToolbarIcon(kind: icon)
                 .stroke(selectedTab == tab ? DARCiTheme.onboardingGreen : .black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
                 .frame(width: 25, height: 25)
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)

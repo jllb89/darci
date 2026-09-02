@@ -12,6 +12,7 @@ struct MemberBillingView: View {
 
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var viewModel: MemberBillingViewModel
 
     init(
@@ -153,7 +154,7 @@ struct MemberBillingView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 14 * scale, weight: .light))
                     .foregroundStyle(onDark ? Color.white : Color.black)
-                    .frame(width: 40 * scale, height: 40 * scale)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -169,11 +170,12 @@ struct MemberBillingView: View {
                     .foregroundStyle(onDark ? Color.white.opacity(0.72) : Color.black.opacity(0.78))
             }
             .padding(.horizontal, 11 * scale)
-            .frame(height: 24 * scale)
+            .frame(minHeight: 24 * scale)
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 4 * scale : 0)
             .background(onDark ? Color.white.opacity(0.12) : Color(red: 0.94, green: 0.94, blue: 0.94))
             .clipShape(Capsule())
         }
-        .frame(height: 40 * scale)
+        .frame(minHeight: 44 * scale)
         .padding(.top, 1 * scale)
     }
 
@@ -234,7 +236,8 @@ struct MemberBillingView: View {
                 }
             }
             .padding(.horizontal, 15 * scale)
-            .frame(height: 68 * scale)
+            .frame(minHeight: 68 * scale)
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 8 * scale : 0)
             .background(isSelected ? Color.black : Color.white)
             .overlay {
                 RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
@@ -269,7 +272,8 @@ struct MemberBillingView: View {
                         .font(DARCiFont.maisonNeue(.medium, size: 15 * scale))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 56 * scale)
+                        .frame(minHeight: 56 * scale)
+                        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 6 * scale : 0)
                         .background(Color.black)
                 }
                 .buttonStyle(.plain)
@@ -497,7 +501,8 @@ struct MemberBillingView: View {
                             .font(DARCiFont.maisonNeue(.book, size: 15 * scale))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 56 * scale)
+                            .frame(minHeight: 56 * scale)
+                            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 6 * scale : 0)
                             .background(DARCiTheme.onboardingGreen)
                     }
                     .buttonStyle(.plain)
@@ -561,70 +566,77 @@ struct MemberBillingView: View {
         return VStack(spacing: 0) {
             billingNavigation(proxy: proxy)
 
-            Spacer(minLength: 30 * scale)
+            ScrollView(showsIndicators: true) {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 30 * scale)
 
-            VStack(spacing: 0) {
-                if showsSpinner {
-                    ProgressView()
-                        .tint(.black)
-                        .controlSize(.regular)
-                        .padding(.bottom, 26 * scale)
-                } else {
-                    Circle()
-                        .fill(DARCiTheme.onboardingGreen)
-                        .frame(width: 20 * scale, height: 20 * scale)
-                        .padding(.bottom, 26 * scale)
-                }
+                    VStack(spacing: 0) {
+                        if showsSpinner {
+                            ProgressView()
+                                .tint(.black)
+                                .controlSize(.regular)
+                                .padding(.bottom, 26 * scale)
+                        } else {
+                            Circle()
+                                .fill(DARCiTheme.onboardingGreen)
+                                .frame(width: 20 * scale, height: 20 * scale)
+                                .padding(.bottom, 26 * scale)
+                        }
 
-                Text(eyebrow)
-                    .font(DARCiFont.maisonNeue(.mono, size: 9 * scale))
-                    .tracking(0.6 * scale)
+                        Text(eyebrow)
+                            .font(DARCiFont.maisonNeue(.mono, size: 9 * scale))
+                            .tracking(0.6 * scale)
 
-                Text(title)
-                    .font(DARCiFont.maisonNeue(.medium, size: 28 * scale))
-                    .tracking(-0.2 * scale)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 12 * scale)
+                        Text(title)
+                            .font(DARCiFont.maisonNeue(.medium, size: 28 * scale))
+                            .tracking(-0.2 * scale)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 12 * scale)
 
-                Text(body)
-                    .font(DARCiFont.maisonNeue(.book, size: 13 * scale))
-                    .lineSpacing(5 * scale)
-                    .foregroundStyle(Color.black.opacity(0.50))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 12 * scale)
+                        Text(body)
+                            .font(DARCiFont.maisonNeue(.book, size: 13 * scale))
+                            .lineSpacing(5 * scale)
+                            .foregroundStyle(Color.black.opacity(0.50))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 12 * scale)
 
-                if let errorMessage = viewModel.errorMessage {
-                    billingError(errorMessage, scale: scale)
-                        .padding(.top, 20 * scale)
-                }
-            }
-
-            Spacer(minLength: 30 * scale)
-
-            if showsSpinner {
-                Button("Check again") {
-                    Task { await viewModel.load() }
-                }
-                .buttonStyle(BillingPrimaryButtonStyle(scale: scale))
-                .accessibilityIdentifier("member-billing-refresh-button")
-            } else if viewModel.payload?.actions.canOpenPortal == true {
-                Button(viewModel.isOpeningPortal ? "Opening Stripe…" : "Manage billing in Stripe") {
-                    Task {
-                        guard let url = await viewModel.createPortalSession() else { return }
-                        openURL(url)
+                        if let errorMessage = viewModel.errorMessage {
+                            billingError(errorMessage, scale: scale)
+                                .padding(.top, 20 * scale)
+                        }
                     }
-                }
-                .buttonStyle(BillingPrimaryButtonStyle(scale: scale))
-                .disabled(viewModel.isOpeningPortal)
-                .accessibilityIdentifier("member-billing-recovery-portal-button")
-            }
 
-            Button("Contact support", action: onContactSupport)
-                .buttonStyle(.plain)
-                .font(DARCiFont.maisonNeue(.medium, size: 11 * scale))
-                .underline()
-                .padding(.top, 16 * scale)
-                .padding(.bottom, 24 * scale)
+                    Spacer(minLength: 30 * scale)
+
+                    if showsSpinner {
+                        Button("Check again") {
+                            Task { await viewModel.load() }
+                        }
+                        .buttonStyle(BillingPrimaryButtonStyle(scale: scale))
+                        .accessibilityIdentifier("member-billing-refresh-button")
+                    } else if viewModel.payload?.actions.canOpenPortal == true {
+                        Button(viewModel.isOpeningPortal ? "Opening Stripe…" : "Manage billing in Stripe") {
+                            Task {
+                                guard let url = await viewModel.createPortalSession() else { return }
+                                openURL(url)
+                            }
+                        }
+                        .buttonStyle(BillingPrimaryButtonStyle(scale: scale))
+                        .disabled(viewModel.isOpeningPortal)
+                        .accessibilityIdentifier("member-billing-recovery-portal-button")
+                    }
+
+                    Button("Contact support", action: onContactSupport)
+                        .buttonStyle(.plain)
+                        .font(DARCiFont.maisonNeue(.medium, size: 11 * scale))
+                        .underline()
+                        .padding(.top, 16 * scale)
+                        .padding(.bottom, max(24 * scale, proxy.safeAreaInsets.bottom))
+                }
+                .frame(maxWidth: .infinity, minHeight: max(proxy.size.height - (41 * scale), 0))
+            }
         }
         .padding(.horizontal, 29 * scale)
         .background(Color.white)
@@ -763,7 +775,7 @@ private struct BillingPrimaryButtonStyle: ButtonStyle {
             .font(DARCiFont.maisonNeue(.medium, size: 15 * scale))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 56 * scale)
+            .frame(minHeight: 56 * scale)
             .background(Color.black.opacity(configuration.isPressed ? 0.76 : 1))
     }
 }

@@ -77,65 +77,70 @@ struct ProfileTypeSelectionView: View {
             ZStack(alignment: .topLeading) {
                 DARCiTheme.onboardingGreen.ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 0) {
-                    Button(action: onBack) {
-                        DARCiArrowLeftIcon()
-                            .stroke(.black, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
-                            .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, scaled(89, in: proxy))
-                    .padding(.leading, scaled(40, in: proxy))
-
-                    Text("Your roles:")
-                        .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
-                        .tracking(0.24)
-                        .lineSpacing(scaled(4.8, in: proxy))
-                        .foregroundStyle(.black)
-                        .padding(.top, scaled(98, in: proxy))
-                        .padding(.leading, scaled(44, in: proxy))
-
+                ScrollView(showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(roles) { role in
-                            ProfileRoleSelectionRow(role: role) {
-                                onSelectRole(role)
-                            }
-                            .frame(height: scaled(47, in: proxy))
-                        }
-                    }
-                    .overlay(alignment: .top) {
-                        ProfileDivider()
-                    }
-                    .padding(.top, scaled(143, in: proxy))
-                    .padding(.horizontal, scaled(23, in: proxy))
-
-                    Spacer(minLength: 0)
-
-                    if showsIlluminotaryCTA {
-                        Button(action: onBecomeIlluminotary) {
-                            HStack(spacing: scaled(18, in: proxy)) {
-                                Text("Become an illuminotary")
-                                    .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
-                                    .lineSpacing(scaled(2.2, in: proxy))
-                                    .foregroundStyle(.white)
-
-                                DARCiArrowCornerIcon()
-                                    .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
-                                    .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(height: scaled(54, in: proxy))
-                            .padding(.horizontal, scaled(25, in: proxy))
-                            .background(Color.black)
+                        Button(action: onBack) {
+                            DARCiArrowLeftIcon()
+                                .stroke(.black, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                                .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, scaled(23, in: proxy))
-                        .padding(.bottom, scaled(28, in: proxy))
-                    }
+                        .accessibilityLabel("Back")
+                        .padding(.top, scaled(67, in: proxy))
+                        .padding(.leading, scaled(29, in: proxy))
 
-                    ProfileFooterLinks()
-                        .padding(.leading, scaled(44, in: proxy))
-                        .padding(.bottom, scaled(43, in: proxy))
+                        Text("Your roles:")
+                            .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
+                            .tracking(0.24)
+                            .lineSpacing(scaled(4.8, in: proxy))
+                            .foregroundStyle(.black)
+                            .padding(.top, scaled(76, in: proxy))
+                            .padding(.leading, scaled(44, in: proxy))
+
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(roles) { role in
+                                ProfileRoleSelectionRow(role: role) {
+                                    onSelectRole(role)
+                                }
+                                .frame(minHeight: scaled(47, in: proxy))
+                            }
+                        }
+                        .overlay(alignment: .top) {
+                            ProfileDivider()
+                        }
+                        .padding(.top, scaled(104, in: proxy))
+                        .padding(.horizontal, scaled(23, in: proxy))
+
+                        Spacer(minLength: scaled(40, in: proxy))
+
+                        if showsIlluminotaryCTA {
+                            Button(action: onBecomeIlluminotary) {
+                                HStack(spacing: scaled(18, in: proxy)) {
+                                    Text("Become an illuminotary")
+                                        .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
+                                        .lineSpacing(scaled(2.2, in: proxy))
+                                        .foregroundStyle(.white)
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                    DARCiArrowCornerIcon()
+                                        .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                                        .frame(width: scaled(18, in: proxy), height: scaled(18, in: proxy))
+                                }
+                                .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy), alignment: .leading)
+                                .padding(.horizontal, scaled(25, in: proxy))
+                                .background(Color.black)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, scaled(23, in: proxy))
+                            .padding(.bottom, scaled(28, in: proxy))
+                        }
+
+                        ProfileFooterLinks()
+                            .padding(.leading, scaled(44, in: proxy))
+                            .padding(.bottom, max(proxy.safeAreaInsets.bottom, scaled(43, in: proxy)))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
                 }
             }
         }

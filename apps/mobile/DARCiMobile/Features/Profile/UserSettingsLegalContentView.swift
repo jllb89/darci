@@ -26,6 +26,7 @@ struct UserSettingsLegalContentView: View {
 
     @State private var searchText = ""
     @State private var expandedFAQIDs: Set<String> = ["document-notarization"]
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private let accent = Color(red: 0.04, green: 1.0, blue: 0.29)
     private let secondaryText = Color(red: 0.66, green: 0.66, blue: 0.66)
@@ -66,7 +67,7 @@ struct UserSettingsLegalContentView: View {
             DARCiArrowLeftIcon()
                 .stroke(.white, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
                 .frame(width: 24, height: 24)
-                .frame(width: 34, height: 34, alignment: .leading)
+                .frame(width: 44, height: 44, alignment: .leading)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back to settings")
@@ -165,7 +166,8 @@ struct UserSettingsLegalContentView: View {
                     .submitLabel(.search)
             }
             .padding(.horizontal, 17)
-            .frame(height: 48)
+            .frame(minHeight: 48)
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 6 : 0)
             .background(input)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .padding(.top, 39)
@@ -292,7 +294,8 @@ struct UserSettingsLegalContentView: View {
                     .foregroundStyle(.white)
             }
             .padding(.horizontal, 28)
-            .frame(height: 88)
+            .frame(minHeight: 88)
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 14 : 0)
             .background(card)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }

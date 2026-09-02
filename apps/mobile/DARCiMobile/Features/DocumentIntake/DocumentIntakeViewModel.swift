@@ -23,6 +23,7 @@ final class DocumentIntakeViewModel: ObservableObject {
     @Published var successorAgents = ""
     @Published var selectedAgentSignatureAuthority = ""
     @Published var selectedAuthorityScopes: Set<String> = []
+    @Published var specialInstructions = ""
     @Published var trustName = ""
     @Published var trustDate = "" {
         didSet {
@@ -142,6 +143,19 @@ final class DocumentIntakeViewModel: ObservableObject {
 
     var showsAuthorityScopeSelection: Bool {
         hasField(for: ["authority_scope_selection"])
+    }
+
+    var showsSpecialInstructions: Bool {
+        productModeKey == "poa_only" && hasField(for: ["special_instructions_text"])
+    }
+
+    var specialInstructionsLabel: String {
+        field(for: ["special_instructions_text"])?.label ?? "Special instructions"
+    }
+
+    var specialInstructionsHelpText: String {
+        helpText(for: ["special_instructions_text"])
+            ?? "Keep this concise and directive. These instructions are copied into the final document package."
     }
 
     var continueLabel: String {
@@ -1112,6 +1126,7 @@ final class DocumentIntakeViewModel: ObservableObject {
         successorAgents = (answers["successor_agent_list"]?.stringArrayValue ?? []).joined(separator: "\n")
         selectedAgentSignatureAuthority = answers["agent_signature_authority"]?.stringValue ?? ""
         selectedAuthorityScopes = Set(answers["authority_scope_selection"]?.stringArrayValue ?? [])
+        specialInstructions = answers["special_instructions_text"]?.stringValue ?? ""
         trustName = answers["trust_name"]?.stringValue ?? ""
         trustDate = answers["trust_date"]?.stringValue ?? ""
         grantors = personListDisplay(answers["grantors"]?.stringArrayValue ?? [])
@@ -1160,6 +1175,9 @@ final class DocumentIntakeViewModel: ObservableObject {
         answers["authority_scope_selection"] = .array(
             selectedAuthorityScopes.sorted().map(JSONValue.string)
         )
+        if showsSpecialInstructions {
+            answers["special_instructions_text"] = .string(specialInstructions)
+        }
         return answers
     }
 

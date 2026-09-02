@@ -202,15 +202,22 @@ struct AuthenticationSignInView: View {
     @State private var isEntryFadingForOTP = false
     @State private var isHeadlineCollapsed = false
     @FocusState private var focusedField: Field?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        ZStack {
+        return ZStack {
             (authenticationStep == .entry ? DARCiTheme.onboardingGreen : Color.black)
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
                 if authenticationStep == .otp {
-                    otpView(in: proxy)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            accessibleOTPView(in: proxy)
+                        } else {
+                            otpView(in: proxy)
+                        }
+                    }
                         .transition(.opacity)
                 } else if authenticationStep == .completeInfo {
                     completeInfoView(in: proxy)
@@ -219,6 +226,10 @@ struct AuthenticationSignInView: View {
                     successView(in: proxy)
                         .transition(.opacity)
                 } else {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        accessibleEntryView(in: proxy)
+                            .opacity(isEntryFadingForOTP ? 0 : 1)
+                    } else {
                     ZStack {
                     Text(content.brand)
                         .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
@@ -318,13 +329,12 @@ struct AuthenticationSignInView: View {
                     }
                 }
                 .opacity(isEntryFadingForOTP ? 0 : 1)
+                    }
                 }
             }
-            .ignoresSafeArea()
+            .ignoresSafeArea(.container, edges: .all)
         }
         .preferredColorScheme(.light)
-        .ignoresSafeArea(.keyboard)
-        .accessibilityIdentifier("authentication-sign-in")
         .onAppear(perform: startIntroAnimation)
         .onChange(of: focusedField) { _, newField in
             if newField == .phone {
@@ -353,10 +363,161 @@ struct AuthenticationSignInView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
+        }
     }
 
     private var isCompactInputActive: Bool {
         activeInputMode != nil
+    }
+
+    private func accessibleEntryView(in proxy: GeometryProxy) -> some View {
+        ScrollView(showsIndicators: true) {
+            VStack(alignment: .leading, spacing: scaled(24, in: proxy)) {
+                HStack(alignment: .center, spacing: scaled(16, in: proxy)) {
+                    Text(content.brand)
+                        .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
+                        .foregroundStyle(.black)
+
+                    Spacer(minLength: 0)
+
+                    if isCompactInputActive {
+                        Button(action: resetInputLayout) {
+                            DARCiArrowLeftIcon()
+                                .stroke(.black, style: StrokeStyle(lineWidth: scaled(2.0625, in: proxy), lineCap: .butt, lineJoin: .miter))
+                                .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Back")
+                        .accessibilityIdentifier("auth-input-back-button")
+                    }
+                }
+
+                if isHeadlineCollapsed == false {
+                    (Text("Welcome\n")
+                        .font(DARCiFont.maisonNeue(.light, size: scaled(64, in: proxy)))
+                    + Text("Sign in")
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(64, in: proxy))))
+                        .foregroundStyle(.black)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(content.accessibilityHeadline)
+                }
+
+                Text(content.supportingText)
+                    .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
+                    .foregroundStyle(.black)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(content.accessibilitySupportingText)
+
+                activeInput(in: proxy)
+
+                continueButton(in: proxy)
+
+                if shouldShowSmsDisclosure {
+                    smsConsentDisclosure(in: proxy)
+                }
+
+                if let feedbackMessage = viewModel.feedbackMessage {
+                    Text(feedbackMessage)
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(13, in: proxy)))
+                        .foregroundStyle(.black)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("auth-feedback-message")
+                }
+
+                Button(action: toggleInputMode) {
+                    Text(inputModeSwitchTitle)
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
+                        .underline()
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isCompactInputActive == false {
+                    Button(action: onBrowse) {
+                        Text(content.browseTitle)
+                            .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, scaled(22, in: proxy))
+            .padding(.top, max(proxy.safeAreaInsets.top, scaled(64, in: proxy)))
+            .padding(.bottom, max(proxy.safeAreaInsets.bottom, scaled(36, in: proxy)))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func accessibleOTPView(in proxy: GeometryProxy) -> some View {
+        ScrollView(showsIndicators: true) {
+            VStack(alignment: .leading, spacing: scaled(28, in: proxy)) {
+                Button(action: returnFromOTP) {
+                    DARCiArrowLeftIcon()
+                        .stroke(.white, style: StrokeStyle(lineWidth: scaled(2.0625, in: proxy), lineCap: .butt, lineJoin: .miter))
+                        .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
+                        .frame(width: 44, height: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
+                .accessibilityIdentifier("otp-back-button")
+
+                Text(content.supportingText)
+                    .font(DARCiFont.maisonNeue(.book, size: scaled(24, in: proxy)))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(content.accessibilitySupportingText)
+
+                TextField("", text: $otpCode)
+                    .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .focused($focusedField, equals: .otp)
+                    .padding(.horizontal, scaled(18, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(76, in: proxy))
+                    .background(Color(red: 0.10, green: 0.10, blue: 0.10))
+                    .accessibilityLabel("One-time code")
+                    .accessibilityIdentifier("otp-code-field")
+
+                verifyCodeButton(in: proxy)
+
+                if let feedbackMessage = viewModel.feedbackMessage {
+                    Text(feedbackMessage)
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("auth-feedback-message")
+                }
+
+                Button(action: toggleInputModeFromOTP) {
+                    Text(inputModeSwitchTitle)
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
+                        .underline()
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, scaled(22, in: proxy))
+            .padding(.top, max(proxy.safeAreaInsets.top, scaled(64, in: proxy)))
+            .padding(.bottom, max(proxy.safeAreaInsets.bottom, scaled(36, in: proxy)))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .accessibilityIdentifier("authentication-otp")
     }
 
     private var inputModeSwitchTitle: String {
@@ -443,12 +604,9 @@ struct AuthenticationSignInView: View {
     }
 
     private func phoneInput(in proxy: GeometryProxy) -> some View {
-        ZStack {
-            VStack(spacing: scaled(46.5, in: proxy)) {
-                separator(in: proxy)
-                separator(in: proxy)
-            }
+        let rowHeight = scaled(dynamicTypeSize.isAccessibilitySize ? 72 : 48, in: proxy)
 
+        return ZStack {
             HStack(spacing: 0) {
                 phoneCountrySelector(in: proxy)
 
@@ -458,12 +616,13 @@ struct AuthenticationSignInView: View {
                 TextField("", text: $phoneNumber, prompt: Text(content.phonePlaceholder).foregroundStyle(Color.black.opacity(0.26)))
                     .font(DARCiFont.maisonNeue(.light, size: scaled(18, in: proxy)))
                     .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .keyboardType(.phonePad)
                     .textContentType(.telephoneNumber)
                     .tint(.black)
                     .focused($focusedField, equals: .phone)
+                    .accessibilityLabel("Phone number")
                     .accessibilityIdentifier("phone-number-field")
-                    .simultaneousGesture(TapGesture().onEnded(activatePhoneInputLayout))
                     .onChange(of: phoneNumber) { _, newValue in
                         let formatted = PhoneNumberFormatting.formattedNationalNumber(newValue, country: selectedPhoneCountry)
                         if formatted != newValue {
@@ -478,15 +637,14 @@ struct AuthenticationSignInView: View {
                     .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
                     .accessibilityHidden(true)
             }
-            .frame(width: scaled(395, in: proxy), height: scaled(47, in: proxy), alignment: .leading)
+            .frame(width: scaled(395, in: proxy), alignment: .leading)
+            .frame(minHeight: rowHeight, alignment: .leading)
 
         }
-        .frame(width: scaled(395, in: proxy), height: scaled(48, in: proxy))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            focusedField = .phone
-            activatePhoneInputLayout()
-        }
+        .frame(width: scaled(395, in: proxy))
+        .frame(minHeight: rowHeight)
+        .overlay(alignment: .top) { separator(in: proxy) }
+        .overlay(alignment: .bottom) { separator(in: proxy) }
     }
 
     private func phoneCountrySelector(in proxy: GeometryProxy) -> some View {
@@ -497,13 +655,16 @@ struct AuthenticationSignInView: View {
                 Text(selectedPhoneCountry.dialCode)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
                     .foregroundStyle(.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
 
                 Image(systemName: "chevron.down")
                     .font(.system(size: scaled(9, in: proxy), weight: .bold))
                     .foregroundStyle(.black.opacity(0.58))
             }
             .padding(.trailing, scaled(6, in: proxy))
-            .frame(height: scaled(34, in: proxy))
+            .frame(width: scaled(68, in: proxy))
+            .frame(minHeight: scaled(dynamicTypeSize.isAccessibilitySize ? 56 : 44, in: proxy))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -513,12 +674,9 @@ struct AuthenticationSignInView: View {
     }
 
     private func emailInput(in proxy: GeometryProxy) -> some View {
-        ZStack {
-            VStack(spacing: scaled(46.5, in: proxy)) {
-                separator(in: proxy)
-                separator(in: proxy)
-            }
+        let rowHeight = scaled(dynamicTypeSize.isAccessibilitySize ? 72 : 48, in: proxy)
 
+        return ZStack {
             HStack(spacing: 0) {
                 TextField("", text: $emailAddress, prompt: Text(content.emailPlaceholder).foregroundStyle(Color.black.opacity(isEmailPlaceholderVisible ? 0.26 : 0)))
                     .font(DARCiFont.maisonNeue(.light, size: scaled(18, in: proxy)))
@@ -538,14 +696,13 @@ struct AuthenticationSignInView: View {
                     .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
                     .accessibilityHidden(true)
             }
-            .frame(width: scaled(395, in: proxy), height: scaled(47, in: proxy), alignment: .leading)
+            .frame(width: scaled(395, in: proxy), alignment: .leading)
+            .frame(minHeight: rowHeight, alignment: .leading)
         }
-        .frame(width: scaled(395, in: proxy), height: scaled(48, in: proxy))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            focusedField = .email
-            activateEmailInputLayout()
-        }
+        .frame(width: scaled(395, in: proxy))
+        .frame(minHeight: rowHeight)
+        .overlay(alignment: .top) { separator(in: proxy) }
+        .overlay(alignment: .bottom) { separator(in: proxy) }
     }
 
     private func continueButton(in proxy: GeometryProxy) -> some View {
@@ -565,7 +722,8 @@ struct AuthenticationSignInView: View {
             }
             .padding(.leading, scaled(24, in: proxy))
             .padding(.trailing, scaled(24, in: proxy))
-            .frame(width: scaled(395, in: proxy), height: scaled(54, in: proxy))
+            .frame(width: scaled(395, in: proxy))
+            .frame(minHeight: scaled(dynamicTypeSize.isAccessibilitySize ? 72 : 54, in: proxy))
             .background(.black)
             .contentShape(Rectangle())
         }
@@ -691,7 +849,8 @@ struct AuthenticationSignInView: View {
             }
             .padding(.leading, scaled(24, in: proxy))
             .padding(.trailing, scaled(24, in: proxy))
-            .frame(width: scaled(395, in: proxy), height: scaled(54, in: proxy))
+            .frame(width: scaled(395, in: proxy))
+            .frame(minHeight: scaled(dynamicTypeSize.isAccessibilitySize ? 72 : 54, in: proxy))
             .background(.white)
             .contentShape(Rectangle())
         }
@@ -700,20 +859,18 @@ struct AuthenticationSignInView: View {
     }
 
     private func completeInfoView(in proxy: GeometryProxy) -> some View {
-        ZStack {
+        ScrollView(showsIndicators: true) {
+            VStack(alignment: .leading, spacing: scaled(28, in: proxy)) {
             Text(content.completeInfoTitle)
                 .font(DARCiFont.maisonNeue(.book, size: scaled(24, in: proxy)))
                 .lineSpacing(scaled(2.4, in: proxy))
                 .foregroundStyle(.white)
-                .frame(width: scaled(395, in: proxy), alignment: .leading)
-                .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-285, in: proxy))
+                .fixedSize(horizontal: false, vertical: true)
 
             completeInfoTextField(
                 title: content.nameTitle,
                 text: $profileName,
                 field: .profileName,
-                labelY: -201.5,
-                inputY: -157.5,
                 proxy: proxy
             )
 
@@ -721,8 +878,6 @@ struct AuthenticationSignInView: View {
                 title: content.lastNameTitle,
                 text: $profileLastName,
                 field: .profileLastName,
-                labelY: -107.5,
-                inputY: -63.5,
                 proxy: proxy
             )
 
@@ -733,14 +888,19 @@ struct AuthenticationSignInView: View {
                     .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
                     .lineSpacing(scaled(1.4, in: proxy))
                     .foregroundStyle(.white)
-                    .frame(width: scaled(392, in: proxy), alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("auth-feedback-message")
-                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(216, in: proxy))
             }
 
             completeInfoContinueButton(in: proxy)
-                .position(x: proxy.size.width / 2 + scaled(-101.5, in: proxy), y: proxy.size.height / 2 + scaled(335, in: proxy))
+                .padding(.top, scaled(12, in: proxy))
+            }
+            .padding(.horizontal, scaled(24, in: proxy))
+            .padding(.top, scaled(146, in: proxy))
+            .padding(.bottom, max(scaled(48, in: proxy), proxy.safeAreaInsets.bottom))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollDismissesKeyboard(.interactively)
         .accessibilityIdentifier("authentication-complete-info")
     }
 
@@ -752,8 +912,6 @@ struct AuthenticationSignInView: View {
                 value: resolvedProfileEmail,
                 accessibilityLabel: "Verified email",
                 accessibilityIdentifier: "complete-info-email-field",
-                labelY: -13.5,
-                inputY: 30.5,
                 proxy: proxy
             )
 
@@ -763,8 +921,6 @@ struct AuthenticationSignInView: View {
                 field: .profilePhone,
                 keyboardType: .phonePad,
                 textContentType: .telephoneNumber,
-                labelY: 80.5,
-                inputY: 124.5,
                 proxy: proxy
             )
         } else {
@@ -774,8 +930,6 @@ struct AuthenticationSignInView: View {
                 field: .profileEmail,
                 keyboardType: .emailAddress,
                 textContentType: .emailAddress,
-                labelY: -13.5,
-                inputY: 30.5,
                 proxy: proxy
             )
 
@@ -784,8 +938,6 @@ struct AuthenticationSignInView: View {
                 value: resolvedProfilePhone,
                 accessibilityLabel: "Verified phone number",
                 accessibilityIdentifier: "complete-info-phone-field",
-                labelY: 80.5,
-                inputY: 124.5,
                 proxy: proxy
             )
         }
@@ -797,17 +949,13 @@ struct AuthenticationSignInView: View {
         field: Field,
         keyboardType: UIKeyboardType = .default,
         textContentType: UITextContentType? = nil,
-        labelY: CGFloat,
-        inputY: CGFloat,
         proxy: GeometryProxy
     ) -> some View {
-        ZStack {
+        VStack(alignment: .leading, spacing: scaled(10, in: proxy)) {
             Text(title)
                 .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
                 .lineSpacing(scaled(1.4, in: proxy))
                 .foregroundStyle(.white)
-                .frame(width: scaled(392, in: proxy), alignment: .leading)
-                .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(labelY, in: proxy))
 
             TextField("", text: text)
                 .font(DARCiFont.maisonNeue(.book, size: scaled(18, in: proxy)))
@@ -820,7 +968,7 @@ struct AuthenticationSignInView: View {
                 .tint(.white)
                 .focused($focusedField, equals: field)
                 .padding(.horizontal, scaled(24, in: proxy))
-                .frame(width: scaled(392, in: proxy), height: scaled(49, in: proxy), alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: scaled(49, in: proxy), alignment: .leading)
                 .background(Color(red: 0.10, green: 0.10, blue: 0.10))
                 .overlay(alignment: .bottom) {
                     Rectangle()
@@ -829,7 +977,6 @@ struct AuthenticationSignInView: View {
                 }
                 .accessibilityLabel(title)
                 .accessibilityIdentifier("complete-info-field")
-                .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(inputY, in: proxy))
         }
     }
 
@@ -838,23 +985,20 @@ struct AuthenticationSignInView: View {
         value: String,
         accessibilityLabel: String,
         accessibilityIdentifier: String,
-        labelY: CGFloat,
-        inputY: CGFloat,
         proxy: GeometryProxy
     ) -> some View {
-        ZStack {
+        VStack(alignment: .leading, spacing: scaled(10, in: proxy)) {
             Text(title)
                 .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
                 .lineSpacing(scaled(1.4, in: proxy))
                 .foregroundStyle(.white)
-                .frame(width: scaled(392, in: proxy), alignment: .leading)
-                .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(labelY, in: proxy))
 
             HStack(spacing: 0) {
                 Text(value)
                     .font(DARCiFont.maisonNeue(.book, size: scaled(18, in: proxy)))
                     .lineSpacing(scaled(1.8, in: proxy))
                     .foregroundStyle(Color(red: 0.35, green: 0.35, blue: 0.35))
+                    .lineLimit(2)
 
                 Spacer()
 
@@ -865,12 +1009,11 @@ struct AuthenticationSignInView: View {
             }
             .padding(.leading, scaled(24, in: proxy))
             .padding(.trailing, scaled(24, in: proxy))
-            .frame(width: scaled(392, in: proxy), height: scaled(49, in: proxy), alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: scaled(49, in: proxy), alignment: .leading)
             .background(Color(red: 0.10, green: 0.10, blue: 0.10))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityIdentifier(accessibilityIdentifier)
-            .position(x: proxy.size.width / 2, y: proxy.size.height / 2 + scaled(inputY, in: proxy))
         }
     }
 

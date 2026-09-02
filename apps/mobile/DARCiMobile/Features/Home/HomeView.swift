@@ -126,7 +126,7 @@ struct HomeView: View {
                         .offset(x: scaled(4, in: proxy), y: -scaled(4, in: proxy))
                         .opacity(hasUnreadNotifications ? 1 : 0)
                 }
-                .frame(width: scaled(36, in: proxy), height: scaled(36, in: proxy))
+                .frame(width: scaled(44, in: proxy), height: scaled(44, in: proxy))
             }
             .buttonStyle(.plain)
             .padding(.leading, scaled(21, in: proxy))
@@ -263,7 +263,7 @@ struct HomeView: View {
 
     private func bottomToolbar(in proxy: GeometryProxy) -> some View {
         HomeBottomToolbar(selectedTab: $selectedTab)
-            .frame(width: scaled(241, in: proxy), height: scaled(25, in: proxy))
+            .frame(width: scaled(241, in: proxy), height: scaled(44, in: proxy))
             .frame(maxWidth: .infinity)
             .padding(.top, scaled(10, in: proxy))
             .padding(.bottom, scaled(12, in: proxy))
@@ -344,6 +344,7 @@ private struct HomeProfileButton: View {
             }
             .frame(width: 82, height: 26)
             .clipShape(RoundedRectangle(cornerRadius: 13))
+            .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -406,12 +407,12 @@ private struct HomeBottomToolbar: View {
     @Binding var selectedTab: AppTab
 
     var body: some View {
-        HStack(spacing: 83) {
+        HStack(spacing: 54.5) {
             toolbarButton(tab: .home, icon: .home)
             toolbarButton(tab: .documents, icon: .file)
             toolbarButton(tab: .requests, icon: .mail)
         }
-        .frame(width: 241, height: 25)
+        .frame(width: 241, height: 44)
         .accessibilityElement(children: .contain)
     }
 
@@ -422,6 +423,7 @@ private struct HomeBottomToolbar: View {
             HomeResourceIconGlyph(icon: icon)
                 .stroke(selectedTab == tab ? DARCiTheme.onboardingGreen : .black, style: StrokeStyle(lineWidth: 2.0625, lineCap: .butt, lineJoin: .miter))
                 .frame(width: 25, height: 25)
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)

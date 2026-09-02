@@ -97,6 +97,7 @@ private struct OnboardingSplashView: View {
 
     @State private var isCopyVisible = false
     @State private var isButtonVisible = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -166,7 +167,8 @@ private struct OnboardingSplashView: View {
                     .accessibilityHidden(true)
             }
             .padding(.trailing, scaled(42, in: proxy))
-            .frame(width: scaled(404, in: proxy), height: scaled(54, in: proxy))
+            .frame(width: scaled(404, in: proxy))
+            .frame(minHeight: scaled(dynamicTypeSize.isAccessibilitySize ? 76 : 54, in: proxy))
             .background(DARCiTheme.onboardingGreen)
             .contentShape(Rectangle())
         }
@@ -247,6 +249,7 @@ private struct OnboardingStoriesView: View {
                         .accessibilityIdentifier("onboarding-story-message")
                         .id(currentStory.id)
                         .transition(.opacity)
+                        .allowsHitTesting(false)
                         .position(
                             x: proxy.size.width / 2,
                             y: proxy.size.height / 2 + scaled(-288, in: proxy)
@@ -270,7 +273,7 @@ private struct OnboardingStoriesView: View {
             Image(systemName: "xmark")
                 .font(.system(size: scaled(18, in: proxy), weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: scaled(25, in: proxy), height: scaled(25, in: proxy))
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

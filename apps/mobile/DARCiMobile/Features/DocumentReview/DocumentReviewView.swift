@@ -16,6 +16,7 @@ struct DocumentReviewView: View {
     @State private var isContinuingToSign = false
     @State private var isContinuingWithoutSignature = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         session: AuthSession?,
@@ -107,7 +108,7 @@ struct DocumentReviewView: View {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 24, weight: .regular))
                     .foregroundStyle(.black)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
 
@@ -343,7 +344,14 @@ struct DocumentReviewView: View {
                 .disabled(viewModel.canContinueWithoutSignature == false)
             }
 
-            HStack(spacing: scaled(18, in: proxy)) {
+            let actionLayout = DARCiAdaptiveLayout.shouldStackActions(
+                viewportWidth: proxy.size.width,
+                isAccessibilityText: dynamicTypeSize.isAccessibilitySize
+            )
+                ? AnyLayout(VStackLayout(spacing: scaled(10, in: proxy)))
+                : AnyLayout(HStackLayout(spacing: scaled(18, in: proxy)))
+
+            actionLayout {
                 Button {
                     Task {
                         if await viewModel.saveToDraft(session: session) {
@@ -358,6 +366,8 @@ struct DocumentReviewView: View {
                     }
                     .font(DARCiFont.maisonNeue(.book, size: 16))
                     .foregroundStyle(.black)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, minHeight: 54)
                     .background(Color(red: 0.67, green: 0.67, blue: 0.67).opacity(0.61))
                 }
@@ -381,8 +391,8 @@ struct DocumentReviewView: View {
                     }
                     .font(DARCiFont.maisonNeue(.book, size: 16))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, minHeight: 54)
                     .background(viewModel.canContinueToSign ? Color.black : Color.black.opacity(0.42))
                 }

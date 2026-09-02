@@ -79,6 +79,7 @@ struct ProductIntakeFlowView: View {
                         .padding(.horizontal, scaled(24, in: proxy))
                         .padding(.bottom, scaled(96, in: proxy))
                     }
+                    .scrollDismissesKeyboard(.interactively)
                     .id(viewModel.scrollResetKey)
                     .onChange(of: viewModel.scrollResetKey) { _, _ in
                         expandedSelectKey = nil
@@ -174,6 +175,7 @@ struct ProductIntakeFlowView: View {
                 DARCiArrowLeftIcon()
                     .stroke(.white, style: StrokeStyle(lineWidth: 2.25, lineCap: .square, lineJoin: .miter))
                     .frame(width: scaled(24, in: proxy), height: scaled(24, in: proxy))
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Back")
@@ -1025,6 +1027,21 @@ struct ProductIntakeFlowView: View {
                             viewModel.toggleAuthorityScope(option)
                         }
                     }
+                }
+            }
+
+            if viewModel.showsSpecialInstructions {
+                intakeField(
+                    label: viewModel.specialInstructionsLabel,
+                    optionalLabel: "Optional",
+                    helpText: viewModel.specialInstructionsHelpText,
+                    tooltipKey: "special_instructions_text"
+                ) {
+                    intakeTextEditor(
+                        text: $viewModel.specialInstructions,
+                        prompt: "Add any special instructions for this power of attorney."
+                    )
+                    .accessibilityIdentifier("poa-special-instructions-field")
                 }
             }
 

@@ -97,74 +97,73 @@ struct UserSettingsView: View {
 
     private var settingsMenu: some View {
         GeometryReader { proxy in
-            VStack(alignment: .leading, spacing: 0) {
-                Button(action: onBack) {
-                    DARCiArrowLeftIcon()
-                        .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
-                        .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
-                        .frame(width: scaled(32, in: proxy), height: scaled(32, in: proxy), alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back")
-
-                Text(displayName)
-                    .font(DARCiFont.maisonNeue(.book, size: scaled(32, in: proxy)))
-                    .lineSpacing(scaled(3.2, in: proxy))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .padding(.top, scaled(54, in: proxy))
-
-                settingsSection(
-                    title: "Profile",
-                    rows: profileRows,
-                    proxy: proxy
-                )
-                .padding(.top, scaled(43, in: proxy))
-
-                settingsSection(
-                    title: "Help & Support",
-                    rows: ["Contact Support", "FAQs"],
-                    proxy: proxy
-                )
-                .padding(.top, scaled(28, in: proxy))
-
-                settingsSection(
-                    title: "Settings",
-                    rows: ["Rate us", "Privacy Policy", "Terms & Conditions"],
-                    proxy: proxy
-                )
-                .padding(.top, scaled(28, in: proxy))
-
-                Button(action: onSignOut) {
-                    HStack(spacing: scaled(12, in: proxy)) {
-                        Text("Sign out")
-                            .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
-                            .lineSpacing(scaled(1.6, in: proxy))
-
-                        SettingsSignOutIcon()
-                            .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .square, lineJoin: .miter))
-                            .frame(width: scaled(15, in: proxy), height: scaled(15, in: proxy))
+            ScrollView(showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Button(action: onBack) {
+                        DARCiArrowLeftIcon()
+                            .stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter))
+                            .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
+                            .frame(width: 44, height: 44, alignment: .leading)
                     }
-                    .foregroundStyle(.white)
-                    .frame(height: scaled(32, in: proxy), alignment: .leading)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back")
+
+                    Text(displayName)
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(32, in: proxy)))
+                        .lineSpacing(scaled(3.2, in: proxy))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, scaled(42, in: proxy))
+
+                    settingsSection(
+                        title: "Profile",
+                        rows: profileRows,
+                        proxy: proxy
+                    )
+                    .padding(.top, scaled(43, in: proxy))
+
+                    settingsSection(
+                        title: "Help & Support",
+                        rows: ["Contact Support", "FAQs"],
+                        proxy: proxy
+                    )
+                    .padding(.top, scaled(28, in: proxy))
+
+                    settingsSection(
+                        title: "Settings",
+                        rows: ["Rate us", "Privacy Policy", "Terms & Conditions"],
+                        proxy: proxy
+                    )
+                    .padding(.top, scaled(28, in: proxy))
+
+                    Button(action: onSignOut) {
+                        HStack(spacing: scaled(12, in: proxy)) {
+                            Text("Sign out")
+                                .font(DARCiFont.maisonNeue(.book, size: scaled(16, in: proxy)))
+                                .lineSpacing(scaled(1.6, in: proxy))
+
+                            SettingsSignOutIcon()
+                                .stroke(.white, style: StrokeStyle(lineWidth: 1.4, lineCap: .square, lineJoin: .miter))
+                                .frame(width: scaled(15, in: proxy), height: scaled(15, in: proxy))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, scaled(35, in: proxy))
+                    .accessibilityIdentifier("settings-sign-out-button")
+
+                    Text(versionLabel)
+                        .font(DARCiFont.maisonNeue(.light, size: scaled(10, in: proxy)))
+                        .lineSpacing(scaled(3, in: proxy))
+                        .foregroundStyle(.white)
+                        .padding(.top, scaled(18, in: proxy))
+                        .padding(.bottom, scaled(18, in: proxy))
                 }
-                .buttonStyle(.plain)
-                .padding(.top, scaled(35, in: proxy))
-                .accessibilityIdentifier("settings-sign-out-button")
-
-                Spacer(minLength: scaled(18, in: proxy))
-
-                Text(versionLabel)
-                    .font(DARCiFont.maisonNeue(.light, size: scaled(10, in: proxy)))
-                    .lineSpacing(scaled(3, in: proxy))
-                    .foregroundStyle(.white)
-                    .padding(.bottom, scaled(18, in: proxy))
+                .padding(.top, scaled(24, in: proxy))
+                .padding(.horizontal, scaled(25, in: proxy))
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
             }
-            .padding(.top, scaled(24, in: proxy))
-            .padding(.horizontal, scaled(25, in: proxy))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .clipped()
         }
         .background(Color.black.ignoresSafeArea())
         .navigationTitle("")
@@ -209,7 +208,7 @@ struct UserSettingsView: View {
                         .stroke(.white, style: StrokeStyle(lineWidth: 1.7, lineCap: .square, lineJoin: .miter))
                         .frame(width: scaled(8, in: proxy), height: scaled(14, in: proxy))
                 }
-                .frame(height: scaled(44, in: proxy))
+                .frame(minHeight: scaled(44, in: proxy))
 
                 if title == "Personal Info" {
                     Button {
@@ -219,7 +218,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-personal-info-button")
                 } else if title == "Membership & Billing" {
@@ -230,7 +229,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-membership-billing-button")
                 } else if title == "illuminotary Information" {
@@ -241,7 +240,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-notary-information-button")
                 } else if title == "Delete my account" {
@@ -253,7 +252,7 @@ struct UserSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isDeletingAccount)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-delete-account-button")
                 } else if title == "Contact Support" {
@@ -264,7 +263,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-contact-support-button")
                 } else if title == "FAQs" {
@@ -275,7 +274,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-faqs-button")
                 } else if title == "Privacy Policy" {
@@ -286,7 +285,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-privacy-policy-button")
                 } else if title == "Terms & Conditions" {
@@ -297,7 +296,7 @@ struct UserSettingsView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy), maxHeight: scaled(44, in: proxy))
+                    .frame(maxWidth: .infinity, minHeight: scaled(44, in: proxy))
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("settings-terms-button")
                 } else {

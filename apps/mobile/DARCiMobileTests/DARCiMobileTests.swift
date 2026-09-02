@@ -5,6 +5,73 @@ import XCTest
 import UIKit
 #endif
 
+final class DARCiAdaptiveLayoutTests: XCTestCase {
+    func testActionsStayHorizontalOnRegularWidthAndText() {
+        XCTAssertFalse(DARCiAdaptiveLayout.shouldStackActions(
+            viewportWidth: 390,
+            isAccessibilityText: false
+        ))
+    }
+
+    func testActionsStackForAccessibilityText() {
+        XCTAssertTrue(DARCiAdaptiveLayout.shouldStackActions(
+            viewportWidth: 390,
+            isAccessibilityText: true
+        ))
+    }
+
+    func testActionsStackInNarrowViewport() {
+        XCTAssertTrue(DARCiAdaptiveLayout.shouldStackActions(
+            viewportWidth: 320,
+            isAccessibilityText: false
+        ))
+    }
+
+    func testPanelHeightNeverExceedsCompactViewport() {
+        let height = DARCiAdaptiveLayout.boundedPanelHeight(
+            viewportHeight: 480,
+            bottomInset: 0,
+            preferredRatio: 0.66,
+            minimumHeight: 520,
+            maximumHeight: 680,
+            topClearance: 8
+        )
+
+        XCTAssertEqual(height, 472)
+    }
+
+    func testPanelHeightKeepsPreferredBoundsOnRegularViewport() {
+        let height = DARCiAdaptiveLayout.boundedPanelHeight(
+            viewportHeight: 844,
+            bottomInset: 34,
+            preferredRatio: 0.72,
+            minimumHeight: 520,
+            maximumHeight: 680,
+            topClearance: 8
+        )
+
+        XCTAssertEqual(height, 607.68, accuracy: 0.01)
+    }
+
+    func testDockedKeyboardProducesViewportOverlap() {
+        let overlap = DARCiAdaptiveLayout.dockedKeyboardOverlap(
+            screenBounds: CGRect(x: 0, y: 0, width: 390, height: 844),
+            keyboardFrame: CGRect(x: 0, y: 520, width: 390, height: 324)
+        )
+
+        XCTAssertEqual(overlap, 324)
+    }
+
+    func testFloatingKeyboardDoesNotMoveWholePanel() {
+        let overlap = DARCiAdaptiveLayout.dockedKeyboardOverlap(
+            screenBounds: CGRect(x: 0, y: 0, width: 1024, height: 1366),
+            keyboardFrame: CGRect(x: 600, y: 800, width: 360, height: 260)
+        )
+
+        XCTAssertEqual(overlap, 0)
+    }
+}
+
 final class AuthURLProtocolStub: URLProtocol {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
@@ -798,7 +865,7 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     @MainActor
-    func testMemberSessionLocationActionRecordsMemberCheckIn() async {
+    func testMemberSessionAutomaticallySharesAndAllowsLocationRefresh() async {
         let apiClient = RecordingMemberSessionAPIClient(responses: [.mock])
         let locationProvider = TestMemberSessionLocationProvider()
         let realtimeClient = TestNotarySessionRealtimeClient()
@@ -811,17 +878,17 @@ final class DARCiMobileTests: XCTestCase {
         )
 
         await viewModel.load(session: session)
-        XCTAssertEqual(locationProvider.prepareCallCount, 1)
+        XCTAssertEqual(locationProvider.prepareCallCount, 2)
         XCTAssertEqual(viewModel.shareLocationButtonTitle, "Share location")
 
         await viewModel.shareLocation(session: session)
 
         let checkIns = await apiClient.recordedCheckIns()
-        XCTAssertEqual(checkIns.count, 1)
+        XCTAssertEqual(checkIns.count, 2)
         XCTAssertEqual(checkIns.first?.participantRole, "member")
         XCTAssertEqual(checkIns.first?.checkinKind, "arrival")
         XCTAssertEqual(checkIns.first?.geolocation.captureStage, "member_check_in")
-        XCTAssertEqual(locationProvider.captureStages, ["member_check_in"])
+        XCTAssertEqual(locationProvider.captureStages, ["member_check_in", "member_check_in"])
         XCTAssertEqual(viewModel.noticeMessage, "Location shared. Your illuminotary can continue the session.")
         XCTAssertEqual(viewModel.shareLocationButtonTitle, "Share location")
         viewModel.stop()
@@ -1651,6 +1718,54 @@ final class DARCiMobileTests: XCTestCase {
         viewModel.setTrustmakerCurrentTrustee(at: 0, isSelected: false)
 
         XCTAssertEqual(viewModel.trustees, [IntakePersonListItem()])
+    }
+
+    @MainActor
+    func testIndependentPOAIncludesSpecialInstructionsInDraftAnswers() async throws {
+        let viewModel = DocumentIntakeViewModel(apiClient: MockDocumentIntakeAPIClient())
+
+        await viewModel.start(modeKey: "poa_only", session: makeAuthSession())
+        viewModel.specialInstructions = "Permit digital copies unless an original is required."
+
+        let signatureData = try XCTUnwrap(viewModel.autosaveSignature.data(using: .utf8))
+        let signature = try XCTUnwrap(JSONSerialization.jsonObject(with: signatureData) as? [String: Any])
+        let answers = try XCTUnwrap(signature["answers"] as? [String: Any])
+
+        XCTAssertTrue(viewModel.showsSpecialInstructions)
+        XCTAssertEqual(
+            answers["special_instructions_text"] as? String,
+            "Permit digital copies unless an original is required."
+        )
+    }
+
+    @MainActor
+    func testIndependentPOARestoresSpecialInstructionsFromSavedDraft() async {
+        let specialInstructions = "Do not delegate authority to another person."
+        let draft = DocumentIntakeDraft(
+            documentId: "document-1",
+            ownerId: "user-1",
+            productFlowMode: "poa_only",
+            jurisdiction: "CA",
+            currentStep: "poa_requirements",
+            rulesSnapshotVersion: DocumentIntakeViewModel.rulesSnapshotVersion,
+            answers: ["special_instructions_text": .string(specialInstructions)],
+            canonicalAnswers: nil,
+            revision: 2,
+            createdAt: nil,
+            updatedAt: nil
+        )
+        let viewModel = DocumentIntakeViewModel(
+            apiClient: MockDocumentIntakeAPIClient(resumedDraft: draft)
+        )
+
+        await viewModel.start(
+            modeKey: "poa_only",
+            resumingDocumentId: draft.documentId,
+            session: makeAuthSession()
+        )
+
+        XCTAssertEqual(viewModel.specialInstructions, specialInstructions)
+        XCTAssertTrue(viewModel.showsSpecialInstructions)
     }
 
     func testDocumentIntakeAPIClientLoadsJurisdictionsWithModeQuery() async throws {

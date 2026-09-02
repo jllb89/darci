@@ -1042,56 +1042,58 @@ private struct PushPermissionExplanationView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            VStack(alignment: .leading, spacing: 0) {
-                Spacer(minLength: scaled(260, in: proxy))
+            ScrollView(showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Spacer(minLength: scaled(260, in: proxy))
 
-                Text("Stay current on time-sensitive updates")
-                    .font(DARCiFont.maisonNeue(.demi, size: 34))
-                    .lineSpacing(6)
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text("Stay current on time-sensitive updates")
+                        .font(DARCiFont.maisonNeue(.demi, size: 34))
+                        .lineSpacing(6)
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Text("DARCi can notify you when a request, signing step, or in-person session needs attention. Sensitive details stay inside the app.")
-                    .font(DARCiFont.maisonNeue(.book, size: 18))
-                    .lineSpacing(6)
-                    .foregroundStyle(Color.white.opacity(0.70))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, scaled(18, in: proxy))
-
-                Spacer(minLength: scaled(64, in: proxy))
-
-                Button(action: onContinue) {
-                    HStack(spacing: scaled(12, in: proxy)) {
-                        Spacer()
-
-                        Text("Continue")
-                            .font(DARCiFont.maisonNeue(.book, size: 22))
-                            .foregroundStyle(.black)
-
-                        DARCiArrowCornerIcon()
-                            .stroke(.black, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
-                            .frame(width: 28, height: 28)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
-                    .padding(.horizontal, scaled(22, in: proxy))
-                    .background(DARCiTheme.onboardingGreen)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("push-permission-continue")
-
-                Button(action: onDismiss) {
-                    Text("Not now")
+                    Text("DARCi can notify you when a request, signing step, or in-person session needs attention. Sensitive details stay inside the app.")
                         .font(DARCiFont.maisonNeue(.book, size: 18))
+                        .lineSpacing(6)
                         .foregroundStyle(Color.white.opacity(0.70))
-                        .frame(maxWidth: .infinity, minHeight: scaled(52, in: proxy))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, scaled(18, in: proxy))
+
+                    Spacer(minLength: scaled(64, in: proxy))
+
+                    Button(action: onContinue) {
+                        HStack(spacing: scaled(12, in: proxy)) {
+                            Spacer()
+
+                            Text("Continue")
+                                .font(DARCiFont.maisonNeue(.book, size: 22))
+                                .foregroundStyle(.black)
+
+                            DARCiArrowCornerIcon()
+                                .stroke(.black, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
+                                .frame(width: 28, height: 28)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: scaled(54, in: proxy))
+                        .padding(.horizontal, scaled(22, in: proxy))
+                        .background(DARCiTheme.onboardingGreen)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("push-permission-continue")
+
+                    Button(action: onDismiss) {
+                        Text("Not now")
+                            .font(DARCiFont.maisonNeue(.book, size: 18))
+                            .foregroundStyle(Color.white.opacity(0.70))
+                            .frame(maxWidth: .infinity, minHeight: scaled(52, in: proxy))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, scaled(12, in: proxy))
+                    .padding(.bottom, max(scaled(48, in: proxy), proxy.safeAreaInsets.bottom))
+                    .accessibilityIdentifier("push-permission-dismiss")
                 }
-                .buttonStyle(.plain)
-                .padding(.top, scaled(12, in: proxy))
-                .padding(.bottom, scaled(48, in: proxy))
-                .accessibilityIdentifier("push-permission-dismiss")
+                .padding(.horizontal, scaled(33, in: proxy))
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .leading)
             }
-            .padding(.horizontal, scaled(33, in: proxy))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(Color.black.ignoresSafeArea())
         }
     }
