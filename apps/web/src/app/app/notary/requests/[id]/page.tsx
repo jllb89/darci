@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { PdfDocumentPreview } from "@/components/app/PdfDocumentPreview";
 import { useStoredAuth } from "@/lib/auth";
 import {
   addFeatureBreadcrumb,
@@ -2701,16 +2702,12 @@ export default function NotaryRequestWorkspacePage() {
         <div className="mt-12 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.52fr)]">
           <section className="space-y-4">
             {previewDocumentSource?.downloadUrl ? (
-              <object
+              <PdfDocumentPreview
+                className={`${previewPanelHeightClass} w-full rounded-[20px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
                 key={previewDocumentSource.id}
-                className={`${previewPanelHeightClass} w-full rounded-[20px] bg-[#f3f6f8] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
-                data={previewDocumentSource.downloadUrl}
-                type="application/pdf"
-              >
-                <div className="flex h-full items-center justify-center px-6 text-center text-sm leading-6 text-Color-Neutral">
-                  Open the PDF in a new tab if your browser does not render inline previews here.
-                </div>
-              </object>
+                label={selectedDocument?.label ?? "Document preview"}
+                sourceUrl={previewDocumentSource.downloadUrl}
+              />
             ) : (
               <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]`}>
                 Select a document to preview it here.

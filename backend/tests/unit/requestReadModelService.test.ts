@@ -735,14 +735,17 @@ describe("requestReadModelService", () => {
     });
 
     expect(detail?.document.reviewDocuments.map((document) => document.label)).toEqual([
+      "Certificate of Trust",
       "Trust Registration Amendment",
       "Power of Attorney - Mina Patel",
     ]);
     expect(detail?.document.reviewDocuments.map((document) => document.versionId)).toEqual([
+      "version-cert",
       "version-rrr-latest",
       "version-poa-tm2",
     ]);
     expect(detail?.document.outputBundle?.map((output) => output.outputKey)).toEqual([
+      "trust_certificate",
       "trust_rrr",
       "poa_document_tm2",
     ]);

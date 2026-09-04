@@ -74,6 +74,7 @@ struct DocumentsListItem: Codable, Identifiable, Equatable, Sendable {
     let productFlowMode: String?
     let selectedFamilies: [String]?
     let createdAt: String
+    let updatedAt: String?
     let summary: DocumentsWorkspaceSummary?
     let signerSummary: DocumentsSignerSummary?
     let nextAction: DocumentsNextAction?

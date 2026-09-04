@@ -14,6 +14,23 @@ struct ProductIntakeRoute: Identifiable, Hashable {
     }
 
     var id: String { "\(modeKey):\(draftDocumentId ?? "new")" }
+
+    static func returningFromReview(
+        existingRoute: ProductIntakeRoute?,
+        documentId: String,
+        productModeKey: String
+    ) -> ProductIntakeRoute {
+        if productModeKey == "notarize_document",
+           let existingRoute,
+           existingRoute.modeKey == productModeKey {
+            return existingRoute
+        }
+
+        return ProductIntakeRoute(
+            modeKey: productModeKey,
+            draftDocumentId: productModeKey == "notarize_document" ? nil : documentId
+        )
+    }
 }
 
 struct ProductIntakeFlowView: View {
@@ -129,6 +146,7 @@ struct ProductIntakeFlowView: View {
             await viewModel.start(modeKey: productModeKey, resumingDocumentId: draftDocumentId, session: session)
         }
         .onAppear {
+            viewModel.resumeEditingAfterReview()
             withAnimation(.easeOut(duration: 0.42)) {
                 hasAppeared = true
             }

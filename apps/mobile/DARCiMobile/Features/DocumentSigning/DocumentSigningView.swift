@@ -8,9 +8,9 @@ struct DocumentSigningView: View {
     let session: AuthSession?
     let documentId: String
     let skipSignatureForNotarization: Bool
+    let onBackToReview: () -> Void
     let onSentToSelectedNotary: (String?) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DocumentSigningViewModel
     @State private var pageCount = 1
     @State private var currentPage = 1
@@ -43,12 +43,14 @@ struct DocumentSigningView: View {
         session: AuthSession?,
         documentId: String,
         skipSignatureForNotarization: Bool = false,
+        onBackToReview: @escaping () -> Void = {},
         onSentToSelectedNotary: @escaping (String?) -> Void = { _ in },
         apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient()
     ) {
         self.session = session
         self.documentId = documentId
         self.skipSignatureForNotarization = skipSignatureForNotarization
+        self.onBackToReview = onBackToReview
         self.onSentToSelectedNotary = onSentToSelectedNotary
         _viewModel = StateObject(wrappedValue: DocumentSigningViewModel(documentId: documentId, apiClient: apiClient))
     }
@@ -200,7 +202,7 @@ struct DocumentSigningView: View {
     private var header: some View {
         HStack(spacing: 20) {
             Button {
-                dismiss()
+                onBackToReview()
             } label: {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 24, weight: .regular))
@@ -376,7 +378,7 @@ struct DocumentSigningView: View {
 
                     Button {
                         dismissKeyboard()
-                        dismiss()
+                        onBackToReview()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 16, weight: .regular))

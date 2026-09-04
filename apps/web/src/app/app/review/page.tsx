@@ -6,6 +6,7 @@ import ProcessBand from "@/app/app/start/ProcessBand";
 import type { DocumentIntakeDraftResponsePayload } from "@/app/app/start/startPageTypes";
 import { useAppToast } from "@/components/app/AppToastContext";
 import { BillingPolicyNotice } from "@/components/app/BillingPolicyNotice";
+import { PdfDocumentPreview } from "@/components/app/PdfDocumentPreview";
 import {
   addFeatureBreadcrumb,
   captureAppMessage,
@@ -204,9 +205,6 @@ export default function ReviewPage() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [billingDenialReason, setBillingDenialReason] = useState<MemberBillingReasonCode | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
-  const [previewErrorMessage, setPreviewErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!documentId) {
@@ -686,85 +684,6 @@ export default function ReviewPage() {
       hasActivePendingOutputs &&
       review.outputs.length + review.pendingOutputs.length > 1
     : false;
-  const selectedPreviewOutputKey = shouldDeferPreviewUntilAllReady
-    ? null
-    : selectedOutput?.outputKey ?? null;
-  const selectedPreviewDownloadUrl = shouldDeferPreviewUntilAllReady
-    ? null
-    : selectedOutput?.downloadUrl ?? null;
-
-  useEffect(() => {
-    if (!selectedPreviewOutputKey || !selectedPreviewDownloadUrl) {
-      setPreviewUrl((currentUrl) => {
-        if (currentUrl) {
-          URL.revokeObjectURL(currentUrl);
-        }
-
-        return null;
-      });
-      setPreviewErrorMessage(null);
-      setIsLoadingPreview(false);
-      return;
-    }
-
-    let isActive = true;
-    const abortController = new AbortController();
-
-    setPreviewUrl((currentUrl) => {
-      if (currentUrl) {
-        URL.revokeObjectURL(currentUrl);
-      }
-
-      return null;
-    });
-    setPreviewErrorMessage(null);
-    setIsLoadingPreview(true);
-
-    const loadPreview = async () => {
-      try {
-        const response = await fetch(selectedPreviewDownloadUrl, {
-          cache: "no-store",
-          signal: abortController.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to load the PDF preview.");
-        }
-
-        const responseBlob = await response.blob();
-        const previewBlob = responseBlob.type
-          ? responseBlob
-          : new Blob([responseBlob], { type: "application/pdf" });
-        const nextPreviewUrl = URL.createObjectURL(previewBlob);
-
-        if (!isActive) {
-          URL.revokeObjectURL(nextPreviewUrl);
-          return;
-        }
-
-        setPreviewUrl(nextPreviewUrl);
-      } catch (error) {
-        if (!isActive || abortController.signal.aborted) {
-          return;
-        }
-
-        setPreviewErrorMessage(
-          error instanceof Error ? error.message : "Failed to load the PDF preview.",
-        );
-      } finally {
-        if (isActive) {
-          setIsLoadingPreview(false);
-        }
-      }
-    };
-
-    void loadPreview();
-
-    return () => {
-      isActive = false;
-      abortController.abort();
-    };
-  }, [selectedPreviewDownloadUrl, selectedPreviewOutputKey]);
 
   const readyOutputCount = payload?.review?.outputs.length ?? 0;
   const blockedOutputCount = (payload?.review?.pendingOutputs ?? []).filter((output) =>
@@ -776,8 +695,6 @@ export default function ReviewPage() {
     (payload?.review?.pendingOutputs ?? []).some((output) =>
       isActiveGenerationStatus(output.status),
     );
-  const previewSourceUrl =
-    previewUrl ?? (previewErrorMessage ? selectedOutput?.downloadUrl ?? null : null);
 
   const approvalCopy = payload?.review?.reviewApproval
     ? "Review approved. Signing can proceed on the prepared document set."
@@ -821,43 +738,12 @@ export default function ReviewPage() {
         );
       }
 
-      if (isLoadingPreview && !previewSourceUrl) {
-        return (
-          <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f7f9fb] px-6 text-center`}>
-            <span
-              className="block h-8 w-8 rounded-full border-2 border-slate-300 border-t-Color-Scheme-1-Text"
-              style={{ animation: "darciSpinnerSpin 900ms linear infinite" }}
-            />
-            <p className="mt-4 text-sm font-medium text-Color-Scheme-1-Text">
-              Loading PDF preview.
-            </p>
-          </div>
-        );
-      }
-
-      if (previewSourceUrl) {
-        return (
-          <object
-            className={`${previewPanelHeightClass} w-full rounded-[20px] border border-Color-Scheme-1-Border/35 bg-[#f3f6f8]`}
-            data={previewSourceUrl}
-            type="application/pdf"
-          >
-            <div className="flex h-full items-center justify-center px-6 text-center text-sm leading-6 text-Color-Neutral">
-              Open the PDF in a new tab if your browser does not render inline previews here.
-            </div>
-          </object>
-        );
-      }
-
       return (
-        <div className={`flex ${previewPanelHeightClass} flex-col items-center justify-center rounded-[20px] border border-dashed border-amber-200 bg-[#f7f9fb] px-6 text-center`}>
-          <p className="text-sm font-medium text-Color-Scheme-1-Text">
-            {previewErrorMessage ?? "The PDF preview is unavailable right now."}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-Color-Neutral">
-            This embedded preview uses your browser&apos;s built-in PDF viewer. Reload the page if it does not recover.
-          </p>
-        </div>
+        <PdfDocumentPreview
+          className={`${previewPanelHeightClass} w-full rounded-[20px] border border-Color-Scheme-1-Border/35`}
+          label={selectedOutput.outputLabel}
+          sourceUrl={selectedOutput.downloadUrl}
+        />
       );
     }
 

@@ -70,6 +70,49 @@ final class DocumentIntakeViewModel: ObservableObject {
     private var lastServerDraftSignature: String?
     private var autosaveTask: Task<Void, Never>?
     private var addressSessionTokens: [String: String] = [:]
+    private var pendingNotarizationUpload: PendingNotarizationUpload?
+    private var completedNotarizationUpload: CompletedNotarizationUpload?
+
+    private struct NotarizationUploadFingerprint: Equatable {
+        let jurisdiction: String
+        let fileName: String
+        let fileData: Data
+        let documentDescription: String
+        let notarizationReason: String
+        let requesterName: String
+        let requesterEmail: String
+        let requesterPhone: String
+    }
+
+    private struct PendingNotarizationUpload {
+        let fingerprint: NotarizationUploadFingerprint
+        let documentId: String
+        let versionId: String
+        let signedURL: URL
+        var didUpload: Bool
+    }
+
+    private struct CompletedNotarizationUpload {
+        let fingerprint: NotarizationUploadFingerprint
+        let documentId: String
+    }
+
+    private enum NotarizationUploadStage {
+        case creating
+        case uploading
+        case finalizing
+
+        var fallbackMessage: String {
+            switch self {
+            case .creating:
+                "Failed to start the document upload. Try again."
+            case .uploading:
+                "Failed to transfer this PDF. Try the upload again."
+            case .finalizing:
+                "The PDF uploaded, but review preparation failed. Try again to finish processing it."
+            }
+        }
+    }
 
     init(apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient()) {
         self.apiClient = apiClient
@@ -435,7 +478,11 @@ final class DocumentIntakeViewModel: ObservableObject {
 
     func start(modeKey: String, resumingDocumentId: String? = nil, session: AuthSession?) async {
         let draftDocumentId = resumingDocumentId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        if productModeKey == modeKey, resumedDocumentId == draftDocumentId, memberForm != nil {
+        let hasLoadedCurrentFlow = memberForm != nil
+            || (modeKey == "notarize_document" && jurisdictions.isEmpty == false)
+        if productModeKey == modeKey,
+           resumedDocumentId == draftDocumentId,
+           hasLoadedCurrentFlow {
             return
         }
 
@@ -533,6 +580,17 @@ final class DocumentIntakeViewModel: ObservableObject {
         }
 
         return false
+    }
+
+    func resumeEditingAfterReview() {
+        guard isSubmitted else {
+            return
+        }
+
+        isSubmitted = false
+        submittedDocumentId = nil
+        errorMessage = nil
+        draftNotice = nil
     }
 
     func continueTapped(session: AuthSession?) async {
@@ -1368,46 +1426,103 @@ final class DocumentIntakeViewModel: ObservableObject {
             return
         }
 
+        let documentDescription = notarizationDocumentDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notarizationReason = notarizationReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fingerprint = NotarizationUploadFingerprint(
+            jurisdiction: trimmedJurisdiction,
+            fileName: notarizationFileName,
+            fileData: fileData,
+            documentDescription: documentDescription,
+            notarizationReason: notarizationReason,
+            requesterName: requesterName,
+            requesterEmail: requesterEmail,
+            requesterPhone: requesterPhone
+        )
+
+        if let completedNotarizationUpload,
+           completedNotarizationUpload.fingerprint == fingerprint {
+            isSubmitted = true
+            submittedDocumentId = completedNotarizationUpload.documentId
+            draftNotice = "Document ready for review."
+            return
+        }
+
+        if pendingNotarizationUpload?.fingerprint != fingerprint {
+            pendingNotarizationUpload = nil
+        }
+
         isSaving = true
         defer { isSaving = false }
+        var uploadStage = NotarizationUploadStage.creating
 
         do {
-            let createResponse = try await apiClient.createDocumentUpload(
-                DocumentUploadCreateRequest(
-                    productFlowMode: "notarize_document",
-                    documentType: "notarize_document",
-                    jurisdiction: trimmedJurisdiction,
-                    fileName: notarizationFileName,
-                    fileSize: notarizationFileSize,
-                    mimeType: "application/pdf",
-                    documentDescription: notarizationDocumentDescription.trimmingCharacters(in: .whitespacesAndNewlines),
-                    notarizationReason: notarizationReason.trimmingCharacters(in: .whitespacesAndNewlines),
-                    requesterName: requesterName,
-                    requesterEmail: requesterEmail,
-                    requesterPhone: requesterPhone,
-                    requesterPhoneCountryCode: "+1"
-                ),
-                accessToken: accessToken
-            )
+            if pendingNotarizationUpload == nil {
+                let createResponse = try await apiClient.createDocumentUpload(
+                    DocumentUploadCreateRequest(
+                        productFlowMode: "notarize_document",
+                        documentType: "notarize_document",
+                        jurisdiction: trimmedJurisdiction,
+                        fileName: notarizationFileName,
+                        fileSize: fileData.count,
+                        mimeType: "application/pdf",
+                        documentDescription: documentDescription,
+                        notarizationReason: notarizationReason,
+                        requesterName: requesterName,
+                        requesterEmail: requesterEmail,
+                        requesterPhone: requesterPhone,
+                        requesterPhoneCountryCode: "+1"
+                    ),
+                    accessToken: accessToken
+                )
 
-            guard let documentId = createResponse.document?.id,
-                  let versionId = createResponse.version?.id,
-                  let signedUrlString = createResponse.upload?.signedUrl,
-                  let signedUrl = URL(string: signedUrlString) else {
+                guard let documentId = createResponse.document?.id,
+                      let versionId = createResponse.version?.id,
+                      let signedUrlString = createResponse.upload?.signedUrl,
+                      let signedURL = URL(string: signedUrlString) else {
+                    throw IntakeError.missingUploadTarget
+                }
+
+                pendingNotarizationUpload = PendingNotarizationUpload(
+                    fingerprint: fingerprint,
+                    documentId: documentId,
+                    versionId: versionId,
+                    signedURL: signedURL,
+                    didUpload: false
+                )
+            }
+
+            guard var upload = pendingNotarizationUpload else {
                 throw IntakeError.missingUploadTarget
             }
 
-            try await apiClient.uploadDocument(data: fileData, mimeType: "application/pdf", to: signedUrl)
+            if upload.didUpload == false {
+                uploadStage = .uploading
+                do {
+                    try await apiClient.uploadDocument(data: fileData, mimeType: "application/pdf", to: upload.signedURL)
+                } catch {
+                    pendingNotarizationUpload = nil
+                    throw error
+                }
+                upload.didUpload = true
+                pendingNotarizationUpload = upload
+            }
+
+            uploadStage = .finalizing
             _ = try await apiClient.finalizeDocumentUpload(
-                documentId: documentId,
-                request: DocumentUploadFinalizeRequest(documentVersionId: versionId),
+                documentId: upload.documentId,
+                request: DocumentUploadFinalizeRequest(documentVersionId: upload.versionId),
                 accessToken: accessToken
             )
+            completedNotarizationUpload = CompletedNotarizationUpload(
+                fingerprint: fingerprint,
+                documentId: upload.documentId
+            )
+            pendingNotarizationUpload = nil
             isSubmitted = true
-            submittedDocumentId = documentId
+            submittedDocumentId = upload.documentId
             draftNotice = "Document uploaded for review."
         } catch {
-            errorMessage = displayMessage(for: error, fallback: "Failed to upload this document for notarization.")
+            errorMessage = displayMessage(for: error, fallback: uploadStage.fallbackMessage)
         }
     }
 
@@ -1901,6 +2016,8 @@ final class DocumentIntakeViewModel: ObservableObject {
         notarizationReason = ""
         clearAddressAutocomplete()
         addressSessionTokens = [:]
+        pendingNotarizationUpload = nil
+        completedNotarizationUpload = nil
         isSubmitted = false
         submittedDocumentId = nil
         draftNotice = nil

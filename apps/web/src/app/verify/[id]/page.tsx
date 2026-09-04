@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { PdfDocumentPreview } from "@/components/app/PdfDocumentPreview";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -157,22 +158,11 @@ export default function PublicVerifyPage() {
                 {errorMessage}
               </div>
             ) : selectedDocument?.downloadUrl ? (
-              <object
-                className={`${previewPanelHeightClass} w-full rounded-[20px] bg-[#f3f6f8] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
-                data={selectedDocument.downloadUrl}
-                type="application/pdf"
-              >
-                <div className="flex h-full items-center justify-center px-6 text-center text-sm leading-6 text-Color-Neutral">
-                  <a
-                    className="rounded-lg border border-Color-Scheme-1-Border/40 bg-white px-4 py-3 text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
-                    href={selectedDocument.downloadUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open PDF in a new tab
-                  </a>
-                </div>
-              </object>
+              <PdfDocumentPreview
+                className={`${previewPanelHeightClass} w-full rounded-[20px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
+                label={selectedDocument.label}
+                sourceUrl={selectedDocument.downloadUrl}
+              />
             ) : (
               <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] bg-white px-6 text-center text-sm leading-6 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]`}>
                 {isLoading ? "Loading verification." : "The verified PDF is not available yet."}

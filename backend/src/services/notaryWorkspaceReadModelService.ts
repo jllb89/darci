@@ -747,19 +747,11 @@ const buildGenerationRunById = (generationRuns: DocumentGenerationRunRecord[]) =
   return new Map(generationRuns.map((run) => [run.id, run]));
 };
 
-const hiddenSessionReviewOutputKeys = new Set(["trust_certificate"]);
-
 const isVisibleSessionReviewVersion = (input: {
   version: DocumentVersionRecord;
   generationRunById: Map<string, DocumentGenerationRunRecord>;
 }) => {
-  const run = input.version.generation_run_id
-    ? input.generationRunById.get(input.version.generation_run_id)
-    : null;
-  const outputKey = run?.output_key?.trim() ?? "";
-  const documentKey = run?.document_key?.trim() ?? "";
-
-  return ![outputKey, documentKey].some((key) => hiddenSessionReviewOutputKeys.has(key));
+  return true;
 };
 
 const buildOutputOrderByKey = (document: Pick<DocumentRecord, "output_bundle">) => {

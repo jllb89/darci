@@ -165,6 +165,10 @@ import { getUserIdentityContextByUserId, type RequestRole } from "../services/us
 import { logDocumentTrace } from "../utils/documentTrace";
 import { captureException, captureMessage } from "../utils/sentry";
 import {
+  PdfReviewValidationError,
+  validatePdfForReview,
+} from "../services/pdfValidationService";
+import {
   assertMemberCanCreateWorkflow,
   BillingPolicyError,
   canViewerAccessFinalPackage,
@@ -627,6 +631,7 @@ const mapDocumentResponse = (document: {
   selected_families?: string[] | null;
   output_bundle?: Array<Record<string, unknown>> | null;
   created_at: string;
+  updated_at?: string | null;
 }, viewerRole?: string | null) => {
   const response: {
     id: string;
@@ -635,6 +640,7 @@ const mapDocumentResponse = (document: {
     documentType: string | null;
     jurisdiction: string | null;
     createdAt: string;
+    updatedAt?: string;
     productFlowMode?: string;
     selectedFamilies?: string[];
     outputBundle?: Array<Record<string, unknown>>;
@@ -650,6 +656,10 @@ const mapDocumentResponse = (document: {
     jurisdiction: document.jurisdiction,
     createdAt: document.created_at,
   };
+
+  if (typeof document.updated_at === "string" && document.updated_at) {
+    response.updatedAt = document.updated_at;
+  }
 
   if (typeof document.product_flow_mode === "string" && document.product_flow_mode) {
     response.productFlowMode = document.product_flow_mode;
@@ -4510,6 +4520,38 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
     });
   }
 
+  let pdfValidation: Awaited<ReturnType<typeof validatePdfForReview>>;
+  try {
+    pdfValidation = await validatePdfForReview(await inspectUploadedDocument());
+  } catch (error) {
+    if (!(error instanceof PdfReviewValidationError)) {
+      throw error;
+    }
+
+    captureDocumentUploadIssue({
+      message: "Document upload finalize rejected unreadable PDF",
+      documentId: document.id,
+      versionId: version.id,
+      storagePath: uploadStoragePath,
+      metadata: {
+        storageMimeType: objectMetadata.mimeType,
+        sizeBytes: resolvedSizeBytes,
+        reason: error.message,
+      },
+    });
+
+    return res.status(400).json({
+      error: "validation_error",
+      message: "This PDF cannot be reviewed. Upload a readable PDF with at least one valid page.",
+      details: [
+        {
+          path: "file",
+          message: error.message,
+        },
+      ],
+    });
+  }
+
   const updatedVersion = await updateDocumentVersion(version.id, {
     mime_type: resolvedMimeType,
     size_bytes: resolvedSizeBytes,
@@ -4543,6 +4585,8 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
       file_name: updatedVersion.file_name,
       file_size: updatedVersion.size_bytes,
       mime_type: updatedVersion.mime_type,
+      pdf_page_count: pdfValidation.pageCount,
+      pdf_is_encrypted: pdfValidation.isEncrypted,
     },
   });
 

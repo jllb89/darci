@@ -182,6 +182,9 @@ struct DocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
 struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     var jurisdictions = [IntakeJurisdictionOption(code: "CA", label: "California")]
     var resumedDraft: DocumentIntakeDraft? = nil
+    var reviewProductFlowMode = "poa_only"
+    var reviewDocumentType = "poa_document"
+    var failsResave = false
 
     func listMemberFormJurisdictions(modeKey: String, accessToken: String) async throws -> MemberFormJurisdictionsResponse {
         MemberFormJurisdictionsResponse(mode: nil, jurisdictions: jurisdictions, message: nil)
@@ -262,7 +265,11 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     }
 
     func resaveDocumentIntakeDraft(documentId: String, accessToken: String) async throws -> DocumentIntakeDraftResponse {
-        DocumentIntakeDraftResponse(
+        if failsResave {
+            throw URLError(.badServerResponse)
+        }
+
+        return DocumentIntakeDraftResponse(
             draft: DocumentIntakeDraft(
                 documentId: documentId,
                 ownerId: "user-1",
@@ -303,10 +310,10 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
                 id: documentId,
                 idn: nil,
                 status: "pending_review",
-                documentType: "poa_document",
+                documentType: reviewDocumentType,
                 jurisdiction: "US-CA",
                 createdAt: "2026-06-05T12:00:00.000Z",
-                productFlowMode: "poa_only"
+                productFlowMode: reviewProductFlowMode
             ),
             review: DocumentReviewState(
                 state: "ready",

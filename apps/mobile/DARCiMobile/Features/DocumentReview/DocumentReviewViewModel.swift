@@ -75,6 +75,23 @@ final class DocumentReviewViewModel: ObservableObject {
             || payload?.document?.documentType == "uploaded_document"
     }
 
+    var productModeKeyForEditing: String {
+        if let productFlowMode = payload?.document?.productFlowMode?.trimmingCharacters(in: .whitespacesAndNewlines),
+           productFlowMode.isEmpty == false {
+            return productFlowMode
+        }
+
+        if isDocumentNotarization {
+            return "notarize_document"
+        }
+
+        if payload?.document?.documentType?.lowercased().contains("trust") == true {
+            return "trust_bundle"
+        }
+
+        return "poa_only"
+    }
+
     var approvalHelperText: String? {
         guard let review else { return nil }
 
@@ -168,6 +185,15 @@ final class DocumentReviewViewModel: ObservableObject {
             errorMessage = displayMessage(for: error, fallback: "Failed to save draft.")
             return false
         }
+    }
+
+    func prepareToEdit(session: AuthSession?) async -> Bool {
+        if isDocumentNotarization || payload?.document == nil {
+            errorMessage = nil
+            return true
+        }
+
+        return await saveToDraft(session: session)
     }
 
     func continueToSign(session: AuthSession?) async -> Bool {

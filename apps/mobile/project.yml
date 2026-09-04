@@ -27,7 +27,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 38K3YA2857
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "4"
+    CURRENT_PROJECT_VERSION: "16"
     IPHONEOS_DEPLOYMENT_TARGET: "18.0"
 
 targets:
@@ -87,6 +87,20 @@ targets:
       - package: PhoneNumberKit
       - package: Sentry
         product: Sentry-Static
+    postBuildScripts:
+      - name: Generate Sentry framework dSYM
+        script: |
+          if [ "${CONFIGURATION}" != "Release" ]; then
+            exit 0
+          fi
+
+          sentry_binary="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Sentry.framework/Sentry"
+          sentry_dsym="${DWARF_DSYM_FOLDER_PATH}/Sentry.framework.dSYM"
+
+          if [ -f "${sentry_binary}" ]; then
+            /usr/bin/xcrun dsymutil "${sentry_binary}" -o "${sentry_dsym}"
+          fi
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.illuminote.darci

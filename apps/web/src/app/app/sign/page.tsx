@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { PdfDocumentPreview } from "@/components/app/PdfDocumentPreview";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import {
   addFeatureBreadcrumb,
@@ -2309,15 +2310,11 @@ export default function SignPage() {
 
     if (selectedOutput) {
       return (
-        <object
-          className={`${previewPanelHeightClass} w-full bg-[#f3f6f8]`}
-          data={selectedOutput.downloadUrl}
-          type="application/pdf"
-        >
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm leading-6 text-Color-Neutral">
-            Open the PDF in a new tab if your browser does not render inline previews here.
-          </div>
-        </object>
+        <PdfDocumentPreview
+          className={`${previewPanelHeightClass} w-full`}
+          label={selectedOutput.outputLabel}
+          sourceUrl={selectedOutput.downloadUrl}
+        />
       );
     }
 

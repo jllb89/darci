@@ -23,7 +23,7 @@ final class DocumentsViewModel: ObservableObject {
 
     var sortedDocuments: [DocumentsListItem] {
         filteredDocuments.sorted { lhs, rhs in
-            DocumentsDateFormatting.date(from: lhs.createdAt) > DocumentsDateFormatting.date(from: rhs.createdAt)
+            activityDate(for: lhs) > activityDate(for: rhs)
         }
     }
 
@@ -193,6 +193,10 @@ final class DocumentsViewModel: ObservableObject {
 
     private var filteredDocuments: [DocumentsListItem] {
         documents.filter(matchesFilters)
+    }
+
+    private func activityDate(for document: DocumentsListItem) -> Date {
+        DocumentsDateFormatting.date(from: document.updatedAt ?? document.createdAt)
     }
 
     private func matchesFilters(_ document: DocumentsListItem) -> Bool {

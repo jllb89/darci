@@ -3,11 +3,11 @@ import PDFKit
 
 struct DocumentReviewView: View {
     let session: AuthSession?
+    let onBackToForm: (String, String) -> Void
     let onSavedToDraft: () -> Void
     let onContinueToSign: (String) -> Void
     let onContinueWithoutSignature: (String) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DocumentReviewViewModel
     @State private var pageCount = 1
     @State private var currentPage = 1
@@ -22,11 +22,13 @@ struct DocumentReviewView: View {
         session: AuthSession?,
         documentId: String,
         apiClient: DocumentIntakeAPIProviding = DocumentIntakeAPIClient(),
+        onBackToForm: @escaping (String, String) -> Void,
         onSavedToDraft: @escaping () -> Void,
         onContinueToSign: @escaping (String) -> Void,
         onContinueWithoutSignature: @escaping (String) -> Void
     ) {
         self.session = session
+        self.onBackToForm = onBackToForm
         self.onSavedToDraft = onSavedToDraft
         self.onContinueToSign = onContinueToSign
         self.onContinueWithoutSignature = onContinueWithoutSignature
@@ -103,7 +105,11 @@ struct DocumentReviewView: View {
     private var header: some View {
         HStack(spacing: 20) {
             Button {
-                dismiss()
+                Task {
+                    if await viewModel.prepareToEdit(session: session) {
+                        onBackToForm(viewModel.documentId, viewModel.productModeKeyForEditing)
+                    }
+                }
             } label: {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 24, weight: .regular))
@@ -111,6 +117,7 @@ struct DocumentReviewView: View {
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .disabled(viewModel.isSavingDraft)
 
             Text(viewModel.documentTitle)
                 .font(DARCiFont.maisonNeue(.medium, size: 15))

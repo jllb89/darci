@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { DomainError } from "../errors/domainError";
+import { validatePdfForReview } from "./pdfValidationService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -331,6 +332,24 @@ export const uploadGeneratedDocument = async (input: {
   content: Buffer;
   contentType: string;
 }) => {
+  if (input.contentType.trim().toLowerCase() === "application/pdf") {
+    try {
+      await validatePdfForReview(input.content);
+    } catch (error) {
+      throwStorageError(
+        "STORAGE_UPLOAD_GENERATED_PDF_INVALID",
+        "Generated PDF is not readable",
+        {
+          bucket: documentsBucket,
+          storagePath: input.storagePath,
+          contentType: input.contentType,
+          sizeBytes: input.content.byteLength,
+        },
+        error,
+      );
+    }
+  }
+
   const { error } = await supabaseStorage.storage.from(documentsBucket).upload(
     input.storagePath,
     input.content,

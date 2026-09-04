@@ -72,6 +72,40 @@ final class DARCiAdaptiveLayoutTests: XCTestCase {
     }
 }
 
+@MainActor
+final class PDFPreviewDocumentLoaderTests: XCTestCase {
+    func testLoadsValidMultiPagePDF() throws {
+        let renderer = UIGraphicsPDFRenderer(
+            bounds: CGRect(x: 0, y: 0, width: 612, height: 792)
+        )
+        let data = renderer.pdfData { context in
+            context.beginPage()
+            context.beginPage()
+        }
+
+        let document = try PDFPreviewDocumentLoader.load(data: data)
+
+        XCTAssertEqual(document.pageCount, 2)
+        XCTAssertFalse(document.isLocked)
+    }
+
+    func testRejectsMalformedPDFData() {
+        XCTAssertThrowsError(
+            try PDFPreviewDocumentLoader.load(data: Data("%PDF-1.7\nmalformed".utf8))
+        ) { error in
+            XCTAssertEqual(error as? PDFPreviewLoadFailure, .unreadable)
+        }
+    }
+
+    func testRejectsEmptyPDFData() {
+        XCTAssertThrowsError(
+            try PDFPreviewDocumentLoader.load(data: Data())
+        ) { error in
+            XCTAssertEqual(error as? PDFPreviewLoadFailure, .unreadable)
+        }
+    }
+}
+
 final class AuthURLProtocolStub: URLProtocol {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
@@ -1766,6 +1800,106 @@ final class DARCiMobileTests: XCTestCase {
 
         XCTAssertEqual(viewModel.specialInstructions, specialInstructions)
         XCTAssertTrue(viewModel.showsSpecialInstructions)
+    }
+
+    @MainActor
+    func testDocumentNotarizationPreservesUploadWhenReturningFromReview() async {
+        let viewModel = DocumentIntakeViewModel(apiClient: MockDocumentIntakeAPIClient())
+        let pdfData = Data("%PDF-1.7\nround-trip".utf8)
+
+        await viewModel.start(modeKey: "notarize_document", session: makeAuthSession())
+        viewModel.notarizationFileName = "client-document.pdf"
+        viewModel.notarizationFileSize = pdfData.count
+        viewModel.notarizationFileData = pdfData
+        viewModel.notarizationDocumentDescription = "Affidavit requiring acknowledgment"
+        viewModel.notarizationReason = "Confirm the signer appeared in person"
+
+        await viewModel.continueTapped(session: makeAuthSession())
+        XCTAssertTrue(viewModel.isSubmitted)
+
+        await viewModel.start(modeKey: "notarize_document", session: makeAuthSession())
+
+        XCTAssertTrue(viewModel.isSubmitted)
+        XCTAssertEqual(viewModel.submittedDocumentId, "document-upload-1")
+
+        viewModel.resumeEditingAfterReview()
+
+        XCTAssertFalse(viewModel.isSubmitted)
+        XCTAssertNil(viewModel.submittedDocumentId)
+        XCTAssertEqual(viewModel.notarizationFileName, "client-document.pdf")
+        XCTAssertEqual(viewModel.notarizationFileSize, pdfData.count)
+        XCTAssertEqual(viewModel.notarizationFileData, pdfData)
+        XCTAssertEqual(viewModel.notarizationDocumentDescription, "Affidavit requiring acknowledgment")
+        XCTAssertEqual(viewModel.notarizationReason, "Confirm the signer appeared in person")
+        XCTAssertTrue(viewModel.canContinue)
+
+        await viewModel.continueTapped(session: makeAuthSession())
+
+        XCTAssertTrue(viewModel.isSubmitted)
+        XCTAssertEqual(viewModel.submittedDocumentId, "document-upload-1")
+    }
+
+    func testProductIntakeRouteRestoresServerDraftsForGeneratedProducts() {
+        for modeKey in ["poa_only", "trust_bundle"] {
+            let route = ProductIntakeRoute.returningFromReview(
+                existingRoute: ProductIntakeRoute(modeKey: modeKey),
+                documentId: "document-1",
+                productModeKey: modeKey
+            )
+
+            XCTAssertEqual(route.modeKey, modeKey)
+            XCTAssertEqual(route.draftDocumentId, "document-1")
+        }
+    }
+
+    func testProductIntakeRoutePreservesLiveNotarizationUpload() {
+        let existingRoute = ProductIntakeRoute(modeKey: "notarize_document")
+
+        let route = ProductIntakeRoute.returningFromReview(
+            existingRoute: existingRoute,
+            documentId: "document-upload-1",
+            productModeKey: "notarize_document"
+        )
+
+        XCTAssertEqual(route, existingRoute)
+        XCTAssertNil(route.draftDocumentId)
+    }
+
+    @MainActor
+    func testReviewReturnResavesGeneratedProductDraft() async {
+        let viewModel = DocumentReviewViewModel(
+            documentId: "document-1",
+            apiClient: MockDocumentIntakeAPIClient(
+                reviewProductFlowMode: "trust_bundle",
+                reviewDocumentType: "trust_document"
+            )
+        )
+
+        await viewModel.load(session: makeAuthSession())
+        let didPrepare = await viewModel.prepareToEdit(session: makeAuthSession())
+
+        XCTAssertTrue(didPrepare)
+        XCTAssertEqual(viewModel.productModeKeyForEditing, "trust_bundle")
+        XCTAssertNotNil(viewModel.draftNotice)
+    }
+
+    @MainActor
+    func testReviewReturnDoesNotRequireDraftForUploadedNotarization() async {
+        let viewModel = DocumentReviewViewModel(
+            documentId: "document-upload-1",
+            apiClient: MockDocumentIntakeAPIClient(
+                reviewProductFlowMode: "notarize_document",
+                reviewDocumentType: "uploaded_document",
+                failsResave: true
+            )
+        )
+
+        await viewModel.load(session: makeAuthSession())
+        let didPrepare = await viewModel.prepareToEdit(session: makeAuthSession())
+
+        XCTAssertTrue(didPrepare)
+        XCTAssertEqual(viewModel.productModeKeyForEditing, "notarize_document")
+        XCTAssertNil(viewModel.errorMessage)
     }
 
     func testDocumentIntakeAPIClientLoadsJurisdictionsWithModeQuery() async throws {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { PdfDocumentPreview } from "@/components/app/PdfDocumentPreview";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import { captureDomainException } from "@/lib/clientTelemetry";
 import { GeolocationCaptureError, getCurrentGeolocationSample } from "@/lib/geolocation";
@@ -543,23 +544,12 @@ export default function RequestWorkspacePage() {
         <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.52fr)]">
           <section className="space-y-4">
             {selectedDocument?.downloadUrl ? (
-              <object
+              <PdfDocumentPreview
+                className={`${previewPanelHeightClass} w-full rounded-[20px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
                 key={`${selectedDocument.id}:${selectedDocument.downloadUrl}`}
-                className={`${previewPanelHeightClass} w-full rounded-[20px] bg-[#f3f6f8] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
-                data={selectedDocument.downloadUrl}
-                type="application/pdf"
-              >
-                <div className={`flex ${previewPanelHeightClass} items-center justify-center px-6 text-center text-sm leading-6 text-Color-Neutral`}>
-                  <a
-                    className="rounded-lg border border-Color-Scheme-1-Border/40 px-4 py-3 text-Color-Scheme-1-Text hover:bg-Color-Neutral-Lightest"
-                    href={selectedDocument.downloadUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open PDF in a new tab
-                  </a>
-                </div>
-              </object>
+                label={selectedDocumentLabel}
+                sourceUrl={selectedDocument.downloadUrl}
+              />
             ) : (
               <div className={`flex ${previewPanelHeightClass} items-center justify-center rounded-[20px] bg-[#f7f9fb] px-6 text-center text-sm leading-6 text-Color-Neutral shadow-[inset_0_0_0_1px_rgba(0,0,0,0.10)]`}>
                 The document preview will appear here as the session document is prepared.

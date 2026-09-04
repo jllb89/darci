@@ -34,6 +34,8 @@ struct AppRootView: View {
     @State private var homeBannerMessage: String?
     @State private var memberBillingReturnEvent: MemberBillingReturn?
     @State private var settingsInitialContent: UserSettingsContentScreen?
+    @State private var shouldPreserveIntakeAfterReview = false
+    @State private var shouldPreserveReviewAfterSigning = false
 
     @StateObject private var sessionCoordinator: AppSessionCoordinator
     @StateObject private var notificationCenterViewModel: NotificationCenterViewModel
@@ -261,7 +263,10 @@ struct AppRootView: View {
                     draftDocumentId: route.draftDocumentId,
                     apiClient: documentIntakeAPIClient
                 ) { documentId in
-                    reviewRoute = DocumentReviewRoute(documentId: documentId)
+                    reviewRoute = DocumentReviewRoute(
+                        documentId: documentId,
+                        productModeKey: route.modeKey
+                    )
                     presentPushPermissionPromptIfEligible()
                 }
                 .onDisappear {
@@ -273,6 +278,16 @@ struct AppRootView: View {
                     session: sessionCoordinator.currentSession,
                     documentId: route.documentId,
                     apiClient: documentIntakeAPIClient,
+                    onBackToForm: { documentId, productModeKey in
+                        shouldReturnToNotificationCenterAfterRoute = false
+                        shouldPreserveIntakeAfterReview = true
+                        intakeRoute = ProductIntakeRoute.returningFromReview(
+                            existingRoute: intakeRoute,
+                            documentId: documentId,
+                            productModeKey: route.productModeKey ?? productModeKey
+                        )
+                        reviewRoute = nil
+                    },
                     onSavedToDraft: {
                         shouldReturnToNotificationCenterAfterRoute = false
                         selectedProductModeKey = nil
@@ -281,18 +296,24 @@ struct AppRootView: View {
                     },
                     onContinueToSign: { documentId in
                         shouldReturnToNotificationCenterAfterRoute = false
+                        shouldPreserveIntakeAfterReview = true
                         signingRoute = DocumentSigningRoute(documentId: documentId)
                         presentPushPermissionPromptIfEligible()
                     },
                     onContinueWithoutSignature: { documentId in
                         shouldReturnToNotificationCenterAfterRoute = false
+                        shouldPreserveIntakeAfterReview = true
                         signingRoute = DocumentSigningRoute(documentId: documentId, skipSignatureForNotarization: true)
                         presentPushPermissionPromptIfEligible()
                     }
                 )
                     .onDisappear {
                         selectedProductModeKey = nil
-                        intakeRoute = nil
+                        if shouldPreserveIntakeAfterReview {
+                            shouldPreserveIntakeAfterReview = false
+                        } else {
+                            intakeRoute = nil
+                        }
                         maybeReturnToNotificationCenterAfterRoute()
                     }
             }
@@ -331,6 +352,11 @@ struct AppRootView: View {
                     session: sessionCoordinator.currentSession,
                     documentId: route.documentId,
                     skipSignatureForNotarization: route.skipSignatureForNotarization,
+                    onBackToReview: {
+                        shouldReturnToNotificationCenterAfterRoute = false
+                        shouldPreserveReviewAfterSigning = true
+                        signingRoute = nil
+                    },
                     onSentToSelectedNotary: { notaryName in
                         shouldReturnToNotificationCenterAfterRoute = false
                         showHomeBanner(
@@ -348,8 +374,12 @@ struct AppRootView: View {
                 )
                     .onDisappear {
                         selectedProductModeKey = nil
-                        intakeRoute = nil
-                        reviewRoute = nil
+                        if shouldPreserveReviewAfterSigning {
+                            shouldPreserveReviewAfterSigning = false
+                        } else {
+                            intakeRoute = nil
+                            reviewRoute = nil
+                        }
                         maybeReturnToNotificationCenterAfterRoute()
                     }
             }
@@ -987,6 +1017,12 @@ private struct AppRootStatusBanner: View {
 
 struct DocumentReviewRoute: Identifiable, Hashable {
     let documentId: String
+    let productModeKey: String?
+
+    init(documentId: String, productModeKey: String? = nil) {
+        self.documentId = documentId
+        self.productModeKey = productModeKey
+    }
 
     var id: String { documentId }
 }

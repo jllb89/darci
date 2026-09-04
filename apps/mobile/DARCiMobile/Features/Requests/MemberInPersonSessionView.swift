@@ -333,13 +333,9 @@ struct MemberInPersonSessionView: View {
                 ForEach(viewModel.reviewDocuments) { document in
                     let isSelected = document.id == viewModel.selectedDocument?.id
                     Button { viewModel.selectDocument(document) } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(document.label)
-                                .font(DARCiFont.maisonNeue(.book, size: 11))
-                                .lineLimit(1)
-                            Text(document.isFinal ? "FINAL PACKAGE" : "SESSION PDF")
-                                .font(DARCiFont.maisonNeue(.mono, size: 8))
-                        }
+                        Text(document.label)
+                            .font(DARCiFont.maisonNeue(.book, size: 11))
+                            .lineLimit(1)
                         .foregroundStyle(isSelected ? .white : .black)
                         .frame(width: 156, alignment: .leading)
                         .padding(.horizontal, 12)

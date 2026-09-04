@@ -427,6 +427,7 @@ describe("GET documents endpoints", () => {
         document_type: "generic",
         jurisdiction: "US-OH",
         created_at: "2026-03-05T00:00:00.000Z",
+        updated_at: "2026-03-05T00:10:00.000Z",
       },
       {
         id: "doc-2",
@@ -466,6 +467,7 @@ describe("GET documents endpoints", () => {
           documentType: "generic",
           jurisdiction: "US-OH",
           createdAt: "2026-03-05T00:00:00.000Z",
+          updatedAt: "2026-03-05T00:10:00.000Z",
           summary: {
             workflow: {
               requestId: null,

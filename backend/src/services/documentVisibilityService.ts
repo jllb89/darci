@@ -27,19 +27,11 @@ export const getVisibleDocumentIdn = (input: {
   return shouldExposeDocumentIdn(input) ? input.idn : null;
 };
 
-const memberHiddenReviewOutputKeys = new Set(["trust_certificate"]);
-
 export const shouldExposeDocumentReviewOutput = (input: {
   outputKey: string;
   documentKey?: string | null | undefined;
   baseOutputKey?: string | null | undefined;
   viewerRole?: string | null | undefined;
 }) => {
-  if (input.viewerRole === "admin" || input.viewerRole === "service_role") {
-    return true;
-  }
-
-  return ![input.outputKey, input.documentKey, input.baseOutputKey].some((key) =>
-    memberHiddenReviewOutputKeys.has(key?.trim() ?? ""),
-  );
+  return true;
 };

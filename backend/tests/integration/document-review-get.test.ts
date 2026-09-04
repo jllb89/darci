@@ -58,7 +58,7 @@ describe("document review payload", () => {
     }));
   });
 
-  it("returns only member-visible review PDFs", async () => {
+  it("returns every member review PDF", async () => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
@@ -172,14 +172,16 @@ describe("document review payload", () => {
     expect(response.status).toBe(200);
     expect(response.body.review.canApprove).toBe(true);
     expect(response.body.review.allVisibleOutputsReady).toBe(true);
-    expect(response.body.review.outputs).toHaveLength(2);
+    expect(response.body.review.outputs).toHaveLength(3);
     expect(response.body.review.outputs.map((output: { outputKey: string }) => output.outputKey)).toEqual([
+      "trust_certificate",
       "trust_rrr",
       "poa_document",
     ]);
-    expect(response.body.review.outputs[0].downloadUrl).toContain("trust-rrr.pdf");
-    expect(response.body.review.outputs[1].downloadUrl).toContain("poa.pdf");
-    expect(mocks.createDocumentDownloadUrlMock).toHaveBeenCalledTimes(2);
+    expect(response.body.review.outputs[0].downloadUrl).toContain("trust-certificate.pdf");
+    expect(response.body.review.outputs[1].downloadUrl).toContain("trust-rrr.pdf");
+    expect(response.body.review.outputs[2].downloadUrl).toContain("poa.pdf");
+    expect(mocks.createDocumentDownloadUrlMock).toHaveBeenCalledTimes(3);
   });
 
   it("flags missing generation runs for the review page to queue", async () => {
