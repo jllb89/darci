@@ -271,7 +271,17 @@ describe("POST /documents with product flow mode", () => {
         jurisdiction: "US-CA",
         productFlowMode: "trust_bundle",
         selectedFamilies: ["poa", "trust"],
+        outputBundle: [
+          {
+            outputKey: "trust_certificate",
+            outputLabel: "Certificate of Trust",
+            isRequired: true,
+            sortOrder: 10,
+            metadata: {},
+          },
+        ],
         createdAt: "2026-04-13T00:20:00.000Z",
+        updatedAt: "2026-04-13T00:20:00.000Z",
       },
       draft: {
         documentId: "doc-intake-2",
@@ -364,7 +374,15 @@ describe("POST /documents with product flow mode", () => {
 
     expect(response.body.document.productFlowMode).toBe("trust_bundle");
     expect(response.body.document.selectedFamilies).toEqual(["poa", "trust"]);
-    expect(response.body.document.outputBundle).toBeUndefined();
+    expect(response.body.document.outputBundle).toEqual([
+      {
+        outputKey: "trust_certificate",
+        outputLabel: "Certificate of Trust",
+        isRequired: true,
+        sortOrder: 10,
+        metadata: {},
+      },
+    ]);
 
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({

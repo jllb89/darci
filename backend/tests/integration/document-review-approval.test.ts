@@ -212,6 +212,19 @@ describe("document review approval", () => {
         created_by: "owner-1",
         created_at: "2026-03-05T00:00:10.000Z",
       },
+      {
+        id: "ver-2",
+        document_id: "doc-1",
+        version: 2,
+        storage_path: "owner-1/doc-1/generated/ver-2.pdf",
+        file_name: "trust-certificate.pdf",
+        mime_type: "application/pdf",
+        size_bytes: 1024,
+        is_final: false,
+        generation_run_id: "run-2",
+        created_by: "owner-1",
+        created_at: "2026-03-05T00:00:11.000Z",
+      },
     ]);
     mocks.listDocumentGenerationRunsMock.mockResolvedValue([
       {
@@ -219,6 +232,13 @@ describe("document review approval", () => {
         document_id: "doc-1",
         intake_revision: 7,
         output_key: "trust_rrr",
+        status: "rendered",
+      },
+      {
+        id: "run-2",
+        document_id: "doc-1",
+        intake_revision: 7,
+        output_key: "trust_certificate",
         status: "rendered",
       },
     ]);
@@ -364,7 +384,7 @@ describe("document review approval", () => {
       "trust_rrr",
       "trust_certificate",
     ]);
-    expect(response.body.reviewApproval.approvedVersionIds).toEqual(["ver-1"]);
+    expect(response.body.reviewApproval.approvedVersionIds).toEqual(["ver-1", "ver-2"]);
     expect(mocks.updateDocumentMock).toHaveBeenCalledWith(
       "doc-1",
       expect.objectContaining({
@@ -380,7 +400,7 @@ describe("document review approval", () => {
             systemKey: "review_approval",
             value: expect.objectContaining({
               approvedOutputKeys: ["trust_rrr", "trust_certificate"],
-              approvedVersionIds: ["ver-1"],
+              approvedVersionIds: ["ver-1", "ver-2"],
             }),
           }),
           expect.objectContaining({ systemKey: "registry_number" }),
