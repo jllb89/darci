@@ -1,4 +1,5 @@
 import { PDFDocument as PdfLibDocument } from "pdf-lib";
+import { loadPdfForProcessing, PdfProcessingError, saveValidatedPdf } from "./pdfProcessingService";
 
 export type PdfReviewValidationResult = {
   pageCount: number;
@@ -39,30 +40,23 @@ export const validatePdfForReview = async (
   content: Uint8Array,
 ): Promise<PdfReviewValidationResult> => {
   try {
-    const document = await PdfLibDocument.load(content);
+    const document = await loadPdfForProcessing(content);
+    await saveValidatedPdf(document);
+    let isEncrypted = false;
+    try { await PdfLibDocument.load(content); }
+    catch (error) { isEncrypted = isEncryptedPdfError(error); }
     return {
       pageCount: assertUsablePages(document),
-      isEncrypted: false,
+      isEncrypted,
     };
   } catch (error) {
     if (error instanceof PdfReviewValidationError) {
       throw error;
     }
-    if (!isEncryptedPdfError(error)) {
-      throw new PdfReviewValidationError("PDF structure is unreadable or damaged");
+    if (error instanceof PdfProcessingError) {
+      if (error.reason === "tools_unavailable") throw error;
+      throw new PdfReviewValidationError(error.message);
     }
-  }
-
-  try {
-    const document = await PdfLibDocument.load(content, { ignoreEncryption: true });
-    return {
-      pageCount: assertUsablePages(document),
-      isEncrypted: true,
-    };
-  } catch (error) {
-    if (error instanceof PdfReviewValidationError) {
-      throw error;
-    }
-    throw new PdfReviewValidationError("Protected PDF structure is unreadable or damaged");
+    throw new PdfReviewValidationError("PDF structure is unreadable or damaged");
   }
 };

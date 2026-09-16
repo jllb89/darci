@@ -203,6 +203,21 @@ export const requireAuth = async (
           user.role = dbIdentityContext.role;
           user.availableRoles = dbIdentityContext.availableRoles;
           user.status = dbIdentityContext.status;
+          // Active profile is shared in the database across web/mobile. A client
+          // may select an assigned profile for this request without changing it
+          // on another device. Never trust a role that isn't currently granted.
+          const requestedProfile = req.get("X-DARCi-Profile");
+          if (requestedProfile) {
+            const effectiveProfile = requestedProfile === "member" && dbIdentityContext.availableRoles.includes("pro")
+              && !dbIdentityContext.availableRoles.includes("member") ? "pro" : requestedProfile;
+            const assignedProfile = dbIdentityContext.availableRoles.find(role => role === effectiveProfile);
+            if (!assignedProfile || !["member", "pro", "notary"].includes(assignedProfile)) {
+              reportAuthIssue({ area: "session", operation: "authorize", reason: "profile_unavailable",
+                requestId: req.requestId, path: req.originalUrl, method: req.method, statusCode: 403 });
+              return res.status(403).json({ error: "active_profile_unavailable", message: "This profile is no longer available. Switch profiles or sign in again." });
+            }
+            user.role = assignedProfile;
+          }
         } else if (
           shouldFailClosedOnMissingIdentity() &&
           !shouldAllowMissingIdentityRequest(req.path)
@@ -227,13 +242,8 @@ export const requireAuth = async (
           user.role = "member";
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "unknown_error";
         const isVitestRuntime = process.env.VITEST === "true" || process.env.VITEST === "1";
-        if (
-          !isVitestRuntime &&
-          !message.includes("invalid input syntax for type uuid") &&
-          !message.includes("fetch failed")
-        ) {
+        if (!isVitestRuntime) {
           reportAuthIssue({
             area: "session",
             operation: "identity_lookup",
@@ -242,12 +252,12 @@ export const requireAuth = async (
             requestId: req.requestId,
             method: req.method,
             path: req.originalUrl,
-            statusCode: 500,
+            statusCode: 503,
             identifier: user.id,
             error,
             provider: "supabase",
           });
-          throw error;
+          return res.status(503).json({ error: "identity_unavailable", message: "Your account could not be checked. Please try again." });
         }
 
         if (!user.role || user.role === "authenticated") {

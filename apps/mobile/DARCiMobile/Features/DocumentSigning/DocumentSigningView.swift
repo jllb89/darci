@@ -31,7 +31,7 @@ struct DocumentSigningView: View {
     @State private var isSignatureFileImporterPresented = false
     @State private var isReplacingSignature = false
     @State private var isNotarySelectionPresented = false
-    @State private var isNotarySelectionMinimized = false
+    @State private var notarySheetDetent: PresentationDetent = .large
     @State private var isSignatureCaptureMinimized = false
     @State private var isSignatureCaptureSuppressed = false
     @State private var keyboardOverlap: CGFloat = 0
@@ -81,7 +81,8 @@ struct DocumentSigningView: View {
                             DocumentPhaseStatusCard(
                                 document: viewModel.payload?.document,
                                 output: selectedOutput,
-                                principalName: viewModel.primarySelfSignature?.partyName
+                                principalName: viewModel.primarySelfSignature?.partyName,
+                                isAwaitingNotarySelection: viewModel.shouldShowNotarySelection && viewModel.activeNotarizationRequestId == nil
                             )
                         }
 
@@ -99,20 +100,7 @@ struct DocumentSigningView: View {
                 }
                 .background(Color.white.ignoresSafeArea())
 
-                if shouldShowNotarySelectionSheet {
-                    captureSheetBackground(proxy: proxy)
-                    Group {
-                        if isNotarySelectionMinimized {
-                            minimizedNotarySelectionCard(proxy: proxy)
-                        } else {
-                            notarySelectionCard(proxy: proxy)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, keyboardOverlap)
-                    .ignoresSafeArea(.container, edges: .bottom)
-                    .animation(.easeOut(duration: 0.25), value: keyboardOverlap)
-                } else if shouldShowCaptureSheet {
+                if shouldShowCaptureSheet && !shouldShowNotarySelectionSheet {
                     captureSheetBackground(proxy: proxy)
                     Group {
                         if isSignatureCaptureMinimized {
@@ -132,6 +120,32 @@ struct DocumentSigningView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .navigationBarBackButtonHidden(true)
+        .safeAreaInset(edge: .bottom) {
+            if viewModel.shouldShowNotarySelection && !isNotarySelectionPresented && viewModel.activeNotarizationRequestId == nil {
+                Button("Choose a notary") {
+                    notarySheetDetent = .large
+                    isNotarySelectionPresented = true
+                }
+                .font(DARCiFont.maisonNeue(.book, size: 15))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(.black)
+                .padding(20)
+                .background(.white)
+                .accessibilityIdentifier("notary-reopen")
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { shouldShowNotarySelectionSheet },
+            set: { if !$0 { closeNotarySelection(suppressSignatureCapture: true) } }
+        )) {
+            GeometryReader { proxy in
+                notarySelectionCard(proxy: proxy)
+            }
+            .presentationDetents([.medium, .large], selection: $notarySheetDetent)
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(36)
+        }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -172,13 +186,13 @@ struct DocumentSigningView: View {
         .onChange(of: viewModel.shouldShowNotarySelection) { _, shouldShow in
             if shouldShow {
                 isNotarySelectionPresented = true
-                isNotarySelectionMinimized = false
+                notarySheetDetent = .large
                 isSignatureCaptureSuppressed = false
                 viewModel.isSkippingSignatureForNotarization = skipSignatureForNotarization
                 Task { await viewModel.fetchAvailableNotaries(session: session) }
             } else {
                 isNotarySelectionPresented = false
-                isNotarySelectionMinimized = false
+                notarySheetDetent = .large
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) {
@@ -325,7 +339,9 @@ struct DocumentSigningView: View {
                         pageCount: $pageCount,
                         currentPage: $currentPage,
                         zoomInTrigger: zoomInTrigger,
-                        zoomOutTrigger: zoomOutTrigger
+                        zoomOutTrigger: zoomOutTrigger,
+                        documentID: documentId,
+                        surface: "signing"
                     )
                 } else if viewModel.isLoading {
                     ProgressView()
@@ -474,97 +490,69 @@ struct DocumentSigningView: View {
 
     private func closeNotarySelection(suppressSignatureCapture: Bool) {
         isNotarySelectionPresented = false
-        isNotarySelectionMinimized = false
+        notarySheetDetent = .large
         isSignatureCaptureSuppressed = suppressSignatureCapture
     }
 
     private func notarySelectionCard(proxy: GeometryProxy) -> some View {
-        VStack(alignment: .leading, spacing: scaled(22, in: proxy)) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Choose a notary")
-                        .font(DARCiFont.maisonNeue(.demi, size: 14))
-                        .foregroundStyle(.black)
+        ScrollView {
+            VStack(alignment: .leading, spacing: scaled(22, in: proxy)) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Choose a notary")
+                            .font(DARCiFont.maisonNeue(.demi, size: 14))
+                            .foregroundStyle(.black)
 
-                    Text("Select a notary in the document jurisdiction to review the confirmed document.")
-                        .font(DARCiFont.maisonNeue(.book, size: 12))
-                        .lineSpacing(4)
-                        .foregroundStyle(.black)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 16)
-
-                HStack(spacing: 10) {
-                    Button {
-                        isNotarySelectionMinimized = true
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 17, weight: .regular))
-                            .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
-                            .frame(width: 26, height: 26)
+                        Text("Select a notary in the document jurisdiction to review the confirmed document.")
+                            .font(DARCiFont.maisonNeue(.book, size: 12))
+                            .lineSpacing(4)
+                            .foregroundStyle(.black)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain)
 
-                    Button {
-                        closeNotarySelection(suppressSignatureCapture: true)
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
-                            .frame(width: 26, height: 26)
+                    Spacer(minLength: 16)
+
+                    HStack(spacing: 10) {
+                        Button {
+                            notarySheetDetent = .medium
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 17, weight: .regular))
+                                .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            closeNotarySelection(suppressSignatureCapture: true)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            notarySelectionContent(proxy: proxy)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .layoutPriority(1)
-
-            notarySelectionActions(proxy: proxy)
-        }
-        .padding(.horizontal, scaled(32, in: proxy))
-        .padding(.top, scaled(36, in: proxy))
-        .padding(.bottom, scaled(22, in: proxy) + activeBottomInset(in: proxy))
-        .frame(maxWidth: .infinity)
-        .frame(height: notarySelectionCardHeight(in: proxy) + activeBottomInset(in: proxy), alignment: .top)
-        .background(Color(red: 0.90, green: 0.90, blue: 0.90))
-        .clipShape(.rect(topLeadingRadius: 36, topTrailingRadius: 36))
-        .shadow(color: .black.opacity(0.06), radius: 16, y: -4)
-    }
-
-    private func minimizedNotarySelectionCard(proxy: GeometryProxy) -> some View {
-        Button {
-            isNotarySelectionMinimized = false
-        } label: {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Choose a notary")
-                        .font(DARCiFont.maisonNeue(.demi, size: 14))
-                        .foregroundStyle(.black)
-
-                    Text("Tap to continue notary selection")
-                        .font(DARCiFont.maisonNeue(.book, size: 11))
-                        .foregroundStyle(.black.opacity(0.56))
                 }
 
-                Spacer(minLength: 12)
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(.black)
-                    .frame(width: 28, height: 28)
+                if let message = viewModel.errorMessage {
+                    signingStatusMessage(message, tone: .error)
+                        .accessibilityIdentifier("notary-submission-error")
+                }
+                notarySelectionContent(proxy: proxy)
             }
-            .padding(.horizontal, scaled(24, in: proxy))
-            .padding(.top, scaled(18, in: proxy))
-            .padding(.bottom, scaled(18, in: proxy) + proxy.safeAreaInsets.bottom)
+            .padding(.horizontal, scaled(32, in: proxy))
+            .padding(.top, scaled(36, in: proxy))
+            .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
-            .background(Color(red: 0.90, green: 0.90, blue: 0.90))
-            .clipShape(.rect(topLeadingRadius: 28, topTrailingRadius: 28))
-            .shadow(color: .black.opacity(0.06), radius: 16, y: -4)
         }
-        .buttonStyle(.plain)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            notarySelectionActions(proxy: proxy)
+                .padding(.horizontal, scaled(32, in: proxy))
+                .padding(.vertical, 16)
+                .background(Color(red: 0.90, green: 0.90, blue: 0.90))
+        }
+        .background(Color(red: 0.90, green: 0.90, blue: 0.90))
     }
 
     @ViewBuilder
@@ -591,7 +579,7 @@ struct DocumentSigningView: View {
         } else if viewModel.availableNotaries.isEmpty {
             notaryStatusMessage("No active notaries are available for this document jurisdiction yet.")
         } else {
-            ScrollView(showsIndicators: true) {
+            VStack(spacing: 0) {
                 VStack(spacing: 10) {
                     ForEach(viewModel.availableNotaries) { notary in
                         Button {
@@ -630,7 +618,7 @@ struct DocumentSigningView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
@@ -685,6 +673,7 @@ struct DocumentSigningView: View {
         }
         .buttonStyle(.plain)
         .disabled(viewModel.canSubmitSelectedNotary == false)
+        .accessibilityIdentifier("notary-submit")
     }
 
     private func notaryStatusMessage(_ text: String) -> some View {
@@ -1037,12 +1026,17 @@ struct DocumentSigningView: View {
         }
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let response = response as? HTTPURLResponse,
+                  (200..<300).contains(response.statusCode) else { throw URLError(.badServerResponse) }
+            guard !Task.isCancelled else { return }
             pdfData = data
             previewErrorMessage = nil
         } catch {
+            guard !Task.isCancelled else { return }
             pdfData = nil
             previewErrorMessage = "Failed to load signing PDF."
+            MobileAuthTelemetry.reportDocumentIssue(surface: "signing", reason: "download_failed", documentID: documentId)
         }
     }
 
@@ -1067,11 +1061,7 @@ struct DocumentSigningView: View {
 
     private func bottomReservedHeight(in proxy: GeometryProxy) -> CGFloat {
         if shouldShowNotarySelectionSheet {
-            if isNotarySelectionMinimized {
-                return minimizedNotarySelectionCardHeight(in: proxy) - scaled(18, in: proxy)
-            }
-
-            return notarySelectionCardHeight(in: proxy) - scaled(28, in: proxy)
+            return scaled(12, in: proxy)
         }
 
         if shouldShowCaptureSheet {
@@ -1087,17 +1077,6 @@ struct DocumentSigningView: View {
         }
 
         return scaled(12, in: proxy)
-    }
-
-    private func notarySelectionCardHeight(in proxy: GeometryProxy) -> CGFloat {
-        DARCiAdaptiveLayout.boundedPanelHeight(
-            viewportHeight: max(0, proxy.size.height - keyboardOverlap),
-            bottomInset: activeBottomInset(in: proxy),
-            preferredRatio: 0.72,
-            minimumHeight: 520,
-            maximumHeight: 680,
-            topClearance: scaled(8, in: proxy)
-        )
     }
 
     private func activeBottomInset(in proxy: GeometryProxy) -> CGFloat {
@@ -1128,10 +1107,6 @@ struct DocumentSigningView: View {
             from: nil,
             for: nil
         )
-    }
-
-    private func minimizedNotarySelectionCardHeight(in proxy: GeometryProxy) -> CGFloat {
-        scaled(78, in: proxy) + proxy.safeAreaInsets.bottom
     }
 
     private func minimizedSignatureCaptureCardHeight(in proxy: GeometryProxy) -> CGFloat {

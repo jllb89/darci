@@ -4,6 +4,7 @@ struct DocumentPhaseStatusCard: View {
     let document: DocumentReviewDocumentSummary?
     let output: DocumentReviewOutput?
     let principalName: String?
+    var isAwaitingNotarySelection = false
     @State private var segmentProgress: CGFloat = 0
 
     private var phase: DocumentPhaseStatus {
@@ -21,7 +22,7 @@ struct DocumentPhaseStatusCard: View {
 
                 Spacer(minLength: 12)
 
-                Text(phase.label)
+                Text(isAwaitingNotarySelection ? "PENDING NOTARY SELECTION" : phase.label)
                     .font(DARCiFont.maisonNeue(.book, size: 9))
                     .foregroundStyle(.white)
                     .lineLimit(1)

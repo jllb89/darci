@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { protectPdf } from "../helpers/protectedPdf";
 import {
   PDFDocument as PdfLibDocument,
-  PDFHexString,
-  PDFName,
-  PDFNumber,
 } from "pdf-lib";
 
 import {
@@ -898,17 +896,7 @@ describe("documentGenerationRenderService", () => {
   it("stamps the uploaded-document addendum when the source PDF is protected", async () => {
     const sourcePdf = await PdfLibDocument.create();
     sourcePdf.addPage([612, 792]);
-    const encryptionDictionary = sourcePdf.context.obj({
-      Filter: PDFName.of("Standard"),
-      V: PDFNumber.of(1),
-      R: PDFNumber.of(2),
-      Length: PDFNumber.of(40),
-      O: PDFHexString.of("00000000000000000000000000000000"),
-      U: PDFHexString.of("00000000000000000000000000000000"),
-      P: PDFNumber.of(-4),
-    });
-    sourcePdf.context.trailerInfo.Encrypt = sourcePdf.context.register(encryptionDictionary);
-    const protectedPdfBytes = Buffer.from(await sourcePdf.save({ useObjectStreams: false }));
+    const protectedPdfBytes = await protectPdf(await sourcePdf.save());
 
     await expect(PdfLibDocument.load(protectedPdfBytes)).rejects.toThrow(/encrypted/i);
 
@@ -941,9 +929,9 @@ describe("documentGenerationRenderService", () => {
       },
       uploadedNotarizationAddendum: { appendPage: true },
     });
-    const stampedPdf = await PdfLibDocument.load(stampedPdfBytes, { ignoreEncryption: true });
+    const stampedPdf = await PdfLibDocument.load(stampedPdfBytes);
 
     expect(stampedPdf.getPageCount()).toBe(2);
-    expect(stampedPdfBytes.byteLength).toBeGreaterThan(protectedPdfBytes.byteLength);
+    expect(stampedPdf.isEncrypted).toBe(false);
   });
 });

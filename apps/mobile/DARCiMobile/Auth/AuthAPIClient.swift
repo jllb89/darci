@@ -32,17 +32,20 @@ struct AuthAPIClient: Sendable {
     private let urlSession: URLSession
     private let jsonEncoder: JSONEncoder
     private let jsonDecoder: JSONDecoder
+    private let activeProfile: String?
 
     init(
         config: AuthConfig = .current(),
         urlSession: URLSession = .shared,
         jsonEncoder: JSONEncoder = JSONEncoder(),
-        jsonDecoder: JSONDecoder = JSONDecoder()
+        jsonDecoder: JSONDecoder = JSONDecoder(),
+        activeProfile: String? = nil
     ) {
         self.config = config
         self.urlSession = urlSession
         self.jsonEncoder = jsonEncoder
         self.jsonDecoder = jsonDecoder
+        self.activeProfile = activeProfile
     }
 
     func requestEmailOTP(email: String, returnTo: String? = nil) async throws -> AuthOTPStartResponse {
@@ -203,7 +206,16 @@ struct AuthAPIClient: Sendable {
         request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Request-Id")
 
         if let accessToken, accessToken.isEmpty == false {
-            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            // Long-lived views/poll tasks can hold an older AuthSession snapshot.
+            // Use the rotated credential only when it belongs to that account.
+            let stored = try? KeychainAuthSessionStore().load()
+            let matchingSession = stored.flatMap { AccessTokenClaims.sameAccount(accessToken, $0.accessToken) ? $0 : nil }
+            let currentToken = matchingSession?.accessToken ?? accessToken
+            request.setValue("Bearer \(currentToken)", forHTTPHeaderField: "Authorization")
+            if let profile = activeProfile ?? matchingSession?.user.role,
+               ["member", "pro", "notary"].contains(profile) {
+                request.setValue(profile, forHTTPHeaderField: "X-DARCi-Profile")
+            }
         }
 
         return request
@@ -258,6 +270,10 @@ struct AuthAPIClient: Sendable {
 
     private func reportFailure(_ error: Error, for request: URLRequest, statusCode: Int?) {
         let path = request.url?.path ?? ""
+        if path.hasSuffix("/submit-notarization") {
+            let documentID = path.split(separator: "/").map(String.init).first { UUID(uuidString: $0) != nil }
+            MobileAuthTelemetry.reportDocumentIssue(surface: "notary_submission", reason: "http_\(statusCode ?? 0)", documentID: documentID)
+        }
         let hasAccessCredential = request.value(forHTTPHeaderField: "Authorization") != nil
         guard path.contains("/auth/") || hasAccessCredential else {
             return
@@ -272,6 +288,9 @@ struct AuthAPIClient: Sendable {
     }
 
     private func telemetryOperation(for path: String, hasAccessCredential: Bool) -> String {
+        if path.contains("/notary/requests/") { return "notary_session_request" }
+        if path.hasSuffix("/submit-notarization") { return "notary_submission" }
+        if path.contains("/documents/") { return "document_request" }
         if path.hasSuffix("/auth/otp/phone/start") { return "phone_otp_start" }
         if path.hasSuffix("/auth/otp/phone/verify") { return "phone_otp_verify" }
         if path.hasSuffix("/auth/otp/start") { return "email_otp_start" }

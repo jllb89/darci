@@ -2775,6 +2775,26 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionSurvivesTemporaryRefreshFailure() async throws {
+        let original = makeAuthSession()
+        let store = InMemoryAuthSessionStore(session: original)
+        let coordinator = AppSessionCoordinator(apiClient: TestAuthAPIClient(refreshError: URLError(.notConnectedToInternet)), sessionStore: store)
+        let restored = await coordinator.restoreSessionOnLaunch()
+        XCTAssertEqual(restored, .restored(original))
+        let refreshed = await coordinator.refreshCurrentSession()
+        XCTAssertEqual(refreshed, original)
+        XCTAssertEqual(try store.load(), original)
+    }
+
+    func testNotaryProfileHintIsIncludedOnlyOnAuthenticatedRequests() throws {
+        let client = AuthAPIClient(activeProfile: "notary")
+        let request = try client.makeRequest(path: "/notary/requests", method: "GET", accessToken: "fixture")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-DARCi-Profile"), "notary")
+        let anonymous = try client.makeRequest(path: "/auth/otp/start", method: "POST")
+        XCTAssertNil(anonymous.value(forHTTPHeaderField: "X-DARCi-Profile"))
+    }
+
+    @MainActor
     func testAppSessionCoordinatorPersistsPersonalInfoUpdate() async throws {
         let originalSession = makeAuthSession()
         let updatedUser = makeAuthenticatedUser(

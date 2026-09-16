@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { loadPdfForProcessing, saveValidatedPdf } from "./pdfProcessingService";
+import { captureMessage } from "../utils/sentry";
 import path from "path";
 import {
   PDFDocument as PdfLibDocument,
@@ -1744,7 +1746,7 @@ export const appendAcknowledgmentPageToPdf = async (input: {
   signatureImageDataUrl?: string | null | undefined;
   sealImageDataUrl?: string | null | undefined;
 }) => {
-  const pdf = await PdfLibDocument.load(input.sourcePdfBytes, { ignoreEncryption: true });
+  const pdf = await loadPdfForProcessing(input.sourcePdfBytes);
   const pages = pdf.getPages();
   const referencePage = pages[pages.length - 1];
   const pageSize: [number, number] = referencePage
@@ -1768,14 +1770,14 @@ export const appendAcknowledgmentPageToPdf = async (input: {
     pdf.addPage(acknowledgmentPage);
   }
 
-  return Buffer.from(await pdf.save());
+  return saveValidatedPdf(pdf);
 };
 
 export const applyFinalizationWatermarkToPdf = async (input: {
   sourcePdfBytes: Buffer;
   watermarkText: string;
 }) => {
-  const pdf = await PdfLibDocument.load(input.sourcePdfBytes, { ignoreEncryption: true });
+  const pdf = await loadPdfForProcessing(input.sourcePdfBytes);
 
   for (const page of pdf.getPages()) {
     await drawWatermarkOnPage({
@@ -1785,7 +1787,7 @@ export const applyFinalizationWatermarkToPdf = async (input: {
     });
   }
 
-  return Buffer.from(await pdf.save());
+  return saveValidatedPdf(pdf);
 };
 
 export const resolvePublicVerificationStatus = (
@@ -2148,6 +2150,7 @@ export const appendAcknowledgmentPage = async (input: {
         sealImageDataUrl: input.notaryProfile.sealDataUrl,
       });
     } catch (error) {
+      captureMessage("pdf.finalization.failed", { level: "error", tags: { document_id: context.document.id, pdf_stage: "acknowledgment" }, extra: { sourceVersionId: sourceVersion.id } });
       throw new DocumentFinalizationConflictError(
         error instanceof Error
           ? error.message
@@ -2362,6 +2365,7 @@ export const watermarkWithNotice = async (input: {
         watermarkText,
       });
     } catch (error) {
+      captureMessage("pdf.finalization.failed", { level: "error", tags: { document_id: context.document.id, pdf_stage: "watermark" }, extra: { sourceVersionId: sourceVersion.id } });
       throw new DocumentFinalizationConflictError(
         error instanceof Error ? error.message : "Failed to apply the finalization watermark",
       );

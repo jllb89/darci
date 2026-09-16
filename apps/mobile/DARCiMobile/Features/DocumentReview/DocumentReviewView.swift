@@ -291,7 +291,9 @@ struct DocumentReviewView: View {
                         pageCount: $pageCount,
                         currentPage: $currentPage,
                         zoomInTrigger: zoomInTrigger,
-                        zoomOutTrigger: zoomOutTrigger
+                        zoomOutTrigger: zoomOutTrigger,
+                        documentID: viewModel.documentId,
+                        surface: "member_review"
                     )
                 } else if viewModel.isLoadingPreview {
                     ProgressView()

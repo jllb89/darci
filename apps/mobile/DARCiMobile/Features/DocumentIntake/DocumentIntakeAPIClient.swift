@@ -185,6 +185,7 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     var reviewProductFlowMode = "poa_only"
     var reviewDocumentType = "poa_document"
     var failsResave = false
+    var signingStatus = "pending_signature"
 
     func listMemberFormJurisdictions(modeKey: String, accessToken: String) async throws -> MemberFormJurisdictionsResponse {
         MemberFormJurisdictionsResponse(mode: nil, jurisdictions: jurisdictions, message: nil)
@@ -372,7 +373,7 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
             document: DocumentReviewDocumentSummary(
                 id: documentId,
                 idn: nil,
-                status: "pending_signature",
+                status: signingStatus,
                 documentType: "poa_document",
                 jurisdiction: "US-CA",
                 createdAt: "2026-06-05T12:00:00.000Z",

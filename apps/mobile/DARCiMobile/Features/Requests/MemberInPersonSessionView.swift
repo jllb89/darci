@@ -395,7 +395,9 @@ struct MemberInPersonSessionView: View {
                         pageCount: $pageCount,
                         currentPage: $currentPage,
                         zoomInTrigger: zoomInTrigger,
-                        zoomOutTrigger: zoomOutTrigger
+                        zoomOutTrigger: zoomOutTrigger,
+                        documentID: viewModel.context?.document.id,
+                        surface: "member_session"
                     )
                 } else if viewModel.isLoadingPreview {
                     ProgressView().tint(.black)

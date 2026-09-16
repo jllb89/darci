@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { roleSatisfiesRequirement, type RequestRole } from "../services/userRoleService";
+import { reportAuthIssue } from "../telemetry/authTelemetry";
 
 export const requireRole = (roles: RequestRole[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -9,6 +10,12 @@ export const requireRole = (roles: RequestRole[]) => {
     });
 
     if (!role || !isAllowed) {
+      reportAuthIssue({
+        area: "session", operation: "authorize", reason: "role_denied",
+        requestId: req.requestId, path: req.originalUrl, method: req.method,
+        statusCode: 403, identifier: req.user?.id,
+        details: { activeRole: role ?? "missing", requiredRoles: roles.join(",") },
+      });
       console.warn("Access denied", { path: req.path, role });
       return res.status(403).json({
         error: "forbidden",

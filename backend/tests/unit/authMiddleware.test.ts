@@ -73,6 +73,27 @@ const buildApp = async () => {
   return app;
 };
 
+describe("request profile authorization", () => {
+  it("uses a currently granted notary profile when another device selected member", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(buildIdentityContext({ availableRoles: ["member", "notary"] }));
+    const app = await buildApp();
+    const response = await request(app).get("/protected")
+      .set("Authorization", `Bearer ${signToken({ sub: "auth-user-1", app_metadata: { role: "member" } })}`)
+      .set("X-DARCi-Profile", "notary");
+    expect(response.status).toBe(200);
+    expect(response.body.user.role).toBe("notary");
+  });
+  it("rejects a forged or revoked notary profile", async () => {
+    mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue(buildIdentityContext());
+    const app = await buildApp();
+    const response = await request(app).get("/protected")
+      .set("Authorization", `Bearer ${signToken({ sub: "auth-user-1", app_metadata: { role: "notary" } })}`)
+      .set("X-DARCi-Profile", "notary");
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("active_profile_unavailable");
+  });
+});
+
 describe("auth middleware Phase 0 guardrails", () => {
   beforeEach(() => {
     vi.resetModules();

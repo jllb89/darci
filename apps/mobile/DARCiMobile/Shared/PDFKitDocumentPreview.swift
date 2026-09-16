@@ -7,6 +7,8 @@ struct PDFKitDocumentPreview: View {
     @Binding var currentPage: Int
     let zoomInTrigger: Int
     let zoomOutTrigger: Int
+    var documentID: String? = nil
+    var surface: String = "preview"
 
     @State private var loadFailure: PDFPreviewLoadFailure?
 
@@ -42,6 +44,10 @@ struct PDFKitDocumentPreview: View {
                 .accessibilityIdentifier("pdf-preview-error")
             }
         }
+        .onChange(of: loadFailure) { _, failure in
+            guard let failure else { return }
+            MobileAuthTelemetry.reportDocumentIssue(surface: surface, reason: String(describing: failure), documentID: documentID)
+        }
     }
 }
 
@@ -57,7 +63,7 @@ enum PDFPreviewLoadFailure: Error, Equatable {
         case .locked:
             "The file requires a password. Ask the document owner to upload an unlocked copy."
         case .unusablePage:
-            "The file does not contain a page that can be displayed. Ask the document owner for a readable copy."
+            "This document version could not be displayed. Refresh the document or contact DARCi support."
         }
     }
 }

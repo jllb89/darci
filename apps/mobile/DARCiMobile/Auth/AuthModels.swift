@@ -118,6 +118,29 @@ struct AuthSession: Codable, Equatable, Sendable {
     let user: AuthenticatedUser
 }
 
+enum AccessTokenClaims {
+    static func payload(_ token: String) -> [String: Any]? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var value = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        value += String(repeating: "=", count: (4 - value.count % 4) % 4)
+        guard let data = Data(base64Encoded: value) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    // These hints only schedule refresh and match the local account. The server
+    // remains responsible for verifying signatures, expiry and authorization.
+    static func expiresSoon(_ token: String, now: Date = Date()) -> Bool {
+        guard let expiry = payload(token)?["exp"] as? Double else { return false }
+        return expiry <= now.timeIntervalSince1970 + 120
+    }
+
+    static func sameAccount(_ first: String, _ second: String) -> Bool {
+        guard let subject = payload(first)?["sub"] as? String, !subject.isEmpty else { return false }
+        return subject == (payload(second)?["sub"] as? String)
+    }
+}
+
 struct AuthVerifyResponse: Decodable, Equatable, Sendable {
     let accessToken: String?
     let refreshToken: String?

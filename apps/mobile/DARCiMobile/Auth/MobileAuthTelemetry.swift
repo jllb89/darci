@@ -3,6 +3,17 @@ import Security
 import Sentry
 
 enum MobileAuthTelemetry {
+    static func reportDocumentIssue(surface: String, reason: String, documentID: String?) {
+        guard configuredValue(for: "DARCI_SENTRY_DSN") != nil else { return }
+        SentrySDK.capture(message: "ios.document.\(surface).\(reason)") { scope in
+            scope.setLevel(.error)
+            scope.setTag(value: "document", key: "telemetry_area")
+            scope.setTag(value: surface, key: "document_surface")
+            scope.setTag(value: reason, key: "document_failure")
+            if let documentID { scope.setTag(value: documentID, key: "document_id") }
+        }
+    }
+
     static func start() {
         guard let dsn = configuredValue(for: "DARCI_SENTRY_DSN"),
               dsn.hasPrefix("https://")

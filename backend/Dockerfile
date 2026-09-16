@@ -24,6 +24,7 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV SERVICE_NAME=api
+RUN apt-get update && apt-get install -y --no-install-recommends qpdf poppler-utils && rm -rf /var/lib/apt/lists/*
 
 # Copy compiled output and production node_modules
 COPY --from=builder /app/backend/dist ./dist

@@ -24,7 +24,7 @@ protocol NotaryProfileAPIProviding: Sendable {
 struct NotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
     private let authClient: AuthAPIClient
 
-    init(authClient: AuthAPIClient = AuthAPIClient()) {
+    init(authClient: AuthAPIClient = AuthAPIClient(activeProfile: "notary")) {
         self.authClient = authClient
     }
 

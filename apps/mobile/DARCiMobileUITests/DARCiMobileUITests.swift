@@ -1,6 +1,21 @@
 import XCTest
 
 final class DARCiMobileUITests: XCTestCase {
+    @MainActor
+    func testNotarySubmissionRemainsReachableAtStandardAndLargestTextSize() throws {
+        for size in ["standard", "accessibility"] {
+            let app = XCUIApplication()
+            app.launchEnvironment["DARCI_MOCK_NOTARY_SELECTION"] = size
+            app.launch()
+            let submit = app.buttons["notary-submit"]
+            XCTAssertTrue(submit.waitForExistence(timeout: 10))
+            XCTAssertTrue(submit.isHittable, "Submit must remain visible at \(size) text size")
+            submit.tap()
+            XCTAssertTrue(app.staticTexts["notary-submission-complete"].waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }

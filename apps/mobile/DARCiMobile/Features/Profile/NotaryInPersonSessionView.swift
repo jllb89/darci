@@ -560,7 +560,9 @@ struct NotaryInPersonSessionView: View {
                         pageCount: $pageCount,
                         currentPage: $currentPage,
                         zoomInTrigger: zoomInTrigger,
-                        zoomOutTrigger: zoomOutTrigger
+                        zoomOutTrigger: zoomOutTrigger,
+                        documentID: viewModel.context?.document.id,
+                        surface: "notary_session"
                     )
                 } else if viewModel.isLoadingPreview {
                     ProgressView()

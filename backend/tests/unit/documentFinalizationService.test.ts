@@ -1,5 +1,6 @@
 import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import { describe, expect, it, vi } from "vitest";
+import { protectPdf } from "../helpers/protectedPdf";
 
 vi.hoisted(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
@@ -59,6 +60,28 @@ const baseRenderInput = {
 } as const;
 
 describe("documentFinalizationService", () => {
+  it.each(["US-CA", "US-OH"])("renders a protected upload through %s acknowledgment and watermark", async jurisdiction => {
+    const source = await PdfLibDocument.create();
+    source.addPage([612, 792]).drawText("ORIGINAL PAGE ONE");
+    source.addPage([612, 792]).drawText("ORIGINAL PAGE TWO");
+    const protectedBytes = await protectPdf(await source.save());
+    const state = jurisdiction === "US-CA" ? "CA" : "OH";
+    const acknowledgment = renderAcknowledgmentContent({
+      ...baseRenderInput,
+      document: { ...baseRenderInput.document, jurisdiction } as never,
+      config: { acknowledgmentTemplateId: `us_${state.toLowerCase()}_acknowledgment_v1`, acknowledgmentTemplateVersion: "2026.04.21.v1", watermarkTextTemplate: "DIGITAL ORIGINAL {{idn}}" },
+      venue: { ...baseRenderInput.venue, state },
+      notaryProfile: { ...baseRenderInput.notaryProfile, jurisdiction },
+      documentFamily: "poa_general", acknowledgerNames: ["Regression Member"],
+    });
+    const acknowledged = await appendAcknowledgmentPageToPdf({ sourcePdfBytes: protectedBytes,
+      acknowledgmentContent: acknowledgment.content, signatureImageDataUrl: onePixelPngDataUrl, sealImageDataUrl: onePixelPngDataUrl });
+    const finalBytes = await applyFinalizationWatermarkToPdf({ sourcePdfBytes: acknowledged, watermarkText: "DIGITAL ORIGINAL TEST12345678" });
+    const final = await PdfLibDocument.load(finalBytes);
+    expect(final.isEncrypted).toBe(false);
+    expect(final.getPageCount()).toBe(3);
+    // Both transformations also run qpdf, pdfinfo and render every page.
+  });
   it("appends a real acknowledgment page to the PDF", async () => {
     const sourcePdfBytes = await createSamplePdf();
 

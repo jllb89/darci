@@ -4542,7 +4542,7 @@ export const finalizeDocumentUpload = async (req: Request, res: Response) => {
 
     return res.status(400).json({
       error: "validation_error",
-      message: "This PDF cannot be reviewed. Upload a readable PDF with at least one valid page.",
+      message: error.message,
       details: [
         {
           path: "file",

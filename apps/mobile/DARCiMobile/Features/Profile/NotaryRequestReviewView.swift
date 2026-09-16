@@ -183,7 +183,9 @@ struct NotaryRequestReviewView: View {
                         pageCount: $pageCount,
                         currentPage: $currentPage,
                         zoomInTrigger: zoomInTrigger,
-                        zoomOutTrigger: zoomOutTrigger
+                        zoomOutTrigger: zoomOutTrigger,
+                        documentID: viewModel.context?.document.id,
+                        surface: "notary_review"
                     )
                 } else if viewModel.isLoadingPreview || viewModel.isLoading {
                     ProgressView()

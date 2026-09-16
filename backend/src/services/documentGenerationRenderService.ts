@@ -1,4 +1,6 @@
 import { access, readFile, readdir } from "fs/promises";
+import { loadPdfForProcessing, saveValidatedPdf } from "./pdfProcessingService";
+import { captureMessage } from "../utils/sentry";
 import path from "path";
 import PDFDocument from "pdfkit";
 import {
@@ -3128,7 +3130,7 @@ export const stampSignatureOnPdf = async (input: {
     appendPage: boolean;
   };
 }) => {
-  const pdf = await PdfLibDocument.load(input.pdfBytes, { ignoreEncryption: true });
+  const pdf = await loadPdfForProcessing(input.pdfBytes);
   const pages = pdf.getPages();
   const page = input.uploadedNotarizationAddendum
     ? input.uploadedNotarizationAddendum.appendPage
@@ -3274,7 +3276,7 @@ export const stampSignatureOnPdf = async (input: {
     }
   }
 
-  return Buffer.from(await pdf.save());
+  return saveValidatedPdf(pdf);
 };
 
 const hydrateSignaturePlacementsForRun = async (input: {
@@ -3434,6 +3436,11 @@ export const applySignatureCaptureToDocumentOutput = async (input: {
           },
         }
       : {}),
+  }).catch(error => {
+    captureMessage("pdf.signature.failed", { level: "error",
+      tags: { document_id: input.document.id, pdf_stage: "signature" },
+      extra: { sourceVersionId: latestVersion.id } });
+    throw error;
   });
   const baseFileName = (latestVersion.file_name ?? `${run.output_key}.pdf`).replace(/\.pdf$/i, "");
   const nextFileName = `${baseFileName.replace(/-signed$/i, "")}-signed.pdf`;

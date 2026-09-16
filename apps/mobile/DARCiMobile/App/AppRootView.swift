@@ -143,12 +143,21 @@ struct AppRootView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task {
+                await sessionCoordinator.refreshSessionIfNeeded()
                 await pushCoordinator.refreshPermissionAndSync()
                 await notificationCenterViewModel.load(for: sessionCoordinator.currentSession)
                 if billingPresentationCoordinator.activePresentation == nil,
                    let session = sessionCoordinator.currentSession {
                     await billingPresentationCoordinator.refresh(session: session)
                 }
+            }
+        }
+        .task(id: sessionCoordinator.currentSession?.user.id) {
+            guard sessionCoordinator.currentSession != nil else { return }
+            while !Task.isCancelled {
+                await sessionCoordinator.refreshSessionIfNeeded()
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
             }
         }
         .fullScreenCover(isPresented: $isPushPermissionPromptPresented) {

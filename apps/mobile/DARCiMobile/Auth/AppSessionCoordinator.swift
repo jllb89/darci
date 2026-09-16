@@ -12,6 +12,7 @@ final class AppSessionCoordinator: ObservableObject {
 
     private let apiClient: AuthAPIProviding
     private let sessionStore: AuthSessionStore
+    private var refreshTask: Task<AuthSession?, Never>?
 
     init(apiClient: AuthAPIProviding = AuthAPIClient(), sessionStore: AuthSessionStore = KeychainAuthSessionStore()) {
         self.apiClient = apiClient
@@ -30,6 +31,7 @@ final class AppSessionCoordinator: ObservableObject {
                 let refreshed = try await apiClient.refresh(refreshToken: storedSession.refreshToken)
                 let session = await restoredSession(from: refreshed.session, storedSession: storedSession)
                 restorationStage = "save"
+                currentSession = session
                 try sessionStore.save(session)
                 currentSession = session
                 return .restored(session)
@@ -39,6 +41,11 @@ final class AppSessionCoordinator: ObservableObject {
                     reason: "\(restorationStage)_failed",
                     error: error
                 )
+                if !Self.isRejectedSession(error) {
+                    if restorationStage == "save", let currentSession { return .restored(currentSession) }
+                    currentSession = storedSession
+                    return .restored(storedSession)
+                }
                 try? sessionStore.clear()
                 currentSession = nil
                 return .clearedStoredSession
@@ -58,6 +65,7 @@ final class AppSessionCoordinator: ObservableObject {
 
     @discardableResult
     func switchActiveRole(to role: String) async -> Bool {
+        if let refreshTask { _ = await refreshTask.value }
         guard let currentSession, currentSession.user.canUseActiveRole(role) else {
             return false
         }
@@ -119,6 +127,25 @@ final class AppSessionCoordinator: ObservableObject {
     }
 
     func refreshCurrentSession() async -> AuthSession? {
+        if let refreshTask { return await refreshTask.value }
+        let task = Task { await self.performSessionRefresh() }
+        refreshTask = task
+        let session = await task.value
+        refreshTask = nil
+        return session
+    }
+
+    func refreshSessionIfNeeded() async {
+        guard let currentSession, AccessTokenClaims.expiresSoon(currentSession.accessToken) else { return }
+        _ = await refreshCurrentSession()
+    }
+
+    private static func isRejectedSession(_ error: Error) -> Bool {
+        if case AuthAPIError.unauthorized = error { return true }
+        return false
+    }
+
+    private func performSessionRefresh() async -> AuthSession? {
         guard let currentSession else {
             return nil
         }
@@ -126,8 +153,11 @@ final class AppSessionCoordinator: ObservableObject {
         var refreshStage = "refresh"
         do {
             let refreshed = try await apiClient.refresh(refreshToken: currentSession.refreshToken)
+            guard !Task.isCancelled, self.currentSession?.accessToken == currentSession.accessToken else { return self.currentSession }
             let session = await restoredSession(from: refreshed.session, storedSession: currentSession)
+            guard !Task.isCancelled, self.currentSession?.accessToken == currentSession.accessToken else { return self.currentSession }
             refreshStage = "save"
+            self.currentSession = session
             try sessionStore.save(session)
             self.currentSession = session
             return session
@@ -137,6 +167,8 @@ final class AppSessionCoordinator: ObservableObject {
                 reason: "\(refreshStage)_failed",
                 error: error
             )
+            guard !Task.isCancelled, self.currentSession?.accessToken == currentSession.accessToken else { return self.currentSession }
+            if !Self.isRejectedSession(error) { return self.currentSession }
             try? sessionStore.clear()
             self.currentSession = nil
             return nil
@@ -184,6 +216,7 @@ final class AppSessionCoordinator: ObservableObject {
 
     @discardableResult
     func signOut() async -> Bool {
+        refreshTask?.cancel()
         let session = currentSession
 
         if let session {
@@ -228,21 +261,9 @@ final class AppSessionCoordinator: ObservableObject {
             return serverSession
         }
 
-        do {
-            let response = try await apiClient.switchActiveRole(storedRole, accessToken: refreshedSession.accessToken)
-            return AuthSession(
-                accessToken: refreshedSession.accessToken,
-                refreshToken: refreshedSession.refreshToken,
-                user: response.user
-            ).normalizedForMobileProfile()
-        } catch {
-            MobileAuthTelemetry.reportSessionFailure(
-                operation: "restore_role",
-                reason: "request_failed",
-                error: error
-            )
-            return serverSession
-        }
+        // Preserve this device's granted profile without switching the web
+        // session's shared database preference during a background refresh.
+        return serverSession.withActiveRole(storedRole)
     }
 }
 

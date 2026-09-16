@@ -1,10 +1,8 @@
 import {
   PDFDocument as PdfLibDocument,
-  PDFHexString,
-  PDFName,
-  PDFNumber,
 } from "pdf-lib";
 import { describe, expect, it } from "vitest";
+import { protectPdf } from "../helpers/protectedPdf";
 import {
   PdfReviewValidationError,
   validatePdfForReview,
@@ -24,19 +22,8 @@ describe("pdfValidationService", () => {
   it("accepts a structurally readable owner-restricted PDF", async () => {
     const document = await PdfLibDocument.create();
     document.addPage([612, 792]);
-    const encryptionDictionary = document.context.obj({
-      Filter: PDFName.of("Standard"),
-      V: PDFNumber.of(1),
-      R: PDFNumber.of(2),
-      Length: PDFNumber.of(40),
-      O: PDFHexString.of("00000000000000000000000000000000"),
-      U: PDFHexString.of("00000000000000000000000000000000"),
-      P: PDFNumber.of(-4),
-    });
-    document.context.trailerInfo.Encrypt = document.context.register(encryptionDictionary);
-
     await expect(
-      validatePdfForReview(await document.save({ useObjectStreams: false })),
+      validatePdfForReview(await protectPdf(await document.save())),
     ).resolves.toEqual({
       pageCount: 1,
       isEncrypted: true,
@@ -54,7 +41,13 @@ describe("pdfValidationService", () => {
     document.addPage([0, 792]);
 
     await expect(validatePdfForReview(await document.save())).rejects.toThrow(
-      "invalid dimensions",
+      "could not be safely processed",
     );
+  });
+  it("rejects a PDF requiring a user password before review", async () => {
+    const document = await PdfLibDocument.create();
+    document.addPage([612, 792]);
+    await expect(validatePdfForReview(await protectPdf(await document.save(), "secret")))
+      .rejects.toThrow("requires a password");
   });
 });
