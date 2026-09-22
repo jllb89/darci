@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { checkOperationalReadiness } from "./operationalHealthService";
-import { emitCriticalSignal, type CriticalCategory } from "../telemetry/criticalSignals";
+import { buildCriticalSignal, emitCriticalSignal, type CriticalCategory } from "../telemetry/criticalSignals";
 
 export type WatchdogSnapshot = {
   ready: boolean;
@@ -8,7 +8,12 @@ export type WatchdogSnapshot = {
   notificationFailed: boolean;
   stripeOverdue: boolean;
   generationOverdue: boolean;
+  unreadyDependencies?: string[];
 };
+
+class WatchdogProbeError extends Error {
+  constructor(readonly probe: string) { super('Operational queue probe failed'); }
+}
 
 export function evaluateWatchdog(snapshot: WatchdogSnapshot): CriticalCategory[] {
   const signals: CriticalCategory[] = [];
@@ -36,21 +41,36 @@ export async function readWatchdogSnapshot(): Promise<WatchdogSnapshot> {
     db.from("stripe_webhook_events").select("id").in("status", ["received", "processing", "failed", "dead_lettered"]).lt("received_at", overdue).limit(1).abortSignal(AbortSignal.timeout(5000)),
     db.from("document_generation_runs").select("id").or(generationOverdueFilter(overdue)).limit(1).abortSignal(AbortSignal.timeout(5000)),
   ]);
-  for (const result of [notifications, failures, stripe, generation]) {
-    if (result.error) throw new Error("Operational queue probe failed");
+  for (const [probe, result] of [['notificationOverdue', notifications], ['notificationFailed', failures], ['stripeOverdue', stripe], ['generationOverdue', generation]] as const) {
+    if (result.error) throw new WatchdogProbeError(probe);
   }
   return { ready: health.ready, notificationOverdue: !!notifications.data?.length, notificationFailed: !!failures.data?.length,
-    stripeOverdue: !!stripe.data?.length, generationOverdue: !!generation.data?.length };
+    stripeOverdue: !!stripe.data?.length, generationOverdue: !!generation.data?.length,
+    ...(!health.ready ? { unreadyDependencies: Object.entries(health.checks ?? {}).filter(([,ready])=>!ready).map(([name])=>name) } : {}) };
 }
 
-export async function runOperationalWatchdog() {
-  try {
-    const snapshot = await readWatchdogSnapshot();
-    for (const category of evaluateWatchdog(snapshot)) emitCriticalSignal(category);
-    // Only a completed probe emits a heartbeat. AWS alarms on missing data if
-    // the worker dies, hangs, or cannot inspect its durable queues.
-    console.log(JSON.stringify({ kind: "darci_watchdog_heartbeat", at: new Date().toISOString() }));
-  } catch {
-    emitCriticalSignal("platform");
-  }
+export function createOperationalWatchdogRunner() {
+  let consecutivePlatformFailures = 0;
+  const platformFailure = (diagnostic: {reason:string;probe?:string;checks?:string[]}) => {
+    consecutivePlatformFailures = Math.min(consecutivePlatformFailures + 1, 100);
+    const context = { diagnostic: { ...diagnostic, consecutive: consecutivePlatformFailures } };
+    // A single bounded dependency timeout is diagnostic, not an outage page.
+    // Direct critical application errors and durable backlog alerts remain immediate.
+    if (consecutivePlatformFailures >= 2) emitCriticalSignal('platform', context);
+    else console.warn(JSON.stringify({ ...buildCriticalSignal('platform', context), kind:'darci_watchdog_transient' }));
+  };
+  return async () => {
+    try {
+      const snapshot = await readWatchdogSnapshot();
+      if (!snapshot.ready) platformFailure({reason:'dependency_unready', checks:snapshot.unreadyDependencies ?? []});
+      else consecutivePlatformFailures = 0;
+      for (const category of evaluateWatchdog(snapshot)) if(category !== 'platform') emitCriticalSignal(category);
+      // Only a completed probe emits a heartbeat. Five missing probes still page.
+      console.log(JSON.stringify({ kind: "darci_watchdog_heartbeat", at: new Date().toISOString() }));
+    } catch(error) {
+      platformFailure(error instanceof WatchdogProbeError ? {reason:'queue_probe_failed',probe:error.probe} : {reason:'probe_failed'});
+    }
+  };
 }
+
+export const runOperationalWatchdog = createOperationalWatchdogRunner();

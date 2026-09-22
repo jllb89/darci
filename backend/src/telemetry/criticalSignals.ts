@@ -6,7 +6,21 @@ type Context = {
   level?: string;
   tags?: Record<string, unknown>;
   fingerprint?: string[];
+  diagnostic?: { reason: string; probe?: string; checks?: string[]; consecutive?: number };
 };
+
+const watchdogReasons = new Set(['dependency_unready', 'queue_probe_failed', 'probe_failed']);
+const watchdogChecks = new Set(['database', 'configuration', 'identityProtection', 'redis', 'worker']);
+const watchdogProbes = new Set(['notificationOverdue', 'notificationFailed', 'stripeOverdue', 'generationOverdue']);
+function safeDiagnostic(value: Context['diagnostic']) {
+  if (!value || !watchdogReasons.has(value.reason)) return undefined;
+  return {
+    reason: value.reason,
+    ...(value.probe && watchdogProbes.has(value.probe) ? { probe: value.probe } : {}),
+    ...(Array.isArray(value.checks) ? { checks: [...new Set(value.checks.filter(check => watchdogChecks.has(check)))] } : {}),
+    ...(Number.isSafeInteger(value.consecutive) && value.consecutive! > 0 && value.consecutive! <= 100 ? { consecutive: value.consecutive } : {}),
+  };
+}
 
 // Deliberately do not serialize messages, stacks, provider errors, arbitrary tags,
 // URLs, identifiers or context objects. These logs feed the independent AWS route.
@@ -18,6 +32,7 @@ export function buildCriticalSignal(category: CriticalCategory, context?: Contex
     environment: process.env.APP_ENV === "production" ? "production" : process.env.APP_ENV === "staging" ? "staging" : "local",
     correlationId: uuid(context?.tags?.request_id) ?? randomUUID(),
     ...(uuid(context?.tags?.document_id) ? { documentId: uuid(context?.tags?.document_id) } : {}),
+    ...(safeDiagnostic(context?.diagnostic) ? { diagnostic: safeDiagnostic(context?.diagnostic) } : {}),
     at: new Date().toISOString(),
   };
 }

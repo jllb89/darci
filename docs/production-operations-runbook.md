@@ -60,6 +60,10 @@ Investigate retention-runner failures without enabling identity deletion. Identi
 
 Check readiness, database/configuration, protected-key availability, Redis and ECS worker health. The worker probes durable queues every minute with bounded queries and no overlapping runs. A completed probe emits a heartbeat; errors do not. Missing heartbeat for five consecutive minutes alerts independently through AWS once enabled. No background monitor can prove an unconfigured API/ALB outage detector: wider production availability/capacity checks remain required.
 
+The hardened runner preserves a single platform-probe failure as `darci_watchdog_transient`, then emits a critical platform signal after **two consecutive** failures. Healthy probes reset that count. This applies only to watchdog platform probes: durable backlog signals and direct critical application errors remain immediate. A failed queue query never emits a success heartbeat.
+
+Use `diagnostic.reason` and its allowlisted labels: `dependency_unready` names failed readiness `checks`; `queue_probe_failed` names the failed bounded queue `probe`; `probe_failed` means the probe did not complete without a more specific safe label. No provider errors, URLs, credentials, arbitrary context or identity values are copied. The older signals at 23:30/23:37 UTC on 22 September lacked these labels; their exact failing dependency cannot be reconstructed from the category alone.
+
 ## Safe detector exercise
 
 With explicit approval to send a batch of test email:
@@ -75,6 +79,6 @@ This exercises **log → metric → alarm → SNS**, not all originating applica
 ## Current limitations
 
 - Source emitters/watchdog and completed-package retry are deployed and verified at `d166019`. Remaining originating-failure drills are tracked separately in the Phase 1 record.
-- Human non-billing admin step-up/enrollment UI, OTP/bounce/suppression end-to-end acceptance, actual-device session faults, and whole-application restore remain open.
+- Human non-billing step-up/enrollment UI is deployed and its API boundary tested; full UI interaction acceptance remains. Controlled deployed deferral/no-resend and recovered-app/worker restart checks pass. Remaining scope includes OTP/bounce/suppression, physical-device faults and selective restored-job resumption.
 - OTLP ingestion/disablement must still be verified; this route does not depend on OTLP or Sentry.
 - Production has no equivalent stack yet; this staging-only template must not be pointed at production by changing its account checks.

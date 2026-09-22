@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildCriticalSignal, classifyCriticalSignal } from "../../src/telemetry/criticalSignals";
 
 describe("independent critical alert boundary", () => {
+  it('retains only bounded diagnostic labels, never provider error text',()=>{
+    const signal=buildCriticalSignal('platform',{diagnostic:{reason:'queue_probe_failed',probe:'stripeOverdue',checks:['redis','private@example.test','redis'],consecutive:2}});
+    expect(signal.diagnostic).toEqual({reason:'queue_probe_failed',probe:'stripeOverdue',checks:['redis'],consecutive:2});
+    expect(buildCriticalSignal('platform',{diagnostic:{reason:'private provider URL'}})).not.toHaveProperty('diagnostic');
+    expect(buildCriticalSignal('platform',{diagnostic:{reason:'probe_failed',probe:'secret-token',consecutive:Infinity}}).diagnostic).toEqual({reason:'probe_failed'});
+  });
   it("never copies sensitive or attacker-controlled context into AWS logs", () => {
     const result = JSON.stringify(buildCriticalSignal("auth", { tags: {
       request_id: "token-sensitive", document_id: "private.pdf", email: "person@example.test",
