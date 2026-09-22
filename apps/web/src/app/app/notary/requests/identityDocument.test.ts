@@ -9,7 +9,7 @@ import {
 
 describe("identityDocument", () => {
   it("does not expose vague government ID as an option", () => {
-    expect(identityDocumentOptions.some((option) => option.value === "government_id")).toBe(false);
+    expect(identityDocumentOptions.map((option) => String(option.value))).not.toContain("government_id");
   });
 
   it("changes follow-up labels by document type", () => {

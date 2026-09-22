@@ -2,8 +2,10 @@
 
 - Status: **active implementation roadmap**
 - Revised: 2026-08-27
-- Release authority: `docs/private-beta-readiness-roadmap-2026-08-25.md`
+- Release authority: [Production readiness roadmap, 2026-09-17](production-readiness-roadmap-2026-09-17.md)
 - Historical client request: `docs/DARCi_Payment_Logic_Spec.md`
+
+> **Production audit update — 2026-09-17:** the membership implementation is present, but Phase 8 requires live/test isolation changes across TypeScript and database functions, not merely live credentials. The read-only staging provider scan found no reconciliation drift and 9/15 lifecycle evidence checks, with no completed acceptance ID. See the production roadmap for missing evidence, live-provider setup and the revised U.S. iOS external-checkout policy assessment. Earlier snapshots below remain dated implementation history.
 
 ## Purpose
 

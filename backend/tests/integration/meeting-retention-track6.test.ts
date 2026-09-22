@@ -52,6 +52,7 @@ import { app } from "../../src/index";
 
 const signToken = (payload: {
   sub: string;
+  role?: string;
   app_metadata?: { role?: string };
 }) => {
   const secret = process.env.SUPABASE_JWT_SECRET ?? "test-secret";
@@ -88,7 +89,7 @@ describe("Track 6 meeting retention endpoint", () => {
       .post("/internal/meeting-artifacts/enforce-retention")
       .set(
         "Authorization",
-        `Bearer ${signToken({ sub: "service-role-1", app_metadata: { role: "service_role" } })}`,
+        `Bearer ${signToken({ sub: "service-role-1", role: "service_role" })}`,
       )
       .send({ limit: 25 });
 
@@ -105,7 +106,7 @@ describe("Track 6 meeting retention endpoint", () => {
       .post("/internal/meeting-artifacts/enforce-retention")
       .set(
         "Authorization",
-        `Bearer ${signToken({ sub: "service-role-1", app_metadata: { role: "service_role" } })}`,
+        `Bearer ${signToken({ sub: "service-role-1", role: "service_role" })}`,
       )
       .send({ limit: 0 });
 

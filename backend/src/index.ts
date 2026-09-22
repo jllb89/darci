@@ -24,13 +24,18 @@ import dashboardRoutes from "./routes/dashboard";
 import rulesRoutes from "./routes/rules";
 import usersRoutes from "./routes/users";
 import billingRoutes from "./routes/billing";
+import { apiSecurityHeaders, enforceAbuseLimits, safeRequestId, safeRequestPath } from "./middleware/productionSafety";
+import { checkOperationalReadiness } from "./services/operationalHealthService";
 
 export const app = express();
+app.disable("x-powered-by");
+// Never trust an arbitrary X-Forwarded-For or a hop count. Supply actual ingress CIDRs.
+app.set("trust proxy", process.env.TRUST_PROXY_CIDRS?.split(",").map(value => value.trim()).filter(Boolean) ?? false);
+app.use(apiSecurityHeaders);
 const isDevelopment = process.env.NODE_ENV !== "production";
 
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
+  ...(isDevelopment ? ["http://localhost:3000", "http://127.0.0.1:3000"] : []),
   ...(process.env.CORS_ALLOWED_ORIGINS
     ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim())
     : []),
@@ -47,8 +52,7 @@ const getHeaderValue = (value: string | string[] | undefined) => {
 const resolveRequestId = (req: Request) => {
   return (
     req.requestId ??
-    getHeaderValue(req.headers["x-request-id"]) ??
-    getHeaderValue(req.headers["x-amzn-trace-id"]) ??
+    safeRequestId(getHeaderValue(req.headers["x-request-id"]) ?? getHeaderValue(req.headers["x-amzn-trace-id"])) ??
     randomUUID()
   );
 };
@@ -84,6 +88,7 @@ app.use(
       "X-CSRF-Token",
       "X-Request-Id",
       "X-Request-Signature",
+      "X-DARCi-Profile",
     ],
     exposedHeaders: ["X-DARCI-Auth-Otp-Logger", "X-DARCI-Auth-Otp-Trace-Id", "X-Request-Id"],
   })
@@ -100,7 +105,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   Sentry.setContext("request", {
     requestId,
     method: req.method,
-    path: req.originalUrl,
+    path: safeRequestPath(req.originalUrl),
   });
 
   next();
@@ -123,7 +128,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   logAuthOtpIngressEvent("request_seen", {
     requestId,
     method: req.method,
-    path: req.originalUrl,
+    path: safeRequestPath(req.originalUrl),
     origin: getHeaderValue(req.headers.origin),
     contentType: getHeaderValue(req.headers["content-type"]),
     contentLength: getHeaderValue(req.headers["content-length"]),
@@ -133,7 +138,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     logAuthOtpIngressEvent("response_finished", {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: safeRequestPath(req.originalUrl),
       statusCode: res.statusCode,
       durationMs: Date.now() - startedAt,
     });
@@ -151,7 +156,7 @@ if (isDevelopment) {
     res.on("finish", () => {
       const durationMs = Date.now() - startedAt;
       console.log(
-        `[api] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${durationMs}ms`
+        `[api] ${req.method} ${safeRequestPath(req.originalUrl)} -> ${res.statusCode} ${durationMs}ms`
       );
     });
 
@@ -180,6 +185,12 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
+app.get("/health/live", (_req: Request, res: Response) => res.json({ status: "ok" }));
+app.get("/health/ready", async (_req: Request, res: Response) => {
+  const result = await checkOperationalReadiness();
+  res.status(result.ready ? 200 : 503).json({ status: result.ready ? "ready" : "not_ready" });
+});
+
 if (process.env.ENABLE_SENTRY_DEBUG_ROUTE === "true") {
   app.get("/debug-sentry", (_req: Request, _res: Response) => {
     throw new Error("Sentry debug error");
@@ -187,6 +198,7 @@ if (process.env.ENABLE_SENTRY_DEBUG_ROUTE === "true") {
 }
 
 app.use(requireAuth);
+app.use(enforceAbuseLimits);
 
 app.use("/auth", authRoutes);
 app.use("/admin", adminRoutes);
@@ -218,13 +230,13 @@ if (process.env.SENTRY_DSN) {
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Unhandled API error", {
     method: req.method,
-    path: req.path,
+    path: safeRequestPath(req.path),
     statusCode: 500,
-    message: err.message,
-    stack: err.stack,
+    requestId: req.requestId,
+    errorType: err.name,
   });
 
-  res.status(500).json({ error: "internal_error", message: err.message });
+  res.status(500).json({ error: "internal_error", message: "Something went wrong. Please try again or contact support with the request ID.", requestId: req.requestId });
 });
 
 if (require.main === module) {

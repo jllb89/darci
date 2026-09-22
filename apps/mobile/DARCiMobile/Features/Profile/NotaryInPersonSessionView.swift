@@ -830,7 +830,7 @@ struct NotaryInPersonSessionView: View {
             sessionInfoBand(
                 icon: "checkmark.seal.fill",
                 title: "Meeting evidence complete",
-                detail: "Completing closes the meeting, watermarks the final PDF, records its SHA-256 hash, and anchors it to the ledger."
+                detail: "Completing closes the meeting, watermarks the final PDF, records its SHA-256 hash, and prepares the verification record."
             )
 
             NotarySessionNotesField(text: $viewModel.notarialNotes)
@@ -844,7 +844,7 @@ struct NotaryInPersonSessionView: View {
                 icon: viewModel.hasLedgerFailure ? "exclamationmark.triangle.fill" : "clock.fill",
                 title: viewModel.hasLedgerFailure ? "Final package needs attention" : "Final package processing",
                 detail: viewModel.hasLedgerFailure
-                    ? "The meeting is complete, but ledger anchoring did not finish. Retry the server-side finalization."
+                    ? "The meeting is complete, but final document verification did not finish. Retry the server-side finalization."
                     : "The meeting is complete. Submit the final package to finish hashing and anchoring.",
                 tone: viewModel.hasLedgerFailure ? .warning : .neutral
             )
@@ -921,7 +921,7 @@ struct NotaryInPersonSessionView: View {
         sessionInfoBand(
             icon: "checkmark.seal.fill",
             title: "Verification ready",
-            detail: "The final package is hashed, ledger anchored, and available in the member record.",
+            detail: "The final package is hashed and verified. Member access follows the package release status.",
             tone: .success
         )
     }
@@ -943,7 +943,7 @@ struct NotaryInPersonSessionView: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 completionCell(title: "Watermarked", done: viewModel.context?.finalization?.isWatermarked == true)
                 completionCell(title: "Hash recorded", done: viewModel.context?.finalization?.isHashRecorded == true)
-                completionCell(title: "Ledger anchored", done: viewModel.isAnchored)
+                completionCell(title: "SHA-256 verified", done: viewModel.isFinalized)
                 completionCell(title: "Verification ready", done: viewModel.context?.capabilities?.canOpenVerification == true)
             }
 

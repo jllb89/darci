@@ -1,5 +1,7 @@
 # DARCi Private Beta Readiness Roadmap
 
+> **Superseded for current launch status on 2026-09-17:** use the [DARCi Production Readiness Roadmap](production-readiness-roadmap-2026-09-17.md). This historical audit remains the product-decision register; its original statements that Stripe/member billing are missing are no longer current. The revised roadmap credits completed implementation and identifies remaining live-mode, production-service, security and acceptance gates.
+
 - Status: product truth and engineering risk source of truth
 - Created: 2026-08-25
 - Current environment: internal staging

@@ -8787,7 +8787,7 @@ export const watermarkDocument = async (req: Request, res: Response) => {
       actorSupabaseId: req.user?.id,
       actorRole: req.user?.role ?? null,
     });
-    const ledgerStatus = result.ledgerAnchorAttempt?.status ?? "anchored";
+    const ledgerStatus = result.ledgerAnchorAttempt?.status === "anchored" ? "not_required" : result.ledgerAnchorAttempt?.status ?? "pending";
 
     await recordAuditEvent({
       ...buildAuditActorContext(req),
@@ -8843,15 +8843,15 @@ export const watermarkDocument = async (req: Request, res: Response) => {
       ...buildAuditActorContext(req),
       entityType: "ledger_entry",
       entityId: result.ledgerEntry.id,
-      action: "system.ledger_anchor_completed",
+      action: "system.hash_verification_completed",
       metadata: {
         request_id: result.request.id,
         ledger_entry_id: result.ledgerEntry.id,
         document_id: result.document.id,
         idn: result.ledgerEntry.idn,
         hash: result.ledgerEntry.hash,
-        ledger_tx_id: result.ledgerEntry.ledger_tx_id,
-        anchored_at: result.ledgerEntry.anchored_at,
+        external_anchor: false,
+        historical_receipt_preserved: result.ledgerEntry.ledger_tx_id !== null,
         status: ledgerStatus,
       },
     });
@@ -8871,8 +8871,8 @@ export const watermarkDocument = async (req: Request, res: Response) => {
       },
       ledger: {
         id: result.ledgerEntry.id,
-        ledgerTxId: result.ledgerEntry.ledger_tx_id,
-        anchoredAt: result.ledgerEntry.anchored_at,
+        ledgerTxId: null,
+        anchoredAt: null,
         status: ledgerStatus,
       },
     });

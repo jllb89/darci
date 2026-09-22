@@ -2313,12 +2313,12 @@ export default function NotaryRequestWorkspacePage() {
   const hasHashRecorded = Boolean(
     context?.finalization.isHashRecorded || context?.finalization.hash || context?.finalization.history.some((event) => event.status === "hash_recorded"),
   );
-  const isAnchored = Boolean(context?.finalization.isAnchored);
+  const isFinalized = Boolean(context?.finalization.isFinalized ?? context?.finalization.isAnchored);
   const hasLedgerFailure = Boolean(
     context?.finalization.anchorAttempt?.status === "failed" || context?.finalization.latestStatus === "failed",
   );
   const isVerificationReady = Boolean(
-    context?.capabilities.canOpenVerification || (context?.finalization.publicVerifyPath && isAnchored),
+    context?.capabilities.canOpenVerification || (context?.finalization.publicVerifyPath && isFinalized),
   );
   const hasRunningAction = activeAction !== null;
   const canStartSession = Boolean(context?.capabilities.canManageMeeting && !isSessionInProgress && !isMeetingCompleted);
@@ -2375,7 +2375,7 @@ export default function NotaryRequestWorkspacePage() {
         ? sealAcknowledgmentDisabledReason
         : !isMeetingCompleted
           ? null
-          : isAnchored
+          : isFinalized
             ? "Final package is already anchored."
             : !context.capabilities.canFinalizeDocument
               ? "Final package is not ready for submission."
@@ -2388,11 +2388,11 @@ export default function NotaryRequestWorkspacePage() {
     { description: "Capture state and county venue details.", done: hasAcknowledgmentVenue, label: "Capture venue" },
     { description: "Seal the acknowledgment page.", done: hasAcknowledgment, label: "Seal acknowledgment" },
     { description: "Close the in-person meeting.", done: isMeetingCompleted, label: "Complete session" },
-    { description: "Finalize as verification-ready.", done: isAnchored, label: "Anchor package" },
+    { description: "Finalize as verification-ready.", done: isFinalized, label: "Verify package" },
   ];
   const operatorPanelStep = !context?.meeting
     ? "start"
-    : isAnchored
+    : isFinalized
       ? "done"
       : isMeetingCompleted
         ? "finalize"
@@ -2534,7 +2534,7 @@ export default function NotaryRequestWorkspacePage() {
   const isVenueStepValid = venueState.trim().length > 0 && venueCounty.trim().length > 0;
 
   useEffect(() => {
-    if (!isAnchored) {
+    if (!isFinalized) {
       hasShownFinalPackageAnchoredToastRef.current = false;
       return;
     }
@@ -2549,7 +2549,7 @@ export default function NotaryRequestWorkspacePage() {
       message: "Final package is anchored. Verification is ready for the member record.",
       durationMs: 7000,
     });
-  }, [isAnchored, showToast]);
+  }, [isFinalized, showToast]);
 
   useEffect(() => {
     if (!context?.meeting || !isSessionInProgress) {
@@ -3094,7 +3094,7 @@ export default function NotaryRequestWorkspacePage() {
                       !hasAcknowledgment ||
                       !hasVerifiedIdentity ||
                       !hasPassedProximity ||
-                      isAnchored ||
+                      isFinalized ||
                       !context.capabilities.canFinalizeDocument
                     }
                     loadingLabel="Submitting final package"
@@ -3114,7 +3114,7 @@ export default function NotaryRequestWorkspacePage() {
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       <CompletionStep done={hasFinalWatermark} label="Watermarked" />
                       <CompletionStep done={hasHashRecorded} label="Hash recorded" />
-                      <CompletionStep done={isAnchored} label="Ledger anchored" />
+                      <CompletionStep done={isFinalized} label="SHA-256 verified" />
                       <CompletionStep done={isVerificationReady} label="Verification ready" />
                     </div>
                     <div className="mt-3 grid min-w-0 gap-1">

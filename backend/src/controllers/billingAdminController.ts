@@ -33,15 +33,17 @@ const retentionActionSchema = z.object({
 
 const hasRecentReauthentication = (req: Request) => {
   if (req.user?.role === "service_role") return true;
-  const authTime = req.user?.rawClaims?.auth_time;
-  const authTimeSeconds = typeof authTime === "number"
-    ? authTime
-    : typeof authTime === "string"
-      ? Number(authTime)
-      : Number.NaN;
-  const elapsedSeconds = Date.now() / 1000 - authTimeSeconds;
-  return Number.isFinite(authTimeSeconds) && elapsedSeconds >= 0 &&
-    elapsedSeconds <= sensitiveActionPolicy.recentReauthWindowSeconds;
+  const claims = req.user?.rawClaims;
+  if (claims?.aal !== "aal2" || !Array.isArray(claims.amr)) return false;
+  // Supabase records authentication time in signed AMR entries. JWT iat and a
+  // token_refresh entry only prove refresh, not recent human verification.
+  return claims.amr.some((entry: unknown) => {
+    if (!entry || typeof entry !== "object") return false;
+    const { method, timestamp } = entry as { method?: unknown; timestamp?: unknown };
+    if (method !== "totp" || typeof timestamp !== "number" || !Number.isFinite(timestamp)) return false;
+    const elapsedSeconds = Date.now() / 1000 - timestamp;
+    return elapsedSeconds >= 0 && elapsedSeconds <= sensitiveActionPolicy.recentReauthWindowSeconds;
+  });
 };
 
 const validateSupportAction = (req: Request, res: Response) => {
@@ -57,7 +59,7 @@ const validateSupportAction = (req: Request, res: Response) => {
   if (!hasRecentReauthentication(req)) {
     res.status(403).json({
       error: "recent_reauthentication_required",
-      message: "Reauthenticate before performing a billing support override",
+      message: "Verify your authenticator code again before performing a billing support override",
     });
     return null;
   }
@@ -143,7 +145,7 @@ export const cleanupStripeWebhookRetentionAdmin = async (req: Request, res: Resp
     return res.status(400).json({ error: "validation_error", message: "A support reason and valid cleanup limit are required", issues: parsed.error.issues });
   }
   if (!hasRecentReauthentication(req)) {
-    return res.status(403).json({ error: "recent_reauthentication_required", message: "Reauthenticate before running retention cleanup" });
+    return res.status(403).json({ error: "recent_reauthentication_required", message: "Verify your authenticator code again before running retention cleanup" });
   }
   try {
     return res.status(200).json(await runStripeWebhookRetentionCleanup({

@@ -11,6 +11,7 @@ import {
 } from "../auth/authPolicy";
 import { getUserIdentityContextBySupabaseId, normalizeRuntimeRole } from "../services/userRoleService";
 import { reportAuthIssue } from "../telemetry/authTelemetry";
+import { isAuthSessionActive } from "../services/authSessionService";
 
 const publicPaths = [
   "/health",
@@ -125,8 +126,11 @@ export const requireAuth = async (
         });
       }
 
-      decoded = jwt.verify(token, secret) as JwtPayload;
+      decoded = jwt.verify(token, secret, { algorithms: ["HS256"] }) as JwtPayload;
     } else {
+      if (tokenAlg !== "ES256" && tokenAlg !== "RS256") {
+        throw new jwt.JsonWebTokenError("Unsupported token algorithm");
+      }
       if (!supabaseUrl && !jwksUrlOverride) {
         console.error("SUPABASE_URL is not configured");
         reportAuthIssue({
@@ -159,15 +163,27 @@ export const requireAuth = async (
       const { payload } = await jwtVerify(token, jwks, {
         issuer: `${supabaseUrl}/auth/v1`,
         audience: "authenticated",
-        algorithms: tokenAlg ? [tokenAlg] : ["ES256", "RS256"],
+        algorithms: ["ES256", "RS256"],
       });
       decoded = payload as JwtPayload;
     }
+    const isServiceCredential = decoded.role === "service_role";
+    if (!isServiceCredential && (decoded.role === "anon" || typeof decoded.sub !== "string" || !decoded.sub.trim())) {
+      throw new jwt.JsonWebTokenError("An authenticated user subject is required");
+    }
+    if (shouldFailClosedOnMissingIdentity()) {
+      if (!Number.isFinite(decoded.exp)) throw new jwt.JsonWebTokenError("Token expiry is required");
+      if (!isServiceCredential) {
+        const expectedIssuer = `${supabaseUrl.replace(/\/+$/, "")}/auth/v1`;
+        const audiences = Array.isArray(decoded.aud) ? decoded.aud : [decoded.aud];
+        if (!supabaseUrl || decoded.iss !== expectedIssuer || !audiences.includes("authenticated")) {
+          throw new jwt.JsonWebTokenError("Invalid token issuer or audience");
+        }
+      }
+    }
     const appMeta = decoded.app_metadata as Record<string, unknown> | undefined;
-    const userMeta = decoded.user_metadata as Record<string, unknown> | undefined;
-    const roleFromMeta =
-      (appMeta?.role as string | undefined) ??
-      (userMeta?.role as string | undefined);
+    // user_metadata is user-editable and must never grant a privileged role.
+    const roleFromMeta = appMeta?.role as string | undefined;
 
     const user = {
       rawClaims: decoded as Record<string, unknown>,
@@ -184,13 +200,22 @@ export const requireAuth = async (
     }
     const roleFromToken = (roleFromMeta ?? decoded.role) as string | undefined;
     if (roleFromToken) {
-      user.role = roleFromToken === "service_role"
+      // Only the signed top-level service credential may bypass app identity
+      // lookup. A profile metadata value is not a service credential.
+      user.role = decoded.role === "service_role"
         ? "service_role"
         : normalizeRuntimeRole(roleFromToken);
     }
 
     if (user.id && user.role !== "service_role") {
       try {
+        if (shouldFailClosedOnMissingIdentity() && !shouldAllowInactiveAccountRequest(req.path)) {
+          if (!await isAuthSessionActive(user.id, decoded.session_id)) {
+            reportAuthIssue({ area: "session", operation: "authorize", reason: "session_revoked",
+              requestId: req.requestId, path: req.originalUrl, method: req.method, statusCode: 401 });
+            return res.status(401).json({ error: "session_expired", message: "Your session is no longer active. Please sign in again." });
+          }
+        }
         const dbIdentityContext = await getUserIdentityContextBySupabaseId(user.id);
         if (dbIdentityContext) {
           user.dbUserId = dbIdentityContext.id;
@@ -203,11 +228,16 @@ export const requireAuth = async (
           user.role = dbIdentityContext.role;
           user.availableRoles = dbIdentityContext.availableRoles;
           user.status = dbIdentityContext.status;
+          if (!dbIdentityContext.availableRoles.length && !shouldAllowInactiveAccountRequest(req.path)) {
+            reportAuthIssue({ area: "session", operation: "authorize", reason: "profile_unavailable",
+              requestId: req.requestId, path: req.originalUrl, method: req.method, statusCode: 403 });
+            return res.status(403).json({ error: "active_profile_unavailable", message: "This account has no active role. Contact support." });
+          }
           // Active profile is shared in the database across web/mobile. A client
           // may select an assigned profile for this request without changing it
           // on another device. Never trust a role that isn't currently granted.
           const requestedProfile = req.get("X-DARCi-Profile");
-          if (requestedProfile) {
+          if (requestedProfile && !shouldAllowInactiveAccountRequest(req.path)) {
             const effectiveProfile = requestedProfile === "member" && dbIdentityContext.availableRoles.includes("pro")
               && !dbIdentityContext.availableRoles.includes("member") ? "pro" : requestedProfile;
             const assignedProfile = dbIdentityContext.availableRoles.find(role => role === effectiveProfile);
@@ -242,7 +272,8 @@ export const requireAuth = async (
           user.role = "member";
         }
       } catch (error) {
-        const isVitestRuntime = process.env.VITEST === "true" || process.env.VITEST === "1";
+        const isVitestRuntime = process.env.NODE_ENV === "test" && !shouldFailClosedOnMissingIdentity()
+          && (process.env.VITEST === "true" || process.env.VITEST === "1");
         if (!isVitestRuntime) {
           reportAuthIssue({
             area: "session",

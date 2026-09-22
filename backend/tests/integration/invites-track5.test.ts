@@ -211,7 +211,13 @@ describe("Track 5 invite routes", () => {
     });
   });
 
-  it("claims public invite tokens with optional authenticated context", async () => {
+  it("rejects unauthenticated claims without touching the claim service", async () => {
+    const response = await request(app).post("/invites/public/public-token/claim").send({});
+    expect(response.status).toBe(401);
+    expect(mocks.claimInviteTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("claims public invite tokens with authenticated context", async () => {
     mocks.claimInviteTokenMock.mockResolvedValue({
       invite: { id: "invite-1" },
       claim: { id: "claim-1" },

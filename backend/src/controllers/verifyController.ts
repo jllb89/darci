@@ -3,6 +3,9 @@ import { recordAuditEvent } from "../services/auditService";
 import { verifyDocumentByIdn } from "../services/documentFinalizationService";
 
 export const verifyDocument = async (req: Request, res: Response) => {
+  res.set("Cache-Control", "private, no-store");
+  res.set("Referrer-Policy", "no-referrer");
+  res.set("X-Robots-Tag", "noindex, nofollow");
   const idn = typeof req.params.idn === "string" ? req.params.idn.trim() : "";
   if (!idn) {
     return res.status(404).json({
@@ -50,5 +53,14 @@ export const verifyDocument = async (req: Request, res: Response) => {
     });
   }
 
-  return res.status(200).json(verification.result);
+  // Public verification is a proof summary, never a document-delivery route.
+  // Keep an explicit allowlist even if the internal result later gains fields.
+  return res.status(200).json({
+    idn: verification.result.idn,
+    hash: verification.result.hash,
+    status: verification.result.status,
+    ledgerTxId: null,
+    anchoredAt: null,
+    documents: [],
+  });
 };

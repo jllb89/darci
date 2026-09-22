@@ -60,6 +60,34 @@ const baseRenderInput = {
 } as const;
 
 describe("documentFinalizationService", () => {
+  it("accepts separately audited legacy hash checks, never the old simulated receipt alone", () => {
+    const evidence: PublicVerificationEvidence = {
+      hashRecord: { id: "hash-1", document_version_id: "version-1", hash: "a".repeat(64), status: "completed" },
+      ledgerEntry: { id: "entry-1", hash: "a".repeat(64), ledger_tx_id: "ledger_SIMULATED", anchored_at: "2026-09-01" },
+      ledgerAnchorAttempt: { status: "anchored", document_hash_record_id: "hash-1", ledger_entry_id: "entry-1" },
+      hashReverification: { id: "recheck-1", document_version_id: "version-1", document_hash_record_id: "hash-1",
+        observed_sha256: "a".repeat(64), rendered_page_count: 2, verifier_revision: "legacy-hash-recheck-v1" },
+    };
+    expect(resolvePublicVerificationStatus(evidence)).toBe("verified");
+    expect(resolvePublicVerificationStatus({ ...evidence, hashReverification: null })).toBe("unverified");
+    for (const change of [{ document_version_id: "wrong" }, { document_hash_record_id: "wrong" },
+      { observed_sha256: "b".repeat(64) }, { rendered_page_count: 0 }, { rendered_page_count: 201 },
+      { rendered_page_count: 1.5 }, { verifier_revision: "unknown" }]) {
+      expect(resolvePublicVerificationStatus({ ...evidence, hashReverification: { ...evidence.hashReverification!, ...change } })).toBe("unverified");
+    }
+    expect(evidence.ledgerEntry?.ledger_tx_id).toBe("ledger_SIMULATED");
+  });
+  it("verifies hash-only records without claiming an external anchor", () => {
+    const evidence: PublicVerificationEvidence = {
+      hashRecord: { id: "hash-1", hash: "a".repeat(64), status: "completed" },
+      ledgerEntry: { id: "entry-1", hash: "a".repeat(64), ledger_tx_id: null, anchored_at: null },
+      ledgerAnchorAttempt: { status: "not_required", document_hash_record_id: "hash-1", ledger_entry_id: "entry-1", response_payload: { provider: "hash_only" } },
+    };
+    expect(resolvePublicVerificationStatus(evidence)).toBe("verified");
+    expect(resolvePublicVerificationStatus({ ...evidence, hashRecord: { ...evidence.hashRecord!, hash: "b".repeat(64) } })).toBe("unverified");
+    expect(resolvePublicVerificationStatus({ ...evidence, ledgerAnchorAttempt: { ...evidence.ledgerAnchorAttempt!, response_payload: {} } })).toBe("unverified");
+    expect(resolvePublicVerificationStatus({ ...evidence, ledgerEntry: { ...evidence.ledgerEntry!, ledger_tx_id: "fake" } })).toBe("unverified");
+  });
   it.each(["US-CA", "US-OH"])("renders a protected upload through %s acknowledgment and watermark", async jurisdiction => {
     const source = await PdfLibDocument.create();
     source.addPage([612, 792]).drawText("ORIGINAL PAGE ONE");
@@ -404,12 +432,12 @@ describe("documentFinalizationService", () => {
     const evidence: PublicVerificationEvidence = {
       hashRecord: {
         id: "hash-1",
-        hash: "abc123",
+        hash: "a".repeat(64),
         status: "completed",
       },
       ledgerEntry: {
         id: "ledger-1",
-        hash: "abc123",
+        hash: "a".repeat(64),
         ledger_tx_id: null,
         anchored_at: null,
       },
@@ -427,12 +455,12 @@ describe("documentFinalizationService", () => {
     const evidence: PublicVerificationEvidence = {
       hashRecord: {
         id: "hash-1",
-        hash: "abc123",
+        hash: "a".repeat(64),
         status: "completed",
       },
       ledgerEntry: {
         id: "ledger-1",
-        hash: "abc123",
+        hash: "a".repeat(64),
         ledger_tx_id: "ledger_AB12CD34EF56",
         anchored_at: "2026-04-21T16:00:00.000Z",
       },
@@ -442,16 +470,16 @@ describe("documentFinalizationService", () => {
     expect(resolvePublicVerificationStatus(evidence)).toBe("unverified");
   });
 
-  it("returns verified only when hash, ledger entry, and anchor attempt agree", () => {
+  it("rejects historical stub receipts even when their rows agree", () => {
     const evidence: PublicVerificationEvidence = {
       hashRecord: {
         id: "hash-1",
-        hash: "abc123",
+        hash: "a".repeat(64),
         status: "completed",
       },
       ledgerEntry: {
         id: "ledger-1",
-        hash: "abc123",
+        hash: "a".repeat(64),
         ledger_tx_id: "ledger_AB12CD34EF56",
         anchored_at: "2026-04-21T16:00:00.000Z",
       },
@@ -462,6 +490,6 @@ describe("documentFinalizationService", () => {
       },
     };
 
-    expect(resolvePublicVerificationStatus(evidence)).toBe("verified");
+    expect(resolvePublicVerificationStatus(evidence)).toBe("unverified");
   });
 });

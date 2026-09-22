@@ -52,8 +52,8 @@ final class DARCiMobileUITests: XCTestCase {
     @MainActor
     func testLaunchesOnboardingSplash() throws {
         let app = makeApp()
-        let firstStory = "Members get documents notarized in seconds not hours. Notaries handle more work without burning out."
-        let secondStory = "Every step meets legal standards. Watermarking, sealing, hashing, and ledger anchoring happen automatically so compliance is never a question."
+        let firstStory = "Keep your documents, signatures, and notary requests in one place—from preparation through the in-person session."
+        let secondStory = "Capture the in-person acknowledgment, seal the document, and record a SHA-256 fingerprint for checking its integrity."
         app.launch()
 
         XCTAssertTrue(app.staticTexts["DARCi"].waitForExistence(timeout: 5))
@@ -117,12 +117,14 @@ final class DARCiMobileUITests: XCTestCase {
         app.typeText("Lopez")
         app.textFields["Email"].tap()
         app.typeText("lopezb.jl@gmail.com")
-        XCTAssertTrue(app.buttons["Continue"].isEnabled)
+        // Scope to the form: iOS also exposes the keyboard return key as Continue.
+        let completeInfoContinue = app.scrollViews["authentication-complete-info"].buttons["Continue"]
+        XCTAssertTrue(completeInfoContinue.isEnabled)
         let keyboardDoneButton = app.buttons.matching(identifier: "Done").firstMatch
         if keyboardDoneButton.waitForExistence(timeout: 2) {
             keyboardDoneButton.tap()
         }
-        app.buttons["Continue"].tap()
+        completeInfoContinue.tap()
         XCTAssertTrue(app.staticTexts["Welcome to DARCi!"].waitForExistence(timeout: 5))
     }
 
@@ -356,12 +358,22 @@ final class DARCiMobileUITests: XCTestCase {
         app.buttons["Close onboarding"].tap()
         XCTAssertTrue(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 5))
 
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.76)).tap()
+        let phoneField = app.textFields["phone-number-field"]
+        XCTAssertTrue(phoneField.waitForExistence(timeout: 5))
+        phoneField.tap()
         app.typeText("2025550147")
-        app.buttons["Continue"].tap()
+        app.buttons["auth-continue-button"].tap()
 
         let otpField = app.textFields["One-time code"]
-        XCTAssertTrue(otpField.waitForExistence(timeout: 5))
+        let reachedOTP = otpField.waitForExistence(timeout: 5)
+        if !reachedOTP {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "mock-phone-signin-failure"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            print(app.debugDescription)
+        }
+        XCTAssertTrue(reachedOTP)
         otpField.tap()
         app.typeText("12345678")
         app.buttons["Verify code"].tap()
@@ -410,7 +422,7 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(readyRequest.waitForExistence(timeout: 5))
         readyRequest.tap()
 
-        XCTAssertTrue(app.staticTexts["Complete in-person session"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Coordinate with member"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["START SESSION"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["notary-session-start-button"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["The session PDF will appear here when it is ready."].exists)

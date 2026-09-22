@@ -1,9 +1,19 @@
 import Stripe from "stripe";
 
 export const STRIPE_API_VERSION: Stripe.LatestApiVersion = "2026-07-29.dahlia";
-export const STRIPE_PROVIDER_ENVIRONMENT = "test" as const;
+export type StripeEnvironment = "test" | "live";
+
+export const getStripeEnvironment = (): StripeEnvironment => {
+  const environment = process.env.STRIPE_PROVIDER_ENVIRONMENT?.trim() ?? "test";
+  if (environment !== "test" && environment !== "live") throw new Error("Invalid Stripe provider environment");
+  const appEnvironment = process.env.APP_ENV?.trim();
+  if (appEnvironment === "production" && environment !== "live") throw new Error("Production cannot use test Stripe entitlements");
+  if (environment === "live" && appEnvironment !== "production") throw new Error("Live Stripe is restricted to the production environment");
+  return environment;
+};
 
 let stripeClient: Stripe | null = null;
+let cachedSecretKey: string | null = null;
 
 const required = (name: string) => {
   const value = process.env[name]?.trim();
@@ -15,11 +25,15 @@ const required = (name: string) => {
 
 export const getStripeClient = () => {
   const secretKey = required("STRIPE_SECRET_KEY");
-  if (!secretKey.startsWith("sk_test_")) {
-    throw new Error("Private beta requires a Stripe test-mode secret key");
+  const environment = getStripeEnvironment();
+  if (!secretKey.startsWith(`sk_${environment}_`)) {
+    throw new Error("Stripe secret key does not match the configured environment");
   }
+  if (environment === "live" && process.env.STRIPE_LIVE_MODE_ENABLED !== "true") throw new Error("Stripe live activation is disabled");
+  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY?.trim();
+  if (publishableKey && !publishableKey.startsWith(`pk_${environment}_`)) throw new Error("Stripe publishable key environment mismatch");
 
-  if (!stripeClient) {
+  if (!stripeClient || cachedSecretKey !== secretKey) {
     stripeClient = new Stripe(secretKey, {
       apiVersion: STRIPE_API_VERSION,
       appInfo: {
@@ -29,6 +43,7 @@ export const getStripeClient = () => {
       maxNetworkRetries: 2,
       timeout: 30_000,
     });
+    cachedSecretKey = secretKey;
   }
 
   return stripeClient;
@@ -69,5 +84,11 @@ export const buildStripeCheckoutReturnUrls = () => {
 export const assertStripeObjectIsTestMode = (object: { livemode: boolean }, label: string) => {
   if (object.livemode) {
     throw new Error(`${label} belongs to Stripe live mode; test/live mixing is blocked`);
+  }
+};
+
+export const assertStripeObjectMatchesEnvironment = (object: { livemode: boolean }, label: string) => {
+  if (typeof object.livemode !== "boolean" || object.livemode !== (getStripeEnvironment() === "live")) {
+    throw new Error(`${label} environment mismatch; test/live mixing is blocked`);
   }
 };

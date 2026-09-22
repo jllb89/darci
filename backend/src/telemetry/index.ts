@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/node";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { redactSentryEvent, redactTelemetry } from "./redaction";
 
 let otelSdk: NodeSDK | null = null;
 
@@ -93,6 +94,10 @@ export const initTelemetry = async () => {
       process.env.GITHUB_SHA ??
       process.env.IMAGE_TAG;
     const sentryOptions: Sentry.NodeOptions = {
+      sendDefaultPii: false,
+      beforeSend: event => redactSentryEvent(event),
+      beforeSendTransaction: event => redactSentryEvent(event),
+      beforeBreadcrumb: breadcrumb => redactTelemetry(breadcrumb),
       dsn: sentryDsn,
       environment,
       skipOpenTelemetrySetup: usesExternalOtel,

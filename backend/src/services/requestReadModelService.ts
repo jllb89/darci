@@ -736,7 +736,7 @@ const canFinalizeFromState = (input: {
   workflowStatus: string | null;
   documentSummary: DocumentWorkspaceSummary;
 }) => {
-  if (!isPrivilegedMeetingRole(input.role) || input.documentSummary.finalization.isAnchored) {
+  if (!isPrivilegedMeetingRole(input.role) || input.documentSummary.finalization.isFinalized) {
     return false;
   }
 
@@ -827,7 +827,7 @@ const buildWarnings = (input: {
 
   if (
     (input.workflowStatus === "completed" || input.meeting?.status === "completed") &&
-    !input.documentSummary.finalization.isAnchored
+    !input.documentSummary.finalization.isFinalized
   ) {
     warnings.push({
       code: "finalization_incomplete",
@@ -885,7 +885,7 @@ const buildNextAction = (input: {
   }
 
   if (
-    !input.documentSummary.finalization.isAnchored &&
+    !input.documentSummary.finalization.isFinalized &&
     (input.workflowStatus === "completed" || input.meeting.status === "completed")
   ) {
     return isPrivilegedMeetingRole(input.role)

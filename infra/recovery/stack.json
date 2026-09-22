@@ -1,0 +1,1401 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DARCi isolated versioned recovery storage. No automatic deletion; budget notification is not a spending cap.",
+  "Parameters": {
+    "OperatorArn": {
+      "Type": "String",
+      "Description": "Explicit recovery operator IAM ARN, not an application role"
+    },
+    "AlertEmail": {
+      "Type": "String"
+    },
+    "BucketName": {
+      "Type": "String"
+    },
+    "BackupImage": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^427057633951\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/darci-recovery@sha256:[a-f0-9]{64}$",
+      "Description": "Scanned immutable ARM64 backup image; blank leaves scheduled execution unprovisioned"
+    },
+    "BackupScheduleState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    }
+  },
+  "Resources": {
+    "RecoveryKey": {
+      "Type": "AWS::KMS::Key",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Description": "DARCi backup encryption; preserve while any recovery snapshot exists",
+        "EnableKeyRotation": true,
+        "KeyPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AccountKeyAdministration",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+                }
+              },
+              "Action": "kms:*",
+              "Resource": "*"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "RecoveryKeyAlias": {
+      "Type": "AWS::KMS::Alias",
+      "Properties": {
+        "AliasName": "alias/darci-recovery",
+        "TargetKeyId": {
+          "Ref": "RecoveryKey"
+        }
+      }
+    },
+    "RecoveryBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Ref": "BucketName"
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "BucketKeyEnabled": true,
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "aws:kms",
+                "KMSMasterKeyID": {
+                  "Fn::GetAtt": [
+                    "RecoveryKey",
+                    "Arn"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "RecoveryBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "RecoveryBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "TLSRequired",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "RecoveryBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${RecoveryBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            },
+            {
+              "Sid": "DenyApplicationAndOtherPrincipals",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "RecoveryBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${RecoveryBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "ArnNotEquals": {
+                  "aws:PrincipalArn": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+                    },
+                    {
+                      "Ref": "OperatorArn"
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "BackupWriter",
+                        "Arn"
+                      ]
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "RecoveryReader",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "Sid": "RecoveryRolesCannotDeleteVersions",
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": [
+                  {
+                    "Fn::GetAtt": [
+                      "BackupWriter",
+                      "Arn"
+                    ]
+                  },
+                  {
+                    "Fn::GetAtt": [
+                      "RecoveryReader",
+                      "Arn"
+                    ]
+                  }
+                ]
+              },
+              "Action": [
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion",
+                "s3:PutLifecycleConfiguration",
+                "s3:PutBucketVersioning"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "RecoveryBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${RecoveryBucket.Arn}/*"
+                }
+              ]
+            },
+            {
+              "Sid": "RequireKmsEncryption",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:PutObject",
+              "Resource": {
+                "Fn::Sub": "${RecoveryBucket.Arn}/*"
+              },
+              "Condition": {
+                "StringNotEquals": {
+                  "s3:x-amz-server-side-encryption": "aws:kms"
+                }
+              }
+            },
+            {
+              "Sid": "RequireRecoveryKey",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:PutObject",
+              "Resource": {
+                "Fn::Sub": "${RecoveryBucket.Arn}/*"
+              },
+              "Condition": {
+                "StringNotEquals": {
+                  "s3:x-amz-server-side-encryption-aws-kms-key-id": {
+                    "Fn::GetAtt": [
+                      "RecoveryKey",
+                      "Arn"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "CriticalAlerts": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": "darci-recovery-critical",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "CriticalAlertsPolicy": {
+      "Type": "AWS::SNS::TopicPolicy",
+      "Properties": {
+        "Topics": [
+          {
+            "Ref": "CriticalAlerts"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "OnlyThisAccountsRecoveryAlarms",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com"
+              },
+              "Action": "sns:Publish",
+              "Resource": {
+                "Ref": "CriticalAlerts"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:darci-recovery-*"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "SnapshotSuccessMissing": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmName": "darci-recovery-staging-snapshot-success-missing",
+        "AlarmDescription": "No successful snapshot in 20 hourly evaluation periods. Investigate before the 24-hour RPO is breached. Owner: lopezb.jl@gmail.com. Runbook: docs/production-recovery-runbook.md. This alarm does not schedule backups.",
+        "Namespace": "DARCi/Recovery",
+        "MetricName": "SnapshotCompleted",
+        "Dimensions": [
+          {
+            "Name": "Environment",
+            "Value": "staging"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 3600,
+        "EvaluationPeriods": 20,
+        "DatapointsToAlarm": 20,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching",
+        "AlarmActions": [
+          {
+            "Ref": "CriticalAlerts"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "CriticalAlerts"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "CriticalEmail": {
+      "Type": "AWS::SNS::Subscription",
+      "Properties": {
+        "Protocol": "email",
+        "Endpoint": {
+          "Ref": "AlertEmail"
+        },
+        "TopicArn": {
+          "Ref": "CriticalAlerts"
+        }
+      }
+    },
+    "RecoveryBudget": {
+      "Type": "AWS::Budgets::Budget",
+      "Properties": {
+        "Budget": {
+          "BudgetName": "darci-recovery-monthly-target",
+          "BudgetType": "COST",
+          "TimeUnit": "MONTHLY",
+          "BudgetLimit": {
+            "Amount": 15,
+            "Unit": "USD"
+          },
+          "CostFilters": {
+            "TagKeyValue": [
+              "user:CostCenter$darci-recovery"
+            ]
+          }
+        },
+        "NotificationsWithSubscribers": [
+          {
+            "Notification": {
+              "NotificationType": "ACTUAL",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 80,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "AlertEmail"
+                }
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "NotificationType": "FORECASTED",
+              "ComparisonOperator": "GREATER_THAN",
+              "Threshold": 100,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "SubscriptionType": "EMAIL",
+                "Address": {
+                  "Ref": "AlertEmail"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "BackupWriter": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Recovery-only append role; no backup reads/deletion. Runtime can read only the dedicated recovery-source secret.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Ref": "OperatorArn"
+                }
+              },
+              "Action": "sts:AssumeRole"
+            },
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "append-snapshots",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject",
+                    "s3:AbortMultipartUpload"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "${RecoveryBucket.Arn}/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:ListBucket",
+                    "s3:ListBucketVersions",
+                    "s3:GetBucketVersioning"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "RecoveryBucket",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:GenerateDataKey",
+                    "kms:Decrypt",
+                    "kms:DescribeKey"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "RecoveryKey",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "kms:ViaService": {
+                        "Fn::Sub": "s3.${AWS::Region}.amazonaws.com"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "cloudwatch:PutMetricData",
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "cloudwatch:namespace": "DARCi/Recovery"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sns:Publish",
+                  "Resource": {
+                    "Ref": "CriticalAlerts"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "cloudformation:DescribeStacks",
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/darci-recovery/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "secretsmanager:GetSecretValue",
+                  "Resource": {
+                    "Ref": "RecoverySourceSecret"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "kms:Decrypt",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "RecoveryKey",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "kms:ViaService": {
+                        "Fn::Sub": "secretsmanager.${AWS::Region}.amazonaws.com"
+                      },
+                      "kms:EncryptionContext:SecretARN": {
+                        "Ref": "RecoverySourceSecret"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "RecoveryReader": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Recovery-only read/decrypt role; no writes",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Ref": "OperatorArn"
+                }
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "read-snapshots",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectVersion"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "${RecoveryBucket.Arn}/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:ListBucket",
+                    "s3:ListBucketVersions",
+                    "s3:GetBucketVersioning"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "RecoveryBucket",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:Decrypt",
+                    "kms:DescribeKey"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "RecoveryKey",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "kms:ViaService": {
+                        "Fn::Sub": "s3.${AWS::Region}.amazonaws.com"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sns:Publish",
+                  "Resource": {
+                    "Ref": "CriticalAlerts"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupRepository": {
+      "Type": "AWS::ECR::Repository",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "RepositoryName": "darci-recovery",
+        "ImageTagMutability": "IMMUTABLE",
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true
+        },
+        "EncryptionConfiguration": {
+          "EncryptionType": "AES256"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "RecoverySourceSecret": {
+      "Type": "AWS::SecretsManager::Secret",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Name": "/darci/staging/recovery-source",
+        "Description": "Only database, Storage and identity-key material required for staging recovery. Refresh deliberately when source credentials rotate.",
+        "KmsKeyId": {
+          "Fn::GetAtt": [
+            "RecoveryKey",
+            "Arn"
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/darci/recovery/backup",
+        "RetentionInDays": 30,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupNetwork": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Short-lived DARCi backup: no ingress, HTTPS and verified PostgreSQL egress only",
+        "VpcId": "vpc-013a5826615911fb4",
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 5432,
+            "ToPort": 5432,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Condition": "HasBackupImage",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "pull-only-backup-and-write-logs",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "ecr:GetAuthorizationToken",
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "BackupRepository",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": ["BackupLogs", "Arn"]
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupTask": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Condition": "HasBackupImage",
+      "Properties": {
+        "Family": "darci-recovery-backup",
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "NetworkMode": "awsvpc",
+        "Cpu": "512",
+        "Memory": "2048",
+        "RuntimePlatform": {
+          "CpuArchitecture": "ARM64",
+          "OperatingSystemFamily": "LINUX"
+        },
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "BackupExecutionRole",
+            "Arn"
+          ]
+        },
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "BackupWriter",
+            "Arn"
+          ]
+        },
+        "Volumes": [
+          {
+            "Name": "scratch"
+          }
+        ],
+        "ContainerDefinitions": [
+          {
+            "Name": "backup",
+            "Image": {
+              "Ref": "BackupImage"
+            },
+            "Essential": true,
+            "User": "1000",
+            "ReadonlyRootFilesystem": true,
+            "StopTimeout": 30,
+            "LinuxParameters": {
+              "InitProcessEnabled": true,
+              "Capabilities": {
+                "Drop": [
+                  "ALL"
+                ]
+              }
+            },
+            "MountPoints": [
+              {
+                "SourceVolume": "scratch",
+                "ContainerPath": "/work",
+                "ReadOnly": false
+              }
+            ],
+            "Environment": [
+              {
+                "Name": "AWS_REGION",
+                "Value": {
+                  "Ref": "AWS::Region"
+                }
+              },
+              {
+                "Name": "AWS_DEFAULT_REGION",
+                "Value": {
+                  "Ref": "AWS::Region"
+                }
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "BackupLogs"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "backup"
+              }
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupScheduleGroup": {
+      "Type": "AWS::Scheduler::ScheduleGroup",
+      "Properties": {
+        "Name": "darci-recovery",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupDeadLetters": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": "darci-recovery-schedule-failures",
+        "SqsManagedSseEnabled": true,
+        "MessageRetentionPeriod": 1209600,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupFailureQueuePolicy": {
+      "Type": "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "Queues": [{"Ref": "BackupDeadLetters"}],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Sid": "OnlyThisAccountsBackupTaskFailureRules",
+            "Effect": "Allow",
+            "Principal": {"Service": "events.amazonaws.com"},
+            "Action": "sqs:SendMessage",
+            "Resource": {"Fn::GetAtt": ["BackupDeadLetters", "Arn"]},
+            "Condition": {
+              "ArnLike": {"aws:SourceArn": {"Fn::Sub": "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/darci-recovery-backup-*"}}
+            }
+          }]
+        }
+      }
+    },
+    "BackupScheduleRole": {
+      "Type": "AWS::IAM::Role",
+      "Condition": "HasBackupImage",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  },
+                  "aws:SourceArn": {
+                    "Fn::GetAtt": [
+                      "BackupScheduleGroup",
+                      "Arn"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "only-run-recovery-task",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "ecs:RunTask",
+                  "Resource": {
+                    "Ref": "BackupTask"
+                  },
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/darci-staging"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "ecs:TagResource",
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/darci-staging/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ecs:CreateAction": "RunTask"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "iam:PassRole",
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "BackupWriter",
+                        "Arn"
+                      ]
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "BackupExecutionRole",
+                        "Arn"
+                      ]
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sqs:SendMessage",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "BackupDeadLetters",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Condition": "HasBackupImage",
+      "Properties": {
+        "Name": "darci-recovery-staging",
+        "GroupName": {
+          "Ref": "BackupScheduleGroup"
+        },
+        "Description": "Two short snapshots daily provide retry headroom for the 24-hour RPO; no production data or external notifications from restored apps.",
+        "ScheduleExpression": "cron(0 2,14 * * ? *)",
+        "ScheduleExpressionTimezone": "America/Mexico_City",
+        "State": {
+          "Ref": "BackupScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/darci-staging"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "BackupScheduleRole",
+              "Arn"
+            ]
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 3600,
+            "MaximumRetryAttempts": 2
+          },
+          "DeadLetterConfig": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "BackupDeadLetters",
+                "Arn"
+              ]
+            }
+          },
+          "EcsParameters": {
+            "TaskDefinitionArn": {
+              "Ref": "BackupTask"
+            },
+            "TaskCount": 1,
+            "LaunchType": "FARGATE",
+            "PlatformVersion": "LATEST",
+            "EnableECSManagedTags": true,
+            "EnableExecuteCommand": false,
+            "PropagateTags": "TASK_DEFINITION",
+            "NetworkConfiguration": {
+              "AwsvpcConfiguration": {
+                "AssignPublicIp": "ENABLED",
+                "Subnets": [
+                  "subnet-042cb0a5539feffec",
+                  "subnet-0608170673e5bf376",
+                  "subnet-0707c07870cd29926"
+                ],
+                "SecurityGroups": [
+                  {
+                    "Ref": "BackupNetwork"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "BackupDeadLetterAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmName": "darci-recovery-schedule-dead-letters",
+        "AlarmDescription": "Backup dispatch or task execution failed. Owner lopezb.jl@gmail.com; runbook docs/production-recovery-runbook.md. Resolve and acknowledge the exact failure message; never purge the queue.",
+        "Namespace": "AWS/SQS",
+        "MetricName": "ApproximateNumberOfMessagesVisible",
+        "Dimensions": [
+          {
+            "Name": "QueueName",
+            "Value": {
+              "Fn::GetAtt": [
+                "BackupDeadLetters",
+                "QueueName"
+              ]
+            }
+          }
+        ],
+        "Statistic": "Maximum",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "CriticalAlerts"
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "CriticalAlerts"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "DARCi"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "darci-recovery"
+          }
+        ]
+      }
+    },
+    "BackupFailed": {
+      "Type": "AWS::Events::Rule",
+      "Condition": "HasBackupImage",
+      "Properties": {
+        "Name": "darci-recovery-backup-failed",
+        "State": "ENABLED",
+        "EventPattern": {
+          "source": [
+            "aws.ecs"
+          ],
+          "detail-type": [
+            "ECS Task State Change"
+          ],
+          "detail": {
+            "lastStatus": [
+              "STOPPED"
+            ],
+            "taskDefinitionArn": [
+              {
+                "prefix": "arn:aws:ecs:us-east-1:427057633951:task-definition/darci-recovery-backup:"
+              }
+            ],
+            "containers": {
+              "exitCode": [
+                {
+                  "anything-but": 0
+                }
+              ]
+            }
+          }
+        },
+        "Targets": [
+          {
+            "Id": "notify-recovery-owner",
+            "Arn": {"Fn::GetAtt": ["BackupDeadLetters", "Arn"]},
+            "InputTransformer": {
+              "InputPathsMap": {
+                "task": "$.detail.taskArn",
+                "code": "$.detail.stopCode"
+              },
+              "InputTemplate": "\"DARCi backup task failed. Task: <task>. Stop code: <code>. Check /darci/recovery/backup logs and docs/production-recovery-runbook.md. Never reset the source database. Sole responder: lopezb.jl@gmail.com.\""
+            }
+          }
+        ]
+      }
+    },
+    "BackupStartFailed": {
+      "Type": "AWS::Events::Rule",
+      "Condition": "HasBackupImage",
+      "Properties": {
+        "Name": "darci-recovery-backup-start-failed",
+        "State": "ENABLED",
+        "EventPattern": {
+          "source": [
+            "aws.ecs"
+          ],
+          "detail-type": [
+            "ECS Task State Change"
+          ],
+          "detail": {
+            "lastStatus": [
+              "STOPPED"
+            ],
+            "taskDefinitionArn": [
+              {
+                "prefix": "arn:aws:ecs:us-east-1:427057633951:task-definition/darci-recovery-backup:"
+              }
+            ],
+            "stopCode": [
+              "TaskFailedToStart"
+            ]
+          }
+        },
+        "Targets": [
+          {
+            "Id": "notify-recovery-owner",
+            "Arn": {"Fn::GetAtt": ["BackupDeadLetters", "Arn"]},
+            "InputTransformer": {
+              "InputPathsMap": {
+                "task": "$.detail.taskArn",
+                "code": "$.detail.stopCode"
+              },
+              "InputTemplate": "\"DARCi backup task failed. Task: <task>. Stop code: <code>. Check /darci/recovery/backup logs and docs/production-recovery-runbook.md. Never reset the source database. Sole responder: lopezb.jl@gmail.com.\""
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "Bucket": {
+      "Value": {
+        "Ref": "RecoveryBucket"
+      }
+    },
+    "KeyArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "RecoveryKey",
+          "Arn"
+        ]
+      }
+    },
+    "WriterRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "BackupWriter",
+          "Arn"
+        ]
+      }
+    },
+    "ReaderRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "RecoveryReader",
+          "Arn"
+        ]
+      }
+    },
+    "AlertTopicArn": {
+      "Value": {
+        "Ref": "CriticalAlerts"
+      }
+    },
+    "BackupRepository": {
+      "Value": {
+        "Fn::GetAtt": [
+          "BackupRepository",
+          "RepositoryUri"
+        ]
+      }
+    },
+    "RecoverySourceSecretArn": {
+      "Value": {
+        "Ref": "RecoverySourceSecret"
+      }
+    },
+    "BackupTaskArn": {
+      "Condition": "HasBackupImage",
+      "Value": {
+        "Ref": "BackupTask"
+      }
+    },
+    "BackupSecurityGroupId": {
+      "Value": {
+        "Ref": "BackupNetwork"
+      }
+    },
+    "BackupScheduleName": {
+      "Condition": "HasBackupImage",
+      "Value": {
+        "Ref": "BackupSchedule"
+      }
+    }
+  },
+  "Conditions": {
+    "HasBackupImage": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "BackupImage"
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  }
+}

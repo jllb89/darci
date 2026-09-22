@@ -253,7 +253,7 @@ describe("GET /dashboard", () => {
   it("forbids service_role on the user dashboard route", async () => {
     const response = await getWithLog(
       "forbids service role",
-      signToken({ sub: "service-role-1", app_metadata: { role: "service_role" } })
+      signToken({ sub: "service-role-1", role: "service_role" })
     );
 
     expect(response.status).toBe(403);

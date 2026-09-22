@@ -248,6 +248,40 @@ describe("user role service", () => {
     );
   });
 
+  it.each(["revoked", "suspended"])("sign-in never reactivates %s role assignments", async status => {
+    state.users[0]!.role = "notary";
+    state.userRoles = ["member", "notary"].map(role => ({
+      id: `role-${role}`, user_id: "db-user-1", role, status,
+      is_active_profile: false, granted_reason: "Access removed", created_at: now, updated_at: now,
+    }));
+    const before = structuredClone(state.userRoles);
+    const { ensureUserIdentityFromAuth, switchActiveRoleBySupabaseUserId } = await import("../../src/services/userRoleService");
+    for (let retry = 0; retry < 3; retry++) {
+      const context = await ensureUserIdentityFromAuth({ supabaseUserId: "auth-user-1", email: "notary@example.com", role: "notary" });
+      expect(context.availableRoles).toEqual([]);
+      expect(context.role).toBe("member");
+      expect(state.userRoles).toEqual(before);
+    }
+    await expect(switchActiveRoleBySupabaseUserId({ supabaseUserId: "auth-user-1", role: "notary" }))
+      .rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("sign-in preserves the selected profile and does not restore a stale privileged profile", async () => {
+    state.users[0]!.role = "notary";
+    state.userRoles = [
+      { id: "role-member", user_id: "db-user-1", role: "member", status: "active", is_active_profile: true,
+        granted_reason: "Member access", created_at: now, updated_at: now },
+      { id: "role-notary", user_id: "db-user-1", role: "notary", status: "revoked", is_active_profile: false,
+        granted_reason: "Access removed", created_at: now, updated_at: now },
+    ];
+    const before = structuredClone(state.userRoles);
+    const { ensureUserIdentityFromAuth } = await import("../../src/services/userRoleService");
+    const context = await ensureUserIdentityFromAuth({ supabaseUserId: "auth-user-1", email: "notary@example.com", role: "admin" });
+    expect(context.availableRoles).toEqual(["member"]);
+    expect(context.role).toBe("member");
+    expect(state.userRoles).toEqual(before);
+  });
+
   it("keeps the dev notary test user on member while requiring phone for profile completion", async () => {
     state.users = [
       {

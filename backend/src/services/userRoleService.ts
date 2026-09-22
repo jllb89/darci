@@ -302,20 +302,10 @@ const selectRoleRowsByUserId = async (userId: string) => {
 };
 
 const ensureBaselineRoleAssignments = async (input: { userId: string; activeRole: RuntimeRole }) => {
-  const rolesToDeactivate = input.activeRole === "member"
-    ? ["pro", "notary", "admin"]
-    : runtimeRoleValues.filter((role) => role !== input.activeRole);
-
-  const { error: clearActiveProfileError } = await supabaseAdmin
-    .from("user_roles")
-    .update({ is_active_profile: false })
-    .eq("user_id", input.userId)
-    .eq("is_active_profile", true)
-    .in("role", rolesToDeactivate);
-
-  if (clearActiveProfileError) {
-    throw new Error(clearActiveProfileError.message);
-  }
+  // Bootstrap legacy/new accounts only. Authentication is not a role grant:
+  // existing assignments (including revocations) are authoritative. Conflict
+  // protection also prevents a concurrent login from overwriting a revocation.
+  if ((await selectRoleRowsByUserId(input.userId)).length > 0) return;
 
   const { error: memberError } = await supabaseAdmin
     .from("user_roles")
@@ -327,7 +317,7 @@ const ensureBaselineRoleAssignments = async (input: { userId: string; activeRole
         is_active_profile: input.activeRole === "member",
         granted_reason: "Baseline member access",
       },
-      { onConflict: "user_id,role" },
+      { onConflict: "user_id,role", ignoreDuplicates: true },
     );
 
   if (memberError) {
@@ -348,7 +338,7 @@ const ensureBaselineRoleAssignments = async (input: { userId: string; activeRole
         is_active_profile: true,
         granted_reason: input.activeRole === "admin" ? "Bootstrap admin manager" : "Synced from active user role",
       },
-      { onConflict: "user_id,role" },
+      { onConflict: "user_id,role", ignoreDuplicates: true },
     );
 
   if (activeRoleError) {
@@ -364,7 +354,7 @@ const deriveAvailableRoles = (
     .filter((assignment) => assignment.status === "active")
     .map((assignment) => assignment.role);
 
-  if (activeRoles.length === 0) {
+  if (assignments.length === 0) {
     return [fallbackRole];
   }
 
@@ -389,7 +379,9 @@ const deriveActiveRole = (
       .map((assignment) => assignment.role),
   )[0];
 
-  return firstActiveRole ?? fallbackRole;
+  // A compatibility display value is not a grant. With recorded assignments
+  // but none active, availableRoles stays empty and authorization denies access.
+  return firstActiveRole ?? (assignments.length === 0 ? fallbackRole : "member");
 };
 
 const buildIdentityContext = async (userRow: UserRow) => {

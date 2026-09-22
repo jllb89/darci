@@ -64,7 +64,8 @@ type RequestDetailPayload = {
       finalization: {
         latestStatus: string | null;
         latestStatusAt: string | null;
-        isAnchored: boolean;
+        isFinalized?: boolean;
+        isAnchored?: boolean;
         isVerificationChecked: boolean;
         isWatermarked: boolean;
         isHashRecorded: boolean;
@@ -493,8 +494,8 @@ export default function RequestWorkspacePage() {
   const hasHashRecorded = Boolean(
     finalization?.isHashRecorded || finalization?.hash || finalization?.history.some((event) => event.status === "hash_recorded"),
   );
-  const isAnchored = Boolean(finalization?.isAnchored);
-  const isVerificationReady = Boolean(isAnchored && verification?.verifyPath);
+  const isFinalized = Boolean(finalization?.isFinalized ?? finalization?.isAnchored);
+  const isVerificationReady = Boolean(isFinalized && verification?.verifyPath);
   const hasLedgerFailure = Boolean(finalization?.anchorAttempt?.status === "failed" || finalization?.latestStatus === "failed");
   const notaryName = payload?.notary?.displayName?.trim() || "Your Illuminotary";
   const statusLabel = formatStatusLabel(sessionMeeting?.status ?? detail?.status ?? payload?.workflow?.latestStatus ?? null);
@@ -604,7 +605,7 @@ export default function RequestWorkspacePage() {
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <CompletionStep done={hasFinalWatermark} label="Watermarked" />
                 <CompletionStep done={hasHashRecorded} label="Hash recorded" />
-                <CompletionStep done={isAnchored} label="Ledger anchored" />
+                <CompletionStep done={isFinalized} label="SHA-256 verified" />
                 <CompletionStep done={isVerificationReady} label="Verification ready" />
               </div>
               <div className="mt-3 grid gap-1 break-words">

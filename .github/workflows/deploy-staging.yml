@@ -34,6 +34,10 @@ env:
   STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL }}
 
 jobs:
+  validate:
+    name: Validate the exact deployment revision
+    uses: ./.github/workflows/ci.yml
+
   changes:
     name: Detect Changed Services
     runs-on: ubuntu-latest
@@ -101,7 +105,7 @@ jobs:
           INFRA_CHANGED: ${{ steps.filter.outputs.infra }}
 
   build-images:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.any_build == 'true'
     name: Build and Push ${{ matrix.service }} Image
     runs-on: ubuntu-24.04-arm
@@ -139,9 +143,9 @@ jobs:
       - name: Load web public config
         if: matrix.repository == 'darci-web'
         run: |
-          secret_json="$(aws secretsmanager get-secret-value --secret-id /darci/staging/app --query SecretString --output text)"
-          node - "$secret_json" >> "$GITHUB_ENV" <<'NODE'
-          const secret = JSON.parse(process.argv[2] ?? "{}");
+          node >> "$GITHUB_ENV" <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const secret = JSON.parse(execFileSync("aws", ["secretsmanager", "get-secret-value", "--secret-id", "/darci/staging/app", "--query", "SecretString", "--output", "text"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
           const supabaseUrl = secret.NEXT_PUBLIC_SUPABASE_URL || secret.SUPABASE_URL || "";
           const supabaseAnonKey = secret.NEXT_PUBLIC_SUPABASE_ANON_KEY || secret.SUPABASE_ANON_KEY || "";
           const sentryDsn = secret.NEXT_PUBLIC_SENTRY_DSN || secret.SENTRY_DSN || "";
@@ -191,6 +195,8 @@ jobs:
             build_args+=(--build-arg "NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED=$STAGING_NEXT_PUBLIC_GOOGLE_MAPS_AUTOCOMPLETE_ENABLED")
           fi
 
+          # Commas here are part of the Buildx cache option, not shell separators.
+          # shellcheck disable=SC2054
           buildx_command=(
             docker buildx build
             --progress=plain
@@ -219,6 +225,37 @@ jobs:
             sleep $((attempt * 20))
           done
 
+      - name: Install pinned image scanner
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.74.0
+          cache: false
+          path: ${{ runner.temp }}/scanner
+
+      - name: Scan the exact pushed image before allowing deployment
+        env:
+          IMAGE_REPOSITORY: ${{ matrix.repository }}
+        run: |
+          set -euo pipefail
+          digest=$(aws ecr describe-images --repository-name "$IMAGE_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          image_ref="$ECR_REGISTRY/$IMAGE_REPOSITORY@$digest"
+          docker pull "$image_ref"
+          image_id=$(docker image inspect "$image_ref" --format '{{.Id}}')
+          docker save "$image_id" -o "$RUNNER_TEMP/runtime-image.tar"
+          trivy image --input "$RUNNER_TEMP/runtime-image.tar" --scanners vuln --severity HIGH,CRITICAL \
+            --ignorefile /dev/null --exit-code 1 --format json --output "$RUNNER_TEMP/image-scan.json"
+          printf '%s\n' "$digest" > "$RUNNER_TEMP/image-digest.txt"
+
+      - name: Preserve passed image digest and scan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-${{ matrix.repository }}
+          path: |
+            ${{ runner.temp }}/image-scan.json
+            ${{ runner.temp }}/image-digest.txt
+          retention-days: 14
+
   deploy:
     name: Deploy Staging
     needs:
@@ -229,6 +266,27 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Download verified image identities
+        uses: actions/download-artifact@v4
+        with:
+          pattern: verified-darci-*
+          path: verified-images
+      - name: Load only digests that passed the scanner
+        run: |
+          node <<'NODE' >> "$GITHUB_ENV"
+          const fs = require("node:fs");
+          for (const [repository, name] of [["darci-api", "API_IMAGE_DIGEST"], ["darci-worker", "WORKER_IMAGE_DIGEST"], ["darci-web", "WEB_IMAGE_DIGEST"]]) {
+            const file = `verified-images/verified-${repository}/image-digest.txt`;
+            if (!fs.existsSync(file)) continue;
+            const digest = fs.readFileSync(file, "utf8").trim();
+            if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error("Invalid verified image digest");
+            console.log(`${name}=${digest}`);
+          }
+          NODE
       - name: Check required configuration
         run: |
           missing=0
@@ -251,12 +309,16 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify database and encryption prerequisites before changing services
+        if: needs.changes.outputs.build_api == 'true' || needs.changes.outputs.build_worker == 'true'
+        run: node backend/scripts/check-phase1-staging-deploy.mjs
+
       - name: Load web public config
         if: needs.changes.outputs.build_web == 'true'
         run: |
-          secret_json="$(aws secretsmanager get-secret-value --secret-id /darci/staging/app --query SecretString --output text)"
-          node - "$secret_json" >> "$GITHUB_ENV" <<'NODE'
-          const secret = JSON.parse(process.argv[2] ?? "{}");
+          node >> "$GITHUB_ENV" <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const secret = JSON.parse(execFileSync("aws", ["secretsmanager", "get-secret-value", "--secret-id", "/darci/staging/app", "--query", "SecretString", "--output", "text"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
           const supabaseUrl = secret.NEXT_PUBLIC_SUPABASE_URL || secret.SUPABASE_URL || "";
           const supabaseAnonKey = secret.NEXT_PUBLIC_SUPABASE_ANON_KEY || secret.SUPABASE_ANON_KEY || "";
           const sentryDsn = secret.NEXT_PUBLIC_SENTRY_DSN || secret.SENTRY_DSN || "";
@@ -328,8 +390,10 @@ jobs:
             RESEND_FAILURE_MODE: "strict",
             AUTH_EMAIL_SEND_COOLDOWN_SECONDS: "60",
             GOOGLE_MAPS_GEOCODE_USE_SERVER: process.env.STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER || "true",
-            LEDGER_ANCHOR_MODE: "stub",
-            LEDGER_ALLOW_STUB_PROVIDER: "true",
+            APP_ENV: "staging",
+            LEDGER_ANCHOR_MODE: "hash_only",
+            LEDGER_ALLOW_STUB_PROVIDER: "false",
+            AUTH_ALLOW_MISSING_DB_USER_FALLBACK: "false",
             BILLING_ENFORCEMENT_MODE: "enforced",
             IOS_MEMBER_CHECKOUT_ENABLED: "true",
             BILLING_LIFECYCLE_ACCEPTANCE_ID: "",
@@ -341,7 +405,8 @@ jobs:
               continue;
             }
 
-            container.image = `${process.env.ECR_REGISTRY}/darci-api:${process.env.IMAGE_TAG}`;
+            if (!process.env.API_IMAGE_DIGEST) throw new Error("Verified API image digest missing");
+            container.image = `${process.env.ECR_REGISTRY}/darci-api@${process.env.API_IMAGE_DIGEST}`;
             const envByName = new Map((container.environment ?? []).map((entry) => [entry.name, entry]));
             for (const [name, value] of Object.entries(authEnv)) {
               envByName.set(name, { name, value });
@@ -355,6 +420,11 @@ jobs:
                 name: "GOOGLE_MAPS_SERVER_API_KEY",
                 valueFrom: `${secretArn}:GOOGLE_MAPS_SERVER_API_KEY::`,
               });
+            }
+            for (const name of ["IDENTITY_FIELD_ENCRYPTION_KEY", "IDENTITY_FIELD_ENCRYPTION_KEY_ID"]) {
+              container.environment = container.environment.filter(entry => entry.name !== name);
+              container.secrets = container.secrets.filter(entry => entry.name !== name);
+              container.secrets.push({ name, valueFrom: `arn:aws:secretsmanager:${process.env.AWS_REGION}:${process.env.AWS_ACCOUNT_ID}:secret:/darci/staging/app:${name}::` });
             }
           }
 
@@ -403,8 +473,10 @@ jobs:
               .map((key) => [key, taskDefinition[key]]),
           );
           const workerEnv = {
-            LEDGER_ANCHOR_MODE: "stub",
-            LEDGER_ALLOW_STUB_PROVIDER: "true",
+            APP_ENV: "staging",
+            LEDGER_ANCHOR_MODE: "hash_only",
+            LEDGER_ALLOW_STUB_PROVIDER: "false",
+            AUTH_ALLOW_MISSING_DB_USER_FALLBACK: "false",
             NOTIFICATION_PUSH_PROVIDER: "apns",
             BILLING_ENFORCEMENT_MODE: "enforced",
             BILLING_RECONCILIATION_RUNNER_ENABLED: "true",
@@ -417,13 +489,19 @@ jobs:
 
           for (const container of nextDefinition.containerDefinitions) {
             if (container.name === "worker") {
-              container.image = `${process.env.ECR_REGISTRY}/darci-worker:${process.env.IMAGE_TAG}`;
+              if (!process.env.WORKER_IMAGE_DIGEST) throw new Error("Verified worker image digest missing");
+              container.image = `${process.env.ECR_REGISTRY}/darci-worker@${process.env.WORKER_IMAGE_DIGEST}`;
               const envByName = new Map((container.environment ?? []).map((entry) => [entry.name, entry]));
               for (const [name, value] of Object.entries(workerEnv)) {
                 envByName.set(name, { name, value });
               }
               container.environment = Array.from(envByName.values()).sort((left, right) => left.name.localeCompare(right.name));
               container.secrets = (container.secrets ?? []).filter((entry) => !Object.prototype.hasOwnProperty.call(workerEnv, entry.name));
+              for (const name of ["IDENTITY_FIELD_ENCRYPTION_KEY", "IDENTITY_FIELD_ENCRYPTION_KEY_ID"]) {
+                container.environment = container.environment.filter(entry => entry.name !== name);
+                container.secrets = container.secrets.filter(entry => entry.name !== name);
+                container.secrets.push({ name, valueFrom: `arn:aws:secretsmanager:${process.env.AWS_REGION}:${process.env.AWS_ACCOUNT_ID}:secret:/darci/staging/app:${name}::` });
+              }
             }
           }
 
@@ -474,7 +552,8 @@ jobs:
 
           for (const container of nextDefinition.containerDefinitions) {
             if (container.name === "web") {
-              container.image = `${process.env.ECR_REGISTRY}/darci-web:${process.env.IMAGE_TAG}`;
+              if (!process.env.WEB_IMAGE_DIGEST) throw new Error("Verified web image digest missing");
+              container.image = `${process.env.ECR_REGISTRY}/darci-web@${process.env.WEB_IMAGE_DIGEST}`;
             }
           }
 

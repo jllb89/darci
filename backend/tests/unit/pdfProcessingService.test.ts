@@ -1,9 +1,13 @@
 import { PDFDocument, PDFName } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { loadPdfForProcessing, saveValidatedPdf, validateRenderedPdf } from "../../src/services/pdfProcessingService";
+import { loadPdfForProcessing, saveValidatedPdf, validateRenderedPdf, MAX_PROCESSED_PDF_PAGES, MAX_PROCESSED_PDF_BYTES } from "../../src/services/pdfProcessingService";
 import { protectPdf } from "../helpers/protectedPdf";
 
 describe("PDF processing regression", () => {
+  it("rejects oversized inputs and page counts before spawning native tools", async () => {
+    await expect(loadPdfForProcessing(new Uint8Array(MAX_PROCESSED_PDF_BYTES + 1))).rejects.toMatchObject({ reason: "resource_limit" });
+    await expect(validateRenderedPdf(new Uint8Array([1]), MAX_PROCESSED_PDF_PAGES + 1)).rejects.toMatchObject({ reason: "resource_limit" });
+  });
   it("rejects the previous encryption-bypass output before it can be released", async () => {
     const original = await PDFDocument.create();
     original.addPage([612, 792]).drawText("Original content must survive");

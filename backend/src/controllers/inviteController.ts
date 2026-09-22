@@ -254,6 +254,7 @@ export const claimPublicInvite = async (req: Request, res: Response) => {
 
   try {
     const viewerUserId = await resolveViewerUserId(req);
+    if (!viewerUserId) throw new InviteClaimServiceError(401, "Sign in to claim this invite");
     const result = await claimInviteToken({
       token: parsedParams.data.token,
       viewerUserId,

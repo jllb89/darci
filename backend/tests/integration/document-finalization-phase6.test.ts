@@ -91,7 +91,7 @@ describe("Phase 6 document finalization endpoints", () => {
     });
   });
 
-  it("returns a public verification result for finalized documents", async () => {
+  it.each([false, true])("returns only public proof, never PDF URLs or private fields (signed in: %s)", async signedIn => {
     mocks.verifyDocumentByIdnMock.mockResolvedValue({
       verificationCheck: {
         id: "verify-check-1",
@@ -118,29 +118,22 @@ describe("Phase 6 document finalization endpoints", () => {
       },
     });
 
-    const response = await request(app).get("/verify/AB12CD34EF56");
+    const call = request(app).get("/verify/AB12CD34EF56");
+    if (signedIn) call.set("Authorization", `Bearer ${notaryToken()}`);
+    const response = await call;
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       idn: "AB12CD34EF56",
       hash: "abc123",
-      ledgerTxId: "ledger_AB12CD34EF56",
-      anchoredAt: "2026-04-20T16:15:00.000Z",
+      ledgerTxId: null,
+      anchoredAt: null,
       status: "verified",
-      documents: [
-        {
-          id: "version-1",
-          versionId: "version-1",
-          label: "Certificate of Trust",
-          fileName: "certificate-finalized-v3.pdf",
-          mimeType: "application/pdf",
-          sizeBytes: 12345,
-          isFinal: true,
-          downloadUrl: "https://signed.example/certificate.pdf",
-          createdAt: "2026-04-20T16:14:00.000Z",
-        },
-      ],
+      documents: [],
     });
+    expect(response.headers["cache-control"]).toContain("no-store");
+    expect(response.text).not.toContain("signed.example");
+    expect(response.text).not.toContain("certificate-finalized");
     expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(2);
   });
 

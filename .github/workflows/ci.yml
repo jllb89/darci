@@ -3,6 +3,10 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -16,11 +20,88 @@ jobs:
         with:
           node-version: "24"
       - run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
-      - run: npm install
+      - run: npm ci && npm run build
+        working-directory: packages/types
+      - run: npm ci
+      - run: npm run build
       - run: npm run observability:validate
       - run: npm run observability:kpis
       - run: npm run observability:test
       - run: npm run test
+      - name: Validate recovery infrastructure safety boundaries
+        run: node --test ../infra/recovery/stack.test.mjs
+
+  database-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PHASE1_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.75.0
+      - run: npm ci && npm run build
+        working-directory: packages/types
+      - run: npm ci
+        working-directory: backend
+      - run: npm run build
+        working-directory: backend
+      - name: Install all migrations into a disposable Supabase instance
+        run: |
+          set -euo pipefail
+          drill_root=$(mktemp -d)
+          echo "DARCI_SQL_DRILL_ROOT=$drill_root" >> "$GITHUB_ENV"
+          supabase init --workdir "$drill_root"
+          mkdir -p "$drill_root/supabase/migrations"
+          cp supabase/migrations/*.sql "$drill_root/supabase/migrations/"
+          supabase start --workdir "$drill_root" -x studio,imgproxy,logflare,vector,supavisor,realtime,edge-runtime > "$drill_root/start.log" 2>&1
+          supabase status --workdir "$drill_root" -o json > "$drill_root/status.json"
+      - name: Exercise actual SQL, role and Storage boundaries
+        run: |
+          set -euo pipefail
+          node backend/scripts/test-phase1-finalization-sql.mjs --confirm-isolated
+          node backend/scripts/test-phase1-identity-provenance-sql.mjs --confirm-isolated
+          node backend/scripts/test-phase1-auth-session-sql.mjs --confirm-isolated
+          node backend/scripts/test-phase1-auth-session-api.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
+          node backend/scripts/test-phase1-billing-sql.mjs --confirm-isolated
+          node backend/scripts/test-legacy-reverification-sql.mjs --confirm-isolated
+          node backend/scripts/test-phase1-storage-boundary.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
+      - name: Stop disposable database
+        if: always() && env.DARCI_SQL_DRILL_ROOT != ''
+        run: supabase stop --workdir "$DARCI_SQL_DRILL_ROOT" --no-backup
+
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Select an available iPhone simulator
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available -j | node -e '
+            let input="";process.stdin.on("data",b=>input+=b);process.stdin.on("end",()=>{
+              const entries=Object.entries(JSON.parse(input).devices).filter(([runtime])=>runtime.includes("iOS-"))
+                .sort(([a],[b])=>b.localeCompare(a,undefined,{numeric:true}));
+              const device=entries.flatMap(([,devices])=>devices).find(d=>d.name.startsWith("iPhone"));
+              if(!device)throw new Error("No available iPhone simulator");
+              console.log("DARCI_CI_SIMULATOR="+device.udid);
+            });' >> "$GITHUB_ENV"
+      - name: Build and test iOS, including accessibility UI regressions
+        run: |
+          set -euo pipefail
+          xcodebuild test -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
+            -configuration Debug -destination "platform=iOS Simulator,id=$DARCI_CI_SIMULATOR" \
+            -derivedDataPath "$RUNNER_TEMP/darci-ios-build" -resultBundlePath "$RUNNER_TEMP/darci-ios-results.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
+            DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
 
   web:
     runs-on: ubuntu-latest
@@ -32,9 +113,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - run: npm install
+      - run: npm ci
       - run: npm run observability:test
+      - run: npm test
       - run: npm run lint
+      - run: npm run build
+      - run: npx tsc --noEmit
 
   types:
     runs-on: ubuntu-latest
@@ -46,5 +130,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - run: npm install
+      - run: npm ci
       - run: npm run build

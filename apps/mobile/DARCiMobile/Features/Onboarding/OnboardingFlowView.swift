@@ -33,17 +33,17 @@ struct OnboardingStoryContent: Identifiable, Equatable {
         OnboardingStoryContent(
             id: 0,
             imageName: "onboarding1",
-            message: "Members get documents notarized in seconds not hours. Notaries handle more work without burning out."
+            message: "Keep your documents, signatures, and notary requests in one place—from preparation through the in-person session."
         ),
         OnboardingStoryContent(
             id: 1,
             imageName: "onboarding2",
-            message: "Every step meets legal standards. Watermarking, sealing, hashing, and ledger anchoring happen automatically so compliance is never a question."
+            message: "Capture the in-person acknowledgment, seal the document, and record a SHA-256 fingerprint for checking its integrity."
         ),
         OnboardingStoryContent(
             id: 2,
             imageName: "onboarding3",
-            message: "Watermarking, sealing, hashing, and ledger anchoring happen automatically. Compliance isn't something you chase—it's something you get."
+            message: "Watermarking, sealing, and SHA-256 verification bring your document and its execution record together."
         ),
         OnboardingStoryContent(
             id: 3,

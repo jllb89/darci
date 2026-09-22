@@ -1,0 +1,470 @@
+# DARCi Production Readiness Roadmap
+
+- Audit date: **2026-09-17**
+- Execution priorities revised: **2026-09-17** — Phase 1 consolidates secure access, truthful finalization, restorable PDF backups, payment correctness and actionable alerts into one mandatory hardening gate. No implementation or acceptance is implied by this reordering.
+- Audited repository revision: `4e7f3ff91d9a6078525e8c6562ebe5b94432db51` (`pdf fix`)
+- Target: controlled production launch of web and iOS, initially California/Ohio, with real member subscriptions if the paid-launch gates pass.
+- Recommendation: **not yet a production go**. The core product is substantially implemented; production isolation, security/integrity work, live-payment support and operational acceptance remain.
+- This supersedes the launch priorities/status in [DARCi Private Beta Readiness Roadmap](private-beta-readiness-roadmap-2026-08-25.md). That document remains the historical product-decision register.
+- The original audit changed documentation only. The subsequent, explicitly authorized Phase 1 implementation is **in progress and not approved for deployment**; current implementation, resource changes and evidence are tracked in [the execution record](production-hardening-phase1-execution-2026-09-17.md). Audit findings below describe the baseline unless superseded by verified execution evidence.
+- **Approved launch-data decision (17 September): fresh production accounts/documents, with beta preserved separately.** No beta migration or deletion; no conversion of Stripe test subscriptions into paid entitlements. The 50 historical beta PDF readability exceptions remain under separate review.
+- **18 September decisions:** automatic AWS backups approved within the existing $15/month total recovery target; public verification links retained with status/hash only and PDFs restricted to authorized in-app access; Sentry work deferred; Jorge is the sole alert responder for now. None of these four questions remains pending. Secondary coverage and Sentry acceptance are not claimed.
+- **Automatic recovery is now enabled:** 02:00/14:00 Mexico City, short-lived tasks only. Real scheduler dispatch, complete encrypted backup, independent receipt checks and a controlled task-failure → queue → alarm → SNS action passed. Regular cadence/whole-application recovery still need acceptance; application hardening/public-verification changes have not been deployed.
+- Latest local proof: backend 614 tests; web 72 tests and production build; prior unchanged iOS 110 unit + 12 UI tests; actual Auth logout/revocation and SQL/Storage boundaries. Rebuilt API/worker/web `phase1-19` images include the public-verification changes and clear HIGH/CRITICAL scans. All 101 migrations install cleanly; the isolated populated-beta upgrade preserves whole-row fingerprints across 16 evidence/billing tables. Two encrypted, version-pinned snapshots restored all 2,474 objects byte-for-byte; source-PDF exceptions are retained, not repaired. An actual cloud-scheduler test subsequently completed another 2,474-object backup in 306 seconds, with independent receipt/database/key checks and all object versions matching the previous verified restore. Key prepared and missing-backup alarm exercised. These results do **not** close the remaining Phase 1 acceptance/deployment gates.
+
+## 1. Executive assessment
+
+We should not rebuild the billing experience or repeat the completed mobile/PDF work. We should also not treat production as “replace staging URLs and Stripe keys.” The remaining work falls into four groups:
+
+1. **Engineering blockers:** test-only Stripe assumptions across application code and SQL; ledger-dependent completion with no real ledger provider; invite-claim authorization/atomicity; sensitive identity retention; safe audit persistence; dependency/runtime/security hardening; incomplete shipping CI.
+2. **Production provisioning:** isolated AWS runtime and secrets, Supabase project/data/storage, production domains/TLS, provider callbacks/keys, iOS production configuration, deployment approvals and recoverable releases.
+3. **Acceptance evidence:** Stripe failure/recovery scenarios, real-device end-to-end workflows, data/object restoration, concurrency/load/outage drills, alert delivery and production smoke tests.
+4. **Client/legal/distribution decisions:** domains and beta-data migration, member terms/taxes, CA/OH approval, public-PDF disclosure, identity retention, ledger versus explicit hash-only product, and App Store purchase/distribution scope.
+
+**Fastest defensible path:** freeze the existing three products and member tiers; close the blockers; provision an isolated production stack; rehearse it; launch to a capped cohort. Do not add Dynamic POA, notary billing, scheduling, new jurisdictions or remote online notarization to this release.
+
+**First delivery milestone:** complete the five-track Phase 1 below as one coordinated hardening release, including working recovery procedures and test evidence—not five separate reports. Broader production provisioning and public rollout follow it. Infrastructure or provider setup strictly needed to prove a Phase 1 control belongs in Phase 1; optional infrastructure complexity and general refactoring do not.
+
+## 2. Audit method and evidence limits
+
+Reviewed the old umbrella roadmap; Stripe roadmap and services/SQL; auth/invites; identity/session/finalization; web/iOS release configuration; Dockerfiles and GitHub workflows; storage/catalog metadata; and provider documentation.
+
+Read-only live checks covered:
+
+- AWS account ending **3951**, primarily **us-east-1**: ECS, task definitions, Secrets Manager metadata and selected non-secret flags, ElastiCache, ECR, Route 53, ACM, ALB, CloudFront, CloudWatch, regional WAF, CloudTrail trail configuration, ECS autoscaling and SMS account/number status.
+- The accessible Supabase project list and DARCi staging bucket/template/catalog metadata.
+- Resend sending-domain and webhook status using the existing staging integration.
+- Stripe test-mode reconciliation and lifecycle-evidence reporting.
+- Recent GitHub CI/deployment results and fresh npm production-dependency audits.
+- Fresh web lint and standalone TypeScript checks.
+
+No secret values are included here. Resource absence means **not found in the inspected account/region/access scope**, not proof that no other client-owned environment exists. Supabase plan/PITR, Auth dashboard settings, Google Cloud key restrictions/budgets, Stripe live-account activation, App Store Connect approval, Sentry alert configuration, Grafana ingestion and all provider contracts/DPAs remain unverified unless explicitly stated below. This is not a penetration test or legal certification.
+
+The 2026-09-16 implementation run passed 571 backend tests, 69 web tests, 108 iOS unit tests, the notary-selection accessibility UI test, web/backend builds and iOS Release compilation. Those are dated baseline results, not a claim that this audit reran every suite or proved production acceptance. Fresh 2026-09-17 standalone web typechecking still fails; see section 4.
+
+## 3. What has progressed since the private-beta roadmap
+
+| Area / old register | Revised assessment | What remains |
+| --- | --- | --- |
+| Member billing, BILL-01–04 | Core implementation exists: three volume tiers, hosted Checkout/Portal, signed webhook inbox, subscriptions/entitlements, atomic usage, continuity, final-package holds/releases, plan changes and operator recovery | Live-mode engineering, provider setup, remaining lifecycle evidence and commercial approval; not another paywall project |
+| Web/iOS membership | Paywall, active-plan/settings states, shared usage/recovery information and iOS presentation coordinator implemented | Production endpoints, actual storefront purchase policy, device Apple Pay and release acceptance |
+| PDF/signing/finalization, INT-04 / SESSION-01 | Encryption-related PDF corruption fixed; independent validation added before transformed bytes are released; API/worker fix deployed to staging | Rehearse final production image and actual team workflows; separately resolve existing damaged beta artifacts |
+| Session/auth reliability, SESSION-01 | Coalesced/proactive mobile refresh, transient-failure preservation and granted request-scoped profile selection implemented | Cross-device/expiry/revocation acceptance; these fixes do not close invite or broad auth-security gaps |
+| Accessibility | Native scrollable notary selection with pinned actions; regression test at standard/max text | Broader critical-path device/VoiceOver/keyboard/display-size acceptance, especially signing and IPEN |
+| Observability, OPS-02 | Error catalog/runbooks, document/session/billing signals, correlation and operational reports exist | Deployed alert routing, source maps/dSYMs, dependency health, worker heartbeat, production retention and incident drill |
+| Jurisdiction boundary, LEGAL-02 | Live staging catalog query returned only `US-CA` and `US-OH` enabled across 208 availability rows | Reproduce approved config in production and test direct API/admin bypasses |
+| Storage privacy | All three staging buckets inspected are private | Full RLS/service-role negative tests, object backup/restore, limits and retention |
+| Shipping baseline, BETA-03/04 | iOS tests now compile/pass; latest GitHub CI and staging deployment succeeded | Web standalone typecheck remains broken; CI still does not test/build everything that ships |
+| Admin/operator controls | Admin configuration plus billing replay/resync/release/support tooling exists | Least-privilege roles, MFA/recent reauthentication, approved production bootstrapping and operator acceptance |
+
+Current membership pricing document proposes **$49 / $99 / $199 USD monthly**, for **3 / 10 / 25 workflows**, identical features. Notaries pay DARCi nothing; their in-person fees are separate. A Trust package consumes one workflow, not one unit per PDF. Keep the continuity and release policy already agreed; obtain approval of its live customer/legal wording. See [pricing rationale](member-membership-pricing-rationale.md).
+
+## 4. Current launch blockers and concrete evidence
+
+### PROD-01 — Stripe live support is not implemented end to end
+
+**Priority: P0 for paid launch. Owner: backend/billing.**
+
+`backend/src/config/stripe.ts` hardcodes `STRIPE_PROVIDER_ENVIRONMENT = "test"`, rejects non-`sk_test_` keys and rejects live objects. `memberBillingService.ts`, `stripeWebhookService.ts` and `billingOperationsService.ts` repeatedly filter/persist `provider_environment = "test"`. Catalog scripts are test-only. SQL in `20260826153000_add_stripe_phase23.sql` and subsequent corrections also embeds test-mode mappings, locks and subscription assumptions.
+
+Although schema constraints allow `test` and `live`, **changing the key alone will fail**. Implement a validated environment boundary throughout clients, lookups, writes, reconciliation, idempotency namespaces, webhook validation and database functions. Add forward migrations; do not edit already-applied migration history. Verify that a live event cannot affect test entitlements and vice versa.
+
+Staging report on this audit:
+
+- Provider scan complete; **0 critical / 0 high / 0 medium reconciliation findings**.
+- **9/15 lifecycle evidence checks** present; no acceptance ID; report recommendation `remain_observe`.
+- Six missing evidence categories: payment failure, payment action required, cancellation/deletion synchronization, period-end downgrade, final-package billing hold and controlled usage reversal.
+- Actual staging remains `test + enforced`; this audit did not change it. The report recommendation and actual flag differ and must be reconciled by the release owner. Lack of evidence is not proof those code paths fail.
+
+Completion requires live catalog/customer/portal/webhook separation, approved commercial settings, complete test-mode evidence, and an explicitly authorized low-value real-payment/receipt/refund or cancellation exercise. No real charge is authorized by this audit. Stripe documents separate test objects and production webhook registration in its [go-live checklist](https://docs.stripe.com/get-started/checklist/go-live).
+
+### PROD-02 — Ledger decision is a functional completion gate
+
+**Priority: P0. Owner: product, backend and counsel.**
+
+`ledgerService.ts` implements only `stub` / `unconfigured`; staging API and worker explicitly allow the stub. `documentFinalizationService.ts` completes the document/request and invokes final-package release only when all ledger attempts are `anchored`.
+
+Choose one before launch:
+
+- **Real ledger required:** implement the selected provider, real proof/finality validation, retries/reconciliation, outage handling and privacy-safe hash-only external payloads.
+- **Hash-only launch approved:** implement explicit finalized/hash-verified/released states independent of external anchoring; preserve audit history and distinguish optional pending/failed/confirmed anchors. Update public verification, billing release, notifications and both clients. Remove external-ledger promises.
+
+Simply disabling the stub will strand completion in the current flow. Continuing the stub and calling it a real anchor is unacceptable. Public landing-page FAQ currently promises distributed-ledger anchoring and broad compliance (`apps/web/src/app/page.tsx`); correct these claims to match the approved deployment.
+
+### PROD-03 — Invite claims still need verified recipient binding and atomicity
+
+**Priority: P0. Owner: auth/backend.**
+
+The public claim controller passes token, optional viewer ID and client-provided `claimAddress`. `claimInviteToken` does not establish a verified-email match before inserting the claim, then separately updates invite/token/recipient rows. The authenticated open path has additional recipient logic, but does not eliminate the public-path risk.
+
+Require the intended verified account email for signer claim/acceptance, make claim/use-count/assignment transitions transactional, and reject mismatched/revoked/expired/concurrent claims without partial mutation. Add negative tests for unauthenticated, wrong-email, already-claimed-by-another-user, forwarding and retry cases. Preserve preview/signup onboarding without granting signing authority prematurely.
+
+### PROD-04 — Identity protection and retention remain incomplete
+
+**Priority: P0. Owner: privacy/security/backend/counsel.**
+
+`identityDocumentSchemaService.ts` labels some `maskedIdentifier` fields as full passport/card identifiers. `identityDocumentPolicy.ts` accepts those values without masking; the notary controller copies them into identity/check-in metadata. This is not evidence of field-level encryption or minimization.
+
+Define accurate field semantics, protected storage/encryption and role/audit controls; prevent replication into broad read models, logs, crash reports and caches. Obtain a retention/legal-hold policy for identifiers, evidence, GPS, signatures, documents, audit and backups. The meeting-artifact retention endpoint and Stripe retention runner do **not** demonstrate comprehensive identity/GPS deletion automation. Implement and schedule the missing cleanup with proof and alerts.
+
+### PROD-05 — Security/runtime and CI are not at a production baseline
+
+**Priority: P0. Owner: security/platform/web/backend.**
+
+Fresh `npm audit --omit=dev` results:
+
+| Scope | Critical | High | Moderate | Low | Total package entries |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Backend | 2 | 9 | 63 | 1 | 75 |
+| Web | 1 | 7 | 7 | 1 | 16 |
+
+These are dependency findings, not a count of independently exploitable DARCi vulnerabilities. Triage reachability and remediate direct/reachable exposure; do not use `npm audit fix --force` blindly. Backend critical entries include `fast-xml-parser` and `protobufjs`; web includes direct Next.js `16.1.6`. The audit offers a newer compatible-major Next.js fix; re-check exact supported versions when implementing. Include OS/native PDF parser scanning, not only npm.
+
+Docker still uses Node 20 while CI uses Node 24. Node 20 is listed as EOL by the [official release schedule](https://nodejs.org/en/about/previous-releases). Move runtime/build/CI to an agreed supported LTS baseline and test native PDF tooling on the shipped ARM64 image. Backend runtime also copies the full installed dependency tree rather than a pruned production set; audit the actual final image.
+
+Additional findings:
+
+- No broad application rate-limiter/Helmet policy found in the inspected ingress; auth cooldowns exist but do not cover all abuse paths. Protect OTP, public invites/verification, uploads/PDF transforms, Checkout and expensive session actions, with proxy-aware distributed limits.
+- Next.js headers configure assets/AASA, not a full CSP/security-header baseline. Web access/refresh tokens remain in localStorage. Assess cookie-based sessions or a documented hardened alternative, and test CSP with maps/PDF/auth. Restrict production CORS/origins rather than retaining local-development allowances.
+- API catch-all returns `err.message`; sanitize public failures while preserving private correlation. Review telemetry scrubbing beyond the newly added safe events.
+- CI runs backend tests/observability, web observability test/lint and types build, but not an explicit backend build gate, full web test/typecheck/production-build gate, iOS tests/build/archive validation, migration/RLS suite or dependency/image scan. Deployment runs independently on master pushes rather than requiring a successful promoted release.
+- Fresh web lint: zero errors, one hook dependency warning. Fresh standalone `tsc --noEmit`: **fails** at `apps/web/src/app/app/notary/requests/identityDocument.test.ts:12`, obsolete `government_id` comparison (TS2367).
+
+Exit: no unreviewed critical or reachable unmitigated high exposure; remaining findings have an owner, mitigation and expiry; every shipping gate is reproducible and required for promotion.
+
+### PROD-06 — Legal-document audit and provenance are not fully closed
+
+**Priority: P0 for critical transitions; P1 for wider coverage. Owner: backend/counsel.**
+
+`auditService.ts` still logs and continues if generic audit insertion fails. Inventory material signing/notary/identity/release transitions and make their required evidence transactional or durably recoverable. Do not indiscriminately make every analytics event blocking.
+
+Live active template registry entries still contain descriptive labels such as `sha256:ca-poadoc-v1`, not hashes of exact template bytes. Store actual content digests and immutable versions/provenance, including rules/bindings and rendering version. Rehearse reconstruction and CA/OH package composition. Preserve the hidden internal trust artifact where legally required without exposing it incorrectly as a standalone review item.
+
+The September PDF fix is committed and deployed to staging API/worker, and must remain in production with qpdf/Poppler installed. Existing corrupted beta derivatives were not automatically repaired. Follow the [recorded recovery boundary](mobile-pdf-session-regression-fix-2026-09-16.md): never overwrite already-hashed/anchored bytes or fabricate signatures. Decide whether those beta records are retained separately or migrated with approved corrections.
+
+## 5. External-service and production configuration register
+
+Statuses below describe what was observed, not blanket approval of a vendor account. “Owner” is an accountable role to assign to a named person at the Phase 1 kickoff (1.0).
+
+### A. AWS foundation, edge and runtime
+
+| ID | Current evidence | Required production work and exit evidence | Owner |
+| --- | --- | --- | --- |
+| AWS-01 Account/IAM | CLI access works; GitHub staging deployment uses OIDC | Choose isolated production account preferably, or explicitly isolated resources/roles in the existing account. Root/admin MFA, break-glass access, billing ownership, scoped GitHub OIDC subject/environment and separate task/execution roles. Review least privilege for secrets, SMS, ECR and logs; no long-lived developer keys in tasks. | Platform/security/client |
+| AWS-02 ECS/network | Only `darci-staging` found; API/web/worker each 1 running/desired task, 0.5 vCPU/1 GiB, public IP enabled; no scalable targets | Provision production API, worker and web with documented task definitions/IaC. Prefer private tasks with controlled egress; restrict ingress to ALB security groups. Use multiple AZs; target at least two API/web tasks unless a smaller controlled-launch availability tradeoff is signed off. Size PDF CPU/memory/temp disk using load tests. | Platform |
+| AWS-03 Worker/queues | Dedicated worker exists; Redis is Valkey 8 serverless; snapshot retention 0 | Separate production Redis/credentials/prefix, TLS/security groups, appropriate persistence/eviction and recovery strategy. Verify BullMQ hash-slot prefix, concurrency and durable job reconstruction. Prove crash/restart does not lose or duplicate generation, notification, webhook, usage or release work. Multi-worker scheduled tasks need distributed deduplication, not only in-process flags. | Platform/backend |
+| AWS-04 DNS/TLS/CDN | `.dev`/`.com` zones exist; `.dev` app/API staging names point directly to ALB. Existing CloudFront alias is only `app.staging.darciregistry.com`. Inspected ACM certificates are staging wildcards. | Confirm final domains first. Add production ALB routing, ACM certs and DNS; configure CloudFront for the actual production web hostname if used. Do not assume `.dev` currently uses the old CDN. HTTPS redirect/HSTS, certificate renewal alerts, AASA serving and correct origin headers. Never cache authenticated/billing/signed-document responses as shared public content. | Platform/web |
+| AWS-05 Secrets/KMS | Only `/darci/staging/app` found; local `.env.production` has empty DB/auth/Redis/Stripe/public URL fields | Create least-privilege production secret references and rotation/redeploy procedure. Do not copy the staging secret wholesale. Separate Supabase service role/JWT, webhook signing, Stripe, Resend, APNs and OTLP credentials. Encryption-at-rest baseline plus policy-approved customer KMS where required. | Platform/security |
+| AWS-06 Deploy/rollback | Staging task revisions API 96 / worker 82 use `staging-4e7f3ff91d9a`; web revision 61 uses earlier web-only image `staging-ddad6f95f0bf`. Circuit breakers disabled. No production workflow found. | Promote a reviewed release manifest containing each image digest, migration set and config version. Protected GitHub production environment, approval and CI dependency; no auto-production deploy on ordinary master push. Enable failed-deployment rollback, verify prior compatible image/config recovery, and define forward-only migration limits. | Platform |
+| AWS-07 ECR/supply chain | Repositories have mutable tags, scan-on-push false; registry BASIC scan config has no rules | Scan actual release images, remediate findings, pin/rebuild supported bases, produce inventory/SBOM as appropriate and promote digests. Lifecycle rules must retain rollback images. Run as non-root; constrain filesystem/egress while allowing required private PDF temp storage. | Platform/security |
+| AWS-08 Health/alerts | `/health` only returns `ok`; inspected tasks have no container health checks. No CloudWatch metric alarms, regional WAF ACLs or configured CloudTrail trails found; logs retained 30 days. | Separate liveness/readiness and worker heartbeat; dependency and queue-age checks. ALB errors/latency, ECS restarts/CPU/memory, Redis, email/SMS spend, certificate, webhook, PDF/finalization and synthetic checks. WAF/abuse policy, durable audit trail, budgets/cost alerts, notification ownership. “No trails” does not mean AWS event history is absent. | Platform/on-call |
+| AWS-09 Backup/DR | Redis snapshots disabled; DB/object restore not demonstrated | Define RPO/RTO, retention/legal hold, encrypted backups and separate restore destination. Restore DB **and document/signature object bytes**, compare hashes and test app access. Decide regional recovery requirements and rehearse the runbook. | Platform/privacy |
+
+AWS documents automatic rollback behavior and its prerequisites in the [ECS deployment circuit-breaker guide](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-circuit-breaker.html). Use dependency-aware readiness without making a noncritical telemetry outage remove every healthy API task.
+
+### B. Supabase: database, Auth, Storage and Realtime
+
+**Owner: backend/platform/security. Priority: P0.**
+
+One accessible DARCi project was found, `oqferisuloumoojgbjde`, active/healthy in us-east-1 and used by staging. No separately identified DARCi production project was found in this access scope. The `documents`, `signatures` and `notarized-copies` buckets are private, but their inspected bucket-level MIME/size restrictions are unset; this does not mean API upload validation is absent.
+
+- [ ] Provision an isolated production project with appropriate compute/plan/quotas, region, connection pooling, SSL verification, network/access restrictions and owned billing.
+- [ ] Rehearse full schema installation plus forward migrations in a disposable environment. Review historical migrations for development-user repairs, admin grants, staging provider IDs, legacy release backfills and notification seeds; do not blindly import staging users, pending outbox rows or test entitlements.
+- [ ] Promote counsel-approved CA/OH rules/templates/bindings, catalog and email templates as versioned release data. Verify required grants/functions/extensions, immutable hash provenance, reference data and notary eligibility.
+- [ ] Run actual SQL/RLS tests for member, signer, assigned/wrong notary, admin, anonymous and service-role-mediated APIs. Existing RLS files and billing SQL tests are not evidence of comprehensive production enforcement.
+- [ ] Configure Auth Site URL, exact web/native redirect allowlists, email confirmations, token/refresh/session policy, password/recovery settings, abuse controls and admin step-up/MFA. Verify custom email OTP and Supabase-originated recovery/confirmation delivery separately. Configure any enabled OAuth provider's own console callbacks/consent; do not add unused social providers as launch scope.
+- [ ] Configure production Send SMS Hook endpoint and signing secret; validate signed requests, replay rejection, delivery and failure behavior. Local `.env.staging` says hook disabled, whereas the live secret says enabled: use effective runtime, not local-file assumptions.
+- [ ] Create/verify private buckets, storage policies, signed URL expiry, upload content/size limits and cleanup. Validate held/private versions cannot be obtained through alternate endpoints or stale URLs. Test realtime publication/private channels and JWT rotation/reconnect on actual devices.
+- [ ] Enable policy-appropriate backups/PITR and separately back up storage object bytes. Supabase explicitly states DB backups exclude Storage API objects; DB restoration alone cannot restore deleted PDFs. [Supabase backup documentation](https://supabase.com/docs/guides/platform/backups)
+- [x] Launch-data strategy decided: fresh production; beta remains separate and preserved. **Provisioning is not complete.** Production must have independent Auth/storage/database/provider configuration and must not import beta accounts, legal artifacts or Stripe test entitlements.
+
+See the vendor's [production checklist](https://supabase.com/docs/guides/deployment/going-into-prod) for dashboard-side controls; their existence has not been verified here.
+
+### C. Stripe, subscriptions and Apple Pay
+
+**Owner: billing/backend/client finance. Priority: P0 for paid launch.**
+
+Keep the implemented model. Complete PROD-01 before installing live keys. Then:
+
+- [ ] Confirm merchant activation, legal business/contact details, payout bank, charges/payout capabilities and ownership/MFA; establish taxability/billing address/invoice/receipt settings with the client's adviser.
+- [ ] Create/verify separate live product/Price mappings for the approved three tiers and a restricted live Customer Portal. Approve cancellation, proration, downgrade, no-rollover/no-overage, notary-fee exclusion and final-package hold wording.
+- [ ] Register the production `POST /webhooks/stripe` endpoint with the approved SDK-compatible API version and existing required events: Checkout completed/expired; subscription created/updated/deleted; invoice paid/payment_failed/payment_action_required. Preserve raw-body signature validation, durable inbox and retries. Version changes require contract tests, not an unreviewed dashboard upgrade.
+- [ ] Inject the live key, endpoint-specific signing secret and approved HTTPS return URL; verify both API and worker environment isolation. Build-time public keys, if used, must match live mode. Do not reuse test customer/price/portal IDs.
+- [ ] Exercise all six currently missing test evidence categories and the wider concurrency/out-of-order/worker-restart/byte-identical-release matrix. An evidence marker is not a substitute for the actual test.
+- [ ] Verify Apple Pay on the actual enabled hosted Checkout flow using a supported physical device/wallet. For custom/embedded payment surfaces, configure required payment domains; native Apple Pay would additionally need the appropriate Merchant ID/certificates/entitlements and is not what the present hosted-checkout implementation ships. Follow the applicable [Stripe Apple Pay integration guide](https://docs.stripe.com/apple-pay?platform=web).
+- [ ] Assign daily reconciliation, refund/dispute, fraud and webhook-incident ownership. Perform a deliberately authorized live smoke test only after the preceding gates.
+
+### D. Resend email and delivery evidence
+
+**Owner: backend/client domain administrator. Priority: P0.**
+
+The connected Resend account reports `darciregistry.com` as verified. Both existing staging webhook endpoints (`.dev` and `.com`) are **disabled**. A configured signing secret is therefore not proof that delivery/bounce events are reaching DARCi. Sending may still work; this finding concerns missing callback evidence and recovery visibility.
+
+- [ ] Decide whether sender addresses remain on `.com` even if the app uses `.dev`; that is valid when deliberate. Verify SPF/DKIM, DMARC policy and alignment, sender/reply-to/support mailboxes and ownership.
+- [ ] Use a production-scoped key/domain policy. Create and enable the production Resend webhook with matching secret, necessary event subscriptions and deduplication. Separately restore/verify staging callback delivery before acceptance.
+- [ ] Test OTP, signup/confirmation/recovery, signer invite, notary assignment/contact exchange, session and final-package notification. Correlate sent→delivered/bounced/suppressed; account for delays and avoid claiming “email delivered” from API acceptance alone.
+- [ ] Verify resend/cooldown, retries, suppression, opt-outs where relevant, retention, expiry and links/logos pointing to production. Keep `.com` support addresses that remain intentional.
+
+Delivery events and replay behavior are described in [Resend's webhook documentation](https://resend.com/docs/webhooks/introduction).
+
+### E. AWS End User Messaging SMS / SNS
+
+**Owner: platform/auth/client messaging owner. Priority: P0 if phone OTP remains enabled.**
+
+AWS SMS account tier is already **PRODUCTION**—do not repeat sandbox removal as unfinished. The account has one ACTIVE SMS-capable toll-free number and another PENDING number. Verify the number actually selected by the hook, its registration/compliance status and approved use case. The live secret enables the Supabase SMS hook; general notification SMS remains `internal` with SNS sending disabled. These are separate delivery paths.
+
+- [ ] Explicitly set approved origination identity and region rather than relying on the hardcoded number fallback; confirm IAM `SendTextMessage` permissions, spend limits, registration, allowed countries and consent/STOP/HELP handling as applicable.
+- [ ] Point production Supabase to production `/webhooks/supabase/auth/send-sms`, with its own hook secret. Test delivery, wrong-code/replay/rate limiting, account-linking, pending-number failure and provider outage without exposing tokens or reallocating a phone belonging to another account.
+- [ ] Either configure general SNS notification SMS with consent/cost controls, or keep it intentionally disabled and ensure no required workflow depends on it. Do not enable both paths merely because SMS credentials exist.
+- [ ] Monitor spend/delivery failures and document account/phone recovery. Ensure recipients are not stranded if email or phone recovery is unavailable.
+
+AWS ends Amazon Pinpoint support on October 30, 2026, but states that its renamed End User Messaging delivery channels continue. Do **not** infer that DARCi's SMS Voice v2 delivery API must be replaced solely from the Pinpoint name. Confirm the used APIs, not legacy campaign/analytics features. [AWS migration notice](https://docs.aws.amazon.com/pinpoint/latest/userguide/migrate.html)
+
+### F. APNs, Apple Developer and App Store Connect
+
+**Owner: iOS/client Apple account holder. Priority: P0 for iOS launch.**
+
+Staging APNs configuration is present/enabled at 100% rollout, with `APNS_ENVIRONMENT=production`, appropriate to distribution/TestFlight tokens. This does not mean the DARCi backend is production. Production signing/submission and actual delivery were not verified through App Store Connect in this audit.
+
+- [ ] Verify paid program/team ownership, agreements, current distribution profile/certificates, app identifier, APNs key scope and revocation/rotation access. Keep APNs transport environment distinct from DARCi deployment environment.
+- [ ] **Fix Release configuration:** `Config/Release.xcconfig` explicitly points at staging API and Sentry environment. `generate-release-config.sh` defaults to `.env.staging` and writes Supabase/Sentry values, **not the API URL**. Passing `.env.production` alone does not produce a correct production build. Add explicit environment selection plus an archive-time rejection of staging/localhost/missing config.
+- [ ] Align API, Supabase, Sentry, associated domains, invite/session/document/billing trusted hosts and production AASA paths. Existing entitlements include both staging and production `.dev`; avoid cross-environment invite/payment links resolving in the wrong app. If `.com` is chosen, update all relevant allowlists, not just DNS.
+- [ ] Validate Release archive signing/dSYMs, symbol upload, install/upgrade, push registration/invalidation, cold-start universal links and logged-out invite/checkout return. September's successful Release compilation is not App Store acceptance.
+- [ ] Complete privacy labels/policy, SDK data-use inventory, required-reason API/privacy manifest review, encryption/export answers, screenshots/metadata/age rating, support URL, account deletion and reviewer access. No app-owned `PrivacyInfo.xcprivacy` was found in the source inventory; assess actual API use and the archive's aggregated SDK manifests rather than assuming all dependencies are noncompliant. [Apple privacy-manifest guidance](https://developer.apple.com/documentation/BundleResources/privacy-manifest-files)
+- [ ] Validate Dynamic Type, Display Zoom, VoiceOver, keyboard avoidance, location-denied/retry states and nonblocking access to accepted work. Test actual physical devices as well as simulator automation.
+
+**Payment-policy revision:** Apple's current guidelines allow external-purchase links/CTAs in United States storefront apps without the external-link entitlement; person-to-person/outside-app services have separate provisions. A mandatory in-person step alone does not establish that DARCi's membership—which also unlocks digital workflows and excludes notary fees—qualifies for every native Stripe purchase method. The existing hosted-checkout path is the practical starting point for a U.S.-scoped submission; document it accurately, restrict distribution/behavior appropriately, and obtain acceptance of the submitted app. Do not equate a California/Ohio document jurisdiction with an App Store storefront. Other storefronts/native payment methods require their own policy analysis. [Apple App Review Guidelines §3.1](https://developer.apple.com/app-store/review/guidelines/)
+
+### G. Google Maps / Places / Geocoding
+
+**Owner: platform/web/iOS/client Google Cloud owner. Priority: P0 for enabled venue assistance.**
+
+Browser and backend geocoding integrations exist; the staging API references the server key. Google Cloud billing, quotas, API enablement and key restrictions were not inspected through the provider console.
+
+- [ ] Use separate browser/server credentials and production restrictions: exact HTTPS referrers for browser Maps/Places; API restrictions plus appropriate server egress controls for server geocoding. Never ship the server key in web/iOS bundles.
+- [ ] Confirm the precise Maps/Places/Geocoding APIs used, billing project, budgets/quotas, required attribution and production hostname allowlists. Add an iOS-specific key only if a native Google SDK actually uses it; do not create unnecessary integrations.
+- [ ] Test autocomplete, reverse geocoding, manual address completion, rate-limit/provider-denial behavior and accessibility. A map result is address assistance, not legal proof of co-presence. Approve GPS thresholds/accuracy/freshness and notary fallback policy separately.
+
+Follow [Google's key-restriction guidance](https://developers.google.com/maps/api-security-best-practices).
+
+### H. Sentry, Grafana/OTLP and incident operations
+
+**Owner: platform/engineering on-call. Priority: P0 for actionable launch coverage.**
+
+Sentry integrations and the error catalog exist across clients/backend. The staging OTLP destination points to Grafana Cloud. The inspected API/worker task definitions reference an OTLP endpoint but do not show an `OTEL_EXPORTER_OTLP_HEADERS` secret injection; authenticated ingestion and resulting traces remain unverified. A local `.env` header is not evidence that ECS has it.
+
+- [ ] Configure intentional production Sentry projects/environments, release tags and sampling; supply upload credentials through CI secrets, not app bundles. Verify web source maps and iOS dSYMs by resolving a controlled event to source.
+- [ ] Configure/verify Grafana endpoint/auth headers, TLS, service/environment/release attributes and exporter compatibility. Avoid duplicate auto-instrumentation. Decide whether OTLP is required or intentionally disabled; silently broken telemetry is not an acceptable state.
+- [ ] Verify scrubbing of auth headers, invite tokens, signed URLs/query strings, full identity identifiers, signatures and document content in all capture paths—not just the new helpers.
+- [ ] Create/deliver real production alerts with owner/runbook: auth/SMS/email failures, wrong-role spikes, queue age/dead letters, PDF validation/finalization, webhook/reconciliation, held-release failures, public verification, retention/backup failures and infrastructure health. Test escalation and recovery.
+- [ ] Approve telemetry retention/data residency/access, usage budgets, support access and incident/breach procedures. Local catalog/KPI-readiness checks are not live SLO evidence.
+
+### I. Domain ownership, provider governance and intentionally unused services
+
+**Owner: client/product/security. Priority: P0 for required services.**
+
+Confirm billing owners, MFA/admin recovery, approved subprocessors/DPAs, privacy disclosures, renewal dates and emergency contacts for AWS, Supabase, Stripe, Resend, Google Cloud, Apple, Sentry and Grafana. Include registrar/DNS ownership and the working support mailbox. Do not assume all credentials belong permanently to a developer account.
+
+`POSTMARK_SERVER_TOKEN` and `LEDGER_ANCHOR_URL` appear in old configuration; Postmark is not the active email provider and setting a ledger URL does not implement a provider. Generic outbound webhooks/SNS are conditional, not mandatory new vendors. Inventory any enabled OAuth or other client-managed service before launch; do not provision integrations solely because an obsolete example variable exists.
+
+## 6. Production configuration handoff
+
+Use placeholders below until the client chooses `.dev` versus `.com`. `<APP>`, `<API>` and `<VERIFY>` are not deployable values. Record a reviewed manifest outside plaintext secret files.
+
+| Configuration family | Production requirement |
+| --- | --- |
+| Environment | `APP_ENV=production`, supported runtime with `NODE_ENV=production`; explicit production telemetry env/release; debug/test/mock paths off |
+| Routing | `API_BASE_URL=<API>`, `APP_BASE_URL=<APP>`, `WEB_APP_URL=<APP>`, deliberate `PUBLIC_VERIFICATION_BASE_URL=<VERIFY>`; exact `AUTH_ALLOWED_ORIGINS` and `CORS_ALLOWED_ORIGINS`; auth/invite/contact/payment/verification links and asset origins agree |
+| Supabase | Production URL, anon/public key, service-role key, applicable JWT validation settings, DB connection/SSL/pool and private bucket names; no staging host/key in production |
+| Queue | Production `REDIS_URL`, `DISABLE_REDIS_QUEUES=false`, isolated `BULLMQ_KEY_PREFIX`; runner/concurrency/retention settings documented |
+| Stripe | Validated mode setting **to be implemented**, live key and webhook secret, production return URL, approved catalog/portal mappings; `BILLING_ENFORCEMENT_MODE=enforced` only after acceptance; real acceptance evidence; iOS purchase gate tied to approved distribution |
+| Email | `NOTIFICATION_PROVIDER=resend`, production key/webhook secret, sender/from/reply-to and strict failure behavior; review provider rollout/allowlist controls |
+| SMS | Production hook enablement/secret, explicit origination identity/region/message policy; general SNS remains disabled unless deliberately required and tested |
+| Push | APNs key/team/bundle/private key, correct distribution endpoint, enabled provider/allowed app environments/rollout; separate device-token data from beta |
+| Maps | Restricted `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, appropriate libraries/enablement, backend-only `GOOGLE_MAPS_SERVER_API_KEY` and server-geocode flag |
+| Telemetry | Sentry DSN/env/release/sampling and CI upload credentials; OTLP endpoint/auth/protocol if retained; no local-only config assumption |
+| Ledger | No stub allowed in real production; either real provider with proof verification or implemented, approved hash-only completion mode |
+| Web/iOS build | Web public values are baked into the image; iOS values into the archive. Rebuild with reviewed production inputs. `with-local-next-env.mjs` can fill missing public values from `.env.staging` locally; production builds must fail on missing inputs instead. Never assume updating an ECS runtime secret rewrites a shipped bundle. |
+
+Callback checklist: Supabase auth returns; `POST <API>/webhooks/supabase/auth/send-sms`; `POST <API>/webhooks/resend`; `POST <API>/webhooks/stripe`; Stripe Checkout/Portal returns; production AASA invite/document/session/billing routes; any explicitly enabled OAuth console callbacks.
+
+## 7. Ordered execution roadmap
+
+P0 = required before opening the relevant production surface. P1 = must close before increasing exposure, or receive a named, dated, expiring acceptance with a real mitigation. Proposed roles below must be assigned to people. No calendar estimate is reliable until the ledger/migration/legal decisions are made.
+
+### Phase 1 — Non-negotiable production hardening
+
+**Goal:** prove that only authorized people can act, completed documents tell the truth, lost PDFs can be restored, payments cannot corrupt entitlements or accepted work, and failures reach someone who can recover them.
+
+This is the first substantial delivery phase. It absorbs the former decision kickoff and pulls backup/restore, billing failure acceptance and actionable monitoring forward from later phases. Keep the implemented product/billing screens; fix and verify the underlying controls. A green build or a new dashboard alone does not complete this phase.
+
+#### 1.0 — Resolve essential decisions and establish the baseline
+
+- [ ] Assign named engineering, platform/security, billing, privacy/legal and support owners; agree the hardening scope/budget, evidence reviewer and escalation path for blocked decisions.
+- [ ] Confirm CA/OH in-person scope and member-only billing; freeze new features. Record domains, expected concurrency, App Store distribution scope and fresh-data versus beta-migration intent for subsequent provisioning.
+- [ ] Complete the decisions needed by these tracks. **Approved on 2026-09-17–18:** hash-only launch with no external-ledger claim; protect identity data without automatic deletion until counsel approves periods; RPO 24 hours/RTO 4 hours; up to $15/month total for isolated recovery including short-lived automatic AWS backups; critical alerts solely to Jorge at `lopezb.jl@gmail.com` for now; public status/hash verification with PDF access restricted to the authorized app; Sentry deferred. Retention periods/legal holds and remaining legal/commercial approvals are still outstanding. Approval of these decisions is not implementation acceptance.
+- [ ] Record the starting revision, migrations, active configuration, known damaged beta artifacts and current test/evidence gaps. Keep customer documents and already-finalized records out of destructive failure-injection exercises.
+
+Unrelated work can continue while a decision is pending, but do not invent legal retention periods, overwrite artifacts or silently change finalization/payment policy to complete the checklist.
+
+#### 1A — Secure access and sensitive-data boundaries
+
+**Owner:** auth/backend + security/privacy. **Maps to:** PROD-03, PROD-04, PROD-05; Supabase authorization and identity controls.
+
+- [ ] Bind signer claims/acceptance to an authenticated, verified matching email; make claim, token consumption and assignment atomic/idempotent. Preserve safe preview/signup without granting signing authority.
+- [ ] Test server and RLS/storage boundaries for owner, invited signer, selected/wrong notary, unrelated member, admin, anonymous and service worker. Include legacy notary codes, profile hints, revoked roles and billing-held/private document access; service-role queries still require application authorization.
+- [ ] Preserve mobile refresh/profile fixes and prove expiry, concurrent refresh, cross-device switching, logout/revocation and temporary network failure cannot switch accounts, resurrect sessions or bypass current grants.
+- [ ] Correct full-identifier semantics; protect complete identity values with restricted storage/access and required audit records. Apply the approved retention/minimization policy across duplicated metadata, evidence, GPS, caches and logs, including legal-hold behavior and cleanup failures.
+- [ ] Add distributed, proxy-aware abuse controls to authentication, invite claim, public verification, uploads/PDF processing and billing/session mutations. Implement safe public errors, production-origin restrictions and a reviewed browser-token/CSP/security-header posture.
+- [ ] Remediate the critical/reachable dependency findings, move to a supported runtime and scan the actual shipped image/native PDF tooling. Validate secret boundaries and production/test separation in code and release configuration; require appropriate step-up/MFA for privileged recovery actions.
+
+**Exit evidence:** automated negative authorization/RLS tests, wrong-email/concurrent-claim tests, session/revocation scenarios, sensitive-data/log inspection and retention/hold tests pass. No unresolved authorization bypass, unreviewed critical finding or reachable unmitigated high exposure. Any other accepted security risk has a named approver, concrete mitigation and expiry.
+
+#### 1B — Truthful finalization and durable legal evidence
+
+**Owner:** document/backend + product/counsel. **Maps to:** PROD-02, PROD-06; finalization/public-release controls.
+
+- [ ] Implement the chosen ledger model end to end. Real anchoring requires actual provider proof; approved hash-only completion must not depend on a stub or claim external anchoring. Update state transitions, billing release, public verification, both clients, notifications and customer-facing claims together.
+- [ ] Make legally material signing, notary, identity, acknowledgment and release evidence durable/atomic or demonstrably recoverable. Inject audit/storage/database failures and prove no silent successful transition without the required evidence.
+- [ ] Replace template hash labels with digests of exact content and retain immutable template/rule/rendering provenance. Lock CA/OH package composition, acknowledgment/signature/seal placement and hidden trust-artifact behavior with tests and required content review.
+- [ ] Preserve the PDF encryption fix and independently validate transformed pages before storage/release. Enforce processing resource limits, timeouts and temp cleanup; test the actual qpdf/Poppler ARM64 image with normal, protected, malformed and large fixtures.
+- [ ] Prove released hashes refer to the exact readable published bytes; distinguish preparing, failed, finalized, held, released and external-anchor states. Retry/recovery must not create duplicate signatures, overwrite prior versions or publish a held package.
+- [ ] Deploy and accept the status/hash-only public verification boundary. Anonymous and signed-in visitors to the public route receive no filenames, PDF previews or signed download URLs. Only authorized in-app routes may return document bytes; hiding a public viewer's download button is not an access control. Local regression tests pass; deployment is outstanding.
+- [ ] Classify the known damaged beta packages and prepare an approved, auditable correction/migration approach. Never mark an old package repaired merely because a new local derivative renders correctly.
+
+**Exit evidence:** CA/OH Trust, POA and uploaded-document paths (with/without signing) produce readable, correctly composed outputs on Apple PDFKit and web; byte/hash checks and injected-failure recovery pass. No false “completed,” “released” or “anchored” state; no silent loss of material audit evidence. Any existing-artifact corrections remain separately authorized and versioned.
+
+#### 1C — Backups that restore actual PDFs
+
+**Owner:** platform/backend + privacy. **Maps to:** AWS-09; Supabase database/object recovery.
+
+- [ ] Implement a policy-approved backup process covering database/Auth relationships and **actual object bytes** for originals, signatures, intermediate versions, final packages and required evidence. Record version/path/size/checksum manifests, retention, encryption, access controls and backup failure reporting.
+- [ ] Keep recovery copies isolated from ordinary application deletion/compromise, using the approved account/storage controls. Confirm that restoring the database also restores its references to the corresponding object snapshot; database metadata alone is insufficient.
+- [ ] Run a controlled recovery drill with dedicated fixtures in an isolated destination: simulate missing/corrupted objects there, restore DB and files, compare checksums, open the recovered PDFs and verify authorized app/public access and continued denial of private/held versions.
+- [ ] Verify recovery preserves immutable document/IDN/version/hash and signature relationships. Test queue/job reconstruction where necessary; restoration must not resend old invitations, duplicate charges or release held documents automatically.
+- [ ] Measure achieved recovery time and recovery point against the approved RTO/RPO. Document commands, access prerequisites, restore ordering, operator and evidence; test backup/restore failure alert delivery.
+
+**Exit evidence:** a completed restore report with snapshot identifiers, restored object counts, checksum comparisons, actual PDF readability/access checks and measured RPO/RTO. Missing objects or mismatched hashes fail the drill. An already-corrupted source needs recorded correction—not a backup label declaring it healthy. A configured backup schedule without a successful restore does not pass.
+
+#### 1D — Payment correctness and accepted-work continuity
+
+**Owner:** billing/backend + product/finance. **Maps to:** PROD-01; Stripe lifecycle/usage/release recovery.
+
+- [ ] Implement validated live/test isolation across TypeScript, SQL functions/migrations, catalog mappings, idempotency, webhook ingestion, subscription state and reconciliation. Keep real charges disabled while proving the implementation; never treat test subscriptions as paid production entitlement.
+- [ ] Complete the six missing staging evidence categories: failed payment, payment action required, cancellation/deletion, period-end downgrade, final-package hold and controlled usage reversal. Attach actual outcomes, not a manually populated acceptance marker.
+- [ ] Exercise duplicate/delayed/out-of-order events, last-unit concurrency, worker crash/retry, paid-invoice fulfillment, period rollover, upgrades without usage reset and recovery from a deliberately missed event. No double charge initiation, duplicate consumption or unauthorized entitlement.
+- [ ] Prove submitted work continues through signers/notary/session/finalization after membership lapse. Enforce the approved final-package hold across every read/download/public-verification route; reactivation releases the original finalized bytes exactly once.
+- [ ] Test operator replay/resync/release/reversal through authorized, recently reauthenticated, reason-bound, audited actions; reconcile Stripe and DARCi state without ad hoc database edits. Keep notaries and invited signers outside the payer/allowance model.
+- [ ] Document and test environment/key/webhook mismatch rejection, production activation prerequisites and the rollback/pause behavior that preserves accepted work. Review customer terms/held-package treatment with product/legal before activation.
+
+**Exit evidence:** complete staging lifecycle evidence plus concurrency/outage/recovery results, environment-mixing rejection tests and clean reconciliation after recovery. Public production key/catalog/webhook activation and an explicitly authorized real-payment smoke test occur in Phase 3; those do not justify postponing correctness tests until launch.
+
+#### 1E — Actionable alerts and operator recovery
+
+**Owner:** platform/on-call + auth/billing/document owners. **Maps to:** AWS-08; Resend delivery evidence; Sentry/Grafana operations.
+
+- [ ] Establish liveness versus dependency readiness and a worker heartbeat/queue-age signal. Monitor auth/role failures, email/SMS delivery, PDF validation/finalization, required audit writes, Stripe inbox/dead letters/drift, held-release failures, backup/restore and retention jobs.
+- [ ] Repair and verify staging Resend delivery-event callbacks; prove provider acceptance versus delivery/bounce/suppression is distinguishable. Verify the intended OTLP ingestion path or explicitly disable unused telemetry. **Sentry provider rules/release attribution/symbolication are deferred at Jorge's request (18 September), not verified or waived as passed.** Revisit before relying on Sentry for production incident response.
+- [ ] Configure the minimum critical alert routes with thresholds, grouping/deduplication, environment/release/request/document correlation and linked recovery runbooks. **Jorge is the sole responder for now**, by explicit request; secondary coverage is a documented limitation, not another unanswered question. Redact credentials, identity values, signed URLs and document contents.
+- [ ] Trigger safe synthetic failures for each critical category in the test environment. Verify detection, actual responder notification, acknowledgment and successful recovery/resolution—not just that an event appears in a dashboard.
+- [ ] Export/version production-ready monitoring configuration and define how it is installed and reverified during provisioning. Give support concrete lookup/recovery instructions and a documented escalation path; avoid paging on every expected user validation error.
+
+**Exit evidence:** an alert exercise log showing injected incident, detection/notification timestamps, recipient, correlation, action taken and recovery. Every critical failure category reaches a responsible person with enough context to act. Production-specific destinations/thresholds are installed and rechecked in Phases 2–3, not invented for the first time there.
+
+#### Integrated Phase 1 delivery and exit gate
+
+Recommended sequence: establish the baseline/owners and early alert visibility; implement access and finalization foundations; finish payment isolation/recovery; run restore and cross-track failure drills; then close the gate. Tracks may overlap, but are accepted as one hardening release.
+
+- [ ] Make backend build/tests, full web tests/typecheck/lint/build, types build, iOS build/tests and migration/RLS/security checks required in CI. Fix the known standalone web typecheck failure and preserve the existing PDF, membership, session and accessibility regressions.
+- [ ] Package the fixes, forward migrations, safe configuration templates, backup/restore tooling, alert definitions, operator runbooks and evidence against one reviewed revision. Provision only the isolated test/backup/provider resources needed for proof; record any external approval or spend dependency before acting.
+- [ ] Run a cross-track exercise: a legitimate workflow encounters a recoverable failure, its required evidence remains consistent, an alert reaches the owner, recovery restores valid authorized bytes/state, and billing neither double-consumes nor prematurely releases the package.
+- [ ] Produce a Phase 1 completion record for **all five tracks**, with owner, revision/environment, tests/drill evidence, remaining limitations and reviewer approval. A blocked required decision makes that track incomplete, not silently waived.
+
+**Phase 1 exit:** all five controls are implemented and demonstrated in a controlled production-shaped environment; required CI is green; no unresolved integrity/auth/payment blocker. This approves advancement to production provisioning—not public traffic, live charges, data migration or legal/App Store approval. Later phases repeat the critical proofs against actual production configuration rather than deferring their implementation.
+
+### Phase 2 — Provision and rehearse isolated production
+
+- [ ] Complete AWS-01–09 and production Supabase, without moving customer traffic.
+- [ ] Create reproducible task/secret/config manifests, production domain/TLS routing and protected release workflow.
+- [ ] Rehearse migrations/reference-data promotion on a clean database; verify full RLS, storage, queues and realtime.
+- [ ] Install the Phase 1 backup/monitoring controls in production and repeat the database/object restore and worker-recovery drill against isolated production-configured recovery resources.
+
+**Exit:** private production candidate healthy through dependency checks; release/rollback and restore evidence attached; no beta resource references. Phase 2 preparation can overlap Phase 1, but public traffic waits for both.
+
+### Phase 3 — Activate production providers and verify live billing
+
+- [ ] Complete production email/SMS/APNs/Maps/Sentry/Grafana configuration and callback verification.
+- [ ] Reverify the Phase 1 email/alert and Stripe lifecycle controls using the final provider configuration. Any still-missing Phase 1 correctness evidence blocks advancement; it is not deferred to this phase.
+- [ ] Configure/verify Stripe live merchant/catalog/portal/webhooks after live-mode code is proven. Get explicit authorization for any real charge.
+- [ ] Approve member terms, taxes, held-package messaging, support/refund/dispute procedures and customer notices.
+
+**Exit:** every enabled external dependency has a configuration owner, delivery/verification evidence, failure/retry path and monitoring. No required workflow relies on an `internal` no-delivery provider.
+
+### Phase 4 — Build the production web/iOS release candidate
+
+- [ ] Build the web image with production public inputs and inspect API/Supabase/links/caching/CSP.
+- [ ] Generate explicit production iOS config; validate archive/signing/symbols, associated domains and push.
+- [ ] Complete App Store privacy/review materials and accurately document the purchase flow; test supported physical devices and accessibility settings.
+
+**Exit:** traceable release candidate per platform; no staging/localhost URLs or secrets; approval/review requirements met before public iOS availability. Web rollout need not wait on unrelated iOS improvements, but must pass its own complete production gate.
+
+### Phase 5 — Production-shaped acceptance and go/no-go
+
+Use dedicated test identities/documents. Never use real customer legal acts just to exercise failure injection.
+
+- [ ] CA and OH × Trust, standalone POA, upload with signature, upload without signature; web→web, mobile→mobile and cross-platform owner/signer/notary combinations.
+- [ ] Invite intended/wrong email, expiry/revocation/claim concurrency; notary approval/rejection/wrong role/jurisdiction and legacy-code boundaries.
+- [ ] Cross-device profile changes, token expiry/refresh, logout/revocation, app background/foreground and network interruption.
+- [ ] Location permission denial/inaccuracy/staleness, approved fallback, manual venue completion, identity handling and required audit evidence.
+- [ ] Normal/protected/password-required/malformed/large PDFs; signature and acknowledgment placement; final bytes readable in browser and Apple PDFKit; all expected package artifacts; exact published hash/public verification.
+- [ ] Quota last-unit concurrency, upgrade/downgrade/renewal/cancellation/failure/action-required, accepted-work continuity, held-package access denial and original-byte release after reactivation.
+- [ ] Duplicate/out-of-order webhooks, worker crash/queue outage, external provider failures, alert delivery and support replay/resync without double fulfillment.
+- [ ] Production backup/restore, secret rotation, rollback, dependency health and performance/cost envelope.
+- [ ] Limited authorized live payment plus receipt/reconciliation and agreed cancellation/refund check; never substitute a browser redirect for entitlement evidence.
+
+**Exit:** signed result matrix identifying environment, image/archive version, test case, evidence, reviewer and date. Failures have fixes or explicit safe feature disablement; no blanket “staging worked” acceptance.
+
+### Phase 6 — Controlled production launch, then widen
+
+- [ ] Release owner approves all enabled-surface P0 gates and legal/distribution requirements.
+- [ ] Promote reviewed manifests, verify migrations/config/images, enable providers/purchase controls only in the approved sequence, then admit the capped cohort.
+- [ ] Name the on-call engineer and support escalation route; inspect first real workflows and reconcile first invoices/releases daily during the initial period.
+- [ ] Monitor errors, queues, auth/delivery, PDF validation, billing drift and costs against agreed thresholds. Pause new enrollment/checkout if necessary while preserving accepted-work continuity.
+- [ ] Widen only after an agreed observation period with no recurring unexplained integrity/auth/payment failures. Maintain dependency scans and restore drills.
+
+**Rollback rule:** reverting an app image is not permission to revert a database blindly, delete a finalized artifact, replay a charge or revoke legitimate completed work. Use the compatible release manifest and audited recovery procedures.
+
+## 8. Go/no-go record
+
+Do not mark production approved until each line has an owner and linked evidence:
+
+- [ ] Phase 1's five-track hardening gate is complete, with restore, payment-recovery and actual alert-delivery evidence—not implementation claims alone.
+- [ ] Scope, domains, data-migration treatment and account ownership approved.
+- [ ] CA/OH templates/notarial workflow and public-PDF/identity/retention/member terms approved by appropriate reviewers; no unsupported marketing claims.
+- [ ] Security/invite/audit/identity/dependency blockers closed; authorization/RLS and abuse controls demonstrated.
+- [ ] Real ledger or truthful hash-only completion implemented and accepted.
+- [ ] Isolated production infra, secrets, Supabase and provider integrations verified.
+- [ ] Stripe live isolation/configuration and lifecycle recovery accepted if charging; notaries remain free.
+- [ ] Production web and iOS builds/configuration verified; required Apple review/distribution path satisfied.
+- [ ] Full acceptance matrix, backup/object restore and rollback evidence attached.
+- [ ] Monitoring/symbolication/alerts/support/reconciliation ownership active.
+- [ ] Launch approver, date, release manifest, cohort cap and pause/rollback criteria recorded.
+
+## 9. Deferred work—not prerequisites to rewrite the working product
+
+Keep Dynamic POA, annual plans, Pro/delegated payment, credit bundles, notary subscriptions, additional jurisdictions, RON and in-app scheduling out of this launch. Large-file refactoring/API client generation and obsolete-client cleanup can follow unless a specific defect makes them necessary for a gate. A second-region active-active platform is not automatically required; the client must approve availability/RPO/RTO and the corresponding cost.
+
+## 10. Related implementation references
+
+- [Historical private-beta roadmap](private-beta-readiness-roadmap-2026-08-25.md)
+- [Stripe implementation roadmap](stripe-implementation-roadmap.md) — phases 0–7 foundations implemented; phase 8 live gate remains.
+- [Stripe operator/team testing](stripe-phase7-operations-and-team-testing.md)
+- [PDF/session regression fix and old-artifact recovery](mobile-pdf-session-regression-fix-2026-09-16.md)
+- [AWS historical deployment roadmap](aws-staging-deployment-roadmap.md) — older domains/runtime examples are not current production instructions.
+- [Domain-cutover audit](domain-cutover-darciregistry-dev-audit.md)
+- [Jurisdiction launch runbook](jurisdiction-launch-runbook.md)
+- [Error-reporting runbook](first-class-error-reporting-runbook.md)
+- [Resend incident runbook](resend-email-incident-runbook.md)
+- [Push notification runbook](push-notification-runbook.md)
+
+Maintenance: mark a task complete only with implementation/configuration **and its stated acceptance evidence**. Keep build success, deployed configuration, legal approval and customer-visible acceptance as separate facts. Update this document after each production-readiness pass.

@@ -414,19 +414,19 @@ export default function Home() {
                     "IPEN is in-person electronic notarization. It combines face-to-face verification with digital workflows, giving you the legal rigor of traditional notarization without the delays. You meet with a notary to confirm identity and intent, then the process moves entirely digital from there.",
                 },
                 {
-                  question: "How does ledger anchoring work?",
+                  question: "How does document verification work?",
                   answer:
-                    "After notarization, DARCI cryptographically hashes your document and anchors it to a distributed ledger. This creates permanent, verifiable proof of authenticity. Anyone can check the public verification endpoint anytime to confirm your document hasn't been altered.",
+                    "After notarization, DARCi records a SHA-256 fingerprint of the finalized document. Verification can check whether a file matches those recorded bytes. This launch does not use an external ledger; a matching hash is an integrity check, not independent proof of identity or legal validity.",
                 },
                 {
                   question: "Is DARCI legally compliant?",
                   answer:
-                    "Yes. DARCI meets all legal standards for digital notarization and document verification. We handle IDN assignment, watermarking, sealing, and hashing to ensure compliance at every step. Your documents hold the same legal weight as traditional notarized records.",
+                    "DARCi supports jurisdiction-specific in-person electronic notarization workflows. Availability and requirements depend on the jurisdiction and document. Your notary reviews the applicable requirements; a digital integrity record alone does not establish legal validity.",
                 },
                 {
                   question: "How long does illuminotarization take?",
                   answer:
-                    "The in-person acknowledgment takes minutes. Once you meet with a notary, the digital workflow completes in seconds. Most documents are fully verified and anchored within hours, not days.",
+                    "The in-person acknowledgment takes minutes. Once you meet with a notary, the digital workflow completes in seconds. Final processing includes document hashing and integrity verification.",
                 },
                 {
                   question: "Can anyone verify my documents?",

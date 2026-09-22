@@ -78,7 +78,22 @@ describe("documentWorkspaceReadModelService", () => {
     mocks.getDocumentReleaseControlMock.mockResolvedValue(null);
   });
 
-  it("builds a verification-ready summary for an anchored document", async () => {
+  it("shows a rechecked legacy package as finalized, never externally anchored", async () => {
+    mocks.getVerificationSnapshotForDocumentMock.mockResolvedValue({
+      hashRecord: { id: "hash-1", document_version_id: "version-1", hash: "a".repeat(64), status: "completed" },
+      ledgerEntry: { id: "entry-1", hash: "a".repeat(64), ledger_tx_id: "ledger_SIMULATED", anchored_at: "2026-09-01" },
+      ledgerAnchorAttempt: { status: "anchored", document_hash_record_id: "hash-1", ledger_entry_id: "entry-1" },
+      hashReverification: { id: "recheck-1", document_version_id: "version-1", document_hash_record_id: "hash-1",
+        observed_sha256: "a".repeat(64), rendered_page_count: 2, verifier_revision: "legacy-hash-recheck-v1" },
+    });
+    const summary = await buildDocumentWorkspaceSummary({ document: { id: "doc-1", idn: "RECHECK123456", status: "completed" } as never });
+    expect(summary.finalization.isFinalized).toBe(true);
+    expect(summary.finalization.isAnchored).toBe(false);
+    expect(summary.finalization.ledgerTxId).toBeNull();
+    expect(summary.finalization.anchoredAt).toBeNull();
+  });
+
+  it("does not claim verification readiness from a history label without evidence", async () => {
     mocks.getLatestNotarizationRequestForDocumentMock.mockResolvedValue({
       id: "req-1",
       document_id: "doc-1",
@@ -152,7 +167,8 @@ describe("documentWorkspaceReadModelService", () => {
       finalization: {
         latestStatus: "ledger_anchored",
         latestStatusAt: "2026-04-20T12:30:00.000Z",
-        isAnchored: true,
+        isAnchored: false,
+        isFinalized: false,
         isVerificationChecked: false,
         isWatermarked: false,
         isHashRecorded: false,
@@ -171,7 +187,7 @@ describe("documentWorkspaceReadModelService", () => {
         ],
       },
       verification: {
-        status: "ready",
+        status: "pending_finalization",
         idn: "IDN-1234",
         verifyPath: "/verify/IDN-1234",
       },
@@ -224,6 +240,7 @@ describe("documentWorkspaceReadModelService", () => {
         latestStatus: null,
         latestStatusAt: null,
         isAnchored: false,
+        isFinalized: false,
         isVerificationChecked: false,
         isWatermarked: false,
         isHashRecorded: false,

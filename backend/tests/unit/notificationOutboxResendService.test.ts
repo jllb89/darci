@@ -42,21 +42,21 @@ const apnsMocks = vi.hoisted(() => {
 });
 
 vi.mock("@aws-sdk/client-sns", () => ({
-  SNSClient: vi.fn().mockImplementation(() => ({
+  SNSClient: vi.fn().mockImplementation(function() { return {
     send: snsMocks.publishMock,
-  })),
-  PublishCommand: vi.fn((input) => ({ input })),
+  }; }),
+  PublishCommand: vi.fn(function(input) { return { input }; }),
 }));
 
 vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({
+  Resend: vi.fn().mockImplementation(function() { return {
     emails: {
       send: resendMocks.sendEmailMock,
     },
     webhooks: {
       verify: resendMocks.verifyWebhookMock,
     },
-  })),
+  }; }),
 }));
 
 vi.mock("../../src/services/apnsClient", () => ({

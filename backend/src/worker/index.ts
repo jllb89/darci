@@ -8,6 +8,8 @@ import { runDueNotificationJobs } from "../services/notificationOutboxService";
 import { deliverWebhook } from "../services/webhookService";
 import { captureException, flushSentry } from "../utils/sentry";
 import { runDueStripeWebhookEvents } from "../services/stripeWebhookService";
+import { publishWorkerHeartbeat } from "../services/operationalHealthService";
+import { getSafetyRedis } from "../middleware/productionSafety";
 import {
   getBillingOperationsReport,
   runStripeWebhookRetentionCleanup,
@@ -38,6 +40,18 @@ type GenerationRunJobData = {
 };
 
 const redisConnection = connection;
+let heartbeatAlertAt = 0;
+const heartbeat = async () => {
+  try { await publishWorkerHeartbeat(); }
+  catch (error) {
+    if (Date.now() - heartbeatAlertAt > 60_000) {
+      heartbeatAlertAt = Date.now();
+      captureException(new Error("Worker heartbeat could not be published"), { tags: { service: "worker", operation: "heartbeat" } });
+    }
+  }
+};
+const heartbeatInterval = process.env.REDIS_URL ? setInterval(() => { void heartbeat(); }, 30_000) : null;
+if (heartbeatInterval) void heartbeat();
 
 const workers: Array<Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>> = [];
 let notificationOutboxInterval: NodeJS.Timeout | null = null;
@@ -399,6 +413,7 @@ if (stripeRetentionRunnerEnabled) {
 }
 
 const shutdown = async () => {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (notificationOutboxInterval) {
     clearInterval(notificationOutboxInterval);
     notificationOutboxInterval = null;
@@ -422,6 +437,7 @@ const shutdown = async () => {
   if (redisConnection) {
     await redisConnection.quit();
   }
+  if (process.env.REDIS_URL) getSafetyRedis().disconnect();
 };
 
 process.on("SIGINT", shutdown);

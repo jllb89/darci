@@ -18,9 +18,9 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({
+  Resend: vi.fn().mockImplementation(function() { return {
     emails: { send: mocks.resendSendMock },
-  })),
+  }; }),
 }));
 
 vi.mock("../../src/services/userRoleService", () => ({

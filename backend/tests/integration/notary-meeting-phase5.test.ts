@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createMeetingCheckinMock: vi.fn(),
   createGeolocationSampleMock: vi.fn(),
   createIdentityVerificationEventMock: vi.fn(),
+  recordProtectedIdentityMock: vi.fn(),
   getGeolocationSampleByIdMock: vi.fn(),
   listMeetingGeolocationSamplesMock: vi.fn(),
   createProximityEvaluationMock: vi.fn(),
@@ -25,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   runDueNotificationJobsMock: vi.fn(),
   getNotaryProfileByUserIdMock: vi.fn(),
   broadcastRequestRealtimeInvalidationMock: vi.fn(),
+}));
+
+vi.mock("../../src/services/protectedIdentityService", () => ({
+  recordProtectedIdentity: mocks.recordProtectedIdentityMock,
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -1336,22 +1341,25 @@ describe("Phase 5 meeting runtime slice", () => {
       created_at: "2026-05-27T15:06:00.000Z",
       updated_at: "2026-05-27T15:06:00.000Z",
     });
-    mocks.createIdentityVerificationEventMock.mockImplementation(async (input) => ({
+    mocks.recordProtectedIdentityMock.mockImplementation(async (input) => ({
+      checkin: { id: "checkin-identity-4", checkin_kind: "identity", metadata: {} },
+      verificationEvent: {
       id: "identity-4",
       meeting_id: input.meetingId,
-      meeting_participant_id: input.meetingParticipantId,
-      verified_by_user_id: input.verifiedByUserId,
-      verification_method: input.verificationMethod,
-      status: input.status,
-      subject_name_snapshot: input.subjectNameSnapshot,
-      document_type: input.documentType,
-      document_last4: input.documentLast4,
-      issuing_jurisdiction: input.issuingJurisdiction,
-      verified_at: input.verifiedAt,
-      notes: input.notes,
-      metadata: input.metadata,
-      created_at: input.verifiedAt,
-      updated_at: input.verifiedAt,
+      meeting_participant_id: input.participantId,
+      verified_by_user_id: input.actorId,
+      verification_method: input.event.verificationMethod,
+      status: input.event.status,
+      subject_name_snapshot: input.event.subjectName,
+      document_type: input.identityMetadata.documentType,
+      document_last4: input.identityMetadata.documentNumberTail,
+      issuing_jurisdiction: input.identityMetadata.issuingJurisdiction,
+      verified_at: input.event.recordedAt,
+      notes: input.event.notes,
+      metadata: { identityDocument: input.identityMetadata },
+      created_at: input.event.recordedAt,
+      updated_at: input.event.recordedAt,
+      },
     }));
 
     const response = await postIdentityVerification({
@@ -1376,21 +1384,22 @@ describe("Phase 5 meeting runtime slice", () => {
       "artifact-front",
       "artifact-back",
     ]);
-    expect(mocks.createIdentityVerificationEventMock).toHaveBeenCalledWith(
+    expect(mocks.recordProtectedIdentityMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        documentType: "state_identification_card",
-        documentLast4: "AB12",
-        issuingJurisdiction: "OH",
-        metadata: expect.objectContaining({
-          identityDocument: expect.objectContaining({
-            policyVersion: "identity_document_v1",
-            documentExpirationDate: "2030-01-01",
-            evidenceArtifactIds: ["artifact-front", "artifact-back"],
-          }),
+        documentNumber: null,
+        identityMetadata: expect.objectContaining({
+          documentType: "state_identification_card",
+          documentNumberTail: "AB12",
+          issuingJurisdiction: "OH",
+          policyVersion: "identity_document_v1",
+          documentExpirationDate: "2030-01-01",
+          evidenceArtifactIds: ["artifact-front", "artifact-back"],
         }),
       }),
     );
-    expect(mocks.createIdentityVerificationEventMock.mock.calls[0][0]).not.toHaveProperty("documentNumber");
+    expect(mocks.recordProtectedIdentityMock.mock.calls[0][0].identityMetadata).not.toHaveProperty("maskedIdentifier");
+    expect(mocks.createIdentityVerificationEventMock).not.toHaveBeenCalled();
+    expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "notary.identity_verified",

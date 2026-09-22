@@ -24,11 +24,11 @@ const resendMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({
+  Resend: vi.fn().mockImplementation(function() { return {
     webhooks: {
       verify: resendMocks.verifyWebhookMock,
     },
-  })),
+  }; }),
 }));
 
 const serviceMocks = vi.hoisted(() => ({

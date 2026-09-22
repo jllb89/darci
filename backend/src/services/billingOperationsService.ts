@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { createHash, randomUUID } from "crypto";
-import { assertStripeObjectIsTestMode, getStripeClient } from "../config/stripe";
+import { assertStripeObjectMatchesEnvironment, getStripeClient, getStripeEnvironment } from "../config/stripe";
 import { getBillingEnforcementMode, releaseMemberBillingHeldDocuments } from "./billingPolicyService";
 import { processStoredStripeWebhook, resyncStripeMemberSubscription } from "./stripeWebhookService";
 
@@ -218,7 +218,7 @@ export const analyzeBillingReconciliation = (
   for (const subscription of snapshot.subscriptions) {
     const providerId = subscription.provider_subscription_id;
     const provider = providerId ? providerById.get(providerId) : null;
-    if (subscription.provider_environment !== "test") {
+    if (subscription.provider_environment !== getStripeEnvironment()) {
       issues.push(issue({
         code: "internal_environment_mismatch",
         severity: "critical",
@@ -393,7 +393,7 @@ export const analyzeBillingReconciliation = (
   }
 
   for (const payment of snapshot.payments) {
-    if (payment.provider_environment !== "test") {
+    if (payment.provider_environment !== getStripeEnvironment()) {
       issues.push(issue({
         code: "invoice_environment_mismatch",
         severity: "critical",
@@ -496,11 +496,11 @@ const loadProviderSubscriptions = async (): Promise<ProviderSubscriptionSnapshot
   return subscriptions
     .filter((subscription) => {
       const item = subscription.items.data[0];
-      return subscription.metadata.darci_environment === "test"
+      return subscription.metadata.darci_environment === getStripeEnvironment()
         || item?.price.metadata.darci_product_code === "member_membership";
     })
     .map((subscription) => {
-      assertStripeObjectIsTestMode(subscription, "Stripe Subscription");
+      assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
       const item = subscription.items.data[0] ?? null;
       return {
         id: subscription.id,
@@ -544,7 +544,7 @@ export const getBillingOperationsReport = async (input?: {
     supabaseAdmin.from("document_release_controls").select("id, document_id, release_status, updated_at, documents!inner(owner_id)"),
     supabaseAdmin.from("stripe_webhook_events").select("id, event_id, event_type, object_id, status, attempt_count, next_attempt_at, processing_lease_expires_at, last_error_code, error_message, dead_lettered_at, received_at, processed_at, payload_retention_until").order("received_at", { ascending: false }).limit(webhookLimit),
     supabaseAdmin.from("payment_transactions").select("id, billing_account_id, subscription_id, external_id, status, provider_environment, amount_cents, currency_code, occurred_at, updated_at").eq("provider", "stripe").eq("transaction_kind", "invoice").order("occurred_at", { ascending: false }).limit(500),
-    supabaseAdmin.from("billing_orders").select("id, billing_account_id, order_kind, status, total_amount_cents, currency_code, provider_checkout_session_id, created_at, updated_at").eq("provider_environment", "test").order("created_at", { ascending: false }).limit(500),
+    supabaseAdmin.from("billing_orders").select("id, billing_account_id, order_kind, status, total_amount_cents, currency_code, provider_checkout_session_id, created_at, updated_at").eq("provider_environment", getStripeEnvironment()).order("created_at", { ascending: false }).limit(500),
     input?.includeProvider === false
       ? Promise.resolve({ data: [] as ProviderSubscriptionSnapshot[], error: null })
       : loadProviderSubscriptions().then((data) => ({ data, error: null })).catch((error) => ({ data: null, error })),
@@ -629,7 +629,7 @@ export const getBillingOperationsReport = async (input?: {
   });
   return {
     generatedAt: new Date().toISOString(),
-    providerEnvironment: "test" as const,
+    providerEnvironment: getStripeEnvironment(),
     enforcementMode: getBillingEnforcementMode(),
     providerScanComplete: snapshot.providerScanComplete,
     lifecycleAcceptanceId,

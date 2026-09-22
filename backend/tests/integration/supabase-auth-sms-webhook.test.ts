@@ -25,10 +25,10 @@ const pinpointSmsMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@aws-sdk/client-pinpoint-sms-voice-v2", () => ({
-  PinpointSMSVoiceV2Client: vi.fn().mockImplementation(() => ({
+  PinpointSMSVoiceV2Client: vi.fn().mockImplementation(function() { return {
     send: pinpointSmsMocks.sendTextMessageMock,
-  })),
-  SendTextMessageCommand: vi.fn((input) => ({ input })),
+  }; }),
+  SendTextMessageCommand: vi.fn(function(input) { return { input }; }),
 }));
 
 import { app } from "../../src/index";

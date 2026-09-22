@@ -993,19 +993,35 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(AuthenticationSignInContent.signIn.browseTitle, "I just want to browse the app.")
     }
 
+    func testHashOnlyFinalizationDoesNotRequireAnExternalAnchor() throws {
+        let payload = Data(#"{"isFinalized":true,"isAnchored":false}"#.utf8)
+        let notary = try JSONDecoder().decode(NotaryFinalizationSummary.self, from: payload)
+        let document = try JSONDecoder().decode(DocumentsFinalizationSummary.self, from: payload)
+        XCTAssertTrue(notary.isFinalizationReady)
+        XCTAssertTrue(document.isFinalizationReady)
+    }
+
+    func testUnverifiedFinalizationOverridesAHistoricalAnchorFlag() throws {
+        let payload = Data(#"{"isFinalized":false,"isAnchored":true}"#.utf8)
+        let notary = try JSONDecoder().decode(NotaryFinalizationSummary.self, from: payload)
+        let document = try JSONDecoder().decode(DocumentsFinalizationSummary.self, from: payload)
+        XCTAssertFalse(notary.isFinalizationReady)
+        XCTAssertFalse(document.isFinalizationReady)
+    }
+
     func testOnboardingStoriesAreStable() {
         XCTAssertEqual(OnboardingStoryContent.all.count, 4)
         XCTAssertEqual(OnboardingStoryContent.all.map(\.imageName), ["onboarding1", "onboarding2", "onboarding3", "onboarding4"])
         XCTAssertEqual(
             OnboardingStoryContent.all.first?.message,
-            "Members get documents notarized in seconds not hours. Notaries handle more work without burning out."
+            "Keep your documents, signatures, and notary requests in one place—from preparation through the in-person session."
         )
         XCTAssertEqual(
             OnboardingStoryContent.all.map(\.message),
             [
-                "Members get documents notarized in seconds not hours. Notaries handle more work without burning out.",
-                "Every step meets legal standards. Watermarking, sealing, hashing, and ledger anchoring happen automatically so compliance is never a question.",
-                "Watermarking, sealing, hashing, and ledger anchoring happen automatically. Compliance isn't something you chase—it's something you get.",
+                "Keep your documents, signatures, and notary requests in one place—from preparation through the in-person session.",
+            "Capture the in-person acknowledgment, seal the document, and record a SHA-256 fingerprint for checking its integrity.",
+            "Watermarking, sealing, and SHA-256 verification bring your document and its execution record together.",
                 "Members complete notarization faster. Notaries handle more volume without exhaustion. The work moves at a pace that feels natural, not rushed."
             ]
         )

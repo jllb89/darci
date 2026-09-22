@@ -117,6 +117,7 @@ export type NotaryQueueRequestSummary = {
     latestStatus: string | null;
     latestStatusAt: string | null;
     isAnchored: boolean;
+    isFinalized: boolean;
     isVerificationChecked: boolean;
     isWatermarked: boolean;
     isHashRecorded: boolean;
@@ -675,11 +676,12 @@ const mapFinalizationSummary = (input: {
     latestStatus: input.documentSummary.finalization.latestStatus,
     latestStatusAt: input.documentSummary.finalization.latestStatusAt,
     isAnchored: input.documentSummary.finalization.isAnchored,
+    isFinalized: input.documentSummary.finalization.isFinalized,
     isVerificationChecked: input.documentSummary.finalization.isVerificationChecked,
     isWatermarked: input.documentSummary.finalization.isWatermarked,
     isHashRecorded: input.documentSummary.finalization.isHashRecorded,
     verificationStatus: input.visibleIdn ? resolvePublicVerificationStatus(input.snapshot) : null,
-    anchoredAt: input.snapshot.ledgerEntry?.anchored_at ?? null,
+    anchoredAt: null,
     lastCheckedAt: getLastCheckedAt({
       latestCheck: input.latestCheck,
       snapshot: input.snapshot,
@@ -1045,7 +1047,7 @@ const buildNextAction = (input: {
     return "continue_meeting";
   }
 
-  if (input.meeting?.status === "completed" && !input.documentSummary.finalization.isAnchored) {
+  if (input.meeting?.status === "completed" && !input.documentSummary.finalization.isFinalized) {
     return "complete_finalization";
   }
 
@@ -1092,7 +1094,7 @@ const buildWarnings = (input: {
     });
   }
 
-  if (input.meeting?.status === "completed" && !input.documentSummary.finalization.isAnchored) {
+  if (input.meeting?.status === "completed" && !input.documentSummary.finalization.isFinalized) {
     warnings.push({
       code: "finalization_pending",
       severity: "info",
@@ -1125,7 +1127,7 @@ const buildCapabilities = (input: {
       input.meeting?.status === "completed" &&
       hasPassedSamePlace &&
       hasVerifiedIdentity &&
-      !input.documentSummary.finalization.isAnchored,
+      !input.documentSummary.finalization.isFinalized,
     canOpenVerification: input.documentSummary.verification.status === "ready",
   };
 };
@@ -1229,7 +1231,7 @@ const buildQueueCounts = (requests: NotaryQueueRequestSummary[]) => {
   ).length;
   const completed = requests.filter((request) => {
     return (
-      request.finalization.isAnchored ||
+      request.finalization.isFinalized ||
       request.request.queueStatus === "completed" ||
       request.request.status === "completed"
     );
@@ -1494,7 +1496,7 @@ export const getNotaryRequestContext = async (input: {
     finalization: {
       ...base.finalization,
       hash: base.snapshot.hashRecord?.hash ?? null,
-      ledgerTxId: base.snapshot.ledgerEntry?.ledger_tx_id ?? null,
+      ledgerTxId: null,
       anchorAttempt: base.snapshot.ledgerAnchorAttempt
         ? {
             id: base.snapshot.ledgerAnchorAttempt.id,

@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import {
-  assertStripeObjectIsTestMode,
+  assertStripeObjectMatchesEnvironment,
+  getStripeEnvironment,
   getStripeClient,
   getStripeWebhookSecret,
 } from "../config/stripe";
@@ -47,15 +48,13 @@ export const ingestStripeWebhook = async (input: {
     input.signature,
     getStripeWebhookSecret(),
   );
-  if (event.livemode) {
-    throw new Error("Stripe live-mode webhook rejected by private-beta endpoint");
-  }
+  assertStripeObjectMatchesEnvironment(event, "Stripe webhook");
 
   const { data, error } = await supabaseAdmin
     .from("stripe_webhook_events")
     .insert({
       provider: "stripe",
-      provider_environment: "test",
+      provider_environment: getStripeEnvironment(),
       event_id: event.id,
       event_type: event.type,
       object_id: objectIdFromEvent(event),
@@ -85,7 +84,7 @@ export const ingestStripeWebhook = async (input: {
     .from("stripe_webhook_events")
     .select("id, event_id, event_type, attempt_count")
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("event_id", event.id)
     .single();
   if (existingError || !existing) {
@@ -120,16 +119,16 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
   const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
     expand: ["latest_invoice"],
   });
-  assertStripeObjectIsTestMode(subscription, "Stripe Subscription");
+  assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
 
   if (subscription.items.data.length !== 1) {
     throw new Error("DARCi member subscription must contain exactly one Stripe item");
   }
   const item = subscription.items.data[0]!;
   const price = item.price;
-  assertStripeObjectIsTestMode(price, "Stripe subscription Price");
+  assertStripeObjectMatchesEnvironment(price, "Stripe subscription Price");
   if (
-    subscription.metadata.darci_environment !== "test" ||
+    subscription.metadata.darci_environment !== getStripeEnvironment() ||
     price.metadata.darci_product_code !== "member_membership"
   ) {
     throw new Error("Stripe subscription is outside the DARCi test member allowlist");
@@ -148,7 +147,7 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
     invoice = typeof subscription.latest_invoice === "string"
       ? await stripe.invoices.retrieve(subscription.latest_invoice)
       : subscription.latest_invoice;
-    assertStripeObjectIsTestMode(invoice, "Stripe Invoice");
+    assertStripeObjectMatchesEnvironment(invoice, "Stripe Invoice");
   }
 
   const status = normalizeSubscriptionStatus(subscription, invoice);
@@ -174,6 +173,7 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
     p_invoice_amount_cents: invoice?.amount_paid ?? invoice?.amount_due ?? 0,
     p_invoice_currency: invoice?.currency?.toUpperCase() ?? subscription.currency.toUpperCase(),
     p_event_id: eventId,
+    p_provider_environment: getStripeEnvironment(),
   });
   if (error) throw new Error(`Stripe subscription fulfillment failed: ${error.message}`);
   if (status === "active" || status === "trialing") {
@@ -198,7 +198,7 @@ export const resyncStripeMemberSubscription = async (input: {
     throw new Error(`Stripe subscription resync lookup failed: ${error?.message ?? "not_found"}`);
   }
   if (
-    subscription.provider_environment !== "test"
+    subscription.provider_environment !== getStripeEnvironment()
     || subscription.role_context !== "member"
     || !subscription.provider_subscription_id
   ) {
@@ -214,7 +214,7 @@ export const resyncStripeMemberSubscription = async (input: {
 };
 
 const expireCheckoutOrder = async (session: Stripe.Checkout.Session, eventId: string) => {
-  assertStripeObjectIsTestMode(session, "Stripe Checkout Session");
+  assertStripeObjectMatchesEnvironment(session, "Stripe Checkout Session");
   const orderId = session.metadata?.darci_order_id ?? session.client_reference_id;
   if (!orderId) return;
   const { error } = await supabaseAdmin
@@ -229,14 +229,14 @@ const expireCheckoutOrder = async (session: Stripe.Checkout.Session, eventId: st
       updated_at: new Date().toISOString(),
     })
     .eq("id", orderId)
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("provider_checkout_session_id", session.id)
     .in("status", ["draft", "pending_payment"]);
   if (error) throw new Error(`Checkout expiration update failed: ${error.message}`);
 };
 
 const processStripeEvent = async (event: Stripe.Event) => {
-  assertStripeObjectIsTestMode(event, "Stripe Event");
+  assertStripeObjectMatchesEnvironment(event, "Stripe Event");
   if (!HANDLED_EVENT_TYPES.has(event.type)) return "ignored" as const;
 
   if (event.type === "checkout.session.completed") {
@@ -329,6 +329,7 @@ export const runDueStripeWebhookEvents = async (input: {
     supabaseAdmin
       .from("stripe_webhook_events")
       .select("id")
+      .eq("provider_environment", getStripeEnvironment())
       .in("status", ["received", "failed"])
       .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
       .order("received_at", { ascending: true })
@@ -336,6 +337,7 @@ export const runDueStripeWebhookEvents = async (input: {
     supabaseAdmin
       .from("stripe_webhook_events")
       .select("id")
+      .eq("provider_environment", getStripeEnvironment())
       .eq("status", "processing")
       .lte("processing_lease_expires_at", now)
       .order("received_at", { ascending: true })

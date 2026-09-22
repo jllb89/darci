@@ -121,7 +121,7 @@ export const shouldAllowMissingIdentityRequest = (path: string) => {
 
 export const shouldFailClosedOnMissingIdentity = () => {
   return (
-    process.env.NODE_ENV === "production" &&
-    process.env.AUTH_ALLOW_MISSING_DB_USER_FALLBACK !== "true"
+    process.env.NODE_ENV === "production" ||
+    ["staging", "production"].includes(process.env.APP_ENV ?? "")
   );
 };

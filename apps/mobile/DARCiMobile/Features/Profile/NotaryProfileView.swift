@@ -333,7 +333,7 @@ private struct NotaryQueueRequestCard: View {
     }
 
     private var completedStatus: String {
-        if request.finalization.isAnchored == true || request.document.summary?.finalization?.isAnchored == true {
+        if request.finalization.isFinalizationReady == true || request.document.summary?.finalization?.isFinalizationReady == true {
             return "APPROVED"
         }
 

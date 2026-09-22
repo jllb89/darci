@@ -1,4 +1,5 @@
 import { access, readFile, readdir } from "fs/promises";
+import { randomUUID } from "node:crypto";
 import { loadPdfForProcessing, saveValidatedPdf } from "./pdfProcessingService";
 import { captureMessage } from "../utils/sentry";
 import path from "path";
@@ -10,6 +11,7 @@ import {
 } from "pdf-lib";
 import type { PDFFont, PDFPage } from "pdf-lib";
 import { recordAuditEvent } from "./auditService";
+import { recordRenderProvenance } from "./renderProvenanceService";
 import { queueDocumentReadyForReviewNotification } from "./notificationService";
 import { runDueNotificationJobs } from "./notificationOutboxService";
 import {
@@ -2917,6 +2919,7 @@ const buildRenderedPdf = async (input: {
     pageCount,
     isPreview,
     signaturePlacements,
+    templateSource,
   };
 };
 
@@ -3578,12 +3581,14 @@ export const processDocumentGenerationRun = async (input: {
     );
     const content = renderedPdf.content;
     const fileName = `${claimedRun.output_key}-${claimedRun.id.slice(0, 8)}.pdf`;
-    const storagePath = `${document.owner_id}/${document.id}/generated/${claimedRun.id}/${fileName}`;
+    const storagePath = `${document.owner_id}/${document.id}/generated/${claimedRun.id}/${randomUUID()}-${fileName}`;
 
     await uploadGeneratedDocument({
       storagePath,
       content,
       contentType: "application/pdf",
+      overwrite: false,
+      verifyStoredBytes: true,
     });
 
     const version = await createGeneratedDocumentVersion({
@@ -3594,6 +3599,11 @@ export const processDocumentGenerationRun = async (input: {
       mimeType: "application/pdf",
       sizeBytes: content.byteLength,
       createdBy: document.owner_id,
+    });
+
+    await recordRenderProvenance({
+      runId: claimedRun.id, versionId: version.id, artifactId: artifact.id,
+      source: renderedPdf.templateSource, ruleSnapshot: claimedRun.render_context_json,
     });
 
     if (renderedPdf.isPreview) {

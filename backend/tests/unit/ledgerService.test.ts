@@ -65,7 +65,7 @@ describe("ledgerService", () => {
     expect(result.errorMessage).toContain('environment "staging"');
   });
 
-  it("allows explicit stub usage in staging-like environments", async () => {
+  it("rejects simulated anchoring in staging even with the legacy override", async () => {
     process.env.APP_ENV = "staging";
     process.env.LEDGER_ANCHOR_MODE = "stub";
     process.env.LEDGER_ALLOW_STUB_PROVIDER = "true";
@@ -73,9 +73,16 @@ describe("ledgerService", () => {
     const result = await anchorToLedger("AB12CD34EF56", "a".repeat(64));
 
     expect(result).toMatchObject({
-      status: "anchored",
-      provider: "stub",
-      ledgerTxId: "ledger_AB12CD34EF56",
+      status: "failed",
+      provider: "unconfigured",
+      ledgerTxId: null,
     });
+  });
+
+  it("records hash-only disposition without inventing an external receipt", async () => {
+    process.env.APP_ENV = "production";
+    process.env.LEDGER_ANCHOR_MODE = "hash_only";
+    expect(await anchorToLedger("AB12CD34EF56", "a".repeat(64))).toMatchObject({status:"not_required",provider:"hash_only",ledgerTxId:null,anchoredAt:null});
+    expect((await anchorToLedger("AB12CD34EF56", "not-a-hash")).status).toBe("failed");
   });
 });

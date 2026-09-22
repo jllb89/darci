@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   updateMeetingParticipantMock: vi.fn(),
   createMeetingCheckinMock: vi.fn(),
   createIdentityVerificationEventMock: vi.fn(),
+  recordProtectedIdentityMock: vi.fn(),
   createProximityEvaluationMock: vi.fn(),
   createMeetingArtifactMock: vi.fn(),
   listMeetingArtifactsMock: vi.fn(),
@@ -29,6 +30,10 @@ const mocks = vi.hoisted(() => ({
   broadcastRequestRealtimeInvalidationMock: vi.fn(),
   queueMeetingScheduledConfirmationNotificationMock: vi.fn(),
   getNotaryProfileByUserIdMock: vi.fn(),
+}));
+
+vi.mock("../../src/services/protectedIdentityService", () => ({
+  recordProtectedIdentity: mocks.recordProtectedIdentityMock,
 }));
 
 vi.mock("../../src/services/userRoleService", async (importOriginal) => {
@@ -360,8 +365,8 @@ const buildWatermarkResult = (overrides: Record<string, unknown> = {}) => ({
     document_id: "doc-1",
     document_version_id: "version-final-1",
     algorithm: "sha256",
-    hash: "hash-final",
-    status: "recorded",
+    hash: "a".repeat(64),
+    status: "completed",
     completed_at: "2026-04-22T15:35:00.000Z",
     metadata: {},
     created_at: "2026-04-22T15:35:00.000Z",
@@ -371,17 +376,24 @@ const buildWatermarkResult = (overrides: Record<string, unknown> = {}) => ({
     id: "ledger-1",
     document_id: "doc-1",
     document_version_id: "version-final-1",
-    hash_record_id: "hash-1",
-    ledger_tx_id: "tx-1",
-    anchored_at: "2026-04-22T15:36:00.000Z",
+
+    hash: "a".repeat(64),
+    ledger_tx_id: null,
+    anchored_at: null,
     metadata: {},
     created_at: "2026-04-22T15:36:00.000Z",
     updated_at: "2026-04-22T15:36:00.000Z",
   },
   ledgerAnchorAttempt: {
     id: "anchor-attempt-1",
+
+    document_hash_record_id: "hash-1",
+
     ledger_entry_id: "ledger-1",
-    status: "anchored",
+
+    status: "not_required",
+
+    response_payload: { provider: "hash_only" },
     attempt_number: 1,
     requested_at: "2026-04-22T15:35:00.000Z",
     completed_at: "2026-04-22T15:36:00.000Z",
@@ -401,7 +413,8 @@ const buildLedgerFailureWatermarkResult = () => buildWatermarkResult({
     id: "ledger-1",
     document_id: "doc-1",
     document_version_id: "version-final-1",
-    hash_record_id: "hash-1",
+
+    hash: "a".repeat(64),
     ledger_tx_id: null,
     anchored_at: null,
     metadata: {},
@@ -410,6 +423,9 @@ const buildLedgerFailureWatermarkResult = () => buildWatermarkResult({
   },
   ledgerAnchorAttempt: {
     id: "anchor-attempt-1",
+
+    document_hash_record_id: "hash-1",
+
     ledger_entry_id: "ledger-1",
     status: "failed",
     attempt_number: 1,
@@ -792,7 +808,9 @@ describe("Phase 5 meeting runtime completion", () => {
       created_at: "2026-04-22T15:05:00.000Z",
       updated_at: "2026-04-22T15:05:00.000Z",
     });
-    mocks.createIdentityVerificationEventMock.mockResolvedValue({
+    mocks.recordProtectedIdentityMock.mockResolvedValue({
+      checkin: { id: "checkin-identity-1", checkin_kind: "identity", metadata: {} },
+      verificationEvent: {
       id: "identity-1",
       meeting_id: "meeting-1",
       meeting_participant_id: "participant-member",
@@ -808,6 +826,7 @@ describe("Phase 5 meeting runtime completion", () => {
       metadata: {},
       created_at: "2026-04-22T15:05:00.000Z",
       updated_at: "2026-04-22T15:05:00.000Z",
+      },
     });
     mocks.createMeetingArtifactMock.mockResolvedValue({
       id: "artifact-venue-1",
@@ -862,6 +881,9 @@ describe("Phase 5 meeting runtime completion", () => {
     expect(response.body.identityVerification.status).toBe("verified");
     expect(response.body.venueCapture.artifactKind).toBe("venue_capture");
     expect(response.body.checkin.checkinKind).toBe("identity");
+    expect(mocks.recordProtectedIdentityMock).toHaveBeenCalledOnce();
+    expect(mocks.createIdentityVerificationEventMock).not.toHaveBeenCalled();
+    expect(mocks.createMeetingCheckinMock).not.toHaveBeenCalled();
     expect(mocks.createMeetingArtifactMock).toHaveBeenCalledWith(
       expect.objectContaining({
         artifactKind: "venue_capture",
@@ -1475,7 +1497,7 @@ describe("Phase 5 meeting runtime completion", () => {
       .send({ advancedAt: "2026-04-22T15:25:00.000Z" });
 
     expect(response.status).toBe(409);
-    expect(response.body.error).toBe("ledger_anchor_failed");
+    expect(response.body.error).toBe("finalization_verification_failed");
     expect(response.body.advancedStep).toBe("final_package_submitted");
     expect(response.body.advancedSteps).toEqual(["meeting_completed", "final_package_submitted"]);
     expect(response.body.nextAction).toBe("retry_final_package_submission");
@@ -1517,8 +1539,8 @@ describe("Phase 5 meeting runtime completion", () => {
         document_id: "doc-1",
         document_version_id: "version-final-1",
         algorithm: "sha256",
-        hash: "hash-final",
-        status: "recorded",
+        hash: "a".repeat(64),
+        status: "completed",
         completed_at: "2026-04-22T15:35:00.000Z",
         metadata: {},
         created_at: "2026-04-22T15:35:00.000Z",
@@ -1528,17 +1550,24 @@ describe("Phase 5 meeting runtime completion", () => {
         id: "ledger-1",
         document_id: "doc-1",
         document_version_id: "version-final-1",
-        hash_record_id: "hash-1",
-        ledger_tx_id: "tx-1",
-        anchored_at: "2026-04-22T15:36:00.000Z",
+
+    hash: "a".repeat(64),
+        ledger_tx_id: null,
+        anchored_at: null,
         metadata: {},
         created_at: "2026-04-22T15:36:00.000Z",
         updated_at: "2026-04-22T15:36:00.000Z",
       },
       ledgerAnchorAttempt: {
         id: "anchor-attempt-1",
-        ledger_entry_id: "ledger-1",
-        status: "anchored",
+
+    document_hash_record_id: "hash-1",
+
+    ledger_entry_id: "ledger-1",
+
+    status: "not_required",
+
+    response_payload: { provider: "hash_only" },
         attempt_number: 1,
         requested_at: "2026-04-22T15:35:00.000Z",
         completed_at: "2026-04-22T15:36:00.000Z",
@@ -1559,12 +1588,12 @@ describe("Phase 5 meeting runtime completion", () => {
     expect(response.body.documentStatus).toBe("completed");
     expect(response.body.requestStatus).toBe("completed");
     expect(response.body.version.isFinal).toBe(true);
-    expect(response.body.hashRecord.hash).toBe("hash-final");
-    expect(response.body.ledger.status).toBe("anchored");
+    expect(response.body.hashRecord.hash).toBe("a".repeat(64));
+    expect(response.body.ledger.status).toBe("not_required");
     expect(response.body.finalizationStatus).toEqual({
       watermarked: true,
       hashRecorded: true,
-      ledgerAnchored: true,
+      ledgerAnchored: false,
       verificationReady: true,
       recoveryAction: null,
     });
@@ -1605,8 +1634,8 @@ describe("Phase 5 meeting runtime completion", () => {
         document_id: "doc-1",
         document_version_id: "version-final-1",
         algorithm: "sha256",
-        hash: "hash-final",
-        status: "recorded",
+        hash: "a".repeat(64),
+        status: "completed",
         completed_at: "2026-04-22T15:35:00.000Z",
         metadata: {},
         created_at: "2026-04-22T15:35:00.000Z",
@@ -1616,17 +1645,24 @@ describe("Phase 5 meeting runtime completion", () => {
         id: "ledger-1",
         document_id: "doc-1",
         document_version_id: "version-final-1",
-        hash_record_id: "hash-1",
-        ledger_tx_id: "tx-1",
-        anchored_at: "2026-04-22T15:36:00.000Z",
+
+    hash: "a".repeat(64),
+        ledger_tx_id: null,
+        anchored_at: null,
         metadata: {},
         created_at: "2026-04-22T15:36:00.000Z",
         updated_at: "2026-04-22T15:36:00.000Z",
       },
       ledgerAnchorAttempt: {
         id: "anchor-attempt-1",
-        ledger_entry_id: "ledger-1",
-        status: "anchored",
+
+    document_hash_record_id: "hash-1",
+
+    ledger_entry_id: "ledger-1",
+
+    status: "not_required",
+
+    response_payload: { provider: "hash_only" },
         attempt_number: 1,
         requested_at: "2026-04-22T15:35:00.000Z",
         completed_at: "2026-04-22T15:36:00.000Z",
@@ -1680,8 +1716,8 @@ describe("Phase 5 meeting runtime completion", () => {
         document_id: "doc-1",
         document_version_id: "version-final-1",
         algorithm: "sha256",
-        hash: "hash-final",
-        status: "recorded",
+        hash: "a".repeat(64),
+        status: "completed",
         completed_at: "2026-04-22T15:35:00.000Z",
         metadata: {},
         created_at: "2026-04-22T15:35:00.000Z",
@@ -1691,7 +1727,8 @@ describe("Phase 5 meeting runtime completion", () => {
         id: "ledger-1",
         document_id: "doc-1",
         document_version_id: "version-final-1",
-        hash_record_id: "hash-1",
+
+    hash: "a".repeat(64),
         ledger_tx_id: null,
         anchored_at: null,
         metadata: {},
@@ -1700,7 +1737,10 @@ describe("Phase 5 meeting runtime completion", () => {
       },
       ledgerAnchorAttempt: {
         id: "anchor-attempt-1",
-        ledger_entry_id: "ledger-1",
+
+    document_hash_record_id: "hash-1",
+
+    ledger_entry_id: "ledger-1",
         status: "failed",
         attempt_number: 1,
         requested_at: "2026-04-22T15:35:00.000Z",
@@ -1719,10 +1759,10 @@ describe("Phase 5 meeting runtime completion", () => {
       .send({ notes: "Final package ready" });
 
     expect(response.status).toBe(409);
-    expect(response.body.error).toBe("ledger_anchor_failed");
+    expect(response.body.error).toBe("finalization_verification_failed");
     expect(response.body.documentStatus).toBe("pending_notary");
     expect(response.body.requestStatus).toBe("in_review");
-    expect(response.body.hashRecord.hash).toBe("hash-final");
+    expect(response.body.hashRecord.hash).toBe("a".repeat(64));
     expect(response.body.ledger).toEqual(
       expect.objectContaining({
         status: "failed",

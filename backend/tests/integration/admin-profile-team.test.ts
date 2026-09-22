@@ -24,7 +24,7 @@ type Row = Record<string, unknown>;
 type Call = { table: string; method: string; url: URL; body: Row | null };
 let tables: Record<string, Row[]>;
 let calls: Call[];
-let failure: { table: string; method: string } | null;
+let failure: { table: string; method: string; persistent?: boolean } | null;
 
 const timestamp = "2026-09-16T12:00:00.000Z";
 const actorId = "00000000-0000-4000-8000-000000000101";
@@ -73,7 +73,7 @@ const handleSupabase = async (input: string | URL | Request, init?: RequestInit)
   if (!tables[table]) throw new Error(`Unexpected Supabase table: ${table}`);
 
   if (failure?.table === table && failure.method === method) {
-    failure = null;
+    if (!failure.persistent) failure = null;
     return new Response(JSON.stringify({ message: "Simulated database outage", code: "TEST_FAILURE" }), {
       status: 503, headers: { "Content-Type": "application/json" },
     });
@@ -249,9 +249,9 @@ describe("admin profile team without direct PostgreSQL", () => {
   });
 
   it("returns a failure rather than an empty successful team when reads fail", async () => {
-    failure = { table: "user_roles", method: "GET" };
+    failure = { table: "user_roles", method: "GET", persistent: true };
     expect((await request(buildApp()).get("/admin/profile/team")).status).toBe(500);
-  });
+  }, 20_000);
 
   it("revokes access and restores the member profile when admin was active", async () => {
     tables.user_roles!.find((row) => row.user_id === memberId)!.is_active_profile = false;

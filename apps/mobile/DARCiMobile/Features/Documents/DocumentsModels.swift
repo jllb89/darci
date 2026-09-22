@@ -95,6 +95,8 @@ struct DocumentsWorkflowSummary: Codable, Equatable, Sendable {
 
 struct DocumentsFinalizationSummary: Codable, Equatable, Sendable {
     let latestStatus: String?
+    var isFinalized: Bool? = nil
+    var isFinalizationReady: Bool { isFinalized ?? isAnchored ?? false }
     let isAnchored: Bool?
 }
 

@@ -10,7 +10,7 @@
 #                -f apps/web/Dockerfile .
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -49,8 +49,9 @@ COPY apps/web ./
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
+RUN apk upgrade --no-cache && npm uninstall --global npm
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_SENTRY_DSN
@@ -67,9 +68,10 @@ ENV SENTRY_RELEASE=$NEXT_PUBLIC_SENTRY_RELEASE
 ENV SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 
 # Standalone output includes the minimal server and runtime dependencies.
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
 
+USER node
 EXPOSE 3000
 CMD ["node", "server.js"]

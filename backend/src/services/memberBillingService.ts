@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import {
-  assertStripeObjectIsTestMode,
+  assertStripeObjectMatchesEnvironment,
+  getStripeEnvironment,
   buildStripeCheckoutReturnUrls,
   getStripeClient,
 } from "../config/stripe";
@@ -161,7 +162,7 @@ const loadPrice = async (priceCode: string) => {
     .select("provider_product_id, provider_price_id, status")
     .eq("catalog_price_id", price.id)
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("status", "verified")
     .single();
   if (mappingError || !mapping) {
@@ -183,7 +184,7 @@ const loadEffectiveMemberSubscription = async (billingAccountId: string) => {
     )
     .eq("billing_account_id", billingAccountId)
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("role_context", "member")
     .in("status", EFFECTIVE_SUBSCRIPTION_STATUSES)
     .order("updated_at", { ascending: false })
@@ -322,7 +323,7 @@ export const changeMemberMembershipPlan = async (input: {
     : "downgrade" as const;
   const stripe = getStripeClient();
   let subscription = await stripe.subscriptions.retrieve(current.subscription.provider_subscription_id);
-  assertStripeObjectIsTestMode(subscription, "Stripe Subscription");
+  assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
   if (subscription.items.data.length !== 1) {
     throw new Error("DARCi member subscription must contain exactly one Stripe item");
   }
@@ -333,7 +334,7 @@ export const changeMemberMembershipPlan = async (input: {
         ? subscription.schedule
         : subscription.schedule.id;
       await stripe.subscriptionSchedules.release(scheduleId, {}, {
-        idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:release-schedule`,
+        idempotencyKey: `darci:${getStripeEnvironment()}:plan-change:${input.idempotencyKey}:release-schedule`,
       });
       subscription = await stripe.subscriptions.retrieve(current.subscription.provider_subscription_id);
     }
@@ -350,9 +351,9 @@ export const changeMemberMembershipPlan = async (input: {
           darci_plan_change_token: input.idempotencyKey,
         },
       },
-      { idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:upgrade` },
+      { idempotencyKey: `darci:${getStripeEnvironment()}:plan-change:${input.idempotencyKey}:upgrade` },
     );
-    assertStripeObjectIsTestMode(updated, "Stripe Subscription");
+    assertStripeObjectMatchesEnvironment(updated, "Stripe Subscription");
     await recordPlanChangeRequest({
       subscription: current.subscription,
       actorUserId: user.id,
@@ -380,14 +381,14 @@ export const changeMemberMembershipPlan = async (input: {
         {
           from_subscription: subscription.id,
           metadata: {
-            darci_environment: "test",
+            darci_environment: getStripeEnvironment(),
             darci_billing_account_id: account.id,
             darci_plan_change_kind: "downgrade",
           },
         },
-        { idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:schedule` },
+        { idempotencyKey: `darci:${getStripeEnvironment()}:plan-change:${input.idempotencyKey}:schedule` },
       );
-  assertStripeObjectIsTestMode(schedule, "Stripe Subscription Schedule");
+  assertStripeObjectMatchesEnvironment(schedule, "Stripe Subscription Schedule");
   const phaseStart = schedule.current_phase?.start_date ?? subscription.items.data[0]!.current_period_start;
   const phaseEnd = schedule.current_phase?.end_date ?? subscription.items.data[0]!.current_period_end;
   const currentProviderPriceId = subscription.items.data[0]!.price.id;
@@ -415,9 +416,9 @@ export const changeMemberMembershipPlan = async (input: {
         },
       ],
     },
-    { idempotencyKey: `darci:test:plan-change:${input.idempotencyKey}:downgrade` },
+    { idempotencyKey: `darci:${getStripeEnvironment()}:plan-change:${input.idempotencyKey}:downgrade` },
   );
-  assertStripeObjectIsTestMode(updatedSchedule, "Stripe Subscription Schedule");
+  assertStripeObjectMatchesEnvironment(updatedSchedule, "Stripe Subscription Schedule");
   const effectiveAt = new Date(phaseEnd * 1000).toISOString();
   await recordPlanChangeRequest({
     subscription: current.subscription,
@@ -448,7 +449,7 @@ const getOrCreateStripeCustomer = async (input: {
     .select("id, provider_customer_id")
     .eq("billing_account_id", input.billingAccountId)
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("is_default", true)
     .eq("status", "active")
     .maybeSingle();
@@ -460,21 +461,21 @@ const getOrCreateStripeCustomer = async (input: {
     {
       email: input.user.email!,
       metadata: {
-        darci_environment: "test",
+        darci_environment: getStripeEnvironment(),
         darci_billing_account_id: input.billingAccountId,
         darci_owner_user_id: input.user.id,
       },
     },
-    { idempotencyKey: `darci:test:customer:${input.billingAccountId}` },
+    { idempotencyKey: `darci:${getStripeEnvironment()}:customer:${input.billingAccountId}` },
   );
-  assertStripeObjectIsTestMode(customer, "Stripe Customer");
+  assertStripeObjectMatchesEnvironment(customer, "Stripe Customer");
 
   const { data: inserted, error: insertError } = await supabaseAdmin
     .from("billing_customers")
     .insert({
       billing_account_id: input.billingAccountId,
       provider: "stripe",
-      provider_environment: "test",
+      provider_environment: getStripeEnvironment(),
       provider_customer_id: customer.id,
       status: "active",
       is_default: true,
@@ -489,7 +490,7 @@ const getOrCreateStripeCustomer = async (input: {
     .select("id, provider_customer_id")
     .eq("billing_account_id", input.billingAccountId)
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("is_default", true)
     .single();
   if (racedError || !raced) throw new Error(`Billing customer creation failed: ${insertError?.message}`);
@@ -501,7 +502,7 @@ const ensureNoEffectiveSubscription = async (billingAccountId: string) => {
     .from("billing_subscriptions")
     .select("id, status")
     .eq("billing_account_id", billingAccountId)
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("role_context", "member")
     .in("status", EFFECTIVE_SUBSCRIPTION_STATUSES)
     .limit(1);
@@ -520,7 +521,7 @@ const readExistingIdempotentOrder = async (billingAccountId: string, idempotency
     .from("billing_orders")
     .select("id, status, provider_checkout_session_id, metadata, billing_order_items(price_code_snapshot)")
     .eq("billing_account_id", billingAccountId)
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("checkout_idempotency_key", idempotencyKey)
     .maybeSingle();
   if (error) throw new Error(`Checkout idempotency lookup failed: ${error.message}`);
@@ -550,7 +551,7 @@ export const createMemberMembershipCheckout = async (input: {
     }
     if (existingOrder.provider_checkout_session_id) {
       const session = await getStripeClient().checkout.sessions.retrieve(existingOrder.provider_checkout_session_id);
-      assertStripeObjectIsTestMode(session, "Stripe Checkout Session");
+      assertStripeObjectMatchesEnvironment(session, "Stripe Checkout Session");
       return {
         orderId: existingOrder.id,
         checkoutSessionId: session.id,
@@ -567,7 +568,7 @@ export const createMemberMembershipCheckout = async (input: {
     .from("billing_orders")
     .select("id, provider_checkout_session_id")
     .eq("billing_account_id", account.id)
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("order_kind", "subscription_checkout")
     .in("status", ["draft", "pending_payment"])
     .neq("checkout_idempotency_key", input.idempotencyKey)
@@ -599,7 +600,7 @@ export const createMemberMembershipCheckout = async (input: {
         currency_code: price.currency_code,
         subtotal_amount_cents: price.unit_amount_cents,
         total_amount_cents: price.unit_amount_cents,
-        provider_environment: "test",
+        provider_environment: getStripeEnvironment(),
         checkout_idempotency_key: input.idempotencyKey,
         metadata: { source: "member_membership_checkout" },
       })
@@ -649,7 +650,7 @@ export const createMemberMembershipCheckout = async (input: {
       allow_promotion_codes: false,
       payment_method_collection: "always",
       metadata: {
-        darci_environment: "test",
+        darci_environment: getStripeEnvironment(),
         darci_order_id: orderId,
         darci_billing_account_id: account.id,
         darci_owner_user_id: user.id,
@@ -657,7 +658,7 @@ export const createMemberMembershipCheckout = async (input: {
       },
       subscription_data: {
         metadata: {
-          darci_environment: "test",
+          darci_environment: getStripeEnvironment(),
           darci_order_id: orderId,
           darci_billing_account_id: account.id,
           darci_owner_user_id: user.id,
@@ -665,9 +666,9 @@ export const createMemberMembershipCheckout = async (input: {
         },
       },
     },
-    { idempotencyKey: `darci:test:checkout:${orderId}` },
+    { idempotencyKey: `darci:${getStripeEnvironment()}:checkout:${orderId}` },
   );
-  assertStripeObjectIsTestMode(session, "Stripe Checkout Session");
+  assertStripeObjectMatchesEnvironment(session, "Stripe Checkout Session");
   if (!session.url) throw new Error("Stripe Checkout Session did not return a hosted URL");
 
   const { error: updateError } = await supabaseAdmin
@@ -702,7 +703,7 @@ export const createMemberCustomerPortalSession = async (input: { dbUserId: strin
     .select("provider_customer_id")
     .eq("billing_account_id", account.id)
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("is_default", true)
     .eq("status", "active")
     .maybeSingle();
@@ -715,7 +716,7 @@ export const createMemberCustomerPortalSession = async (input: { dbUserId: strin
     .from("billing_provider_configurations")
     .select("provider_configuration_id")
     .eq("provider", "stripe")
-    .eq("provider_environment", "test")
+    .eq("provider_environment", getStripeEnvironment())
     .eq("configuration_kind", "customer_portal")
     .eq("status", "verified")
     .single();
@@ -729,7 +730,7 @@ export const createMemberCustomerPortalSession = async (input: { dbUserId: strin
     configuration: configuration.provider_configuration_id,
     return_url: portalReturnUrl,
   });
-  assertStripeObjectIsTestMode(session, "Stripe Customer Portal Session");
+  assertStripeObjectMatchesEnvironment(session, "Stripe Customer Portal Session");
   return { portalUrl: session.url };
 };
 
@@ -778,7 +779,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
           "id, status, provider_subscription_id, current_period_start, current_period_end, cancel_at_period_end, canceled_at, ended_at, metadata, updated_at",
         )
         .eq("billing_account_id", account.id)
-        .eq("provider_environment", "test")
+        .eq("provider_environment", getStripeEnvironment())
         .eq("role_context", "member")
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -787,7 +788,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
         .from("billing_orders")
         .select("id", { count: "exact", head: true })
         .eq("billing_account_id", account.id)
-        .eq("provider_environment", "test")
+        .eq("provider_environment", getStripeEnvironment())
         .eq("order_kind", "subscription_checkout")
         .in("status", ["draft", "pending_payment"]),
     ]);
@@ -847,7 +848,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
       : null;
 
   return {
-    providerEnvironment: "test" as const,
+    providerEnvironment: getStripeEnvironment(),
     paymentsReal: false,
     enforcementMode: getBillingEnforcementMode(),
     plans: (rawCatalog ?? []).map((price) => ({

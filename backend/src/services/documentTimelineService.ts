@@ -95,6 +95,8 @@ const mapFinalizationStatusAction = (status: FinalizationStatusHistoryRecord["st
       return "Document hash recorded";
     case "ledger_anchored":
       return "Ledger anchored";
+    case "hash_verified":
+      return "SHA-256 verification ready";
     case "verification_checked":
       return "Verification checked";
     case "failed":

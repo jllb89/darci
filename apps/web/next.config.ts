@@ -6,6 +6,17 @@ const nextConfig: NextConfig = {
   output: "standalone",
   async headers() {
     return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self)" },
+          // The reviewed PDF viewer embeds authenticated bytes through a local blob URL.
+          { key: "Content-Security-Policy", value: "object-src 'self' blob:; base-uri 'self'; frame-ancestors 'none'" },
+        ],
+      },
       ...["/.well-known/apple-app-site-association", "/apple-app-site-association"].map((source) => ({
         source,
         headers: [

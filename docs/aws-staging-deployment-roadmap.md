@@ -1,5 +1,7 @@
 # AWS Deployment Roadmap — Staging & Production
 
+> **Historical configuration:** use the [2026-09-17 production readiness audit](production-readiness-roadmap-2026-09-17.md) for current resource evidence and launch requirements. The inspected account still has only the staging stack. Current `.dev` staging DNS points directly at the ALB; the older CloudFront distribution has a `.com` staging alias. Do not copy the Node 20 examples or assume production Supabase, provider configuration and DNS already exist.
+
 **Status:** Staging deployed and CDN-accelerated — April 28, 2026  
 **Goal:** Deploy the full DARCi stack to AWS with staging and production environments, using a container-based architecture and AWS-managed runtime configuration.
 

@@ -101,7 +101,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         guard let path = context?.document.summary.finalization.publicVerifyPath?.trimmingCharacters(in: .whitespacesAndNewlines),
               path.isEmpty == false,
               context?.meeting?.status == "completed",
-              context?.document.summary.finalization.isAnchored == true else {
+              context?.document.summary.finalization.isFinalizationReady == true else {
             return nil
         }
         if let absoluteURL = URL(string: path), absoluteURL.scheme != nil {
@@ -161,7 +161,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
             $0.artifactKind == "venue_capture" && $0.status == "active"
         } ?? false
         let hasAcknowledgment = finalization?.history.contains { $0.status == "acknowledgment_appended" } ?? false
-        let isVerificationReady = finalization?.isAnchored == true
+        let isVerificationReady = finalization?.isFinalizationReady == true
             && context?.document.summary.verification.verifyPath?.nilIfEmpty != nil
 
         return [
@@ -408,7 +408,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
         pollTask?.cancel()
         guard realtimeState == .degraded,
               context?.meeting?.status != "completed",
-              context?.document.summary.finalization.isAnchored != true else {
+              context?.document.summary.finalization.isFinalizationReady != true else {
             pollTask = nil
             return
         }

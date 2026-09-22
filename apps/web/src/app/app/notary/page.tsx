@@ -75,7 +75,7 @@ const splitRequests = (requests: NotaryQueueRequestSummary[]) => {
     ready: requests.filter((request) => resolveQueueStatus(request) === "approved" || isOpenMeetingRequest(request)),
     completed: requests.filter((request) => {
       const status = resolveQueueStatus(request);
-      return status === "completed" || request.document.summary.finalization.isAnchored;
+      return status === "completed" || request.document.summary.finalization.isFinalized;
     }),
   } satisfies Record<QueueTab, NotaryQueueRequestSummary[]>;
 };

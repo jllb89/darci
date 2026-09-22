@@ -301,7 +301,7 @@ export const getDocumentObjectMetadata = async (storagePath: string) => {
     return null;
   }
 
-  const metadata = match.metadata ?? {};
+  const metadata = (match.metadata && typeof match.metadata === "object" ? match.metadata : {}) as Record<string, unknown>;
   const rawSize =
     metadata.size ?? metadata.contentLength ?? metadata.content_length ?? null;
   const parsedSize =
@@ -331,6 +331,8 @@ export const uploadGeneratedDocument = async (input: {
   storagePath: string;
   content: Buffer;
   contentType: string;
+  verifyStoredBytes?: boolean;
+  overwrite?: boolean;
 }) => {
   if (input.contentType.trim().toLowerCase() === "application/pdf") {
     try {
@@ -355,7 +357,7 @@ export const uploadGeneratedDocument = async (input: {
     input.content,
     {
       contentType: input.contentType,
-      upsert: true,
+      upsert: input.overwrite ?? true,
     },
   );
 
@@ -370,6 +372,13 @@ export const uploadGeneratedDocument = async (input: {
       },
       error,
     );
+  }
+
+  if (input.verifyStoredBytes) {
+    const stored = await downloadDocumentObject(input.storagePath);
+    if (!stored.equals(input.content)) {
+      throwStorageError("STORAGE_UPLOAD_GENERATED_DOCUMENT_FAILED", "Stored document bytes did not match the validated output", { bucket: documentsBucket, storagePath: input.storagePath });
+    }
   }
 
   return {
@@ -412,7 +421,7 @@ export const getSignatureObjectMetadata = async (storagePath: string) => {
     return null;
   }
 
-  const metadata = match.metadata ?? {};
+  const metadata = (match.metadata && typeof match.metadata === "object" ? match.metadata : {}) as Record<string, unknown>;
 
   return {
     sizeBytes: typeof metadata.size === "number" ? metadata.size : null,

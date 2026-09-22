@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { sendValidationError } from "../utils/validation";
 import { recordAuditEvent } from "../services/auditService";
+import { recordProtectedIdentity } from "../services/protectedIdentityService";
 import {
   identityDocumentPolicyVersion,
   validateIdentityDocument,
@@ -90,6 +91,8 @@ import {
   DocumentFinalizationConflictError,
   DocumentFinalizationForbiddenError,
   DocumentFinalizationNotFoundError,
+  resolvePublicVerificationStatus,
+  getHashReverification,
   watermarkWithNotice as finalizeDocumentWithWatermark,
 } from "../services/documentFinalizationService";
 import {
@@ -218,6 +221,7 @@ const identityVerificationSchema = z.object({
   documentLast4: z.string().trim().min(2).max(4).optional(),
   documentNumberTail: z.string().trim().min(2).max(4).optional(),
   maskedIdentifier: z.string().trim().min(4).max(64).optional(),
+  documentNumber: z.string().trim().min(4).max(64).optional(),
   issuingJurisdiction: z.string().trim().min(1).max(255).optional(),
   documentExpirationDate: z.string().trim().min(10).max(10).optional(),
   evidenceArtifactIds: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
@@ -398,18 +402,17 @@ const packageEntries = <Entry>(primary: Entry, entries?: Entry[] | null) => {
 };
 
 const buildFinalPackageStatusSummary = (input: {
-  ledgerStatus: string;
   hashCompletedAt: string | null;
-  anchoredAt: string | null;
+  verificationReady: boolean;
 }) => {
-  const ledgerAnchored = input.ledgerStatus === "anchored";
+  const verificationReady = input.verificationReady;
 
   return {
     watermarked: true,
     hashRecorded: Boolean(input.hashCompletedAt),
-    ledgerAnchored,
-    verificationReady: ledgerAnchored,
-    recoveryAction: ledgerAnchored ? null : "retry_final_package_submission",
+    ledgerAnchored: false, // No production external-ledger adapter exists.
+    verificationReady,
+    recoveryAction: verificationReady ? null : "retry_final_package_submission",
   };
 };
 
@@ -745,10 +748,8 @@ const getIdentityDocumentMetadata = (metadata: Record<string, unknown>) => {
       typeof identityDocument.documentNumberTail === "string"
         ? identityDocument.documentNumberTail
         : null,
-    maskedIdentifier:
-      typeof identityDocument.maskedIdentifier === "string"
-        ? identityDocument.maskedIdentifier
-        : null,
+    // Legacy rows may contain a complete number under this misleading field name.
+    maskedIdentifier: null,
     evidenceArtifactIds,
   };
 };
@@ -1459,11 +1460,19 @@ const submitFinalPackageForRequest = async (input: {
   );
   const ledgerStatus = ledgerAnchorAttempts.some((attempt) => attempt?.status === "failed")
     ? "failed"
-    : result.ledgerAnchorAttempt?.status ?? "anchored";
+    : result.ledgerAnchorAttempt?.status === "anchored" ? "not_required" : result.ledgerAnchorAttempt?.status ?? "pending";
+  const verifiedVersions = await Promise.all(finalizedVersions.map(async version => {
+    const hashRecord = hashRecords.find(hash => hash.document_version_id === version.id);
+    const ledgerAnchorAttempt = ledgerAnchorAttempts.find(attempt => attempt?.document_hash_record_id === hashRecord?.id);
+    const ledgerEntry = ledgerEntries.find(entry => entry.id === ledgerAnchorAttempt?.ledger_entry_id);
+    return version.is_final === true && resolvePublicVerificationStatus({
+      hashRecord: hashRecord ?? null, ledgerEntry: ledgerEntry ?? null, ledgerAnchorAttempt: ledgerAnchorAttempt ?? null,
+      hashReverification: ledgerAnchorAttempt?.status === "anchored" && hashRecord ? await getHashReverification(hashRecord.id) : null,
+    }) === "verified";
+  }));
   const finalPackageStatus = buildFinalPackageStatusSummary({
-    ledgerStatus,
     hashCompletedAt: result.hashRecord.completed_at,
-    anchoredAt: result.ledgerEntry.anchored_at,
+    verificationReady: verifiedVersions.length > 0 && verifiedVersions.every(Boolean),
   });
 
   await recordAuditEvent({
@@ -1515,30 +1524,30 @@ const submitFinalPackageForRequest = async (input: {
     })),
     ledger: {
       id: result.ledgerEntry.id,
-      ledgerTxId: result.ledgerEntry.ledger_tx_id,
-      anchoredAt: result.ledgerEntry.anchored_at,
+      ledgerTxId: null,
+      anchoredAt: null,
       status: ledgerStatus,
       errorMessage: result.ledgerAnchorAttempt?.error_message ?? null,
     },
     ledgers: ledgerEntries.map((ledgerEntry, index) => ({
       id: ledgerEntry.id,
-      ledgerTxId: ledgerEntry.ledger_tx_id,
-      anchoredAt: ledgerEntry.anchored_at,
-      status: ledgerAnchorAttempts[index]?.status ?? ledgerStatus,
+      ledgerTxId: null,
+      anchoredAt: null,
+      status: ledgerAnchorAttempts[index]?.status === "anchored" ? "not_required" : ledgerAnchorAttempts[index]?.status ?? ledgerStatus,
       errorMessage: ledgerAnchorAttempts[index]?.error_message ?? null,
     })),
     finalizationStatus: finalPackageStatus,
   };
 
-  if (ledgerStatus !== "anchored") {
+  if (!finalPackageStatus.verificationReady) {
     return {
       statusCode: 409,
       body: {
         ...responseBody,
-        status: "ledger_anchor_failed",
-        error: "ledger_anchor_failed",
+        status: "finalization_verification_failed",
+        error: "finalization_verification_failed",
         message:
-          "Ledger anchoring failed. The final package was watermarked and hashed, but verification is not ready. Retry final package submission after resolving the ledger provider issue.",
+          "The final package has not passed integrity verification. Review the stored PDF and its hash evidence before retrying submission.",
       },
     };
   }
@@ -3603,7 +3612,7 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
     documentType: parsed.data.documentType,
     documentLast4: parsed.data.documentLast4,
     documentNumberTail: parsed.data.documentNumberTail,
-    maskedIdentifier: parsed.data.maskedIdentifier,
+    maskedIdentifier: parsed.data.documentNumber ?? parsed.data.maskedIdentifier,
     issuingJurisdiction: parsed.data.issuingJurisdiction,
     documentExpirationDate: parsed.data.documentExpirationDate,
     evidenceArtifactIds: parsed.data.evidenceArtifactIds,
@@ -3621,8 +3630,7 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
     policyVersion: identityDocumentPolicyVersion,
     documentType: normalizedIdentityDocument.documentType,
     documentLabel: normalizedIdentityDocument.documentLabel,
-    documentNumberTail: normalizedIdentityDocument.documentNumberTail,
-    maskedIdentifier: normalizedIdentityDocument.maskedIdentifier,
+    documentNumberTail: normalizedIdentityDocument.documentNumberTail ?? normalizedIdentityDocument.maskedIdentifier?.replace(/[\s-]/g, "").slice(-4) ?? null,
     issuingJurisdiction: normalizedIdentityDocument.issuingJurisdiction,
     documentExpirationDate: normalizedIdentityDocument.documentExpirationDate,
     evidenceArtifactIds: normalizedIdentityDocument.evidenceArtifactIds,
@@ -3690,35 +3698,18 @@ export const recordIdentityVerification = async (req: Request, res: Response) =>
 
   const verificationStatus: IdentityVerificationStatus = parsed.data.status ?? "verified";
   const recordedAt = parsed.data.verifiedAt ?? new Date().toISOString();
-  const checkin = await createMeetingCheckin({
+  const { checkin, verificationEvent } = await recordProtectedIdentity({
     meetingId: meeting.id,
-    meetingParticipantId: participant.id,
-    recordedByUserId: actorUserId,
-    checkinKind: "identity",
-    recordedAt,
-    notes: parsed.data.notes?.trim() ?? null,
-    metadata: {
-      requestId: request.id,
+    participantId: participant.id,
+    actorId: actorUserId,
+    documentNumber: normalizedIdentityDocument.maskedIdentifier,
+    identityMetadata: identityDocumentMetadata,
+    event: {
       verificationMethod: parsed.data.verificationMethod,
-      identityDocument: identityDocumentMetadata,
-    },
-  });
-  const verificationEvent = await createIdentityVerificationEvent({
-    meetingId: meeting.id,
-    meetingParticipantId: participant.id,
-    verifiedByUserId: actorUserId,
-    verificationMethod: parsed.data.verificationMethod as IdentityVerificationMethod,
-    status: verificationStatus,
-    subjectNameSnapshot: parsed.data.subjectName?.trim() ?? null,
-    documentType: normalizedIdentityDocument.documentType,
-    documentLast4: normalizedIdentityDocument.documentNumberTail,
-    issuingJurisdiction: normalizedIdentityDocument.issuingJurisdiction,
-    verifiedAt: verificationStatus === "verified" ? recordedAt : null,
-    notes: parsed.data.notes?.trim() ?? null,
-    metadata: {
-      requestId: request.id,
-      meetingCheckinId: checkin.id,
-      identityDocument: identityDocumentMetadata,
+      status: verificationStatus,
+      subjectName: parsed.data.subjectName?.trim() ?? null,
+      recordedAt,
+      notes: parsed.data.notes?.trim() ?? null,
     },
   });
   const notaryParticipant = participants.find((item) => item.participant_role === "notary");

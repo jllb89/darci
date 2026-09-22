@@ -219,6 +219,8 @@ struct NotaryVenue: Codable, Equatable, Sendable {
 struct NotarySessionFinalization: Decodable, Equatable, Sendable {
     let latestStatus: String?
     let latestStatusAt: String?
+    var isFinalized: Bool? = nil
+    var isFinalizationReady: Bool { isFinalized ?? isAnchored }
     let isAnchored: Bool
     let isVerificationChecked: Bool
     let isWatermarked: Bool
@@ -484,6 +486,8 @@ struct NotaryDocumentWorkspaceSummary: Codable, Equatable, Sendable {
 struct NotaryDocumentFinalizationSummary: Codable, Equatable, Sendable {
     let latestStatus: String?
     let latestStatusAt: String?
+    var isFinalized: Bool? = nil
+    var isFinalizationReady: Bool { isFinalized ?? isAnchored ?? false }
     let isAnchored: Bool?
     let isVerificationChecked: Bool?
     let isWatermarked: Bool?
@@ -549,6 +553,8 @@ struct NotaryFinalizationSummary: Codable, Equatable, Sendable {
     let latestStatus: String?
     let latestStatusAt: String?
     let isAnchored: Bool?
+    var isFinalized: Bool? = nil
+    var isFinalizationReady: Bool { isFinalized ?? isAnchored ?? false }
     let isVerificationChecked: Bool?
     let isWatermarked: Bool?
     let isHashRecorded: Bool?

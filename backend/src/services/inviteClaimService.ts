@@ -794,181 +794,63 @@ export const validateInviteToken = async (input: {
   });
 };
 
+// Authorization and all claim mutations live in one database transaction. Never use
+// caller-supplied email/claimAddress as identity evidence.
+const claimInviteAtomically = async (input: {
+  viewerUserId?: string | null;
+  tokenHash?: string;
+  inviteId?: string;
+}) => {
+  const viewerUserId = input.viewerUserId?.trim();
+  if (!viewerUserId) throw new InviteClaimServiceError(401, "Sign in to claim this invite");
+
+  const { data, error } = await supabaseAdmin.rpc("claim_document_invite", {
+    p_viewer_user_id: viewerUserId,
+    p_token_hash: input.tokenHash ?? null,
+    p_invite_id: input.inviteId ?? null,
+  });
+  if (error) {
+    const publicErrors: Record<string, [number, string]> = {
+      INVITE_IDENTITY_REQUIRED: [403, "Sign in with the verified email this invite was sent to"],
+      INVITE_NOT_FOUND: [404, "Invite not found"],
+      INVITE_UNAVAILABLE: [410, "This invite is expired or no longer available"],
+      INVITE_ALREADY_CLAIMED: [409, "This invite has already been claimed"],
+    };
+    const safe = publicErrors[error.message];
+    if (safe) throw new InviteClaimServiceError(safe[0], safe[1]);
+    throw new Error("Invite claim could not be completed");
+  }
+  if (!data?.id) throw new Error("Invite claim returned no result");
+  return data as DocumentInviteRow;
+};
+
 export const claimInviteToken = async (input: {
   token: string;
   viewerUserId?: string | null;
   claimAddress?: string | null;
 }) => {
   const normalizedToken = input.token.trim();
-  if (!normalizedToken) {
-    throw new InviteClaimServiceError(400, "Invite token is required");
+  if (!normalizedToken) throw new InviteClaimServiceError(400, "Invite token is required");
+  const tokenHash = hashInviteToken(normalizedToken);
+  await claimInviteAtomically({ viewerUserId: input.viewerUserId ?? null, tokenHash });
+  const context = await loadInviteContextByTokenHash(tokenHash);
+  const latestClaim = context?.claims[0] ?? null;
+  const claim = mapLatestClaim(latestClaim);
+  if (!context || !claim || context.invite.claimed_user_id !== input.viewerUserId) {
+    throw new Error("Invite claim could not be loaded");
   }
-
-  const context = await loadInviteContextByTokenHash(hashInviteToken(normalizedToken));
-  if (!context) {
-    throw new InviteClaimServiceError(404, "Invite token not found");
-  }
-
-  const latestClaim = context.claims[0] ?? null;
-  if (latestClaim && ["claimed", "accepted"].includes(latestClaim.claim_status)) {
-    return {
-      invite: mapInvitePublicView({
-        invite: context.invite,
-        recipients: context.recipients,
-        token: context.token,
-        latestClaim,
-        requester: context.requester,
-        claimedUser: context.claimedUser,
-        document: context.document,
-        viewerUserId: input.viewerUserId ?? null,
-      }),
-      claim: mapLatestClaim(latestClaim) as NonNullable<InvitePublicView["latestClaim"]>,
-    } satisfies InviteClaimResult;
-  }
-
-  if (context.token.status === "revoked") {
-    throw new InviteClaimServiceError(410, "Invite token has been revoked");
-  }
-
-  if (isInviteTokenExpired(context.token.expires_at)) {
-    throw new InviteClaimServiceError(410, "Invite token has expired");
-  }
-
-  if (context.token.status === "consumed" || context.token.use_count >= context.token.max_uses) {
-    throw new InviteClaimServiceError(409, "Invite token has already been used");
-  }
-
-  const canClaim = canClaimInviteToken({
-    tokenStatus: context.token.status,
-    useCount: context.token.use_count,
-    maxUses: context.token.max_uses,
-    expiresAt: context.token.expires_at,
-    inviteStatus: context.invite.status,
-    claimMode: context.invite.claim_mode,
-    viewerUserId: input.viewerUserId ?? null,
-  });
-
-  if (!canClaim) {
-    throw new InviteClaimServiceError(409, "Invite cannot be claimed in its current state");
-  }
-
-  const now = new Date().toISOString();
-  const primaryRecipient = context.recipients.find((recipient) => recipient.is_primary) ?? context.recipients[0] ?? null;
-  const claimMethod = input.viewerUserId ? "existing_session" : "signup";
-  const normalizedClaimAddress = input.claimAddress?.trim() ?? "";
-  const claimAddress = normalizedClaimAddress || primaryRecipient?.delivery_address || null;
-  const nextInviteStatus: DocumentInviteStatus = context.invite.requires_acceptance ? "claimed" : "accepted";
-
-  const { data: claimData, error: claimError } = await supabaseAdmin
-    .from("invite_claims")
-    .insert({
-      invite_id: context.invite.id,
-      invite_token_id: context.token.id,
-      claimed_user_id: input.viewerUserId ?? null,
-      created_user_id: null,
-      claim_status: context.invite.requires_acceptance ? "claimed" : "accepted",
-      claim_method: claimMethod,
-      claim_channel: primaryRecipient?.channel ?? "unknown",
-      claim_address: claimAddress,
-      claimed_at: now,
-      accepted_at: context.invite.requires_acceptance ? null : now,
-      metadata: {
-        source: "public_invite_claim_api",
-      },
-    })
-    .select(inviteClaimSelect)
-    .single();
-
-  if (claimError || !claimData) {
-    throw new Error(claimError?.message ?? "Failed to create invite claim");
-  }
-
-  const nextUseCount = context.token.use_count + 1;
-  const nextTokenStatus: InviteTokenStatus = nextUseCount >= context.token.max_uses ? "consumed" : "active";
-
-  const [inviteUpdateResult, tokenUpdateResult, recipientUpdateResult] = await Promise.all([
-    supabaseAdmin
-      .from("document_access_invites")
-      .update({
-        status: nextInviteStatus,
-        claimed_user_id: input.viewerUserId ?? context.invite.claimed_user_id,
-        first_clicked_at: context.invite.first_clicked_at ?? now,
-        accepted_at: context.invite.requires_acceptance ? context.invite.accepted_at : now,
-      })
-      .eq("id", context.invite.id),
-    supabaseAdmin
-      .from("invite_tokens")
-      .update({
-        status: nextTokenStatus,
-        use_count: nextUseCount,
-        last_used_at: now,
-        consumed_at: nextTokenStatus === "consumed" ? now : null,
-        consumed_by_user_id: nextTokenStatus === "consumed" ? input.viewerUserId ?? null : null,
-      })
-      .eq("id", context.token.id),
-    supabaseAdmin
-      .from("invite_recipients")
-      .update({
-        status: context.invite.requires_acceptance ? "claimed" : "opened",
-        last_event_at: now,
-      })
-      .eq("invite_id", context.invite.id),
-  ]);
-
-  if (inviteUpdateResult.error) {
-    throw new Error(inviteUpdateResult.error.message);
-  }
-
-  if (tokenUpdateResult.error) {
-    throw new Error(tokenUpdateResult.error.message);
-  }
-
-  if (recipientUpdateResult.error) {
-    throw new Error(recipientUpdateResult.error.message);
-  }
-
-  const updatedInvite: DocumentInviteRow = {
-    ...context.invite,
-    status: nextInviteStatus,
-    claimed_user_id: input.viewerUserId ?? context.invite.claimed_user_id,
-    first_clicked_at: context.invite.first_clicked_at ?? now,
-    accepted_at: context.invite.requires_acceptance ? context.invite.accepted_at : now,
-    updated_at: now,
-  };
-
-  const updatedToken: InviteTokenRow = {
-    ...context.token,
-    status: nextTokenStatus,
-    use_count: nextUseCount,
-    last_used_at: now,
-    consumed_at: nextTokenStatus === "consumed" ? now : null,
-    consumed_by_user_id: nextTokenStatus === "consumed" ? input.viewerUserId ?? null : null,
-    updated_at: now,
-  };
-
-  const updatedRecipients = context.recipients.map((recipient) => ({
-    ...recipient,
-    status: context.invite.requires_acceptance ? "claimed" : recipient.status,
-    last_event_at: now,
-  }));
-
-  const mappedClaim = mapLatestClaim(claimData as unknown as InviteClaimRow);
-  if (!mappedClaim) {
-    throw new Error("Failed to map invite claim response");
-  }
-
   return {
     invite: mapInvitePublicView({
-      invite: updatedInvite,
-      recipients: updatedRecipients,
-      token: updatedToken,
-      latestClaim: claimData as unknown as InviteClaimRow,
+      invite: context.invite,
+      recipients: context.recipients,
+      token: context.token,
+      latestClaim,
       requester: context.requester,
       claimedUser: context.claimedUser,
       document: context.document,
       viewerUserId: input.viewerUserId ?? null,
     }),
-    claim: mappedClaim,
+    claim,
   } satisfies InviteClaimResult;
 };
 
@@ -979,114 +861,12 @@ export const openAuthenticatedInvite = async (input: {
   claimAddress?: string | null;
 }) => {
   const inviteId = input.inviteId.trim();
-  if (!inviteId) {
-    throw new InviteClaimServiceError(400, "Invite id is required");
-  }
-
-  const viewerUserId = input.viewerUserId?.trim() ?? "";
-  if (!viewerUserId) {
-    throw new InviteClaimServiceError(401, "Sign in to open this invite");
-  }
-
-  const invite = await getInviteById(inviteId);
-  if (!invite || invite.invite_kind !== "document_signing") {
-    throw new InviteClaimServiceError(404, "Invite not found");
-  }
-
-  const [recipients, document] = await Promise.all([
-    listInviteRecipients(invite.id),
-    getDocumentById(invite.document_id),
-  ]);
-
-  if (!document) {
-    throw new InviteClaimServiceError(404, "Document not found");
-  }
-
-  if (!invite.document_output_signer_id) {
-    throw new InviteClaimServiceError(404, "Document signer obligation not found");
-  }
-
-  const viewerEmail = normalizeEmail(input.viewerEmail);
-  if (!userCanOpenInvite({ invite, recipients, viewerUserId, viewerEmail })) {
-    throw new InviteClaimServiceError(404, "Invite not found");
-  }
-
-  if (["declined", "revoked"].includes(invite.status)) {
-    throw new InviteClaimServiceError(409, "Invite cannot be opened in its current state");
-  }
-
-  if (["claimed", "accepted", "completed"].includes(invite.status)) {
-    return {
-      inviteId: invite.id,
-      documentId: invite.document_id,
-      signingHref: getSigningHref(invite.document_id),
-      status: invite.status,
-    } satisfies AuthenticatedInviteOpenResult;
-  }
-
-  if (!["draft", "queued", "sent", "opened", "expired", "failed"].includes(invite.status)) {
-    throw new InviteClaimServiceError(409, "Invite is not ready to open");
-  }
-
-  const now = new Date().toISOString();
-  const primaryRecipient = recipients.find((recipient) => recipient.is_primary) ?? recipients[0] ?? null;
-  const normalizedClaimAddress = input.claimAddress?.trim() ?? "";
-  const claimAddress = normalizedClaimAddress || input.viewerEmail?.trim() || primaryRecipient?.delivery_address || null;
-  const nextInviteStatus: DocumentInviteStatus = invite.requires_acceptance ? "claimed" : "accepted";
-
-  const [claimResult, inviteUpdateResult, recipientUpdateResult] = await Promise.all([
-    supabaseAdmin
-      .from("invite_claims")
-      .insert({
-        invite_id: invite.id,
-        invite_token_id: null,
-        claimed_user_id: viewerUserId,
-        created_user_id: null,
-        claim_status: invite.requires_acceptance ? "claimed" : "accepted",
-        claim_method: authenticatedInviteOpenClaimMethod,
-        claim_channel: primaryRecipient?.channel ?? "unknown",
-        claim_address: claimAddress,
-        claimed_at: now,
-        accepted_at: invite.requires_acceptance ? null : now,
-        metadata: {
-          source: "authenticated_invite_open_api",
-        },
-      }),
-    supabaseAdmin
-      .from("document_access_invites")
-      .update({
-        status: nextInviteStatus,
-        claimed_user_id: viewerUserId,
-        first_clicked_at: invite.first_clicked_at ?? now,
-        accepted_at: invite.requires_acceptance ? invite.accepted_at : now,
-        updated_at: now,
-      })
-      .eq("id", invite.id),
-    supabaseAdmin
-      .from("invite_recipients")
-      .update({
-        status: invite.requires_acceptance ? "claimed" : "opened",
-        last_event_at: now,
-      })
-      .eq("invite_id", invite.id),
-  ]);
-
-  if (claimResult.error) {
-    throw new Error(claimResult.error.message);
-  }
-
-  if (inviteUpdateResult.error) {
-    throw new Error(inviteUpdateResult.error.message);
-  }
-
-  if (recipientUpdateResult.error) {
-    throw new Error(recipientUpdateResult.error.message);
-  }
-
+  if (!inviteId) throw new InviteClaimServiceError(400, "Invite id is required");
+  const invite = await claimInviteAtomically({ viewerUserId: input.viewerUserId ?? null, inviteId });
   return {
     inviteId: invite.id,
     documentId: invite.document_id,
     signingHref: getSigningHref(invite.document_id),
-    status: nextInviteStatus,
+    status: invite.status,
   } satisfies AuthenticatedInviteOpenResult;
 };

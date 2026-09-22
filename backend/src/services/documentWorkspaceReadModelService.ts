@@ -6,6 +6,7 @@ import {
 import {
   getVerificationSnapshotForDocument,
   listFinalizationStatusHistory,
+  resolvePublicVerificationStatus,
 } from "./documentFinalizationService";
 import { getVisibleDocumentIdn } from "./documentVisibilityService";
 import { listWorkflowStatusHistory } from "./illuminotarizationWorkflowService";
@@ -30,6 +31,7 @@ export type DocumentWorkspaceSummary = {
     latestStatus: string | null;
     latestStatusAt: string | null;
     isAnchored: boolean;
+    isFinalized: boolean;
     isVerificationChecked: boolean;
     isWatermarked: boolean;
     isHashRecorded: boolean;
@@ -82,6 +84,7 @@ const buildDefaultSummary = (visibleIdn: string | null): DocumentWorkspaceSummar
     latestStatus: null,
     latestStatusAt: null,
     isAnchored: false,
+    isFinalized: false,
     isVerificationChecked: false,
     isWatermarked: false,
     isHashRecorded: false,
@@ -132,7 +135,10 @@ export const buildDocumentWorkspaceSummary = async (input: {
 
   const latestWorkflowStatus = workflowStatusHistory.at(-1) ?? null;
   const latestFinalizationStatus = finalizationStatusHistory.at(-1) ?? null;
-  const isAnchored = finalizationStatusHistory.some((entry) => entry.status === "ledger_anchored");
+  const isFinalized = input.document.status === "completed" && resolvePublicVerificationStatus(verificationSnapshot) === "verified";
+  // A newly verified legacy hash does not turn its simulated receipt into an
+  // external anchor. This release has no real ledger adapter.
+  const isAnchored = false;
   const isWatermarked = finalizationStatusHistory.some((entry) => entry.status === "watermark_applied");
   const isHashRecorded = finalizationStatusHistory.some((entry) => entry.status === "hash_recorded");
   const isVerificationChecked = finalizationStatusHistory.some(
@@ -155,12 +161,13 @@ export const buildDocumentWorkspaceSummary = async (input: {
     latestStatus: latestFinalizationStatus?.status ?? null,
     latestStatusAt: latestFinalizationStatus?.created_at ?? null,
     isAnchored,
+    isFinalized,
     isVerificationChecked,
     isWatermarked,
     isHashRecorded,
     hash: heldFromViewer ? null : verificationSnapshot.hashRecord?.hash ?? null,
-    ledgerTxId: heldFromViewer ? null : verificationSnapshot.ledgerEntry?.ledger_tx_id ?? null,
-    anchoredAt: heldFromViewer ? null : verificationSnapshot.ledgerEntry?.anchored_at ?? null,
+    ledgerTxId: null,
+    anchoredAt: null,
     anchorAttempt: !heldFromViewer && verificationSnapshot.ledgerAnchorAttempt
       ? {
           id: verificationSnapshot.ledgerAnchorAttempt.id,
@@ -182,7 +189,7 @@ export const buildDocumentWorkspaceSummary = async (input: {
   };
 
   summary.verification = {
-    status: heldFromViewer || !visibleIdn ? "unavailable" : isAnchored ? "ready" : "pending_finalization",
+    status: heldFromViewer || !visibleIdn ? "unavailable" : isFinalized ? "ready" : "pending_finalization",
     idn: visibleIdn,
     verifyPath: heldFromViewer || !visibleIdn ? null : `/verify/${encodeURIComponent(visibleIdn)}`,
   };

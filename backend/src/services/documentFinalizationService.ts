@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { loadPdfForProcessing, saveValidatedPdf } from "./pdfProcessingService";
+import { loadPdfForProcessing, saveValidatedPdf, validateRenderedPdf } from "./pdfProcessingService";
 import { captureMessage } from "../utils/sentry";
 import path from "path";
 import {
@@ -33,10 +33,11 @@ import { transitionIlluminotarizationWorkflowStatus } from "./illuminotarization
 import { anchorToLedger } from "./ledgerService";
 import { getMeetingByRequestId } from "./meetingService";
 import { isNotaryCommissionCurrent, type NotaryProfileRecord } from "./notaryProfileService";
-import { createDocumentDownloadUrl, downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
+import { downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
 import {
   applyFinalPackageBillingPolicy,
   canViewerAccessFinalPackage,
+  getDocumentReleaseControl,
 } from "./billingPolicyService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
@@ -110,7 +111,7 @@ export type LedgerEntryRecord = {
   created_at: string;
 };
 
-export type LedgerAnchorAttemptStatus = "pending" | "anchored" | "failed";
+export type LedgerAnchorAttemptStatus = "pending" | "anchored" | "not_required" | "failed";
 
 export type LedgerAnchorAttemptRecord = {
   id: string;
@@ -147,6 +148,7 @@ export type FinalizationStatus =
   | "acknowledgment_appended"
   | "watermark_applied"
   | "hash_recorded"
+  | "hash_verified"
   | "ledger_anchored"
   | "verification_checked"
   | "failed";
@@ -259,15 +261,26 @@ export type VerificationSnapshot = {
   hashRecord: DocumentHashRecordRecord | null;
   ledgerEntry: LedgerEntryRecord | null;
   ledgerAnchorAttempt: LedgerAnchorAttemptRecord | null;
+  hashReverification?: HashReverificationRecord | null;
+};
+
+export type HashReverificationRecord = {
+  id: string;
+  document_version_id: string;
+  document_hash_record_id: string;
+  observed_sha256: string;
+  rendered_page_count: number;
+  verifier_revision: string;
 };
 
 export type PublicVerificationEvidence = {
-  hashRecord: Pick<DocumentHashRecordRecord, "id" | "hash" | "status"> | null;
+  hashRecord: (Pick<DocumentHashRecordRecord, "id" | "hash" | "status"> & Partial<Pick<DocumentHashRecordRecord, "document_version_id">>) | null;
   ledgerEntry: Pick<LedgerEntryRecord, "id" | "hash" | "ledger_tx_id" | "anchored_at"> | null;
   ledgerAnchorAttempt: Pick<
     LedgerAnchorAttemptRecord,
     "document_hash_record_id" | "ledger_entry_id" | "status"
-  > | null;
+  > & Partial<Pick<LedgerAnchorAttemptRecord, "response_payload">> | null;
+  hashReverification?: HashReverificationRecord | null;
 };
 
 const acknowledgmentPageSelectColumns = [
@@ -764,9 +777,10 @@ const getDocumentHashRecordById = async (documentHashRecordId: string) => {
 const getLatestDocumentHashRecord = async (documentId: string) => {
   const { data, error } = await supabaseAdmin
     .from("document_hash_records")
-    .select(documentHashSelectColumns)
+    .select(`${documentHashSelectColumns}, document_versions!inner(is_final)`)
     .eq("document_id", documentId)
     .eq("status", "completed")
+    .eq("document_versions.is_final", true)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -901,7 +915,7 @@ const getLatestLedgerAnchorAttemptForHashRecord = async (documentHashRecordId: s
 };
 
 export const getVerificationSnapshotForDocument = async (document: DocumentRecord) => {
-  const hashRecord = await getLatestDocumentHashRecord(document.id);
+  const hashRecord = document.status === "completed" ? await getLatestDocumentHashRecord(document.id) : null;
   const ledgerEntry = hashRecord
     ? await getLatestLedgerEntryForHash({
         documentId: document.id,
@@ -909,14 +923,23 @@ export const getVerificationSnapshotForDocument = async (document: DocumentRecor
       })
     : null;
 
+  const ledgerAnchorAttempt = hashRecord ? await getLatestLedgerAnchorAttemptForHashRecord(hashRecord.id) : null;
   return {
     document,
     hashRecord,
     ledgerEntry,
-    ledgerAnchorAttempt: hashRecord
-      ? await getLatestLedgerAnchorAttemptForHashRecord(hashRecord.id)
-      : null,
+    ledgerAnchorAttempt,
+    hashReverification: ledgerAnchorAttempt?.status === "anchored" && hashRecord
+      ? await getHashReverification(hashRecord.id) : null,
   } satisfies VerificationSnapshot;
+};
+
+export const getHashReverification = async (hashRecordId: string): Promise<HashReverificationRecord | null> => {
+  const { data, error } = await supabaseAdmin.from("document_hash_reverifications")
+    .select("id,document_version_id,document_hash_record_id,observed_sha256,rendered_page_count,verifier_revision")
+    .eq("document_hash_record_id", hashRecordId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as HashReverificationRecord | null;
 };
 
 const createLedgerAnchorAttempt = async (input: {
@@ -1793,28 +1816,30 @@ export const applyFinalizationWatermarkToPdf = async (input: {
 export const resolvePublicVerificationStatus = (
   evidence: PublicVerificationEvidence,
 ): PublicVerificationStatus => {
-  if (!evidence.hashRecord || evidence.hashRecord.status !== "completed") {
+  const { hashRecord, ledgerEntry, ledgerAnchorAttempt: attempt } = evidence;
+  if (!hashRecord || hashRecord.status !== "completed" || !/^[a-f0-9]{64}$/i.test(hashRecord.hash)
+      || !ledgerEntry || ledgerEntry.hash !== hashRecord.hash || !attempt
+      || attempt.document_hash_record_id !== hashRecord.id || attempt.ledger_entry_id !== ledgerEntry.id) {
     return "unverified";
   }
-
-  if (
-    !evidence.ledgerEntry ||
-    evidence.ledgerEntry.hash !== evidence.hashRecord.hash ||
-    !evidence.ledgerEntry.ledger_tx_id ||
-    !evidence.ledgerEntry.anchored_at
-  ) {
-    return "unverified";
+  if (attempt.status === "not_required") {
+    return attempt.response_payload?.provider === "hash_only" && !ledgerEntry.ledger_tx_id && !ledgerEntry.anchored_at
+      ? "verified" : "unverified";
   }
-
-  if (!evidence.ledgerAnchorAttempt) {
-    return "unverified";
+  const recheck = evidence.hashReverification;
+  if (attempt.status === "anchored" && recheck?.id && hashRecord.document_version_id
+      && recheck.document_hash_record_id === hashRecord.id
+      && recheck.document_version_id === hashRecord.document_version_id
+      && recheck.observed_sha256 === hashRecord.hash
+      && recheck.verifier_revision === "legacy-hash-recheck-v1"
+      && Number.isInteger(recheck.rendered_page_count) && recheck.rendered_page_count > 0 && recheck.rendered_page_count <= 200) {
+    // This is new, independently checked SHA-256 evidence, never validation of
+    // the historical simulated receipt. Public tx/time remain null.
+    return "verified";
   }
-
-  return evidence.ledgerAnchorAttempt.status === "anchored" &&
-      evidence.ledgerAnchorAttempt.document_hash_record_id === evidence.hashRecord.id &&
-      evidence.ledgerAnchorAttempt.ledger_entry_id === evidence.ledgerEntry.id
-    ? "verified"
-    : "unverified";
+  // No real external-ledger adapter is implemented. A legacy receipt string,
+  // even without the old stub prefix, is not independently verified proof.
+  return "unverified";
 };
 
 const sortVersionedItems = <Item extends { version: DocumentVersionRecord }>(items: Item[]) => {
@@ -1902,6 +1927,7 @@ const loadWatermarkItemsForExecutions = async (input: {
     hashRecord: DocumentHashRecordRecord;
     ledgerEntry: LedgerEntryRecord;
     ledgerAnchorAttempt: LedgerAnchorAttemptRecord | null;
+    hashReverification: HashReverificationRecord | null;
   }>;
 
   for (const execution of input.executions) {
@@ -1927,7 +1953,7 @@ const loadWatermarkItemsForExecutions = async (input: {
 
     const hashRecord = documentHashRecordId
       ? await getDocumentHashRecordById(documentHashRecordId)
-      : await getLatestDocumentHashRecord(input.document.id);
+      : null;
     const ledgerEntry = ledgerEntryId
       ? await getLedgerEntryById(ledgerEntryId)
       : hashRecord
@@ -1942,11 +1968,12 @@ const loadWatermarkItemsForExecutions = async (input: {
         ? await getLatestLedgerAnchorAttemptForHashRecord(hashRecord.id)
         : null;
 
-    if (!hashRecord || !ledgerEntry) {
-      throw new Error("Watermark execution is missing its hash or ledger state");
+    if (!hashRecord || !ledgerEntry || hashRecord.document_version_id !== version.id || hashRecord.execution_run_id !== execution.id) {
+      throw new Error("Watermark execution is missing its version-bound hash or ledger state");
     }
 
-    items.push({ execution, version, hashRecord, ledgerEntry, ledgerAnchorAttempt });
+    const hashReverification = ledgerAnchorAttempt?.status === "anchored" ? await getHashReverification(hashRecord.id) : null;
+    items.push({ execution, version, hashRecord, ledgerEntry, ledgerAnchorAttempt, hashReverification });
   }
 
   return sortVersionedItems(items);
@@ -2041,14 +2068,6 @@ export const appendAcknowledgmentPage = async (input: {
     executionKind: "acknowledgment_append",
   });
 
-  if (existingAcknowledgments.length > 0) {
-    return loadExistingAcknowledgmentResult({
-      document: context.document,
-      request: context.request,
-      executions: existingAcknowledgments,
-    });
-  }
-
   const versions = await listDocumentVersions(context.document.id);
   const appendTargets = await resolveAcknowledgmentAppendTargets({
     document: context.document,
@@ -2092,7 +2111,8 @@ export const appendAcknowledgmentPage = async (input: {
     rule,
   });
   const nextVersionNumber = await getNextDocumentVersionNumber(context.document.id);
-  const acknowledgmentBatchId = randomUUID();
+  const acknowledgmentBatchId = existingAcknowledgments[0]?.metadata.acknowledgmentBatchId ?? randomUUID();
+  const existingAcknowledgmentItems = await loadAcknowledgmentItemsForExecutions({ document: context.document, executions: existingAcknowledgments });
   const acknowledgmentItems = [] as Array<{
     acknowledgmentPage: AcknowledgmentPageRecord;
     execution: DocumentExecutionRunRecord;
@@ -2122,6 +2142,14 @@ export const appendAcknowledgmentPage = async (input: {
       meetingId: input.meetingId,
       identityMethodSummary: input.identityMethodSummary,
     });
+    const reusable = existingAcknowledgmentItems.find(item => item.execution.source_document_version_id === sourceVersion.id);
+    if (reusable) {
+      if (reusable.acknowledgmentPage.content !== acknowledgmentRender.content) {
+        throw new DocumentFinalizationConflictError("Acknowledgment facts changed during recovery; review the existing evidence before proceeding");
+      }
+      acknowledgmentItems.push(reusable);
+      continue;
+    }
     const acknowledgmentPage = await createAcknowledgmentPageRecord({
       documentId: context.document.id,
       jurisdiction: context.document.jurisdiction,
@@ -2162,6 +2190,8 @@ export const appendAcknowledgmentPage = async (input: {
       storagePath,
       content: transformedContent,
       contentType: "application/pdf",
+      overwrite: false,
+      verifyStoredBytes: true,
     });
 
     const version = await createDerivedDocumentVersion({
@@ -2255,6 +2285,22 @@ export const appendAcknowledgmentPage = async (input: {
   };
 };
 
+const assertStoredWatermarkEvidence = async (item: {
+  version: DocumentVersionRecord; hashRecord: DocumentHashRecordRecord;
+  ledgerEntry: LedgerEntryRecord; ledgerAnchorAttempt: LedgerAnchorAttemptRecord | null;
+  hashReverification?: HashReverificationRecord | null;
+}) => {
+  if (resolvePublicVerificationStatus(item) !== "verified" || !item.version.storage_path) {
+    throw new DocumentFinalizationConflictError("Stored finalization evidence requires review");
+  }
+  const bytes = await downloadDocumentObject(item.version.storage_path);
+  if ((await hashDocument(item.version.document_id, bytes)).hash !== item.hashRecord.hash) {
+    throw new DocumentFinalizationConflictError("Stored final PDF does not match its immutable hash");
+  }
+  const pdf = await loadPdfForProcessing(bytes);
+  await validateRenderedPdf(bytes, pdf.getPageCount());
+};
+
 export const watermarkWithNotice = async (input: {
   documentId: string;
   actorSupabaseId?: string | undefined;
@@ -2279,25 +2325,8 @@ export const watermarkWithNotice = async (input: {
     executionKind: "watermark",
   });
 
-  if (existingWatermarks.length > 0) {
-    const existingResult = await loadExistingWatermarkResult({
-      document: context.document,
-      request: context.request,
-      executions: existingWatermarks,
-    });
-    const packageAnchored = existingResult.ledgerAnchorAttempts.every(
-      (attempt) => attempt?.status === "anchored",
-    );
-    const releaseControl = packageAnchored
-      ? await applyFinalPackageBillingPolicy({
-          ownerUserId: context.document.owner_id,
-          documentId: context.document.id,
-          documentVersionId: existingResult.version.id,
-          documentHashRecordId: existingResult.hashRecord.id,
-          actorUserId: context.actorUserId,
-        })
-      : null;
-    return { ...existingResult, releaseControl };
+  if ((process.env.LEDGER_ANCHOR_MODE ?? "hash_only") !== "hash_only") {
+    throw new DocumentFinalizationConflictError("Only hash-only finalization is enabled for this release");
   }
 
   const acknowledgmentExecutions = await listCompletedDocumentExecutionRuns({
@@ -2332,13 +2361,35 @@ export const watermarkWithNotice = async (input: {
     version: DocumentVersionRecord;
     hashRecord: DocumentHashRecordRecord;
     ledgerEntry: LedgerEntryRecord;
-    ledgerAnchorAttempt: LedgerAnchorAttemptRecord;
+    ledgerAnchorAttempt: LedgerAnchorAttemptRecord | null;
   }>;
+  const reusableItems = await loadWatermarkItemsForExecutions({ document: context.document, executions: existingWatermarks });
 
-  await resetFinalDocumentVersions(context.document.id);
+  if (context.document.status === "completed" && reusableItems.some(item => item.ledgerAnchorAttempt?.status === "anchored")) {
+    const finalVersions = (await listDocumentVersions(context.document.id)).filter(version => version.is_final);
+    if (context.request.status !== "completed" || reusableItems.length !== acknowledgmentItems.length
+        || finalVersions.length !== reusableItems.length
+        || finalVersions.some(version => !reusableItems.some(item => item.version.id === version.id))
+        || acknowledgmentItems.some(ack => reusableItems.filter(item => item.execution.source_document_version_id === ack.version.id).length !== 1)) {
+      throw new DocumentFinalizationConflictError("Historical final package requires review");
+    }
+    for (const item of reusableItems) await assertStoredWatermarkEvidence(item);
+    // A retry on an already-completed historical package is read-only: never
+    // rewrite its receipt, release decision, acknowledgment, PDF or workflow.
+    return {
+      ...(await loadExistingWatermarkResult({ document: context.document, request: context.request, executions: existingWatermarks })),
+      releaseControl: await getDocumentReleaseControl(context.document.id),
+    };
+  }
 
   for (const [targetIndex, acknowledgmentItem] of acknowledgmentItems.entries()) {
     const sourceVersion = acknowledgmentItem.version;
+    const reusable = reusableItems.find(item => item.execution.source_document_version_id === sourceVersion.id);
+    if (reusable) {
+      await assertStoredWatermarkEvidence(reusable);
+      watermarkItems.push(reusable);
+      continue;
+    }
     if (!sourceVersion.storage_path) {
       throw new DocumentFinalizationConflictError(
         "Acknowledgment output version is missing its stored PDF asset",
@@ -2375,153 +2426,31 @@ export const watermarkWithNotice = async (input: {
       storagePath,
       content: transformedContent,
       contentType: "application/pdf",
-    });
-
-    const version = await createDerivedDocumentVersion({
-      documentId: context.document.id,
-      sourceVersion,
-      storagePath,
-      fileName,
-      sizeBytes: transformedContent.byteLength,
-      mimeType: "application/pdf",
-      createdBy: context.actorUserId,
-      isFinal: true,
-      versionNumber,
-      resetExistingFinal: false,
-    });
-
-    const execution = await createDocumentExecutionRun({
-      documentId: context.document.id,
-      sourceDocumentVersionId: sourceVersion.id,
-      outputDocumentVersionId: version.id,
-      executionKind: "watermark",
-      initiatedByUserId: context.actorUserId,
-      watermarkText,
-      metadata: {
-        watermarkBatchId,
-        watermarkBatchSize: acknowledgmentItems.length,
-        watermarkTargetIndex: targetIndex,
-        acknowledgmentExecutionId: acknowledgmentItem.execution.id,
-        sourceVersionId: sourceVersion.id,
-        outputVersionId: version.id,
-      },
+      overwrite: false,
+      verifyStoredBytes: true,
     });
 
     const hashResult = await hashDocument(context.document.id, transformedContent);
-    const hashRecord = await createDocumentHashRecord({
-      documentId: context.document.id,
-      documentVersionId: version.id,
-      executionRunId: execution.id,
-      algorithm: "sha256",
-      hash: hashResult.hash,
-      metadata: {
-        watermarkBatchId,
-        sourceVersionId: sourceVersion.id,
-        outputVersionId: version.id,
+    const { data: committed, error: commitError } = await supabaseAdmin.rpc("commit_hash_only_output", {
+      p_document_id: context.document.id,
+      p_source_version_id: sourceVersion.id,
+      p_actor_id: context.actorUserId,
+      p_storage_path: storagePath,
+      p_file_name: fileName,
+      p_size_bytes: transformedContent.byteLength,
+      p_hash: hashResult.hash,
+      p_watermark_text: watermarkText,
+      p_metadata: {
+        watermarkBatchId, watermarkBatchSize: acknowledgmentItems.length,
+        watermarkTargetIndex: targetIndex, acknowledgmentExecutionId: acknowledgmentItem.execution.id,
       },
     });
-
-    const ledgerResult = await anchorToLedger(idn, hashRecord.hash);
-    const ledgerEntry = await createLedgerEntryRecord({
-      documentId: context.document.id,
-      idn,
-      hash: hashRecord.hash,
-      ledgerTxId: ledgerResult.ledgerTxId,
-      anchoredAt: ledgerResult.anchoredAt,
-    });
-    const ledgerAnchorAttempt = await createLedgerAnchorAttempt({
-      documentId: context.document.id,
-      documentHashRecordId: hashRecord.id,
-      ledgerEntryId: ledgerEntry.id,
-      status: ledgerResult.status === "anchored" ? "anchored" : "failed",
-      completedAt: ledgerResult.status === "anchored" ? ledgerEntry.anchored_at : null,
-      failedAt: ledgerResult.status === "failed" ? new Date().toISOString() : null,
-      errorMessage: ledgerResult.errorMessage,
-      responsePayload: {
-        idn: ledgerResult.idn,
-        hash: ledgerResult.hash,
-        ledgerTxId: ledgerResult.ledgerTxId,
-        status: ledgerResult.status,
-        anchoredAt: ledgerResult.anchoredAt ?? ledgerEntry.anchored_at,
-        errorMessage: ledgerResult.errorMessage,
-        provider: ledgerResult.provider,
-      },
-    });
-
-    const executionMetadata = {
-      ...execution.metadata,
-      documentHashRecordId: hashRecord.id,
-      ledgerEntryId: ledgerEntry.id,
-      ledgerAnchorAttemptId: ledgerAnchorAttempt.id,
-    };
-    const { data: updatedExecution, error: updatedExecutionError } = await supabaseAdmin
-      .from("document_execution_runs")
-      .update({ metadata: executionMetadata })
-      .eq("id", execution.id)
-      .select(documentExecutionSelectColumns)
-      .single();
-
-    if (updatedExecutionError || !updatedExecution) {
-      throw new Error(updatedExecutionError?.message ?? "Failed to update watermark execution metadata");
+    if (commitError || !committed) {
+      throw new DocumentFinalizationConflictError("Final document evidence could not be committed; retry is safe");
     }
-
-    await createFinalizationStatusHistoryEntry({
-      documentId: context.document.id,
-      changedByUserId: context.actorUserId,
-      status: "watermark_applied",
-      changeSource: "documents.watermark",
-      changeReason: "Digital-original watermark execution completed",
-      executionRunId: execution.id,
-      metadata: {
-        watermarkBatchId,
-        sourceVersionId: sourceVersion.id,
-        outputVersionId: version.id,
-        watermarkText,
-      },
-    });
-    await createFinalizationStatusHistoryEntry({
-      documentId: context.document.id,
-      changedByUserId: context.actorUserId,
-      status: "hash_recorded",
-      changeSource: "documents.watermark",
-      changeReason: "Final document hash recorded",
-      executionRunId: execution.id,
-      documentHashRecordId: hashRecord.id,
-      metadata: {
-        watermarkBatchId,
-        hash: hashRecord.hash,
-        algorithm: hashRecord.algorithm,
-        documentVersionId: version.id,
-      },
-    });
-    await createFinalizationStatusHistoryEntry({
-      documentId: context.document.id,
-      changedByUserId: context.actorUserId,
-      status: ledgerAnchorAttempt.status === "anchored" ? "ledger_anchored" : "failed",
-      changeSource: "documents.watermark",
-      changeReason:
-        ledgerAnchorAttempt.status === "anchored"
-          ? "Ledger anchoring completed"
-          : "Ledger anchoring failed",
-      executionRunId: execution.id,
-      documentHashRecordId: hashRecord.id,
-      ledgerAnchorAttemptId: ledgerAnchorAttempt.id,
-      metadata: {
-        watermarkBatchId,
-        ledgerEntryId: ledgerEntry.id,
-        ledgerTxId: ledgerEntry.ledger_tx_id,
-        hash: hashRecord.hash,
-        errorMessage: ledgerResult.errorMessage,
-      },
-    });
-
-    watermarkItems.push({
-      execution: updatedExecution as unknown as DocumentExecutionRunRecord,
-      version,
-      hashRecord,
-      ledgerEntry,
-      ledgerAnchorAttempt,
-    });
+    const committedItem = committed as (typeof watermarkItems)[number];
+    await assertStoredWatermarkEvidence(committedItem);
+    watermarkItems.push(committedItem);
   }
 
   const primaryWatermarkItem = getPrimaryWatermarkItem(watermarkItems);
@@ -2531,23 +2460,30 @@ export const watermarkWithNotice = async (input: {
     );
   }
 
-  const packageAnchored = watermarkItems.every(
-    (item) => item.ledgerAnchorAttempt.status === "anchored",
+  const packageFinalized = watermarkItems.every(
+    (item) => resolvePublicVerificationStatus(item) === "verified",
   );
-  const updatedDocument = await updateDocument(context.document.id, {
-    status: packageAnchored ? "completed" : "pending_notary",
+  if (!packageFinalized || watermarkItems.length !== acknowledgmentItems.length) {
+    throw new DocumentFinalizationConflictError("The complete package is not yet verification-ready");
+  }
+  const { data: completedPackage, error: completionError } = await supabaseAdmin.rpc("complete_hash_only_package", {
+    p_document_id: context.document.id, p_actor_id: context.actorUserId,
+    p_version_ids: watermarkItems.map(item => item.version.id),
   });
-  const updatedRequest = await updateNotarizationRequest(context.request.id, {
-    status: packageAnchored ? "completed" : context.request.status,
-  });
+  if (completionError || !completedPackage) {
+    throw new DocumentFinalizationConflictError("Package completion could not be committed; final access remains pending");
+  }
+  const updatedDocument = completedPackage.document as DocumentRecord;
+  const updatedRequest = completedPackage.request as typeof context.request;
+  for (const item of watermarkItems) item.version.is_final = true;
 
-  if (packageAnchored && context.request.workflow_id) {
+  if (packageFinalized && context.request.workflow_id) {
     await transitionIlluminotarizationWorkflowStatus({
       workflowId: context.request.workflow_id,
       nextStatus: "completed",
       changedByUserId: context.actorUserId ?? context.request.assigned_notary_id ?? undefined,
       changeSource: "system",
-      changeReason: "Document watermark, hash, and ledger anchoring completed",
+      changeReason: "Document finalization and integrity verification completed",
       legacyRequestId: context.request.id,
       metadata: {
         documentId: context.document.id,
@@ -2561,7 +2497,7 @@ export const watermarkWithNotice = async (input: {
     });
   }
 
-  const releaseControl = packageAnchored
+  const releaseControl = packageFinalized
     ? await applyFinalPackageBillingPolicy({
         ownerUserId: context.document.owner_id,
         documentId: context.document.id,
@@ -2589,64 +2525,17 @@ export const watermarkWithNotice = async (input: {
   };
 };
 
-const buildOutputLabelByGenerationRunId = (input: {
-  document: Pick<DocumentRecord, "output_bundle">;
-  generationRuns: DocumentGenerationRunRecord[];
-}) => {
-  const outputLabelByKey = new Map<string, string>();
-
-  for (const rawOutput of input.document.output_bundle ?? []) {
-    const outputKey = asTrimmedString(rawOutput.outputKey);
-    const outputLabel = asTrimmedString(rawOutput.outputLabel);
-
-    if (outputKey && outputLabel) {
-      outputLabelByKey.set(outputKey, outputLabel);
-    }
-  }
-
-  const outputLabelByGenerationRunId = new Map<string, string>();
-
-  for (const run of input.generationRuns) {
-    const outputLabel = outputLabelByKey.get(run.output_key);
-    if (outputLabel) {
-      outputLabelByGenerationRunId.set(run.id, outputLabel);
-    }
-  }
-
-  return outputLabelByGenerationRunId;
-};
-
-const buildPublicVerificationDocumentLabel = (input: {
-  version: DocumentVersionRecord;
-  index: number;
-  outputLabelByGenerationRunId: Map<string, string>;
-}) => {
-  const generationRunLabel = input.version.generation_run_id
-    ? input.outputLabelByGenerationRunId.get(input.version.generation_run_id)
-    : null;
-  const fileNameLabel = input.version.file_name?.trim() || null;
-
-  return generationRunLabel ?? fileNameLabel ?? `Document ${input.index + 1}`;
-};
 
 const isPublicVerificationDocumentVersion = (version: DocumentVersionRecord) => {
-  const fileName = version.file_name?.trim().toLowerCase() ?? "";
-  const storagePath = version.storage_path?.trim().toLowerCase() ?? "";
-
-  return Boolean(
-    isPdfDocumentVersion(version) &&
-      (version.is_final || /-finalized-v\d+\.pdf$/.test(fileName) || /-finalized-v\d+\.pdf$/.test(storagePath)),
-  );
+  return isPdfDocumentVersion(version) && version.is_final === true;
 };
 
 const buildPublicVerificationDocuments = async (document: DocumentRecord) => {
-  const [versions, generationRuns] = await Promise.all([
-    listDocumentVersions(document.id),
-    listDocumentGenerationRuns(document.id),
-  ]);
-  const outputLabelByGenerationRunId = buildOutputLabelByGenerationRunId({
+  if (document.status !== "completed") return [];
+  const versions = await listDocumentVersions(document.id);
+  const proofItems = await loadWatermarkItemsForExecutions({
     document,
-    generationRuns,
+    executions: await listCompletedDocumentExecutionRuns({ documentId: document.id, executionKind: "watermark" }),
   });
   const pdfVersions = versions
     .filter(isPublicVerificationDocumentVersion)
@@ -2667,32 +2556,12 @@ const buildPublicVerificationDocuments = async (document: DocumentRecord) => {
   });
 
   return Promise.all(
-    publicVersions.map(async (version, index) => {
-      let downloadUrl: string | null = null;
-
-      if (version.storage_path) {
-        try {
-          downloadUrl = (await createDocumentDownloadUrl(version.storage_path)).signedUrl;
-        } catch {
-          downloadUrl = null;
-        }
-      }
-
-      return {
-        id: version.id,
-        versionId: version.id,
-        label: buildPublicVerificationDocumentLabel({
-          version,
-          index,
-          outputLabelByGenerationRunId,
-        }),
-        fileName: version.file_name,
-        mimeType: version.mime_type,
-        sizeBytes: version.size_bytes,
-        isFinal: Boolean(version.is_final),
-        downloadUrl,
-        createdAt: version.created_at,
-      };
+    publicVersions.map(async (version) => {
+      const proof = proofItems.find(item => item.version.id === version.id);
+      if (!proof) throw new DocumentFinalizationConflictError("Published PDF has no version-bound verification evidence");
+      await assertStoredWatermarkEvidence(proof);
+      // Validate exact bytes server-side without minting a transferable URL.
+      return true;
     }),
   );
 };
@@ -2749,8 +2618,9 @@ export const verifyDocumentByIdn = async (input: {
     };
   }
 
-  const status = resolvePublicVerificationStatus(snapshot);
-  const documents = await safelyBuildPublicVerificationDocuments(snapshot.document);
+  let status = resolvePublicVerificationStatus(snapshot);
+  const documents = status === "verified" ? await safelyBuildPublicVerificationDocuments(snapshot.document) : [];
+  if (status === "verified" && documents.length === 0) status = "unverified";
   const verificationCheck = await createPublicVerificationCheck({
     documentId: snapshot.document.id,
     documentHashRecordId: snapshot.hashRecord?.id ?? null,
@@ -2784,10 +2654,10 @@ export const verifyDocumentByIdn = async (input: {
     result: {
       idn: normalizedIdn,
       hash: snapshot.hashRecord?.hash ?? null,
-      ledgerTxId: snapshot.ledgerEntry?.ledger_tx_id ?? null,
-      anchoredAt: snapshot.ledgerEntry?.anchored_at ?? null,
+      ledgerTxId: null,
+      anchoredAt: null,
       status,
-      documents,
+      documents: [],
     },
   };
 };

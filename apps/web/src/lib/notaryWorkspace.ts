@@ -35,6 +35,7 @@ export type NotaryQueueRequestSummary = {
         latestStatus: string | null;
         latestStatusAt: string | null;
         isAnchored: boolean;
+    isFinalized?: boolean;
         isVerificationChecked: boolean;
         isWatermarked: boolean;
         isHashRecorded: boolean;
@@ -105,6 +106,7 @@ export type NotaryQueueRequestSummary = {
     latestStatus: string | null;
     latestStatusAt: string | null;
     isAnchored: boolean;
+    isFinalized?: boolean;
     isVerificationChecked: boolean;
     isWatermarked: boolean;
     isHashRecorded: boolean;

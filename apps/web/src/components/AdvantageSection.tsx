@@ -16,7 +16,7 @@ const advantageItems = [
     label: "Verify",
     title: "Anytime, anywhere",
     description:
-      "Every step meets legal standards. Watermarking, sealing, hashing, and ledger anchoring happen automatically so compliance is never a question.",
+      "Capture the in-person acknowledgment, seal the document, and record a SHA-256 fingerprint for checking its integrity.",
     image: "/images/advantages/a2.webp",
   },
   {
@@ -32,7 +32,7 @@ const advantageItems = [
     label: "Comply",
     title: "Standards built in",
     description:
-      "Watermarking, sealing, hashing, and ledger anchoring happen automatically. Compliance isn't something you chase—it's something you get.",
+      "Watermarking, sealing, and SHA-256 verification bring your document and its execution record together.",
     image: "/images/cta/cta2.webp",
   },
 ];

@@ -4,12 +4,12 @@
   "main": "index.js",
   "scripts": {
     "dev": "npm run dev:staging",
-    "dev:staging": "NODE_OPTIONS='' NODE_TLS_REJECT_UNAUTHORIZED=0 TS_NODE_PREFER_TS_EXTS=1 LEDGER_ALLOW_STUB_PROVIDER=true DISABLE_REDIS_QUEUES=true DOTENV_CONFIG_PATH=../.env.staging nodemon --watch src --ext ts --signal SIGTERM --exec \"node -r dotenv/config -r ts-node/register src/index.ts\"",
-    "start:staging": "NODE_OPTIONS='' NODE_TLS_REJECT_UNAUTHORIZED=0 TS_NODE_PREFER_TS_EXTS=1 LEDGER_ALLOW_STUB_PROVIDER=true DISABLE_REDIS_QUEUES=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/index.ts",
+    "dev:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 LEDGER_ANCHOR_MODE=hash_only DISABLE_REDIS_QUEUES=true DOTENV_CONFIG_PATH=../.env.staging nodemon --watch src --ext ts --signal SIGTERM --exec \"node -r dotenv/config -r ts-node/register src/index.ts\"",
+    "start:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 LEDGER_ANCHOR_MODE=hash_only DISABLE_REDIS_QUEUES=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "worker": "ts-node --preferTsExts src/worker/index.ts",
-    "worker:staging": "NODE_OPTIONS='' NODE_TLS_REJECT_UNAUTHORIZED=0 TS_NODE_PREFER_TS_EXTS=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/worker/index.ts",
+    "worker:staging": "NODE_OPTIONS='' TS_NODE_PREFER_TS_EXTS=1 LEDGER_ANCHOR_MODE=hash_only DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register src/worker/index.ts",
     "probe:auth-otp": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/probe-auth-otp.ts",
     "probe:auth-sms": "NODE_OPTIONS='' DISABLE_REDIS_QUEUES=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/probe-auth-sms.ts",
     "test:smoke:upload": "OTEL_SDK_DISABLED=1 ts-node --preferTsExts scripts/smoke-document-upload.ts",
@@ -17,7 +17,7 @@
     "test:smoke:phase5": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase5-meeting.ts",
     "test:smoke:phase6": "OTEL_SDK_DISABLED=1 LEDGER_ALLOW_STUB_PROVIDER=true DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-phase6-finalization.ts",
     "observability:validate": "node ../scripts/validate-error-catalog.mjs",
-    "observability:test": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/unit/sentryTelemetry.test.ts tests/unit/documentTrace.test.ts --reporter=dot",
+    "observability:test": "NODE_OPTIONS='' node ./node_modules/vitest/vitest.mjs run tests/unit/sentryTelemetry.test.ts tests/unit/documentTrace.test.ts --reporter=dot",
     "observability:kpis": "node ../scripts/evaluate-observability-kpis.mjs",
     "observability:smoke": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/smoke-observability-telemetry.ts",
     "notifications:run-due": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/run-notification-outbox.ts",
@@ -26,9 +26,9 @@
     "stripe:catalog:verify": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/verify-stripe-member-catalog.ts",
     "stripe:operations:report": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/report-stripe-billing-readiness.ts",
     "stripe:acceptance:verify": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config -r ts-node/register scripts/report-stripe-billing-readiness.ts --require-acceptance",
-    "test:integration:staging": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
-    "test": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs run",
-    "test:watch": "NODE_OPTIONS='' DOTENV_CONFIG_PATH=../.env.staging node -r dotenv/config ./node_modules/vitest/vitest.mjs"
+    "test:integration:staging": "NODE_OPTIONS='' node ./node_modules/vitest/vitest.mjs run tests/integration --silent --reporter=dot",
+    "test": "NODE_OPTIONS='' node ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "NODE_OPTIONS='' node ./node_modules/vitest/vitest.mjs"
   },
   "keywords": [],
   "author": "",
@@ -39,10 +39,11 @@
     "@aws-sdk/client-sns": "^3.1045.0",
     "@darci/types": "file:../packages/types",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/auto-instrumentations-node": "^0.52.1",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.52.1",
-    "@opentelemetry/sdk-node": "^0.52.1",
-    "@sentry/node": "^8.55.0",
+    "@opentelemetry/auto-instrumentations-node": "0.80.0",
+    "@opentelemetry/core": "2.11.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.222.0",
+    "@opentelemetry/sdk-node": "0.222.0",
+    "@sentry/node": "10.75.0",
     "@supabase/supabase-js": "^2.50.0",
     "@types/marked": "^5.0.2",
     "@types/pdfkit": "^0.17.5",
@@ -59,7 +60,7 @@
     "pg": "^8.18.0",
     "resend": "^6.12.2",
     "standardwebhooks": "^1.0.0",
-    "stripe": "^22.5.0",
+    "stripe": "22.5.0",
     "swagger-ui-express": "^5.0.1",
     "yamljs": "^0.3.0",
     "zod": "^4.3.6"
@@ -76,6 +77,6 @@
     "supertest": "^7.1.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9"
+    "vitest": "4.1.11"
   }
 }

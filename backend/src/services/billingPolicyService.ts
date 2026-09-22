@@ -414,7 +414,7 @@ export const isDocumentFinalPackageHeld = async (documentId: string) => {
 export const isFinalPackageReleaseUnavailable = (
   control: DocumentReleaseControlRecord | null,
 ) => {
-  if (control?.release_status === "billing_held") return true;
+  if (control?.release_status === "billing_held" || control?.release_status === "pending") return true;
   return getBillingEnforcementMode() === "enforced" && control?.release_status !== "released";
 };
 

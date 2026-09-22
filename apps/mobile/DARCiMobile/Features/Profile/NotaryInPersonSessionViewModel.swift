@@ -218,8 +218,8 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         context?.meeting?.status == "completed"
     }
 
-    var isAnchored: Bool {
-        context?.finalization?.isAnchored == true
+    var isFinalized: Bool {
+        context?.finalization?.isFinalizationReady == true
     }
 
     var latestDistanceLabel: String {
@@ -286,7 +286,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
             NotarySessionTimelineItem(id: "venue", label: "Venue", isComplete: hasVenue),
             NotarySessionTimelineItem(id: "seal", label: "Seal", isComplete: hasAcknowledgment),
             NotarySessionTimelineItem(id: "complete", label: "Complete", isComplete: isMeetingCompleted),
-            NotarySessionTimelineItem(id: "anchor", label: "Anchored", isComplete: isAnchored),
+            NotarySessionTimelineItem(id: "anchor", label: "Verified", isComplete: isFinalized),
         ]
     }
 
@@ -580,8 +580,8 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
             }
             preferLatestDocumentOnNextRefresh = true
             await refresh(session: session, silent: true)
-            noticeMessage = isAnchored
-                ? "Session complete. The final package is hashed and anchored."
+            noticeMessage = isFinalized
+                ? "Session complete. The final package is hashed and verified."
                 : "Session complete. Final package processing is still underway."
         }
     }
@@ -607,7 +607,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
             }
             preferLatestDocumentOnNextRefresh = true
             await refresh(session: session, silent: true)
-            noticeMessage = "Final package hashed and anchored."
+            noticeMessage = "Final package hashed and verified."
         }
     }
 
@@ -652,7 +652,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         } ?? false
         let hasAcknowledgment = context.finalization?.history.contains { $0.status == "acknowledgment_appended" } ?? false
 
-        if context.finalization?.isAnchored == true { return .done }
+        if context.finalization?.isFinalizationReady == true { return .done }
         if context.meeting?.status == "completed" { return .finalize }
         if context.meeting?.status != "in_progress" { return .start }
         if hasPassedSamePlace == false { return .samePlace }

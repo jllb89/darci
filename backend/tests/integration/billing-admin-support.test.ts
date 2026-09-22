@@ -47,7 +47,7 @@ vi.mock("../../src/services/billingOperationsService", () => ({
 
 import adminRoutes from "../../src/routes/admin";
 
-const buildApp = (authTime: number) => {
+const buildApp = (authTime: number, claims?: Record<string, unknown>) => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -56,7 +56,7 @@ const buildApp = (authTime: number) => {
       dbUserId: "00000000-0000-4000-8000-000000000101",
       role: "admin",
       status: "active",
-      rawClaims: { auth_time: authTime },
+      rawClaims: claims ?? { aal: "aal2", amr: [{ method: "totp", timestamp: authTime }] },
     };
     next();
   });
@@ -93,6 +93,19 @@ describe("billing admin support actions", () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error).toBe("recent_reauthentication_required");
+    expect(mocks.releaseDocument).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { aal: "aal1", amr: [{ method: "totp", timestamp: Math.floor(Date.now()/1000) }] },
+    { aal: "aal2", iat: Math.floor(Date.now()/1000), amr: [{ method: "token_refresh", timestamp: Math.floor(Date.now()/1000) }] },
+    { aal: "aal2", auth_time: Math.floor(Date.now()/1000) },
+    { aal: "aal2", amr: [{ method: "totp", timestamp: Math.floor(Date.now()/1000)+300 }] },
+  ])("rejects insufficient or fabricated recency claims: %j", async claims => {
+    const response = await request(buildApp(0, claims))
+      .post("/admin/billing/documents/00000000-0000-4000-8000-000000000301/release")
+      .send({ reason: "Approved package release" });
+    expect(response.status).toBe(403);
     expect(mocks.releaseDocument).not.toHaveBeenCalled();
   });
 

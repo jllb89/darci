@@ -1,5 +1,5 @@
-export type LedgerAnchorResultStatus = "anchored" | "failed";
-export type LedgerProviderName = "stub" | "unconfigured";
+export type LedgerAnchorResultStatus = "anchored" | "not_required" | "failed";
+export type LedgerProviderName = "hash_only" | "stub" | "unconfigured";
 
 export type LedgerAnchorResult = {
   idn: string;
@@ -48,6 +48,8 @@ const getExecutionEnvironment = () => {
 };
 
 const isStubProviderAllowed = () => {
+  // No opt-in flag can make simulated evidence production/staging evidence.
+  if (!["test", "development", "dev", "local"].includes(getExecutionEnvironment())) return false;
   if (parseBooleanEnv(process.env.LEDGER_ALLOW_STUB_PROVIDER)) {
     return true;
   }
@@ -62,7 +64,7 @@ const isStubProviderAllowed = () => {
 };
 
 const getLedgerAnchorMode = () => {
-  return (process.env.LEDGER_ANCHOR_MODE ?? "stub").trim().toLowerCase();
+  return (process.env.LEDGER_ANCHOR_MODE ?? "hash_only").trim().toLowerCase();
 };
 
 const buildFailedLedgerResult = (input: {
@@ -145,6 +147,13 @@ export const anchorToLedger = async (
       errorMessage: "Ledger anchoring requires a completed SHA-256 hash",
       provider: defaultProvider,
     });
+  }
+
+  if (getLedgerAnchorMode() === "hash_only") {
+    return {
+      idn: normalizedIdn, hash: normalizedHash, status: "not_required",
+      ledgerTxId: null, anchoredAt: null, errorMessage: null, provider: "hash_only",
+    };
   }
 
   const provider = resolveLedgerProvider();

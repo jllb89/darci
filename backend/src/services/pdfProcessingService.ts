@@ -7,7 +7,23 @@ import { PDFDocument } from "pdf-lib";
 import { captureMessage } from "../utils/sentry";
 
 const execute = promisify(execFile);
-type PdfFailure = "password_required" | "unreadable" | "render_failed" | "tools_unavailable";
+type PdfFailure = "password_required" | "unreadable" | "render_failed" | "tools_unavailable" | "resource_limit";
+export const MAX_PROCESSED_PDF_BYTES = 50 * 1024 * 1024;
+export const MAX_PROCESSED_PDF_PAGES = 200;
+let runningTools = 0;
+const toolWaiters: Array<() => void> = [];
+async function acquireToolSlot() {
+  if (runningTools < 2) { runningTools++; return; }
+  if (toolWaiters.length >= 8) throw new PdfProcessingError("resource_limit");
+  await new Promise<void>(resolve => toolWaiters.push(resolve));
+}
+function releaseToolSlot() {
+  const next = toolWaiters.shift();
+  if (next) next(); else runningTools--;
+}
+function assertPdfSize(content: Uint8Array) {
+  if (!content.byteLength || content.byteLength > MAX_PROCESSED_PDF_BYTES) throw new PdfProcessingError("resource_limit");
+}
 
 export class PdfProcessingError extends Error {
   constructor(public readonly reason: PdfFailure) {
@@ -21,6 +37,7 @@ export class PdfProcessingError extends Error {
 }
 
 async function run(tool: string, args: string[]) {
+  await acquireToolSlot();
   try {
     return await execute(tool, args, { timeout: 30_000, maxBuffer: 1024 * 1024, env: { ...process.env, LC_ALL: "C" } });
   } catch (error) {
@@ -34,10 +51,13 @@ async function run(tool: string, args: string[]) {
       fingerprint: ["pdf_processing", tool, reason],
     });
     throw new PdfProcessingError(reason);
+  } finally {
+    releaseToolSlot();
   }
 }
 
 async function withPdfFiles<T>(content: Uint8Array, action: (input: string, directory: string) => Promise<T>) {
+  assertPdfSize(content);
   const directory = await mkdtemp(join(tmpdir(), "darci-pdf-"));
   try {
     const input = join(directory, "input.pdf");
@@ -50,6 +70,7 @@ async function withPdfFiles<T>(content: Uint8Array, action: (input: string, dire
 
 export function assertPdfPages(pdf: PDFDocument) {
   const pages = pdf.getPages();
+  if (pages.length > MAX_PROCESSED_PDF_PAGES) throw new PdfProcessingError("resource_limit");
   if (!pages.length || pages.some(page => {
     const { width, height } = page.getSize();
     return !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0;
@@ -61,6 +82,7 @@ export function assertPdfPages(pdf: PDFDocument) {
  * for provenance and actually decrypt password-free PDFs before mutating them.
  */
 export async function loadPdfForProcessing(content: Uint8Array): Promise<PDFDocument> {
+  assertPdfSize(content);
   try {
     const pdf = await PDFDocument.load(content);
     assertPdfPages(pdf);
@@ -85,6 +107,7 @@ export async function loadPdfForProcessing(content: Uint8Array): Promise<PDFDocu
 
 /** Independently parse and render every page before upload/hash/release. */
 export async function validateRenderedPdf(content: Uint8Array, expectedPages: number): Promise<void> {
+  if (!Number.isInteger(expectedPages) || expectedPages < 1 || expectedPages > MAX_PROCESSED_PDF_PAGES) throw new PdfProcessingError("resource_limit");
   await withPdfFiles(content, async (input, directory) => {
     await run("qpdf", ["--check", input]);
     const { stdout } = await run("pdfinfo", [input]);

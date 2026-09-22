@@ -119,7 +119,7 @@ final class NotaryProfileViewModel: ObservableObject {
             case .ready:
                 return isApprovedForMeeting(request) || isOpenMeetingRequest(request)
             case .completed:
-                return resolveQueueStatus(request) == "completed" || request.document.summary?.finalization?.isAnchored == true || request.finalization.isAnchored == true
+                return resolveQueueStatus(request) == "completed" || request.document.summary?.finalization?.isFinalizationReady == true || request.finalization.isFinalizationReady == true
             }
         }
         .sorted(by: isMoreRecent)
