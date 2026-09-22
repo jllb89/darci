@@ -70,6 +70,19 @@ describe("notificationOutboxService", () => {
     expect(getNotificationRetryDelaySeconds(3)).toBe(1200);
   });
 
+  it.each(["pending", "queued", "sent", "delivered", "opened", "clicked", "accepted", "bounced", "suppressed", "failed"] as const)(
+    "does not requeue a provider deferral from %s",
+    (status) => {
+      const patch = mapOutboundEventToDeliveryPatch({
+        delivery: { status, sent_at: null, delivered_at: null, failed_at: null,
+          bounced_at: null, opened_at: null, clicked_at: null, accepted_at: null },
+        eventType: "deferred",
+        eventAt: "2026-09-22T22:00:00.000Z",
+      });
+      expect(patch).toEqual({ status: status === "pending" || status === "queued" ? "sent" : status });
+    },
+  );
+
   it("computes observability metrics with invite-specific counters", () => {
     const metrics = __testUtils.computeNotificationJobsMetrics({
       jobs: [

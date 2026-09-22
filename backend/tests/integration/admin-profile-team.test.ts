@@ -120,11 +120,12 @@ const handleSupabase = async (input: string | URL | Request, init?: RequestInit)
   });
 };
 
-const buildApp = (actorRole: string | null = "admin") => {
+const buildApp = (actorRole: string | null = "admin", recentMfa = true) => {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    if (actorRole) req.user = { id: `auth-${actorId}`, role: actorRole, dbUserId: actorId };
+    if (actorRole) req.user = { id: `auth-${actorId}`, role: actorRole, dbUserId: actorId,
+      rawClaims: recentMfa ? { aal: "aal2", amr: [{ method: "totp", timestamp: Math.floor(Date.now() / 1000) }] } : { aal: "aal1" } };
     next();
   });
   app.use("/admin", adminRoutes);
@@ -155,6 +156,13 @@ describe("admin profile team without direct PostgreSQL", () => {
 
   afterEach(() => {
     expect(mocks.poolQuery).not.toHaveBeenCalled();
+  });
+
+  it("rejects a privileged grant without recent MFA before any database mutation", async () => {
+    const response = await request(buildApp("admin", false)).post("/admin/profile/team").send({ email: "member@example.test" });
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("recent_reauthentication_required");
+    expect(calls).toEqual([]);
   });
 
   it("grants admin access, records the actor, and returns the team without switching profiles", async () => {

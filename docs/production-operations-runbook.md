@@ -1,0 +1,80 @@
+# DARCi critical operations runbook
+
+Status, 22 September 2026: staging AWS detectors installed; new source emitters/watchdog require the next API/worker deployment. This is not production monitoring acceptance.
+
+Responder: Jorge, `lopezb.jl@gmail.com`. No secondary responder is configured. Sentry provider work remains deferred.
+
+## Scope and cost
+
+`infra/monitoring/stack.mjs` defines `darci-staging-operational-alerts`: seven category detectors on the existing API/worker log groups plus a missing-watchdog detector. Eight fixed-cardinality custom metrics and eight standard alarms; no new compute, secrets, IAM roles or subscriptions. Existing SNS policy permits only the `darci-recovery-*` alarm prefix in this account.
+
+Jorge approved **up to $6/month additional staging monitoring spend**. Eight classic metrics at $0.30 and eight standard alarms at $0.10 give a planning estimate of **$3.20/month**, before existing free-tier allowances and variable log/SNS/API charges. Verify the regional bill; this is not a hard cap. No per-user/document/request metric dimensions are created. [AWS CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/).
+
+Structured signals contain only a fixed category, environment, timestamp, generated/validated UUID correlation and optional document UUID. They exclude errors/stacks, arbitrary tags, identities, tokens, URLs and PDF contents. The original generic audit helper still reports failure without blocking analytics; material evidence remains protected by database transactions/triggers. An alert does not substitute for those transactions.
+
+## Deploy and enable
+
+```sh
+node infra/monitoring/deploy-staging.mjs --approve-six-dollar-monitoring
+```
+
+This validates the account, confirmed recipient and existing SNS permission before creating/updating the versioned detector stack. Category actions are enabled. Missing-watchdog actions default **disabled** until the application emits real heartbeats. The alarm may correctly read ALARM while disabled: do not claim it is covering worker outages yet.
+
+After API/worker deployment, inspect genuine `darci_watchdog_heartbeat` events and queue results. Then:
+
+```sh
+node infra/monitoring/deploy-staging.mjs --approve-six-dollar-monitoring --enable-watchdog
+```
+
+The command requires at least three recent heartbeat metric periods before enabling actions. Do not inject synthetic success/heartbeat events to pass this guard. Subsequent infrastructure updates preserve an already-enabled heartbeat action and recheck the recent metrics; omission of the flag does not silently disable existing protection.
+
+## Detection and response
+
+Seven failure metrics aggregate API and worker events. `auth` requires five actionable failures in five minutes; the other categories require one. Expected invalid-credential/expired-session warnings are excluded. CloudWatch sends ALARM and OK transition emails—not one email per poll. OK indicates that the metric is below threshold; confirm application recovery before closing an incident.
+
+### auth
+
+Correlate the signal with request logs. Check Auth provider availability, session-sync errors, role grants and deployed origins. Do not grant a role, bypass JWT verification, email tokens or force logout of unrelated members to resolve an alert. Reproduce with a dedicated fixture; confirm login/refresh and revoked-token denial.
+
+### notification
+
+Check outbox jobs overdue by five minutes and recent failed/partially sent jobs. Inspect provider callback evidence and suppression/bounce reason privately. Retry only the affected eligible job through the authorized operator route, preserving its dedupe key. A provider acceptance response is not proof of inbox/SMS delivery. Never replay the whole queue or override an intentional opt-out.
+
+### document
+
+Check generation queued/rendering beyond five minutes or PDF/storage/signing/finalization exceptions. Preserve the source, current version, hash and release control. Diagnose by correlation and document UUID; inspect bytes only through authorized tooling. Resume safe idempotent work. Never overwrite a final PDF or manufacture acknowledgment/signature evidence. Completed retries must verify and return the existing package.
+
+### audit
+
+Treat a missing material audit as an integrity incident. Verify the related transaction rolled back, then restore database access and retry the authorized operation. Generic audit-helper failures are separately signaled. Do not insert an invented completion record or change ledger/hash evidence to make an alert disappear.
+
+### billing
+
+Check the admin reconciliation report, durable webhook inbox and held-release eligibility. The watchdog flags inbox events older than five minutes in received/processing/failed/dead-letter states; the existing reconciliation worker checks provider drift and eligible-but-held packages. Use recent TOTP, a support reason and an idempotency key for relevant operator recovery. Never charge a client, issue a refund, change a plan or reverse client usage merely as an alert drill.
+
+### retention
+
+Investigate retention-runner failures without enabling identity deletion. Identity retention periods and legal holds still need approval. Do not delete old keys, backups, evidence or held material to silence an alert. Stripe webhook-payload retention is a separate existing policy, not approval to delete identity records.
+
+### platform
+
+Check readiness, database/configuration, protected-key availability, Redis and ECS worker health. The worker probes durable queues every minute with bounded queries and no overlapping runs. A completed probe emits a heartbeat; errors do not. Missing heartbeat for five consecutive minutes alerts independently through AWS once enabled. No background monitor can prove an unconfigured API/ALB outage detector: wider production availability/capacity checks remain required.
+
+## Safe detector exercise
+
+With explicit approval to send a batch of test email:
+
+```sh
+node infra/monitoring/drill-staging.mjs --approve-staging-alert-drill
+```
+
+The command writes eleven clearly labeled synthetic events to a dedicated stream in the existing staging API log group: five auth and one for each other category. It does not affect client requests, queues, database records, files or heartbeat metrics. Check actual metric thresholds, alarm history and successful SNS actions; ask the responder to confirm receipt. Let normal metric evaluation return alarms to OK. Do not use `set-alarm-state` or artificial success data to claim detector recovery.
+
+This exercises **log → metric → alarm → SNS**, not all originating application failure paths. Source failure injections, actual worker-loss detection and full incident recovery remain separate acceptance gates after deployment.
+
+## Current limitations
+
+- Source emitters/watchdog and the completed-package retry fix are local until the next app deployment.
+- Human non-billing admin step-up/enrollment UI, OTP/bounce/suppression end-to-end acceptance, actual-device session faults, and whole-application restore remain open.
+- OTLP ingestion/disablement must still be verified; this route does not depend on OTLP or Sentry.
+- Production has no equivalent stack yet; this staging-only template must not be pointed at production by changing its account checks.

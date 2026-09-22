@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/node";
 import { getErrorTelemetryFields } from "../errors/domainError";
+import { emitCapturedCriticalSignal } from "../telemetry/criticalSignals";
 
 export type CaptureLevel = "fatal" | "error" | "warning" | "info" | "debug";
 
@@ -66,6 +67,7 @@ export const captureException = (
   error: unknown,
   context?: CaptureContextInput,
 ) => {
+  emitCapturedCriticalSignal(context);
   if (process.env.NODE_ENV === "test") {
     return;
   }
@@ -80,6 +82,9 @@ export const captureMessage = (
   message: string,
   context?: CaptureContextInput,
 ) => {
+  // Sentry message defaults are informational; only explicitly actionable events
+  // belong on the independent critical-alert route.
+  emitCapturedCriticalSignal({ ...context, fingerprint: context?.fingerprint ?? [message], level: context?.level ?? "info" });
   if (process.env.NODE_ENV === "test") {
     return;
   }

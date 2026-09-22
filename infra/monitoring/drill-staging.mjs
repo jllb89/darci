@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {categories} from './stack.mjs';
+assert(process.argv.includes('--approve-staging-alert-drill'),'Explicit staging detector email drill approval required');
+const aws=args=>JSON.parse(execFileSync('aws',[...args,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']})||'{}');
+assert.equal(aws(['sts','get-caller-identity']).Account,'427057633951');
+const stack=aws(['cloudformation','describe-stacks','--stack-name','darci-staging-operational-alerts']).Stacks[0];
+assert(['CREATE_COMPLETE','UPDATE_COMPLETE'].includes(stack.StackStatus));
+const run='phase1-detector-drill-'+randomUUID(),group='/ecs/darci-staging-api';
+aws(['logs','create-log-stream','--log-group-name',group,'--log-stream-name',run]);
+const timestamp=Date.now();
+const events=categories.flatMap(category=>Array.from({length:category==='auth'?5:1},()=>({timestamp,message:JSON.stringify({kind:'darci_critical_signal',category,environment:'staging',correlationId:randomUUID(),synthetic:true,drill:run,at:new Date(timestamp).toISOString()})})));
+aws(['logs','put-log-events','--log-group-name',group,'--log-stream-name',run,'--log-events',JSON.stringify(events)]);
+console.log(JSON.stringify({run,logGroup:group,at:new Date(timestamp).toISOString(),categories,eventCount:events.length,scope:'Log -> metric -> alarm -> SNS route only. Does not represent actual client failures or certify source instrumentation. No synthetic watchdog success is emitted.'}));

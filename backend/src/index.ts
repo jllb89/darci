@@ -26,6 +26,7 @@ import usersRoutes from "./routes/users";
 import billingRoutes from "./routes/billing";
 import { apiSecurityHeaders, enforceAbuseLimits, safeRequestId, safeRequestPath } from "./middleware/productionSafety";
 import { checkOperationalReadiness } from "./services/operationalHealthService";
+import { emitCriticalSignal } from "./telemetry/criticalSignals";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -228,7 +229,9 @@ if (process.env.SENTRY_DSN) {
 }
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+  const signal = emitCriticalSignal("platform", { tags: { request_id: req.requestId } });
   console.error("Unhandled API error", {
+    correlationId: signal.correlationId,
     method: req.method,
     path: safeRequestPath(req.path),
     statusCode: 500,

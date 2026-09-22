@@ -39,6 +39,7 @@ import {
   rejectNotaryApplicationAdminHandler,
 } from "../controllers/notaryProfileController";
 import { requireRole } from "../middleware/roles";
+import { requireAdminMutationStepUp } from "../middleware/adminStepUp";
 import {
   cleanupStripeWebhookRetentionAdmin,
   getBillingOperationsAdmin,
@@ -50,6 +51,7 @@ import {
 } from "../controllers/billingAdminController";
 
 const router = Router();
+router.use(requireRole(["admin", "service_role"]), requireAdminMutationStepUp);
 
 router.get(
   "/billing/operations",

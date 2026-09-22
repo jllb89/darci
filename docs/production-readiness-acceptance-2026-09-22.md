@@ -2,6 +2,8 @@
 
 ## Decision
 
+**Superseded latest state:** see [the later Phase 1 pass](production-readiness-phase1-pass-2026-09-22.md): user deployed `c5acd9b`; reconciliation passes the actual admin API; hold/reversal/reactivation and last-unit concurrency passed; 15/15 lifecycle categories now present. Local completed-retry and independent monitoring source changes still need deployment. The rest of this document is the earlier same-day acceptance record.
+
 **Continue Phase 1; not a production go.** Latest staging release `eeec032` includes the downgrade fix, which now passes through the actual deployed API. Billing lifecycle evidence is **13/15**. The subsequently approved reconciliation fix passes local tests and a read-only staging scan, but **that reporting fix is not deployed**. The roadmap distinguishes these two release states.
 
 Authorized scope: isolated synthetic staging users and Stripe test subscriptions; subsequently, local downgrade and reconciliation patches/regression tests. The user deployed `eeec032`; the agent did not commit, push or deploy. No real charges, client emails/SMS, client subscriptions/PDF changes or production resources. Sentry remains deferred.
@@ -56,7 +58,7 @@ Harness corrections are not product defects: an earlier Auth-only fixture was re
 
 Private operator receipts contain no passwords/access/refresh tokens: `/private/tmp/phase1-acceptance22-6b5c25b0-receipt.json`, `/private/tmp/darci-acceptance22-downgrade-receipt.json`, `/private/tmp/darci-acceptance22-final-receipt.json`. This durable summary, not temporary receipts alone, records the acceptance limitations.
 
-## Next pass
+## Earlier next-pass list — superseded by the linked later pass
 
 1. Deploy/retest the locally verified clock-aware reconciliation report. Downgrade deployment/API acceptance is complete.
 2. Finish **final-package billing hold** and **controlled usage reversal** evidence. Prove hold → resubscribe → same-byte release, accepted-work continuity, authorized operator actions and all download/read boundaries. Add last-unit concurrency and missed/out-of-order-event exercises. Do not manufacture acceptance from 13/15.

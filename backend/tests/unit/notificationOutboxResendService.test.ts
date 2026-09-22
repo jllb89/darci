@@ -1371,6 +1371,12 @@ describe("notification outbox Resend runtime", () => {
       metadata: { source: "resend_webhook" },
     });
 
+    expect(supabaseMocks.state.notification_jobs[0].status).toBe("sent");
+    expect(supabaseMocks.state.notification_deliveries[0].status).toBe("sent");
+    const result = await runDueNotificationJobs();
+    expect(result.claimedCount).toBe(0);
+    expect(resendMocks.sendEmailMock).not.toHaveBeenCalled();
+
     expect(supabaseMocks.state.document_access_invites[0]).toEqual(
       expect.objectContaining({
         status: "sent",

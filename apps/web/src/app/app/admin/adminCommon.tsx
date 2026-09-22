@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AdminSecurity } from "@/components/app/AdminSecurity";
 import { fetchWithTokenRefresh, notaryApiBaseUrl, readApiErrorMessage } from "@/lib/notaryWorkspace";
 
 export type AdminCapabilities = {
@@ -334,6 +335,7 @@ export function AdminPageShell({
         </div>
         {titleAccessory ? <div className="ml-auto">{titleAccessory}</div> : null}
       </div>
+      <AdminSecurity />
       {children}
     </div>
   );

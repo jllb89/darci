@@ -36,8 +36,8 @@ jobs:
       - run: npm run observability:kpis
       - run: npm run observability:test
       - run: npm run test
-      - name: Validate recovery infrastructure safety boundaries
-        run: node --test ../infra/recovery/stack.test.mjs
+      - name: Validate recovery and monitoring infrastructure safety boundaries
+        run: node --test ../infra/recovery/stack.test.mjs ../infra/monitoring/stack.test.mjs
       - name: Validate workflow deployment boundaries
         run: node --test ../scripts/workflow-gates.test.mjs ../scripts/workflow-structure.test.mjs
 

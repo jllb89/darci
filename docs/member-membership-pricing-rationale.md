@@ -21,7 +21,7 @@ Notary fees are not included in the membership price. Notaries do not pay DARCi 
 
 ## Why these prices
 
-DARCi combines more value than a conventional electronic-signature tool. It supports jurisdiction-aware document generation, multi-party execution, notary selection, an in-person completion workflow, a notarial acknowledgment, finalization, hashing, ledger evidence, and public verification. It should therefore not be positioned as inexpensive envelope-only software.
+DARCi combines more value than a conventional electronic-signature tool. It supports jurisdiction-aware document generation, multi-party execution, notary selection, an in-person completion workflow, a notarial acknowledgment, finalization, SHA-256 integrity evidence, and public status/hash verification. External-ledger anchoring is deferred for launch. It should therefore not be positioned as inexpensive envelope-only software.
 
 At the same time, DARCi is not currently charging a separate one-time Trust creation or registration fee. That makes the entry subscription price important: a member can subscribe for one month, create a Trust package, and later cancel. Pricing the entry tier too low would substantially undervalue the highest-value workflow in the membership.
 

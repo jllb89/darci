@@ -17,6 +17,7 @@ import {
   type DocumentRecord,
   type DocumentVersionRecord,
   getActiveNotarizationRequest,
+  getLatestNotarizationRequestForDocument,
   getDocumentGenerationRunById,
   getDocumentById,
   getUserIdBySupabaseId,
@@ -1088,17 +1089,22 @@ const createPublicVerificationCheck = async (input: {
   return data as unknown as PublicVerificationCheckRecord;
 };
 
-const resolveAuthorizedFinalizationContext = async (input: {
+export const resolveAuthorizedFinalizationContext = async (input: {
   documentId: string;
   actorSupabaseId?: string | undefined;
   actorRole?: string | null;
+  allowCompletedRetry?: boolean;
 }) => {
   const document = await getDocumentById(input.documentId);
   if (!document) {
     throw new DocumentFinalizationNotFoundError("Document not found");
   }
 
-  const request = await getActiveNotarizationRequest(input.documentId);
+  let request = await getActiveNotarizationRequest(input.documentId);
+  if (!request && input.allowCompletedRetry && document.status === "completed") {
+    const completedRequest = await getLatestNotarizationRequestForDocument(input.documentId);
+    if (completedRequest?.status === "completed") request = completedRequest;
+  }
   if (!request) {
     throw new DocumentFinalizationConflictError(
       "Document must have an active notarization request before finalization",
@@ -2306,7 +2312,7 @@ export const watermarkWithNotice = async (input: {
   actorSupabaseId?: string | undefined;
   actorRole?: string | null;
 }) => {
-  const context = await resolveAuthorizedFinalizationContext(input);
+  const context = await resolveAuthorizedFinalizationContext({ ...input, allowCompletedRetry: true });
   const rule = await getJurisdictionRule(context.document.jurisdiction);
   const finalizationConfig = resolveJurisdictionFinalizationConfig({
     jurisdiction: context.document.jurisdiction,
@@ -2365,16 +2371,16 @@ export const watermarkWithNotice = async (input: {
   }>;
   const reusableItems = await loadWatermarkItemsForExecutions({ document: context.document, executions: existingWatermarks });
 
-  if (context.document.status === "completed" && reusableItems.some(item => item.ledgerAnchorAttempt?.status === "anchored")) {
+  if (context.document.status === "completed") {
     const finalVersions = (await listDocumentVersions(context.document.id)).filter(version => version.is_final);
     if (context.request.status !== "completed" || reusableItems.length !== acknowledgmentItems.length
         || finalVersions.length !== reusableItems.length
         || finalVersions.some(version => !reusableItems.some(item => item.version.id === version.id))
         || acknowledgmentItems.some(ack => reusableItems.filter(item => item.execution.source_document_version_id === ack.version.id).length !== 1)) {
-      throw new DocumentFinalizationConflictError("Historical final package requires review");
+      throw new DocumentFinalizationConflictError("Completed final package requires review");
     }
     for (const item of reusableItems) await assertStoredWatermarkEvidence(item);
-    // A retry on an already-completed historical package is read-only: never
+    // A retry on any already-completed package is read-only: never
     // rewrite its receipt, release decision, acknowledgment, PDF or workflow.
     return {
       ...(await loadExistingWatermarkResult({ document: context.document, request: context.request, executions: existingWatermarks })),

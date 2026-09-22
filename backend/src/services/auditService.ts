@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { emitCriticalSignal } from "../telemetry/criticalSignals";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -52,6 +53,7 @@ export const recordAuditEvent = async (input: AuditEventInput) => {
   });
 
   if (error) {
+    emitCriticalSignal("audit", { tags: { request_id: input.requestId } });
     console.warn("Audit event insert failed", {
       action: input.action,
       entityType: input.entityType,

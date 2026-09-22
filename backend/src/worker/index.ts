@@ -10,6 +10,7 @@ import { captureException, flushSentry } from "../utils/sentry";
 import { runDueStripeWebhookEvents } from "../services/stripeWebhookService";
 import { publishWorkerHeartbeat } from "../services/operationalHealthService";
 import { getSafetyRedis } from "../middleware/productionSafety";
+import { runOperationalWatchdog } from "../services/operationalWatchdogService";
 import {
   getBillingOperationsReport,
   runStripeWebhookRetentionCleanup,
@@ -54,6 +55,14 @@ const heartbeatInterval = process.env.REDIS_URL ? setInterval(() => { void heart
 if (heartbeatInterval) void heartbeat();
 
 const workers: Array<Worker<HashingJobData | LedgerJobData | WebhookJobData | GenerationRunJobData>> = [];
+let watchdogInFlight = false;
+const watchdog = async () => {
+  if (watchdogInFlight) return;
+  watchdogInFlight = true;
+  try { await runOperationalWatchdog(); } finally { watchdogInFlight = false; }
+};
+const watchdogInterval = process.env.NODE_ENV === "production" ? setInterval(() => { void watchdog(); }, 60_000) : null;
+if (watchdogInterval) void watchdog();
 let notificationOutboxInterval: NodeJS.Timeout | null = null;
 let notificationOutboxRunInFlight = false;
 let stripeWebhookInterval: NodeJS.Timeout | null = null;
@@ -413,6 +422,7 @@ if (stripeRetentionRunnerEnabled) {
 }
 
 const shutdown = async () => {
+  if (watchdogInterval) clearInterval(watchdogInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (notificationOutboxInterval) {
     clearInterval(notificationOutboxInterval);

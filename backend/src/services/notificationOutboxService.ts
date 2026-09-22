@@ -526,7 +526,7 @@ const eventTypeToDeliveryStatus: Partial<
   queued: "queued",
   sent: "sent",
   delivered: "delivered",
-  deferred: "queued",
+  deferred: "sent",
   failed: "failed",
   bounced: "bounced",
   complained: "complained",
@@ -769,6 +769,16 @@ export const mapOutboundEventToDeliveryPatch = (input: {
   eventType: OutboundMessageEventType;
   eventAt: string;
 }) => {
+  // A deferral means the provider already accepted the message and owns its
+  // retry. Re-queueing it here sends duplicates; a late callback must also
+  // preserve any delivery/failure outcome already recorded.
+  if (input.eventType === "deferred") {
+    return {
+      status: input.delivery.status === "pending" || input.delivery.status === "queued"
+        ? "sent" as NotificationDeliveryStatus
+        : input.delivery.status,
+    };
+  }
   const nextStatus = eventTypeToDeliveryStatus[input.eventType] ?? input.delivery.status;
   const patch: Partial<NotificationDeliveryRecord> = {
     status: nextStatus,
@@ -1602,7 +1612,10 @@ const mapNotificationEventToInviteRecipientStatus = (input: {
     return input.currentStatus;
   }
 
-  if (input.eventType === "queued" || input.eventType === "deferred") {
+  if (input.eventType === "deferred") {
+    return input.currentStatus === "queued" ? "sent" : input.currentStatus;
+  }
+  if (input.eventType === "queued") {
     return input.currentStatus === "sent" ? "sent" : "queued";
   }
   if (input.eventType === "sent" || input.eventType === "accepted") {
