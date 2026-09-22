@@ -2,6 +2,17 @@
 
 Status: **in progress; not approved for deployment or production**. Baseline `4e7f3ff91d9a6078525e8c6562ebe5b94432db51`.
 
+## 22 September — CI failure repair
+
+The failed runs `35764422766` (CI) and `35764423519` (staging deployment) both validated revision `c0a8476da628cba3deaa71480617d7afca1fa6d0`. Deployment correctly stopped at validation; these failures did not roll out the Phase 1 application.
+
+- **iOS exit 66:** the workflow invoked a gitignored `.xcodeproj` without generating it. CI now installs XcodeGen when needed and runs the existing `make -C apps/mobile generate` target before building. Failed runs preserve the `.xcresult` bundle. The staging workflow calls this same CI workflow, so both paths receive the fix.
+- **Backend timeouts:** eight route suites omitted the new database identity lookup mock, and the request read-model suite omitted meeting check-ins. Real Supabase/PostgREST requests retried beyond Vitest's five-second limit. Explicit fixture mocks now cover those dependencies and the review-approval product-mode lookup. An opt-in no-provider-network guard fails these nine suites if another dependency escapes its mocks, even when application code catches the error. No timeouts were increased and no production authorization checks were disabled. A new route regression checks that the current database member role overrides a stale notary JWT claim.
+- **Additional local iOS finding:** phone-auth UI tests inherited a Mexico phone region despite using a US national-number fixture, and burst-injected keystrokes sometimes raced live formatting and lost a digit. Auth UI tests now explicitly select the US country through the app's picker (locale alone does not control PhoneNumberKit's system country lookup), allow formatting to settle between keystrokes, assert the entered digits, and address the existing Continue accessibility identifier. No application locale or authentication behavior was changed.
+- **Backend validation:** all **615 tests across 92 files** pass both locally and in a fresh Node 24 Linux container with two CPUs and outbound networking disabled. The container includes the tracked legal templates required by rendering tests. Backend compilation, observability catalog/KPI/test commands, four recovery-infrastructure tests, workflow lint and whitespace checks pass. Logs: `/private/tmp/darci-ci-fixed-all22.log`, `/private/tmp/darci-ci-linux-tests22b.log`.
+- **iOS validation:** a clean tracked-files checkout, with no pre-existing `.xcodeproj` or local credentials, generates and builds successfully. Final full run: **110 unit tests and 12 UI tests pass**, including both phone-auth flows, membership presentation and accessibility regressions. Local Xcode 26.2/iOS 26.2 simulator; GitHub's runner still requires its own run. Evidence: `/private/tmp/darci-ci-ios-clean22e.log`, `/private/tmp/darci-ci-ios-results22e.xcresult`.
+- These repairs are local, not a claim of a green GitHub run or deployment. Commit/push the repaired revision before validating it; re-running the failed old revision will not include the fixes. The database/encryption deployment preflight remains unchanged: passing CI does not apply missing Phase 1 migrations or authorize rollout.
+
 ## Approved decisions
 
 - Hash-only launch: genuine SHA-256 checks; no external-ledger claim. Real anchoring deferred.

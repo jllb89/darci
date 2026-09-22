@@ -1,6 +1,20 @@
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requireNoNetwork } from "../helpers/noNetwork";
+
+requireNoNetwork();
+
+vi.mock("../../src/services/userRoleService", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/services/userRoleService")>(),
+  getUserIdentityContextBySupabaseId: vi.fn(async (id: string) => {
+    const role = id === "notary-1" ? "notary" : id === "user-1" ? "member" : null;
+    return role ? {
+      id: `db-${id}`, supabaseUserId: id, email: null, phone: null,
+      role, status: "active", availableRoles: [role], roleAssignments: [],
+    } : null;
+  }),
+}));
 
 const mocks = vi.hoisted(() => ({
   getNotarizationRequestByIdMock: vi.fn(),
@@ -75,6 +89,16 @@ describe("auth middleware", () => {
     expect(response.status).toBe(404);
     expect(response.body.error).toBe("not_found");
     expect(mocks.getNotarizationRequestByIdMock).toHaveBeenCalledWith("req-1");
+  });
+
+  it("uses the current database role instead of a stale notary claim", async () => {
+    const token = signToken({ sub: "user-1", app_metadata: { role: "notary" } });
+    const response = await request(app)
+      .post("/notary/requests/req-1/sign")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(403);
+    expect(mocks.getNotarizationRequestByIdMock).not.toHaveBeenCalled();
   });
 });
 

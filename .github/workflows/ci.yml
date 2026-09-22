@@ -82,6 +82,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Generate the Xcode project from its tracked specification
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          make -C apps/mobile generate
+          test -f apps/mobile/DARCiMobile.xcodeproj/project.pbxproj
       - name: Select an available iPhone simulator
         run: |
           xcodebuild -version
@@ -102,6 +111,14 @@ jobs:
             -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
             DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
             DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
+      - name: Preserve iOS test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darci-ios-test-results
+          path: ${{ runner.temp }}/darci-ios-results.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
 
   web:
     runs-on: ubuntu-latest

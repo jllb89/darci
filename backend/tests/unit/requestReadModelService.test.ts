@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requireNoNetwork } from "../helpers/noNetwork";
+
+requireNoNetwork();
 
 const mocks = vi.hoisted(() => ({
   listDocumentsMock: vi.fn(),
@@ -18,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   getMeetingByRequestIdMock: vi.fn(),
   listMeetingsByRequestIdsMock: vi.fn(),
   listMeetingParticipantsMock: vi.fn(),
+  listMeetingCheckinsMock: vi.fn(),
   listIdentityVerificationEventsMock: vi.fn(),
   listProximityEvaluationsMock: vi.fn(),
   listMeetingArtifactsMock: vi.fn(),
@@ -112,6 +116,7 @@ vi.mock("../../src/services/meetingService", async () => {
     getMeetingByRequestId: mocks.getMeetingByRequestIdMock,
     listMeetingsByRequestIds: mocks.listMeetingsByRequestIdsMock,
     listMeetingParticipants: mocks.listMeetingParticipantsMock,
+    listMeetingCheckins: mocks.listMeetingCheckinsMock,
     listIdentityVerificationEvents: mocks.listIdentityVerificationEventsMock,
     listProximityEvaluations: mocks.listProximityEvaluationsMock,
     listMeetingArtifacts: mocks.listMeetingArtifactsMock,
@@ -149,6 +154,7 @@ describe("requestReadModelService", () => {
     mocks.getMeetingByRequestIdMock.mockReset();
     mocks.listMeetingsByRequestIdsMock.mockReset();
     mocks.listMeetingParticipantsMock.mockReset();
+    mocks.listMeetingCheckinsMock.mockReset();
     mocks.listIdentityVerificationEventsMock.mockReset();
     mocks.listProximityEvaluationsMock.mockReset();
     mocks.listMeetingArtifactsMock.mockReset();
@@ -217,6 +223,7 @@ describe("requestReadModelService", () => {
     mocks.getMeetingByRequestIdMock.mockResolvedValue(null);
     mocks.listMeetingsByRequestIdsMock.mockResolvedValue([]);
     mocks.listMeetingParticipantsMock.mockResolvedValue([]);
+    mocks.listMeetingCheckinsMock.mockResolvedValue([]);
     mocks.listIdentityVerificationEventsMock.mockResolvedValue([]);
     mocks.listProximityEvaluationsMock.mockResolvedValue([]);
     mocks.listMeetingArtifactsMock.mockResolvedValue([]);

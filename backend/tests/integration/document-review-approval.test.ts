@@ -1,6 +1,17 @@
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requireNoNetwork } from "../helpers/noNetwork";
+
+requireNoNetwork();
+
+// User resolution for these route fixtures is supplied by the document-service
+// mocks below. Never fall through to a real Supabase lookup/retry cycle.
+// Identity/session policy is covered separately by authMiddleware and SQL tests.
+vi.mock("../../src/services/userRoleService", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/services/userRoleService")>(),
+  getUserIdentityContextBySupabaseId: vi.fn().mockResolvedValue(null),
+}));
 
 const mocks = vi.hoisted(() => ({
   getDocumentByIdMock: vi.fn(),
@@ -60,6 +71,14 @@ vi.mock("../../src/services/documentGenerationService", async (importOriginal) =
     prepareGenerationRun: mocks.prepareGenerationRunMock,
   };
 });
+
+vi.mock("../../src/services/productFlowModeService", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/services/productFlowModeService")>(),
+  buildSelectionForMode: vi.fn().mockResolvedValue({
+    modeKey: "trust_bundle", families: ["poa", "trust"],
+    poaType: "general", trustType: "rrr", idnType: "acknowledgment",
+  }),
+}));
 
 vi.mock("../../src/services/memberFormRulesService", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/services/memberFormRulesService")>();

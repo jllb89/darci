@@ -1,6 +1,17 @@
 import request from "supertest";
 import jwt from "jsonwebtoken";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requireNoNetwork } from "../helpers/noNetwork";
+
+requireNoNetwork();
+
+// User resolution for these route fixtures is supplied by the document-service
+// mocks below. Never fall through to a real Supabase lookup/retry cycle.
+// Identity/session policy is covered separately by authMiddleware and SQL tests.
+vi.mock("../../src/services/userRoleService", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/services/userRoleService")>(),
+  getUserIdentityContextBySupabaseId: vi.fn().mockResolvedValue(null),
+}));
 
 vi.hoisted(() => {
   if (!process.env.SUPABASE_URL) {

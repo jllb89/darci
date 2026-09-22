@@ -29,6 +29,9 @@ final class DARCiMobileUITests: XCTestCase {
         existingUser: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
+        // These fixtures use English labels and US national phone numbers;
+        // do not inherit the developer/runner simulator's country settings.
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launchEnvironment["DARCI_MOCK_AUTH"] = "1"
         if restoreSession {
             app.launchEnvironment["DARCI_MOCK_AUTH_RESTORE"] = "1"
@@ -47,6 +50,32 @@ final class DARCiMobileUITests: XCTestCase {
             app.launchEnvironment["DARCI_MOCK_AUTH_EXISTING_USER"] = "1"
         }
         return app
+    }
+
+    @MainActor
+    private func selectUSPhoneCountry(in app: XCUIApplication) {
+        // PhoneNumberKit also reads system Contacts/telephony country settings.
+        let selector = app.buttons["phone-country-selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 5))
+        selector.tap()
+        let search = app.textFields["Search country or code"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("United States")
+        let country = app.buttons.containing(.staticText, identifier: "US").firstMatch
+        XCTAssertTrue(country.waitForExistence(timeout: 5))
+        country.tap()
+        XCTAssertEqual(selector.value as? String, "United States, +1")
+    }
+
+    @MainActor
+    private func enterPhoneNumber(_ number: String, into field: XCUIElement) {
+        // Let the live formatter settle between keystrokes; a burst of injected
+        // characters can race its text binding updates and lose a digit.
+        for digit in number {
+            field.typeText(String(digit))
+        }
+        XCTAssertEqual((field.value as? String)?.filter(\.isNumber), number)
     }
 
     @MainActor
@@ -80,6 +109,7 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["To access the app, continue below."].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Continue"].waitForExistence(timeout: 5))
 
+        selectUSPhoneCountry(in: app)
         let phoneField = app.textFields["phone-number-field"]
         XCTAssertTrue(phoneField.waitForExistence(timeout: 5))
         phoneField.tap()
@@ -87,10 +117,10 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertFalse(app.buttons["I just want to browse the app."].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Use email instead."].waitForExistence(timeout: 2))
-        app.typeText("2025550147")
+        enterPhoneNumber("2025550147", into: phoneField)
 
-        app.buttons["Continue"].tap()
-        XCTAssertTrue(app.buttons["Verify code"].waitForExistence(timeout: 5))
+        app.buttons["auth-continue-button"].tap()
+        XCTAssertTrue(app.buttons["Verify code"].waitForExistence(timeout: 5), app.debugDescription)
         let otpField = app.textFields["One-time code"]
         XCTAssertTrue(otpField.waitForExistence(timeout: 5))
         otpField.tap()
@@ -358,10 +388,11 @@ final class DARCiMobileUITests: XCTestCase {
         app.buttons["Close onboarding"].tap()
         XCTAssertTrue(app.staticTexts["Welcome Sign in"].waitForExistence(timeout: 5))
 
+        selectUSPhoneCountry(in: app)
         let phoneField = app.textFields["phone-number-field"]
         XCTAssertTrue(phoneField.waitForExistence(timeout: 5))
         phoneField.tap()
-        app.typeText("2025550147")
+        enterPhoneNumber("2025550147", into: phoneField)
         app.buttons["auth-continue-button"].tap()
 
         let otpField = app.textFields["One-time code"]
