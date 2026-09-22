@@ -2,6 +2,8 @@ XCODEGEN ?= xcodegen
 SCHEME ?= DARCiMobile
 DESTINATION ?= generic/platform=iOS Simulator
 TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17
+PACKAGE_LOCK ?= Package.resolved
+GENERATED_PACKAGE_LOCK ?= DARCiMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 ARCHIVE_PATH ?= build/DARCiMobile.xcarchive
 APP_STORE_PROFILE ?= DARCi App Store com.illuminote.darci TF 2026-08-10
 
@@ -12,6 +14,8 @@ bootstrap:
 
 generate: bootstrap
 	$(XCODEGEN) generate
+	@mkdir -p $(dir $(GENERATED_PACKAGE_LOCK))
+	@cp $(PACKAGE_LOCK) $(GENERATED_PACKAGE_LOCK)
 
 release-config:
 	zsh ./scripts/generate-release-config.sh

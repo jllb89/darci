@@ -2,11 +2,20 @@
 
 ## Decision
 
-**Continue Phase 1; not a production go.** The hardening release is deployed to staging. Post-deployment tests improved billing lifecycle evidence from **9/15 to 13/15** and exposed a real downgrade failure. Its approved local fix passes tests and a real Stripe test-clock rollover, but is **not deployed**. A clock-related reconciliation gap remains below.
+**Continue Phase 1; not a production go.** Latest staging release `eeec032` includes the downgrade fix, which now passes through the actual deployed API. Billing lifecycle evidence is **13/15**. The subsequently approved reconciliation fix passes local tests and a read-only staging scan, but **that reporting fix is not deployed**. The roadmap distinguishes these two release states.
 
-Authorized scope: isolated synthetic staging users and Stripe test subscriptions; subsequently, a local downgrade patch/regression test. No real charges, client emails/SMS, client subscriptions/PDF changes, production resources, commits, pushes or deployments. Sentry remains deferred.
+Authorized scope: isolated synthetic staging users and Stripe test subscriptions; subsequently, local downgrade and reconciliation patches/regression tests. The user deployed `eeec032`; the agent did not commit, push or deploy. No real charges, client emails/SMS, client subscriptions/PDF changes or production resources. Sentry remains deferred.
 
-## Deployed baseline
+## Follow-up after the user's redeployment
+
+- [CI `35784026499`](https://github.com/jllb89/darci/actions/runs/35784026499) and [deployment `35784026517`](https://github.com/jllb89/darci/actions/runs/35784026517) succeeded on `eeec032bf9945326b669e89c8dd000db7a832647`. Deployment took approximately **7m02s**, CI **3m26s**. No new iOS run was required for this backend/docs-only commit; another task's uncommitted iOS optimization files were preserved.
+- API task definition **98**, worker **84**, unchanged web **62**: all desired/running 1/1, pending 0, rollouts complete. API image `sha256:db70cabcdb884c874658089848c6f8cb8e1ae364da7c163f7432c133bd076ca6`, worker `sha256:466abe3d56194ba128b4dd882f17e6edc9c64f75c48b7da058effc90ab298d3d`; web digest unchanged from the initial baseline below. Health/live/ready 200; anonymous member endpoints 401; unknown verification IDN 404/no-store.
+- Reused only a labeled non-clock fixture customer, created a new test subscription, and called the **deployed** `/billing/member-membership/plan-change`: **202 scheduled**, repeated request **202 reused**, provider metadata correct and downgrade effective exactly at renewal. Membership retained **10 current units** with **Starter pending**. The earlier clock exercise already proved 3-unit renewal synchronization; it was not repeated in this deployed-API test.
+- Canceled that additional synthetic subscription without proration/new invoice, verified terminal webhook synchronization and denied new-workflow eligibility, then verified global logout. Private receipt: `/private/tmp/darci-deployed-downgrade22-receipt.json`. This brings the two passes to five test subscriptions, all terminal; no client subscription was touched.
+- Reconciliation patch: **15 focused tests** across three suites, **626/626 full backend tests across 94 files**, backend compilation and whitespace checks pass. Locally patched read-only staging report finds **17 internal / 17 provider subscriptions**, **zero critical/high/medium/low issues**, **zero webhook backlog**; lifecycle stays **13/15**, no acceptance ID. Local log `/private/tmp/darci-reconciliation22-live-report.log`; full test log `/private/tmp/darci-reconciliation22-all-tests.log`.
+- **Remaining immediate deployment:** reconciliation report only. The user approved its local implementation, not another deployment. Existing missing-subscription warnings from the deployed list-only implementation are not evidence of a missing customer payment; verify the affected ID directly before intervention.
+
+## Initial deployed baseline — superseded by follow-up above
 
 - Revision `105a3e1e9ba2ab84565bd344903f8f7c168ce5de`: [server CI](https://github.com/jllb89/darci/actions/runs/35775144985), [deployment](https://github.com/jllb89/darci/actions/runs/35775145143) and [independent iOS validation](https://github.com/jllb89/darci/actions/runs/35775145255) succeeded.
 - Deployment approximately **7m59s**, including **4m40s** ECS rollout. Independent iOS job **16m46s**: build/tests **14m08s**, simulator selection/Xcode initialization **1m58s**. This pass did not rebuild iOS.
@@ -24,7 +33,7 @@ Authorized scope: isolated synthetic staging users and Stripe test subscriptions
 | Private billing | Other member's subscription hidden by authenticated RLS. Canceled/incomplete-expired fixture memberships report no entitlement and no permission to create workflows under enforced mode. | Held/private PDF role matrix remains open. |
 | Checkout | Three real API creations; duplicate idempotency tokens reuse sessions; provider expiration synchronized by signed webhook. | Hosted Checkout UI was not completed this pass; its existing evidence is historical. |
 | Payments | Real test-mode paid, declined and authentication-required subscriptions synchronized. Correlated invoice/subscription events processed on first attempt. | Not real-money or native Apple Pay acceptance. |
-| Downgrade | Local corrected service creates a real schedule and reuses the request. Deployed membership shows pending Starter, keeps 10 current units. Synthetic clock advancement changes Stripe price at renewal; deployed worker synchronizes Starter's 3-unit next period. | Patched API still needs deployment/retest. Synthetic future time is not a device period-rollover proof. |
+| Downgrade | Corrected service and subsequent deployed API both create/reuse the schedule and keep 10 current units with Starter pending. Earlier synthetic clock advancement changes price at renewal and synchronizes the 3-unit next period. | Deployed API acceptance now passed; synthetic clock time is not a device period-rollover proof. |
 | Recovery | Complete snapshot `2026-09-22T20-00-50.575Z-0fba2016-a34b-4fbc-a3e9-72998701d9b0`, manifest version `9rh0_SDh3Psmvu4mn0IR8Hsegi3lfRa_`, 2,533 objects; archive size/key presence checked. Both recovery alarms OK. | Freshness/receipt check, not another full application restore. |
 
 ## Defect and local validation
@@ -37,7 +46,7 @@ Deployed downgrade returned 500 because Stripe rejects `metadata` alongside `fro
 
 ## Reconciliation gap
 
-Before fixtures: complete provider reconciliation, zero issues/backlog. After the clock drill: **one critical `internal_subscription_missing_in_stripe`**, zero high/medium issues, zero backlog. Stripe's [unscoped subscription list omits test-clock subscriptions](https://docs.stripe.com/api/subscriptions/list); direct retrieval and webhook evidence confirm the synthetic subscription exists and is terminal. Do not delete evidence or suppress genuine missing-subscription alerts. Approval was requested for a local direct-lookup fallback and regression coverage.
+Before fixtures: complete provider reconciliation, zero issues/backlog. After the clock drill, the old report produced **one critical `internal_subscription_missing_in_stripe`**, zero high/medium issues, zero backlog. Stripe's [unscoped subscription list omits test-clock subscriptions](https://docs.stripe.com/api/subscriptions/list); direct retrieval and webhook evidence confirm the synthetic subscription exists and is terminal. Jorge subsequently approved the local fix: retrieve known same-environment IDs missing from the list, retain real 404/resource-missing alerts and fail closed on provider outages/auth/rate limits or wrong-mode objects. Account mismatches remain visible. Nine new tests cover these cases plus deduplication and offline mode. The corrected local scan is clean; deployed report acceptance awaits release. No audit evidence, fixture history or genuine alerts were deleted/suppressed.
 
 ## Fixture handling
 
@@ -49,7 +58,7 @@ Private operator receipts contain no passwords/access/refresh tokens: `/private/
 
 ## Next pass
 
-1. Deploy/retest downgrade through the actual API; resolve clock-aware reconciliation and obtain a clean deployed report.
+1. Deploy/retest the locally verified clock-aware reconciliation report. Downgrade deployment/API acceptance is complete.
 2. Finish **final-package billing hold** and **controlled usage reversal** evidence. Prove hold → resubscribe → same-byte release, accepted-work continuity, authorized operator actions and all download/read boundaries. Add last-unit concurrency and missed/out-of-order-event exercises. Do not manufacture acceptance from 13/15.
 3. Finish Phase 1A–1C role/held-access, identity/legal-hold, full CA/OH product/crash-recovery and whole-application restore exercises. Preserve 50 known beta PDF exceptions and fresh production separation.
 4. Finish critical-category alerts/outbox/OTP/bounce/suppression proof. Sentry deferred; Jorge sole responder.

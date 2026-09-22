@@ -23,6 +23,10 @@ jobs:
   ios:
     runs-on: macos-26
     timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DARCI_IOS_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-5
+      DARCI_IOS_DEVICE_NAME: iPhone 17 Pro
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,33 +41,62 @@ jobs:
           xcodegen --version
           make -C apps/mobile generate
           test -f apps/mobile/DARCiMobile.xcodeproj/project.pbxproj
+          cmp apps/mobile/Package.resolved apps/mobile/DARCiMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
       - name: Identify Xcode cache boundary
         id: xcode
-        run: echo "version=$(xcodebuild -version | tr '\n ' '--')" >> "$GITHUB_OUTPUT"
-      - name: Cache Swift packages and incremental build products
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/darci-ios-build
-          key: ios-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/**/Package.resolved') }}-${{ github.sha }}
-          restore-keys: |
-            ios-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/**/Package.resolved') }}-
-      - name: Select an available iPhone simulator
         run: |
+          test -x "$DEVELOPER_DIR/usr/bin/xcodebuild"
           xcodebuild -version
-          xcrun simctl list devices available -j | node -e '
-            let input="";process.stdin.on("data",b=>input+=b);process.stdin.on("end",()=>{
-              const entries=Object.entries(JSON.parse(input).devices).filter(([runtime])=>runtime.includes("iOS-"))
-                .sort(([a],[b])=>b.localeCompare(a,undefined,{numeric:true}));
-              const device=entries.flatMap(([,devices])=>devices).find(d=>d.name.startsWith("iPhone"));
-              if(!device)throw new Error("No available iPhone simulator");
-              console.log("DARCI_CI_SIMULATOR="+device.udid);
-            });' >> "$GITHUB_ENV"
-      - name: Build and test iOS, including accessibility UI regressions
+          echo "version=$(xcodebuild -version | tr '\n ' '--')-XcodeGen-$(xcodegen --version | awk '{print $NF}')" >> "$GITHUB_OUTPUT"
+      - name: Select and start the pinned iPhone simulator
         run: |
           set -euo pipefail
-          xcodebuild test -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
+          simulator_id="$(xcrun simctl list devices available -j | node -e '
+            let input="";process.stdin.on("data",b=>input+=b);process.stdin.on("end",()=>{
+              const devices=JSON.parse(input).devices[process.env.DARCI_IOS_RUNTIME] ?? [];
+              const device=devices.find(d=>d.name===process.env.DARCI_IOS_DEVICE_NAME);
+              if(!device)throw new Error("Missing "+process.env.DARCI_IOS_DEVICE_NAME+" on "+process.env.DARCI_IOS_RUNTIME);
+              console.log(device.udid);
+            });')"
+          echo "DARCI_CI_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator_id"
+      - name: Cache locked Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/darci-ios-packages
+          key: ios-spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/mobile/Package.resolved') }}
+      - name: Cache incremental build products
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/darci-ios-build/Build
+            ${{ runner.temp }}/darci-ios-build/ModuleCache.noindex
+            ${{ runner.temp }}/darci-ios-build/SDKStatCaches.noindex
+          key: ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-
+      - name: Build iOS tests while the simulator boots
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
+            -configuration Debug -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/darci-ios-build" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/darci-ios-packages" \
+            -onlyUsePackageVersionsFromResolvedFile -showBuildTimingSummary \
+            -resultBundlePath "$RUNNER_TEMP/darci-ios-build-results.xcresult" \
+            ARCHS=arm64 COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
+            DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
+      - name: Run the full unit and UI test suites without rebuilding
+        run: |
+          set -euo pipefail
+          xcrun simctl bootstatus "$DARCI_CI_SIMULATOR" -b
+          xcodebuild test-without-building -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
             -configuration Debug -destination "platform=iOS Simulator,id=$DARCI_CI_SIMULATOR" \
-            -derivedDataPath "$RUNNER_TEMP/darci-ios-build" -resultBundlePath "$RUNNER_TEMP/darci-ios-results.xcresult" \
+            -derivedDataPath "$RUNNER_TEMP/darci-ios-build" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/darci-ios-packages" \
+            -disableAutomaticPackageResolution -showBuildTimingSummary \
+            -resultBundlePath "$RUNNER_TEMP/darci-ios-test-results.xcresult" \
             -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
             DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
             DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
@@ -72,6 +105,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: darci-ios-test-results
-          path: ${{ runner.temp }}/darci-ios-results.xcresult
+          path: ${{ runner.temp }}/darci-ios-*-results.xcresult
           if-no-files-found: ignore
           retention-days: 7

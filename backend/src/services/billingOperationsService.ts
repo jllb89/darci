@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { createHash, randomUUID } from "crypto";
+import type Stripe from "stripe";
 import { assertStripeObjectMatchesEnvironment, getStripeClient, getStripeEnvironment } from "../config/stripe";
 import { getBillingEnforcementMode, releaseMemberBillingHeldDocuments } from "./billingPolicyService";
 import { processStoredStripeWebhook, resyncStripeMemberSubscription } from "./stripeWebhookService";
@@ -488,6 +489,20 @@ const requireRows = <T>(label: string, data: T[] | null, error: { message: strin
   return data ?? [];
 };
 
+const providerSubscriptionSnapshot = (subscription: Stripe.Subscription): ProviderSubscriptionSnapshot => {
+  assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
+  const item = subscription.items.data[0] ?? null;
+  return {
+    id: subscription.id,
+    billingAccountId: subscription.metadata.darci_billing_account_id || null,
+    status: subscription.status,
+    priceId: item?.price.id ?? null,
+    currentPeriodStart: item ? new Date(item.current_period_start * 1000).toISOString() : null,
+    currentPeriodEnd: item ? new Date(item.current_period_end * 1000).toISOString() : null,
+    livemode: subscription.livemode,
+  };
+};
+
 const loadProviderSubscriptions = async (): Promise<ProviderSubscriptionSnapshot[]> => {
   const stripe = getStripeClient();
   const subscriptions = await stripe.subscriptions
@@ -499,19 +514,7 @@ const loadProviderSubscriptions = async (): Promise<ProviderSubscriptionSnapshot
       return subscription.metadata.darci_environment === getStripeEnvironment()
         || item?.price.metadata.darci_product_code === "member_membership";
     })
-    .map((subscription) => {
-      assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
-      const item = subscription.items.data[0] ?? null;
-      return {
-        id: subscription.id,
-        billingAccountId: subscription.metadata.darci_billing_account_id || null,
-        status: subscription.status,
-        priceId: item?.price.id ?? null,
-        currentPeriodStart: item ? new Date(item.current_period_start * 1000).toISOString() : null,
-        currentPeriodEnd: item ? new Date(item.current_period_end * 1000).toISOString() : null,
-        livemode: subscription.livemode,
-      };
-    });
+    .map(providerSubscriptionSnapshot);
 };
 
 const itemBySubscriptionForReport = (
@@ -550,11 +553,35 @@ export const getBillingOperationsReport = async (input?: {
       : loadProviderSubscriptions().then((data) => ({ data, error: null })).catch((error) => ({ data: null, error })),
   ]);
 
-  if (providerResult.error) {
+  const internalSubscriptions = requireRows("Subscription reconciliation lookup", subscriptionsResult.data, subscriptionsResult.error) as InternalSubscriptionSnapshot[];
+  const providerSubscriptions = providerResult.data ?? [];
+  try {
+    if (providerResult.error) throw providerResult.error;
+    if (input?.includeProvider !== false) {
+      // Unscoped Stripe lists omit test-clock subscriptions. A known ID is
+      // missing only after an explicit 404, not merely absent from that list.
+      const seen = new Set(providerSubscriptions.map((row) => row.id));
+      for (const subscription of internalSubscriptions) {
+        const id = subscription.provider_subscription_id;
+        if (!id || subscription.provider_environment !== getStripeEnvironment() || seen.has(id)) continue;
+        seen.add(id);
+        try {
+          const retrieved = await getStripeClient().subscriptions.retrieve(id);
+          providerSubscriptions.push(providerSubscriptionSnapshot(retrieved));
+        } catch (error) {
+          const failure = error as { code?: string; statusCode?: number } | null;
+          if (failure?.code === "resource_missing" && failure.statusCode === 404) continue;
+          // Network/auth/rate-limit failures and mode mismatches are not proof
+          // of absence. Fail the report instead of declaring a complete scan.
+          throw error;
+        }
+      }
+    }
+  } catch (error) {
     throw new BillingOperationsError(
       502,
       "billing_provider_reconciliation_failed",
-      `Stripe reconciliation failed: ${providerResult.error instanceof Error ? providerResult.error.message : "unknown_error"}`,
+      `Stripe reconciliation failed: ${error instanceof Error ? error.message : "unknown_error"}`,
     );
   }
 
@@ -568,7 +595,7 @@ export const getBillingOperationsReport = async (input?: {
     }));
   const snapshot: BillingReconciliationSnapshot = {
     accounts: requireRows("Billing-account reconciliation lookup", accountsResult.data, accountsResult.error) as BillingAccountSnapshot[],
-    subscriptions: requireRows("Subscription reconciliation lookup", subscriptionsResult.data, subscriptionsResult.error) as InternalSubscriptionSnapshot[],
+    subscriptions: internalSubscriptions,
     subscriptionItems: requireRows("Subscription-item reconciliation lookup", itemsResult.data, itemsResult.error) as SubscriptionItemSnapshot[],
     entitlements: requireRows("Entitlement reconciliation lookup", entitlementsResult.data, entitlementsResult.error) as EntitlementSnapshot[],
     usageEvents: requireRows("Usage reconciliation lookup", usageResult.data, usageResult.error) as UsageEventSnapshot[],
@@ -576,7 +603,7 @@ export const getBillingOperationsReport = async (input?: {
     webhooks: requireRows("Webhook reconciliation lookup", webhooksResult.data, webhooksResult.error) as WebhookSnapshot[],
     payments: requireRows("Payment reconciliation lookup", paymentsResult.data, paymentsResult.error) as PaymentSnapshot[],
     orders: requireRows("Order reconciliation lookup", ordersResult.data, ordersResult.error) as BillingOrderSnapshot[],
-    providerSubscriptions: providerResult.data ?? [],
+    providerSubscriptions,
     providerScanComplete: input?.includeProvider !== false,
   };
   const issues = analyzeBillingReconciliation(snapshot);
