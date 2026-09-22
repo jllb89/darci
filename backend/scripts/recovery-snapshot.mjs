@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdtemp, writeFile, readFile, readdir, stat, chmod } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, stat, chmod, realpath, lstat } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -111,6 +111,16 @@ async function upload(file, key) {
 async function download(item, file) {
   assert(Number.isSafeInteger(item.bytes) && item.bytes >= 0 && item.bytes <= maxBytes, 'Invalid recovery object size');
   assert(typeof item.sha256 === 'string' && /^[a-f0-9]{64}$/.test(item.sha256), 'Invalid recovery checksum');
+  if (flags['resume-directory']) {
+    try {
+      assert(!(await lstat(file)).isSymbolicLink());
+      if ((await stat(file)).size === item.bytes) {
+        const digest=createHash('sha256');let prefix=Buffer.alloc(0);
+        for await(const chunk of createReadStream(file)){digest.update(chunk);if(prefix.length<1024)prefix=Buffer.concat([prefix,chunk.subarray(0,1024-prefix.length)]);}
+        if(digest.digest('hex')===item.sha256)return prefix;
+      }
+    } catch(error) { if(error.code!=='ENOENT')throw error; }
+  }
   await aws(['s3api', 'get-object', '--bucket', stack.Bucket, '--key', item.key, '--version-id', item.versionId, file]);
   assert.equal((await stat(file)).size, item.bytes, 'Recovery length mismatch');
   const digest = createHash('sha256');
@@ -146,7 +156,13 @@ async function main() {
     const expectedRole = stack.WriterRoleArn.split('/').at(-1);
     assert(caller.Arn.startsWith(`arn:aws:sts::427057633951:assumed-role/${expectedRole}/`), 'Unexpected scheduled-task identity');
   }
-  const folder = await mkdtemp(path.join(tmpdir(), 'darci-recovery-'));
+  let folder;
+  if(flags['resume-directory']) {
+    assert.equal(process.argv[2],'restore-check','Only read-only restore checks can resume');
+    folder=await realpath(flags['resume-directory']);
+    assert.equal(path.dirname(folder),await realpath(tmpdir()),'Resume only a private temporary recovery directory');
+    assert(/^darci-recovery-[A-Za-z0-9]+$/.test(path.basename(folder)));
+  } else folder = await mkdtemp(path.join(tmpdir(), 'darci-recovery-'));
   await chmod(folder, 0o700);
   if (process.argv[2] === 'restore-check') {
     assert(flags.manifest && flags.version, 'An exact manifest key and S3 version are required');

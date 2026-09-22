@@ -5,6 +5,8 @@ Status: **rehearsal in progress — not a production recovery certification**.
 Responder: Jorge, `lopezb.jl@gmail.com`. Sole-responder coverage is explicitly accepted for now (18 September); no secondary coverage is claimed.
 Approved targets: RPO ≤24 hours; RTO ≤4 hours. Neither target is proven yet.
 
+22 September update: the independently restored 20:00 UTC snapshot has **2,533/2,533 exact object checksums**, 2,405 readable PDFs and 50 preserved historical source exceptions. Auth/Storage/API/Redis and a quarantined worker were reconstructed; eight functional checks, including a real worker stop/natural heartbeat expiry/restart, pass. This is stronger than the earlier offline-Postgres proof but **not full queue/job or all-held-route recovery certification**. See the [current evidence record](production-readiness-phase1-pass-2026-09-22.md).
+
 ## Safety boundaries
 
 - Current backup source is **staging only**, Supabase project `oqferisuloumoojgbjde`. Operator CLI reads `/darci/staging/app`; the unattended task can read only `/darci/staging/recovery-source`, containing database/Storage and protected-identity recovery settings. Stripe, email, SMS and other app keys are excluded from that subset.
@@ -76,6 +78,25 @@ PATH=/opt/homebrew/opt/node@24/bin:$PATH node backend/scripts/recovery-snapshot.
 ```
 
 This downloads through the recovery-reader role, verifies sizes and SHA-256 checksums, checks the database archive index and runs native PDF validation/rendering on every page. A checksum match does not excuse a malformed source PDF. Failures are retained in a private report and cause a nonzero exit. **This is not a full database, authentication, authorization or application restore.**
+
+An interrupted local check can add `--resume-directory=/ABSOLUTE/PRIVATE/TEMP/darci-recovery-...` with the **same exact manifest key/version**. Only private system-temporary recovery directories are accepted. The manifest is fetched again; every reused file is size/SHA-256 checked again, and PDF validation/rendering reruns. A partial, mismatched or symlinked file is never accepted as complete. The default remains AWS CLI transfer; there is no extra SDK dependency.
+
+### Isolated authenticated application rehearsal
+
+With a verified object directory and cached compatible Docker images:
+
+```sh
+node backend/scripts/recovery-application-drill.mjs /ABSOLUTE/PRIVATE/RESTORE_DIRECTORY --confirm-isolated
+node backend/scripts/recovery-functional-drill.mjs /ABSOLUTE/WORKSPACE/.recovery-private/EXACT_PRINTED_RUN --confirm-isolated
+```
+
+The bootstrap requires all object checksums, allowing only explicitly reported source-readability exceptions. It creates a new Docker `--internal` network with no published ports, restores a fresh database, reconstructs file Storage metadata, and starts Auth, PostgREST, gateway, API, Redis and worker. API/worker code comes from the current compiled `backend/dist`; record its tested revision before accepting a run. The runtime image and Supabase versions are currently pinned in the script to the rehearsed versions; this is a local operator tool, not a generic production launcher.
+
+Private runtime files live in ignored, mode-0700 `.recovery-private/` so Colima can share the files. Credentials are mode 0600. Never commit this directory. Auth must use the `auth` database search path and the recovered gateway JWT issuer. Native file Storage requires its cache/content-type extended attributes as well as exact bytes; copying only the file is insufficient.
+
+The functional test generates an internal magic link without sending email and verifies it against restored Auth. It checks owner linkage, anonymous/unrelated denial, Storage URL restrictions, exact final bytes, safe public verification, missing/corrupt-copy detection and denied external egress. It stops **only its own recovered worker**, waits for the real heartbeat to expire, observes readiness 503, restarts it and verifies readiness 200 with unchanged durable queues. Fault injection changes only the isolated file copy and restores exact bytes afterward.
+
+All provider/outbox runners and BullMQ replay are disabled; no hosted provider credentials are passed. Auth/Storage use isolated privileged DB credentials, so restored production role ownership/password rotation is not claimed. The reported functional time excludes prior transfer/bootstrap/debugging; use a complete incident timeline for an RTO claim. Full selective job reconstruction, held/signer-route coverage and recovered-key acceptance remain required. Stop the exact named containers after collecting the private report; do not prune unrelated Docker resources or erase preserved source exceptions.
 
 For the offline database component, use the private artifact directory printed by that check:
 

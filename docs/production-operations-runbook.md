@@ -1,6 +1,6 @@
 # DARCi critical operations runbook
 
-Status, 22 September 2026: staging AWS detectors installed; new source emitters/watchdog require the next API/worker deployment. This is not production monitoring acceptance.
+Status, 22 September 2026: source emitters/watchdog deployed at `d166019`; all eight AWS operational alarm actions enabled after genuine heartbeat verification, all eight OK on recheck. This is staging proof, not production monitoring acceptance or proof of every incident source.
 
 Responder: Jorge, `lopezb.jl@gmail.com`. No secondary responder is configured. Sentry provider work remains deferred.
 
@@ -74,7 +74,7 @@ This exercises **log → metric → alarm → SNS**, not all originating applica
 
 ## Current limitations
 
-- Source emitters/watchdog and the completed-package retry fix are local until the next app deployment.
+- Source emitters/watchdog and completed-package retry are deployed and verified at `d166019`. Remaining originating-failure drills are tracked separately in the Phase 1 record.
 - Human non-billing admin step-up/enrollment UI, OTP/bounce/suppression end-to-end acceptance, actual-device session faults, and whole-application restore remain open.
 - OTLP ingestion/disablement must still be verified; this route does not depend on OTLP or Sentry.
 - Production has no equivalent stack yet; this staging-only template must not be pointed at production by changing its account checks.

@@ -75,3 +75,4 @@ supabase/.temp/
 /backend/probe_res.txt
 /backend/results.txt
 /backend/test_output.txt
+.recovery-private/
