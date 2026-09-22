@@ -1,6 +1,6 @@
 # Phase 1 execution — 17 September 2026
 
-Status: **in progress; not approved for deployment or production**. Baseline `4e7f3ff91d9a6078525e8c6562ebe5b94432db51`.
+Status updated 22 September: **hardening deployed to staging at `105a3e1`; Phase 1 acceptance incomplete; production not approved**. Original audit baseline `4e7f3ff91d9a6078525e8c6562ebe5b94432db51`. Earlier dated implementation notes below remain historical; [post-deployment acceptance](production-readiness-acceptance-2026-09-22.md) supersedes their deployment status. Fresh tests advance billing evidence to 13/15 and find a downgrade defect (approved local fix, not deployed) plus a clock-related reconciliation reporting gap. See that record for exact evidence and remaining gates.
 
 ## 22 September — staging database upgrade and workflow latency repair
 

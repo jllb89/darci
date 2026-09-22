@@ -380,11 +380,6 @@ export const changeMemberMembershipPlan = async (input: {
     : await stripe.subscriptionSchedules.create(
         {
           from_subscription: subscription.id,
-          metadata: {
-            darci_environment: getStripeEnvironment(),
-            darci_billing_account_id: account.id,
-            darci_plan_change_kind: "downgrade",
-          },
         },
         { idempotencyKey: `darci:${getStripeEnvironment()}:plan-change:${input.idempotencyKey}:schedule` },
       );
@@ -396,6 +391,13 @@ export const changeMemberMembershipPlan = async (input: {
     schedule.id,
     {
       end_behavior: "release",
+      // Stripe disallows metadata when creating from_subscription. Attach it
+      // with the phase update after the existing subscription is migrated.
+      metadata: {
+        darci_environment: getStripeEnvironment(),
+        darci_billing_account_id: account.id,
+        darci_plan_change_kind: "downgrade",
+      },
       phases: [
         {
           start_date: phaseStart,
