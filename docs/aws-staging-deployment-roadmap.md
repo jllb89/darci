@@ -341,7 +341,7 @@ Staging GitHub Actions variables now use `https://api.staging.darciregistry.com`
 ```
 On push to master:
   1. Build all 3 Docker images
-  2. Push to ECR (tagged with git SHA + "staging-latest")
+  2. Push candidate images to ECR with the revision-specific SHA tag; deploy only the digest that passed scanning and exact-revision CI. Do not publish a candidate as `staging-latest` before validation.
   3. Force new deployments for all STAGING ECS services
   4. Wait for services to stabilize
   5. Smoke test the public API health URL

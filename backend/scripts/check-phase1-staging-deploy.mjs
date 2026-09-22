@@ -17,10 +17,10 @@ try {
     return response.json();
   };
   const schema=await get('');
-  for (const rpc of ['claim_document_invite','record_protected_identity_verification','record_document_render_provenance',
-    'commit_hash_only_output','complete_hash_only_package','is_auth_session_active']) {
-    assert(schema.paths?.[`/rpc/${rpc}`],`Missing Phase 1 database capability: ${rpc}. Apply reviewed migrations before deployment.`);
-  }
+  const required = ['claim_document_invite','record_protected_identity_verification','record_document_render_provenance',
+    'commit_hash_only_output','complete_hash_only_package','is_auth_session_active'];
+  const missing = required.filter(rpc => !schema.paths?.[`/rpc/${rpc}`]);
+  assert.equal(missing.length, 0, `Missing Phase 1 database capabilities: ${missing.join(', ')}. Apply reviewed migrations before deployment.`);
   const config=await get('billing_runtime_configuration?singleton=eq.true&select=stripe_environment');
   assert.equal(config[0]?.stripe_environment,'test','Staging database must remain Stripe test-only');
   console.log('PASS: required Phase 1 database API capabilities and protected-storage configuration present. This is not full release acceptance.');

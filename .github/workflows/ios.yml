@@ -1,0 +1,77 @@
+name: iOS
+on:
+  push:
+    paths:
+      - 'apps/mobile/**'
+      - 'api/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'api/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Generate the Xcode project from its tracked specification
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          make -C apps/mobile generate
+          test -f apps/mobile/DARCiMobile.xcodeproj/project.pbxproj
+      - name: Identify Xcode cache boundary
+        id: xcode
+        run: echo "version=$(xcodebuild -version | tr '\n ' '--')" >> "$GITHUB_OUTPUT"
+      - name: Cache Swift packages and incremental build products
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/darci-ios-build
+          key: ios-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/**/Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            ios-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/**/Package.resolved') }}-
+      - name: Select an available iPhone simulator
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available -j | node -e '
+            let input="";process.stdin.on("data",b=>input+=b);process.stdin.on("end",()=>{
+              const entries=Object.entries(JSON.parse(input).devices).filter(([runtime])=>runtime.includes("iOS-"))
+                .sort(([a],[b])=>b.localeCompare(a,undefined,{numeric:true}));
+              const device=entries.flatMap(([,devices])=>devices).find(d=>d.name.startsWith("iPhone"));
+              if(!device)throw new Error("No available iPhone simulator");
+              console.log("DARCI_CI_SIMULATOR="+device.udid);
+            });' >> "$GITHUB_ENV"
+      - name: Build and test iOS, including accessibility UI regressions
+        run: |
+          set -euo pipefail
+          xcodebuild test -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
+            -configuration Debug -destination "platform=iOS Simulator,id=$DARCI_CI_SIMULATOR" \
+            -derivedDataPath "$RUNNER_TEMP/darci-ios-build" -resultBundlePath "$RUNNER_TEMP/darci-ios-results.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
+            DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
+      - name: Preserve iOS test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darci-ios-test-results
+          path: ${{ runner.temp }}/darci-ios-results.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

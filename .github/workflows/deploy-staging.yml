@@ -18,6 +18,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 env:
@@ -34,9 +35,49 @@ env:
   STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL }}
 
 jobs:
+  preflight:
+    name: Check staging prerequisites before builds
+    needs: changes
+    if: needs.changes.outputs.any_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check required deployment configuration
+        run: |
+          test "$GITHUB_REF" = refs/heads/master
+          for name in AWS_ACCOUNT_ID AWS_REGION AWS_DEPLOY_ROLE_ARN STAGING_NEXT_PUBLIC_API_BASE_URL STAGING_HEALTH_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name repository variable is required"
+              exit 1
+            fi
+          done
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Check database and encryption prerequisites now
+        if: needs.changes.outputs.build_api == 'true' || needs.changes.outputs.build_worker == 'true'
+        run: node backend/scripts/check-phase1-staging-deploy.mjs
+
   validate:
-    name: Validate the exact deployment revision
-    uses: ./.github/workflows/ci.yml
+    name: Reuse passing CI for the exact revision
+    needs: [changes, preflight]
+    if: needs.changes.outputs.any_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Require all server checks on this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/workflow-gates.mjs wait-ci
 
   changes:
     name: Detect Changed Services
@@ -50,28 +91,47 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Find the last successful rollout
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/workflow-gates.mjs baseline
 
       - name: Filter changed paths
         id: filter
+        if: steps.baseline.outputs.full_build != 'true'
         uses: dorny/paths-filter@v3
         with:
+          base: ${{ steps.baseline.outputs.base }}
+          ref: ${{ github.sha }}
           filters: |
             backend:
               - 'backend/**'
               - 'packages/**'
               - 'api/**'
+              - 'docs/**'
+              - 'supabase/migrations/**'
             web:
               - 'apps/web/**'
               - 'packages/**'
             infra:
               - '.github/workflows/deploy-staging.yml'
+              - '.github/workflows/ci.yml'
+              - 'scripts/workflow-gates.mjs'
               - '.dockerignore'
 
       - name: Build matrix
         id: matrix
         run: |
           node <<'NODE' >> "$GITHUB_OUTPUT"
-          const isManualRun = process.env.GITHUB_EVENT_NAME === "workflow_dispatch";
+          const isManualRun = process.env.GITHUB_EVENT_NAME === "workflow_dispatch" || process.env.FULL_BUILD === "true";
           const backendChanged = isManualRun || process.env.BACKEND_CHANGED === "true" || process.env.INFRA_CHANGED === "true";
           const webChanged = isManualRun || process.env.WEB_CHANGED === "true" || process.env.INFRA_CHANGED === "true";
 
@@ -103,9 +163,12 @@ jobs:
           BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
           WEB_CHANGED: ${{ steps.filter.outputs.web }}
           INFRA_CHANGED: ${{ steps.filter.outputs.infra }}
+          FULL_BUILD: ${{ steps.baseline.outputs.full_build }}
 
   build-images:
-    needs: [changes, validate]
+    # Candidate builds/scans run alongside CI. Only the deploy job may use them
+    # after the exact revision's CI has passed.
+    needs: [changes, preflight]
     if: needs.changes.outputs.any_build == 'true'
     name: Build and Push ${{ matrix.service }} Image
     runs-on: ubuntu-24.04-arm
@@ -205,7 +268,6 @@ jobs:
             --cache-from type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache"
             --cache-to type=registry,ref="$ECR_REGISTRY/${{ matrix.repository }}:staging-buildcache",mode=max,ignore-error=true
             "${build_args[@]}"
-            -t "$ECR_REGISTRY/${{ matrix.repository }}:staging-latest"
             -t "$ECR_REGISTRY/${{ matrix.repository }}:$IMAGE_TAG"
             --push
             .
@@ -261,6 +323,7 @@ jobs:
     needs:
       - changes
       - build-images
+      - validate
     if: needs.changes.outputs.any_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
