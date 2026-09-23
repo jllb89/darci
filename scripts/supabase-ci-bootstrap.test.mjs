@@ -76,6 +76,7 @@ test('process failures and status failures fail closed without exposing stdout',
 
 test('only explicit pre-migration transient registry failures qualify for retry', () => {
   assert.equal(retryableImageFailure('ghcr.io registry response: 503'), true);
+  assert.equal(retryableImageFailure('public.ecr.aws toomanyrequests: Rate exceeded'), true);
   assert.equal(retryableImageFailure('database connection reset'), false);
   assert.equal(retryableImageFailure('ghcr.io unauthorized'), false);
   assert.equal(retryableImageFailure('ghcr.io manifest unknown'), false);

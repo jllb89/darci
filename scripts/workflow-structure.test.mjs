@@ -67,6 +67,7 @@ test('digest scans and database-security tests remain mandatory', () => {
 
 test('database bootstrap keeps sanitized failure evidence without publishing credentials', () => {
   const database = job(ci, 'database-security');
+  assert.match(database, /name: Install all migrations into a disposable Supabase instance\n        env:[\s\S]*?SUPABASE_INTERNAL_IMAGE_REGISTRY: public\.ecr\.aws\n        run:/);
   assert.match(database, /node scripts\/supabase-ci-bootstrap\.mjs "\$drill_root"/);
   assert.match(database, /if: failure\(\) && env\.DARCI_SQL_DRILL_ROOT != ''/);
   assert.match(database, /path: \$\{\{ env\.DARCI_SQL_DRILL_ROOT \}\}\/bootstrap\.sanitized\.log/);

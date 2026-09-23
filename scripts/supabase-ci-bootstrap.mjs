@@ -16,7 +16,7 @@ export function sanitize(output) {
 export function retryableImageFailure(output) {
   // A SQL failure must never be retried or mistaken for a registry outage.
   if (/SQLSTATE|Applying migration|Initializing schema|migration.*(?:failed|error)/i.test(output)) return false;
-  return /(?:ghcr\.io|registry-1\.docker\.io|pull(?:ing)? (?:image|access)|failed to (?:pull|download))/i.test(output)
+  return /(?:ghcr\.io|public\.ecr\.aws|registry-1\.docker\.io|pull(?:ing)? (?:image|access)|failed to (?:pull|download))/i.test(output)
     && /(?:too many requests|toomanyrequests|\b429\b|\b50[234]\b|i\/o timeout|TLS handshake timeout|connection reset|unexpected EOF|temporary failure in name resolution)/i.test(output);
 }
 

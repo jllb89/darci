@@ -67,6 +67,10 @@ jobs:
       - run: npm run build
         working-directory: backend
       - name: Install all migrations into a disposable Supabase instance
+        env:
+          # setup-cli exports ghcr.io, which rate-limited our shared Actions runners.
+          # Use Supabase's default public mirror; retain the pinned CLI/image versions.
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
         run: |
           set -euo pipefail
           drill_root=$(mktemp -d)
