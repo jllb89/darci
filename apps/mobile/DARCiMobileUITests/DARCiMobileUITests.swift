@@ -2,6 +2,146 @@ import XCTest
 
 final class DARCiMobileUITests: XCTestCase {
     @MainActor
+    func testContractSharedControlsDismissKeyboardAndPreserveMultilineText() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["DARCI_MOCK_INTAKE_KEYBOARD"] = "1"
+        app.launch()
+        let phone = app.textFields["keyboard-fixture-phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 5))
+        phone.tap()
+        enterPhoneNumber("2025550147", into: phone)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 200)
+        XCTAssertEqual(app.buttons.matching(identifier: "Done").count, 1)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        phone.tap()
+        app.buttons["intake-select-fixture-jurisdiction"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+
+        let notes = app.textViews["keyboard-fixture-notes"]
+        notes.tap()
+        notes.typeText("Line one\nLine two")
+        XCTAssertEqual(notes.value as? String, "Line one\nLine two")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        app.buttons["poa-authority-scope-fixture"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+
+        let date = app.textFields["keyboard-fixture-date"]
+        date.tap()
+        date.typeText("2024")
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "Done").count, 1)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "contract-date-blue-done"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        date.tap()
+        date.typeText("0923")
+        XCTAssertEqual(date.value as? String, "2024-09-23")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testContractFormOwnsOneDoneButtonAndHandlesReturn() throws {
+        let app = makeApp(restoreSession: true)
+        app.launch()
+        let product = app.buttons["home-product-card-trust_bundle"]
+        XCTAssertTrue(product.waitForExistence(timeout: 10))
+        product.tap()
+        let name = app.textFields["trust-name-field"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !name.isHittable { app.swipeUp() }
+        name.tap()
+        name.typeText("Keyboard Test Trust")
+        XCTAssertEqual(app.buttons.matching(identifier: "intake-keyboard-done").count, 1)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == 'Done'")).count - app.keyboards.buttons.matching(NSPredicate(format: "label == 'Done'")).count, 1)
+        app.keyboards.buttons["Done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "Keyboard Test Trust")
+        name.tap()
+        app.buttons["intake-keyboard-done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLoginKeyboardKeepsFullWidthAndSingleDismissButton() throws {
+        let app = makeApp()
+        app.launch()
+        app.buttons["Start"].tap()
+        XCTAssertTrue(app.buttons["Close onboarding"].waitForExistence(timeout: 5))
+        app.buttons["Close onboarding"].tap()
+        let submit = app.buttons["auth-continue-button"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 5))
+        let initialWidth = submit.frame.width
+        XCTAssertGreaterThan(initialWidth, app.frame.width * 0.8)
+
+        let phone = app.textFields["phone-number-field"]
+        phone.tap()
+        assertReadableLoginKeyboard(in: app, button: submit, expectedWidth: initialWidth, name: "phone")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(submit.frame.width, initialWidth, accuracy: 1)
+
+        app.buttons["Use email instead."].tap()
+        let email = app.textFields["Enter your email here"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5))
+        email.tap()
+        email.typeText("keyboard-fixture@example.com")
+        assertReadableLoginKeyboard(in: app, button: submit, expectedWidth: initialWidth, name: "email")
+        submit.tap()
+        let otp = app.textFields["otp-code-field"]
+        XCTAssertTrue(otp.waitForExistence(timeout: 5))
+        otp.tap()
+        assertReadableLoginKeyboard(in: app, button: app.buttons["Verify code"], expectedWidth: initialWidth, name: "otp")
+        app.typeText("12345678")
+        XCTAssertEqual(otp.value as? String, "12345678")
+    }
+
+    @MainActor
+    private func assertReadableLoginKeyboard(in app: XCUIApplication, button: XCUIElement, expectedWidth: CGFloat, name: String) {
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "login-keyboard-\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 200, "Enable the simulator software keyboard; an accessory-only keyboard does not exercise avoidance.")
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "Done").count, 1)
+        XCTAssertEqual(button.frame.width, expectedWidth, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44)
+        XCTAssertTrue(button.isHittable)
+        XCTAssertLessThanOrEqual(button.frame.maxY, app.keyboards.firstMatch.frame.minY)
+    }
+
+    @MainActor
+    func testLoginAtLargestAccessibilitySizeCanScrollToActions() throws {
+        let app = makeApp()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        app.buttons["Start"].tap()
+        XCTAssertTrue(app.buttons["Close onboarding"].waitForExistence(timeout: 5))
+        app.buttons["Close onboarding"].tap()
+        let form = app.scrollViews["authentication-entry"]
+        XCTAssertTrue(form.waitForExistence(timeout: 5))
+        let phone = app.textFields["phone-number-field"]
+        for _ in 0..<6 where !phone.isHittable { form.swipeUp() }
+        phone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "Done").count, 1)
+        let submit = app.buttons["auth-continue-button"]
+        for _ in 0..<6 where !submit.isHittable { form.swipeUp() }
+        XCTAssertTrue(submit.isHittable)
+        XCTAssertGreaterThan(submit.frame.width, app.frame.width * 0.8)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "login-largest-accessibility"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testNotarySubmissionRemainsReachableAtStandardAndLargestTextSize() throws {
         for size in ["standard", "accessibility"] {
             let app = XCUIApplication()
@@ -10,8 +150,53 @@ final class DARCiMobileUITests: XCTestCase {
             let submit = app.buttons["notary-submit"]
             XCTAssertTrue(submit.waitForExistence(timeout: 10))
             XCTAssertTrue(submit.isHittable, "Submit must remain visible at \(size) text size")
+            XCTAssertGreaterThan(app.staticTexts["Choose a notary"].frame.minY, app.frame.height * 0.18)
             submit.tap()
             XCTAssertTrue(app.staticTexts["notary-submission-complete"].waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testNotarySheetFitsShortListsAndScrollsLongLists() throws {
+        var singleNotaryTop: CGFloat = 0
+        for count in [0, 1, 5, 20] {
+            let app = XCUIApplication()
+            app.launchEnvironment["DARCI_MOCK_NOTARY_SELECTION"] = "standard"
+            app.launchEnvironment["DARCI_MOCK_NOTARY_COUNT"] = String(count)
+            app.launch()
+            let title = app.staticTexts["Choose a notary"]
+            XCTAssertTrue(title.waitForExistence(timeout: 10))
+            if count > 0 {
+                XCTAssertTrue(app.staticTexts["Adam Eberts"].waitForExistence(timeout: 5))
+            } else {
+                XCTAssertTrue(app.staticTexts["No active notaries are available for this document jurisdiction yet."].waitForExistence(timeout: 5))
+            }
+            XCTAssertGreaterThan(title.frame.minY, app.frame.height * 0.18)
+            let submit = app.buttons["notary-submit"]
+            XCTAssertTrue(submit.isHittable)
+            if count == 1 { singleNotaryTop = title.frame.minY }
+            if count == 5 {
+                XCTAssertLessThan(title.frame.minY, singleNotaryTop - 80)
+                XCTAssertTrue(app.staticTexts["Test Notary 5"].isHittable)
+                let initialTop = title.frame.minY
+                app.buttons["Minimize notary selection"].tap()
+                XCTAssertGreaterThan(title.frame.minY, initialTop)
+                app.buttons["Expand notary selection"].tap()
+                XCTAssertEqual(title.frame.minY, initialTop, accuracy: 2)
+            }
+            if count == 20 {
+                let last = app.staticTexts["Test Notary 20"]
+                let list = app.scrollViews["notary-selection-card"]
+                for _ in 0..<10 where !last.isHittable { list.swipeUp() }
+                XCTAssertTrue(last.isHittable)
+                last.tap()
+                XCTAssertTrue(submit.isHittable)
+            }
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "notary-card-\(count)-rows"
+            attachment.lifetime = .keepAlways
+            add(attachment)
             app.terminate()
         }
     }

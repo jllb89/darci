@@ -31,7 +31,10 @@ struct DocumentSigningView: View {
     @State private var isSignatureFileImporterPresented = false
     @State private var isReplacingSignature = false
     @State private var isNotarySelectionPresented = false
-    @State private var notarySheetDetent: PresentationDetent = .large
+    @State private var isNotarySheetMinimized = false
+    @State private var notaryContentHeight: CGFloat = 0
+    @State private var notaryActionsHeight: CGFloat = 0
+    @State private var notaryViewportHeight: CGFloat = 800
     @State private var isSignatureCaptureMinimized = false
     @State private var isSignatureCaptureSuppressed = false
     @State private var keyboardOverlap: CGFloat = 0
@@ -118,12 +121,15 @@ struct DocumentSigningView: View {
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+            notaryViewportHeight = $0
+        }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .navigationBarBackButtonHidden(true)
         .safeAreaInset(edge: .bottom) {
             if viewModel.shouldShowNotarySelection && !isNotarySelectionPresented && viewModel.activeNotarizationRequestId == nil {
                 Button("Choose a notary") {
-                    notarySheetDetent = .large
+                    isNotarySheetMinimized = false
                     isNotarySelectionPresented = true
                 }
                 .font(DARCiFont.maisonNeue(.book, size: 15))
@@ -142,7 +148,13 @@ struct DocumentSigningView: View {
             GeometryReader { proxy in
                 notarySelectionCard(proxy: proxy)
             }
-            .presentationDetents([.medium, .large], selection: $notarySheetDetent)
+            .presentationDetents(
+                [.height(compactNotarySheetHeight), .height(fittedNotarySheetHeight)],
+                selection: Binding(
+                    get: { .height(isNotarySheetMinimized ? compactNotarySheetHeight : fittedNotarySheetHeight) },
+                    set: { isNotarySheetMinimized = $0 == .height(compactNotarySheetHeight) && compactNotarySheetHeight < fittedNotarySheetHeight }
+                )
+            )
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(36)
         }
@@ -186,13 +198,13 @@ struct DocumentSigningView: View {
         .onChange(of: viewModel.shouldShowNotarySelection) { _, shouldShow in
             if shouldShow {
                 isNotarySelectionPresented = true
-                notarySheetDetent = .large
+                isNotarySheetMinimized = false
                 isSignatureCaptureSuppressed = false
                 viewModel.isSkippingSignatureForNotarization = skipSignatureForNotarization
                 Task { await viewModel.fetchAvailableNotaries(session: session) }
             } else {
                 isNotarySelectionPresented = false
-                notarySheetDetent = .large
+                isNotarySheetMinimized = false
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) {
@@ -488,9 +500,21 @@ struct DocumentSigningView: View {
         viewModel.shouldShowNotarySelection && isNotarySelectionPresented
     }
 
+    private var fittedNotarySheetHeight: CGFloat {
+        DARCiAdaptiveLayout.contentFittingSheetHeight(
+            contentHeight: notaryContentHeight,
+            actionsHeight: notaryActionsHeight,
+            viewportHeight: notaryViewportHeight
+        )
+    }
+
+    private var compactNotarySheetHeight: CGFloat {
+        min(fittedNotarySheetHeight, notaryViewportHeight * 0.45)
+    }
+
     private func closeNotarySelection(suppressSignatureCapture: Bool) {
         isNotarySelectionPresented = false
-        notarySheetDetent = .large
+        isNotarySheetMinimized = false
         isSignatureCaptureSuppressed = suppressSignatureCapture
     }
 
@@ -514,14 +538,15 @@ struct DocumentSigningView: View {
 
                     HStack(spacing: 10) {
                         Button {
-                            notarySheetDetent = .medium
+                            isNotarySheetMinimized.toggle()
                         } label: {
-                            Image(systemName: "chevron.down")
+                            Image(systemName: isNotarySheetMinimized ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 17, weight: .regular))
                                 .foregroundStyle(Color(red: 0.49, green: 0.49, blue: 0.49))
                                 .frame(width: 26, height: 26)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(isNotarySheetMinimized ? "Expand notary selection" : "Minimize notary selection")
 
                         Button {
                             closeNotarySelection(suppressSignatureCapture: true)
@@ -532,6 +557,7 @@ struct DocumentSigningView: View {
                                 .frame(width: 26, height: 26)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Close notary selection")
                     }
                 }
 
@@ -545,11 +571,18 @@ struct DocumentSigningView: View {
             .padding(.top, scaled(36, in: proxy))
             .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                notaryContentHeight = $0
+            }
         }
+        .accessibilityIdentifier("notary-selection-card")
         .safeAreaInset(edge: .bottom, spacing: 0) {
             notarySelectionActions(proxy: proxy)
                 .padding(.horizontal, scaled(32, in: proxy))
                 .padding(.vertical, 16)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    notaryActionsHeight = $0
+                }
                 .background(Color(red: 0.90, green: 0.90, blue: 0.90))
         }
         .background(Color(red: 0.90, green: 0.90, blue: 0.90))

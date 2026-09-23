@@ -4,6 +4,26 @@ import UniformTypeIdentifiers
 
 private let intakeRootCoordinateSpace = "intake-root"
 
+private struct IntakeKeyboardToolbar: ToolbarContent {
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Spacer()
+            Button("Done") { IntakeKeyboard.dismiss() }
+                .tint(.blue)
+                .foregroundStyle(.blue)
+                .accessibilityIdentifier("intake-keyboard-done")
+        }
+    }
+}
+
+// All three products share these controls and the same dismissal behavior.
+@MainActor
+private enum IntakeKeyboard {
+    static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
 struct ProductIntakeRoute: Identifiable, Hashable {
     let modeKey: String
     let draftDocumentId: String?
@@ -69,6 +89,7 @@ struct ProductIntakeFlowView: View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
                 Color.black.ignoresSafeArea()
+                    .onTapGesture { IntakeKeyboard.dismiss() }
 
                 ScrollViewReader { scrollProxy in
                     ScrollView(showsIndicators: false) {
@@ -142,6 +163,7 @@ struct ProductIntakeFlowView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar { IntakeKeyboardToolbar() }
         .task(id: startTaskID) {
             await viewModel.start(modeKey: productModeKey, resumingDocumentId: draftDocumentId, session: session)
         }
@@ -152,6 +174,7 @@ struct ProductIntakeFlowView: View {
             }
         }
         .onChange(of: viewModel.step) { _, _ in
+            IntakeKeyboard.dismiss()
             activeTooltipKey = nil
             activeTooltipContent = nil
         }
@@ -166,6 +189,7 @@ struct ProductIntakeFlowView: View {
             onSubmittedToReview(documentId)
         }
         .onDisappear {
+            IntakeKeyboard.dismiss()
             Task {
                 await viewModel.flushAutosave(session: session)
             }
@@ -186,6 +210,7 @@ struct ProductIntakeFlowView: View {
     private func header(in proxy: GeometryProxy) -> some View {
         VStack(alignment: .leading, spacing: scaled(42, in: proxy)) {
             Button {
+                IntakeKeyboard.dismiss()
                 if viewModel.goBack() == false {
                     dismiss()
                 }
@@ -535,7 +560,10 @@ struct ProductIntakeFlowView: View {
             }
 
             if canAdd {
-                Button(action: addAction) {
+                Button {
+                    IntakeKeyboard.dismiss()
+                    addAction()
+                } label: {
                     Text(addButtonLabel)
                         .font(DARCiFont.maisonNeue(.book, size: 14))
                         .foregroundStyle(.white)
@@ -620,6 +648,7 @@ struct ProductIntakeFlowView: View {
             HStack(alignment: .center, spacing: 14) {
                 if showsCurrentTrusteeSelection {
                     Button {
+                        IntakeKeyboard.dismiss()
                         viewModel.setTrustmakerCurrentTrustee(at: index, isSelected: item.wrappedValue.isCurrentTrustee == false)
                     } label: {
                         HStack(spacing: 8) {
@@ -636,6 +665,7 @@ struct ProductIntakeFlowView: View {
                     .buttonStyle(.plain)
                 } else if showsNamedSignerSelection {
                     Button {
+                        IntakeKeyboard.dismiss()
                         viewModel.setSigningTrustee(at: index, isSelected: item.wrappedValue.isSigningTrustee == false)
                     } label: {
                         HStack(spacing: 8) {
@@ -654,7 +684,10 @@ struct ProductIntakeFlowView: View {
 
                 Spacer(minLength: 10)
 
-                Button(action: removeAction) {
+                Button {
+                    IntakeKeyboard.dismiss()
+                    removeAction()
+                } label: {
                     Text("Remove")
                         .font(DARCiFont.maisonNeue(.book, size: 11))
                         .foregroundStyle(.white.opacity(0.76))
@@ -747,6 +780,7 @@ struct ProductIntakeFlowView: View {
                     Spacer(minLength: 10)
 
                     Button {
+                        IntakeKeyboard.dismiss()
                         viewModel.selectAllTrusteePowers()
                     } label: {
                         HStack(spacing: 6) {
@@ -826,6 +860,7 @@ struct ProductIntakeFlowView: View {
                     }
 
                     Button {
+                        IntakeKeyboard.dismiss()
                         priorDocumentFileImporterIndex = viewModel.priorDocumentItems.count
                         isPriorDocumentFileImporterPresented = true
                     } label: {
@@ -902,6 +937,7 @@ struct ProductIntakeFlowView: View {
             }
 
             Button {
+                IntakeKeyboard.dismiss()
                 priorDocumentFileImporterIndex = index
                 isPriorDocumentFileImporterPresented = true
             } label: {
@@ -926,6 +962,7 @@ struct ProductIntakeFlowView: View {
             .accessibilityIdentifier("trust-prior-document-\(index)-file-button")
 
             Button {
+                IntakeKeyboard.dismiss()
                 viewModel.removePriorDocumentItem(at: index)
             } label: {
                 Text("Remove document")
@@ -1022,6 +1059,7 @@ struct ProductIntakeFlowView: View {
                         Spacer(minLength: 10)
 
                         Button {
+                            IntakeKeyboard.dismiss()
                             viewModel.selectAllAuthorityScopes()
                         } label: {
                             HStack(spacing: 6) {
@@ -1082,6 +1120,7 @@ struct ProductIntakeFlowView: View {
 
             intakeField(label: "Document upload") {
                 Button {
+                    IntakeKeyboard.dismiss()
                     isFileImporterPresented = true
                 } label: {
                     Text(viewModel.notarizationFileName.isEmpty ? "Select PDF" : viewModel.notarizationFileName)
@@ -1103,6 +1142,7 @@ struct ProductIntakeFlowView: View {
             if viewModel.notarizationFileName.isEmpty == false {
                 VStack(alignment: .leading, spacing: scaled(24, in: proxy)) {
                     Button("Clear selected file") {
+                        IntakeKeyboard.dismiss()
                         viewModel.clearNotarizationFile()
                     }
                     .font(DARCiFont.maisonNeue(.book, size: 15))
@@ -1524,6 +1564,7 @@ struct ProductIntakeFlowView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(presentation.options) { option in
                     Button {
+                        IntakeKeyboard.dismiss()
                         presentation.onSelect(option.id)
                     } label: {
                         HStack(spacing: 10) {
@@ -1667,6 +1708,7 @@ struct ProductIntakeFlowView: View {
 
     private func continueButton(in proxy: GeometryProxy) -> some View {
         Button {
+            IntakeKeyboard.dismiss()
             Task {
                 await viewModel.continueTapped(session: session)
             }
@@ -1792,6 +1834,7 @@ private struct FieldHelpTooltip: View {
 
     var body: some View {
         Button {
+            IntakeKeyboard.dismiss()
             withAnimation(.easeOut(duration: 0.16)) {
                 if isActive {
                     activeKey = nil
@@ -1854,6 +1897,7 @@ private struct CustomSelectInput: View {
 
     var body: some View {
         Button {
+            IntakeKeyboard.dismiss()
             guard isDisabled == false else {
                 return
             }
@@ -1896,6 +1940,7 @@ private struct CustomSelectInput: View {
             }
         }
         .zIndex(isExpanded ? 1_000 : 0)
+        .accessibilityIdentifier("intake-select-\(key)")
     }
 }
 
@@ -1971,6 +2016,7 @@ private struct AddressAutocompleteInput: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.addressAutocompleteSuggestions) { suggestion in
                         Button {
+                            IntakeKeyboard.dismiss()
                             searchTask?.cancel()
                             isResolvingSelection = true
                             viewModel.clearAddressAutocomplete()
@@ -2040,6 +2086,11 @@ private struct IntakePhoneTextInput: View {
             .tint(DARCiTheme.onboardingGreen)
             .keyboardType(.phonePad)
             .focused($isFocused)
+            .submitLabel(.done)
+            .onSubmit {
+                isFocused = false
+                IntakeKeyboard.dismiss()
+            }
             .padding(.horizontal, 14)
             .frame(minHeight: 49)
             .background(Color(red: 0.10, green: 0.10, blue: 0.10))
@@ -2106,6 +2157,15 @@ private struct IntakeDateTextInput: UIViewRepresentable {
         textField.leftViewMode = .always
         textField.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 14, height: 1))
         textField.rightViewMode = .always
+        // SwiftUI's keyboard toolbar does not attach to this UIKit input.
+        // Give numeric date entry its own equivalent blue dismissal action.
+        let accessory = UIToolbar()
+        accessory.sizeToFit()
+        accessory.tintColor = .systemBlue
+        let done = UIBarButtonItem(title: "Done", style: .done, target: context.coordinator, action: #selector(Coordinator.dismissKeyboard))
+        done.accessibilityIdentifier = "intake-keyboard-done"
+        accessory.items = [UIBarButtonItem(systemItem: .flexibleSpace), done]
+        textField.inputAccessoryView = accessory
         return textField
     }
 
@@ -2125,6 +2185,10 @@ private struct IntakeDateTextInput: UIViewRepresentable {
             self.text = text
         }
 
+        @objc func dismissKeyboard() {
+            IntakeKeyboard.dismiss()
+        }
+
         func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
             let currentText = textField.text ?? ""
             guard let textRange = Range(range, in: currentText) else {
@@ -2135,6 +2199,11 @@ private struct IntakeDateTextInput: UIViewRepresentable {
             let formatted = IntakeDateFormatting.formatISODateInput(proposedText)
             textField.text = formatted
             text.wrappedValue = formatted
+            // A complete valid date is unambiguous; partial/invalid dates stay editable.
+            if currentText.count < 10, formatted.count == 10,
+               IntakeDateFormatting.isValidISODate(formatted) {
+                textField.resignFirstResponder()
+            }
             return false
         }
     }
@@ -2151,6 +2220,11 @@ private struct IntakeTextInput: View {
             .foregroundStyle(.white)
             .tint(DARCiTheme.onboardingGreen)
             .focused($isFocused)
+            .submitLabel(.done)
+            .onSubmit {
+                isFocused = false
+                IntakeKeyboard.dismiss()
+            }
             .padding(.horizontal, 14)
             .frame(minHeight: 49)
             .background(Color(red: 0.10, green: 0.10, blue: 0.10))
@@ -2261,7 +2335,10 @@ private struct AuthorityScopeChip: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            IntakeKeyboard.dismiss()
+            action()
+        } label: {
             Text(option.label)
                 .font(DARCiFont.maisonNeue(.book, size: 14))
                 .foregroundStyle(isSelected ? .black : .white)
@@ -2280,6 +2357,41 @@ private struct AuthorityScopeChip: View {
         .accessibilityValue(isSelected ? "Selected" : "")
     }
 }
+
+#if DEBUG
+// Exercises the exact primitives shared by POA, trust and uploaded-document
+// forms without uploading a PDF or writing a client draft.
+struct IntakeKeyboardRegressionScreen: View {
+    @State private var phone = ""
+    @State private var notes = ""
+    @State private var date = ""
+    @State private var selected = false
+    @State private var expandedKey: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    CustomSelectInput(key: "fixture-jurisdiction", selectedText: "California", placeholder: "Jurisdiction", options: [], expandedKey: $expandedKey, isDisabled: false) { _ in }
+                    IntakePhoneTextInput(text: $phone, countryIso2: "US", prompt: "Phone")
+                        .accessibilityIdentifier("keyboard-fixture-phone")
+                    IntakeTextEditorInput(text: $notes, prompt: "Instructions")
+                        .accessibilityIdentifier("keyboard-fixture-notes")
+                    IntakeDateTextInput(text: $date, prompt: "YYYY-MM-DD")
+                        .frame(height: 49)
+                        .accessibilityIdentifier("keyboard-fixture-date")
+                    AuthorityScopeChip(option: IntakeOption(id: "fixture", label: "Select authority"), isSelected: selected) {
+                        selected.toggle()
+                    }
+                }
+                .padding(24)
+            }
+            .background(.black)
+            .toolbar { IntakeKeyboardToolbar() }
+        }
+    }
+}
+#endif
 
 #Preview {
     NavigationStack {

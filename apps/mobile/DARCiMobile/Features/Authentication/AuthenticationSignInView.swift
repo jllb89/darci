@@ -135,8 +135,6 @@ struct PhoneCountryPickerSheet: View {
 }
 
 struct AuthenticationSignInView: View {
-    private let designSize = CGSize(width: 440, height: 956)
-    private let bottomGroupLift: CGFloat = 24
 
     private enum Field {
         case phone
@@ -195,7 +193,6 @@ struct AuthenticationSignInView: View {
     @State private var profileEmail = ""
     @State private var profilePhone = ""
     @State private var isPhoneCountryPickerPresented = false
-    @State private var visibleItemCount = 0
     @State private var activeInputMode: InputMode?
     @State private var authenticationStep: AuthenticationStep = .entry
     @State private var isEmailPlaceholderVisible = false
@@ -210,14 +207,10 @@ struct AuthenticationSignInView: View {
                 .ignoresSafeArea()
 
             GeometryReader { proxy in
+                // A keyboard changes available height, never the form's scale.
+                // Every step scrolls instead of shrinking typography and controls.
                 if authenticationStep == .otp {
-                    Group {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            accessibleOTPView(in: proxy)
-                        } else {
-                            otpView(in: proxy)
-                        }
-                    }
+                    scrollableOTPView(in: proxy)
                         .transition(.opacity)
                 } else if authenticationStep == .completeInfo {
                     completeInfoView(in: proxy)
@@ -226,116 +219,13 @@ struct AuthenticationSignInView: View {
                     successView(in: proxy)
                         .transition(.opacity)
                 } else {
-                    if dynamicTypeSize.isAccessibilitySize {
-                        accessibleEntryView(in: proxy)
-                            .opacity(isEntryFadingForOTP ? 0 : 1)
-                    } else {
-                    ZStack {
-                    Text(content.brand)
-                        .font(DARCiFont.maisonNeue(.medium, size: scaled(24, in: proxy)))
-                        .tracking(0.24)
-                        .lineSpacing(scaled(4.8, in: proxy))
-                        .foregroundStyle(.black)
-                        .position(x: proxy.size.width / 2 + scaled(-160, in: proxy), y: proxy.size.height / 2 + scaled(-363.5, in: proxy))
-                        .revealOrder(0, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-
-                        if isCompactInputActive {
-                            Button(action: resetInputLayout) {
-                                DARCiArrowLeftIcon()
-                                    .stroke(.black, style: StrokeStyle(lineWidth: scaled(2.0625, in: proxy), lineCap: .butt, lineJoin: .miter))
-                                    .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: scaled(44, in: proxy), height: scaled(44, in: proxy))
-                            .contentShape(Rectangle())
-                            .accessibilityLabel("Back")
-                            .accessibilityIdentifier("auth-input-back-button")
-                            .position(x: proxy.size.width / 2 + scaled(174, in: proxy), y: proxy.size.height / 2 + scaled(-363.5, in: proxy))
-                            .transition(.opacity)
-                        }
-
-                    if !isHeadlineCollapsed {
-                        (Text("Welcome\n")
-                            .font(DARCiFont.maisonNeue(.light, size: scaled(64, in: proxy)))
-                        + Text("Sign in")
-                            .font(DARCiFont.maisonNeue(.book, size: scaled(64, in: proxy))))
-                            .lineSpacing(scaled(6.4, in: proxy))
-                            .foregroundStyle(.black)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel(content.accessibilityHeadline)
-                            .position(x: proxy.size.width / 2 + scaled(-59.5, in: proxy), y: proxy.size.height / 2 + scaled(-152, in: proxy))
-                            .revealOrder(1, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-                            .transition(.opacity)
-                    }
-
-                    Text(content.supportingText)
-                        .font(DARCiFont.maisonNeue(.book, size: scaled(22, in: proxy)))
-                        .lineSpacing(scaled(2.4, in: proxy))
-                        .foregroundStyle(.black)
-                        .frame(width: scaled(395, in: proxy), alignment: .leading)
-                        .accessibilityLabel(content.accessibilitySupportingText)
-                        .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(supportingTextY, in: proxy))
-                        .revealOrder(2, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-
-                    activeInput(in: proxy)
-                        .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(inputY, in: proxy))
-                        .revealOrder(3, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-
-                    continueButton(in: proxy)
-                        .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(continueButtonY, in: proxy))
-                        .revealOrder(4, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-
-                    if shouldShowSmsDisclosure {
-                        smsConsentDisclosure(in: proxy)
-                            .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(smsDisclosureY, in: proxy))
-                            .revealOrder(5, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-                            .transition(.opacity)
-                    }
-
-                    if let feedbackMessage = viewModel.feedbackMessage {
-                        Text(feedbackMessage)
-                            .font(DARCiFont.maisonNeue(.book, size: scaled(13, in: proxy)))
-                            .lineSpacing(scaled(1.3, in: proxy))
-                            .foregroundStyle(.black)
-                            .frame(width: scaled(395, in: proxy), alignment: .leading)
-                            .accessibilityIdentifier("auth-feedback-message")
-                            .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(entryFeedbackY, in: proxy))
-                            .transition(.opacity)
-                    }
-
-                    Button(action: toggleInputMode) {
-                        Text(inputModeSwitchTitle)
-                            .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
-                            .lineSpacing(scaled(1.4, in: proxy))
-                            .underline()
-                            .foregroundStyle(.black)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: scaled(395, in: proxy), alignment: .leading)
-                    .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(emailLinkY, in: proxy))
-                    .revealOrder(6, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-
-                    if !isCompactInputActive {
-                        Button(action: onBrowse) {
-                            Text(content.browseTitle)
-                                .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
-                                .lineSpacing(scaled(1.4, in: proxy))
-                                .foregroundStyle(.black)
-                        }
-                        .buttonStyle(.plain)
-                        .position(x: proxy.size.width / 2 + scaled(-101.5, in: proxy), y: proxy.size.height / 2 + scaled(browseButtonY, in: proxy))
-                        .revealOrder(7, visibleItemCount: visibleItemCount, scale: scale(in: proxy))
-                        .transition(.opacity)
-                    }
-                }
-                .opacity(isEntryFadingForOTP ? 0 : 1)
-                    }
+                    scrollableEntryView(in: proxy)
+                        .opacity(isEntryFadingForOTP ? 0 : 1)
                 }
             }
-            .ignoresSafeArea(.container, edges: .all)
+            .clipped()
         }
         .preferredColorScheme(.light)
-        .onAppear(perform: startIntroAnimation)
         .onChange(of: focusedField) { _, newField in
             if newField == .phone {
                 activatePhoneInputLayout()
@@ -363,19 +253,13 @@ struct AuthenticationSignInView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { focusedField = nil }
-            }
-        }
     }
 
     private var isCompactInputActive: Bool {
         activeInputMode != nil
     }
 
-    private func accessibleEntryView(in proxy: GeometryProxy) -> some View {
+    private func scrollableEntryView(in proxy: GeometryProxy) -> some View {
         ScrollView(showsIndicators: true) {
             VStack(alignment: .leading, spacing: scaled(24, in: proxy)) {
                 HStack(alignment: .center, spacing: scaled(16, in: proxy)) {
@@ -452,14 +336,15 @@ struct AuthenticationSignInView: View {
                 }
             }
             .padding(.horizontal, scaled(22, in: proxy))
-            .padding(.top, max(proxy.safeAreaInsets.top, scaled(64, in: proxy)))
+            .padding(.top, scaled(16, in: proxy))
             .padding(.bottom, max(proxy.safeAreaInsets.bottom, scaled(36, in: proxy)))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollDismissesKeyboard(.interactively)
+        .accessibilityIdentifier("authentication-entry")
     }
 
-    private func accessibleOTPView(in proxy: GeometryProxy) -> some View {
+    private func scrollableOTPView(in proxy: GeometryProxy) -> some View {
         ScrollView(showsIndicators: true) {
             VStack(alignment: .leading, spacing: scaled(28, in: proxy)) {
                 Button(action: returnFromOTP) {
@@ -478,18 +363,22 @@ struct AuthenticationSignInView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(content.accessibilitySupportingText)
 
-                TextField("", text: $otpCode)
-                    .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
-                    .keyboardType(.numberPad)
-                    .textContentType(.oneTimeCode)
-                    .foregroundStyle(.white)
-                    .tint(.white)
-                    .focused($focusedField, equals: .otp)
-                    .padding(.horizontal, scaled(18, in: proxy))
-                    .frame(maxWidth: .infinity, minHeight: scaled(76, in: proxy))
-                    .background(Color(red: 0.10, green: 0.10, blue: 0.10))
-                    .accessibilityLabel("One-time code")
-                    .accessibilityIdentifier("otp-code-field")
+                if dynamicTypeSize.isAccessibilitySize {
+                    TextField("", text: $otpCode)
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .focused($focusedField, equals: .otp)
+                        .padding(.horizontal, scaled(18, in: proxy))
+                        .frame(maxWidth: .infinity, minHeight: scaled(76, in: proxy))
+                        .background(Color(red: 0.10, green: 0.10, blue: 0.10))
+                        .accessibilityLabel("One-time code")
+                        .accessibilityIdentifier("otp-code-field")
+                } else {
+                    otpCodeBoxes(in: proxy)
+                }
 
                 verifyCodeButton(in: proxy)
 
@@ -512,7 +401,7 @@ struct AuthenticationSignInView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, scaled(22, in: proxy))
-            .padding(.top, max(proxy.safeAreaInsets.top, scaled(64, in: proxy)))
+            .padding(.top, scaled(16, in: proxy))
             .padding(.bottom, max(proxy.safeAreaInsets.bottom, scaled(36, in: proxy)))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -524,40 +413,8 @@ struct AuthenticationSignInView: View {
         activeInputMode == .email ? content.phoneTitle : content.emailTitle
     }
 
-    private var supportingTextY: CGFloat {
-        isCompactInputActive ? -285 : 205 - bottomGroupLift
-    }
-
-    private var inputY: CGFloat {
-        isCompactInputActive ? -220 : 270 - bottomGroupLift
-    }
-
-    private var continueButtonY: CGFloat {
-        isCompactInputActive ? -155 : 335 - bottomGroupLift
-    }
-
     private var shouldShowSmsDisclosure: Bool {
         activeInputMode != .email
-    }
-
-    private var smsDisclosureY: CGFloat {
-        isCompactInputActive ? -56 : 407 - bottomGroupLift
-    }
-
-    private var emailLinkY: CGFloat {
-        if shouldShowSmsDisclosure {
-            return isCompactInputActive ? 14 : 462 - bottomGroupLift
-        }
-
-        return isCompactInputActive ? -102.5 : 387.5 - bottomGroupLift
-    }
-
-    private var browseButtonY: CGFloat {
-        shouldShowSmsDisclosure ? 485 - bottomGroupLift : 432.5 - bottomGroupLift
-    }
-
-    private var entryFeedbackY: CGFloat {
-        isCompactInputActive ? -121 : 371 - bottomGroupLift
     }
 
     private var isEmailVerified: Bool {
@@ -734,64 +591,12 @@ struct AuthenticationSignInView: View {
 
     private func smsConsentDisclosure(in proxy: GeometryProxy) -> some View {
         Text("By requesting a code, you agree to DARCi Terms: https://darciregistry.com/terms and Privacy: https://app.staging.darciregistry.dev/privacy. DARCi sends SMS verification codes only. Message/data rates may apply; frequency varies. Reply STOP to opt out or HELP for help.")
-            .font(DARCiFont.maisonNeue(.book, size: scaled(10, in: proxy)))
+            .font(DARCiFont.maisonNeue(.book, size: scaled(13, in: proxy)))
             .lineSpacing(scaled(1.6, in: proxy))
             .foregroundStyle(Color.black.opacity(0.68))
             .frame(width: scaled(395, in: proxy), alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("auth-sms-consent-disclosure")
-    }
-
-    private func otpView(in proxy: GeometryProxy) -> some View {
-        ZStack {
-            Button(action: returnFromOTP) {
-                DARCiArrowLeftIcon()
-                    .stroke(.white, style: StrokeStyle(lineWidth: scaled(2.0625, in: proxy), lineCap: .butt, lineJoin: .miter))
-                    .frame(width: scaled(21, in: proxy), height: scaled(21, in: proxy))
-            }
-            .buttonStyle(.plain)
-            .frame(width: scaled(44, in: proxy), height: scaled(44, in: proxy))
-            .contentShape(Rectangle())
-            .accessibilityLabel("Back")
-            .accessibilityIdentifier("otp-back-button")
-            .position(x: proxy.size.width / 2 + scaled(-174, in: proxy), y: proxy.size.height / 2 + scaled(-363.5, in: proxy))
-
-            Text(content.supportingText)
-                .font(DARCiFont.maisonNeue(.book, size: scaled(24, in: proxy)))
-                .lineSpacing(scaled(2.4, in: proxy))
-                .foregroundStyle(.white)
-                .frame(width: scaled(395, in: proxy), alignment: .leading)
-                .accessibilityLabel(content.accessibilitySupportingText)
-                .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-285, in: proxy))
-
-            otpCodeBoxes(in: proxy)
-                .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-169.5, in: proxy))
-
-            verifyCodeButton(in: proxy)
-                .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-82, in: proxy))
-
-            if let feedbackMessage = viewModel.feedbackMessage {
-                Text(feedbackMessage)
-                    .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
-                    .lineSpacing(scaled(1.4, in: proxy))
-                    .foregroundStyle(.white)
-                    .frame(width: scaled(395, in: proxy), alignment: .leading)
-                    .accessibilityIdentifier("auth-feedback-message")
-                    .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-42, in: proxy))
-            }
-
-            Button(action: toggleInputModeFromOTP) {
-                Text(inputModeSwitchTitle)
-                    .font(DARCiFont.maisonNeue(.book, size: scaled(14, in: proxy)))
-                    .lineSpacing(scaled(1.4, in: proxy))
-                    .underline()
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
-            .frame(width: scaled(395, in: proxy), alignment: .leading)
-            .position(x: proxy.size.width / 2 + scaled(0.5, in: proxy), y: proxy.size.height / 2 + scaled(-29.5, in: proxy))
-        }
-        .accessibilityIdentifier("authentication-otp")
     }
 
     private func otpCodeBoxes(in proxy: GeometryProxy) -> some View {
@@ -802,14 +607,14 @@ struct AuthenticationSignInView: View {
                 Rectangle()
                     .fill(Color(red: 0.10, green: 0.10, blue: 0.10))
                     .frame(width: scaled(box.width, in: proxy), height: scaled(65, in: proxy))
-                    .position(x: scaled(220 + box.x, in: proxy), y: scaled(32.5, in: proxy))
+                    .position(x: scaled(197.5 + box.x, in: proxy), y: scaled(32.5, in: proxy))
                     .accessibilityHidden(true)
 
                 Text(otpCharacter(at: index))
                     .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
                     .foregroundStyle(.white)
                     .frame(width: scaled(box.width, in: proxy), height: scaled(65, in: proxy))
-                    .position(x: scaled(220 + box.x, in: proxy), y: scaled(32.5, in: proxy))
+                    .position(x: scaled(197.5 + box.x, in: proxy), y: scaled(32.5, in: proxy))
                     .accessibilityHidden(true)
             }
 
@@ -823,7 +628,7 @@ struct AuthenticationSignInView: View {
                 .accessibilityLabel("One-time code")
                 .accessibilityIdentifier("otp-code-field")
         }
-        .frame(width: scaled(440, in: proxy), height: scaled(65, in: proxy))
+        .frame(width: scaled(395, in: proxy), height: scaled(65, in: proxy))
         .contentShape(Rectangle())
         .onTapGesture {
             focusedField = .otp
@@ -1096,18 +901,6 @@ struct AuthenticationSignInView: View {
             .frame(width: scaled(395, in: proxy), height: max(0.5, scaled(0.5, in: proxy)))
     }
 
-    private func startIntroAnimation() {
-        visibleItemCount = 0
-
-        for index in 1...7 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index - 1) * 0.11) {
-                withAnimation(.easeOut(duration: 0.45)) {
-                    visibleItemCount = index
-                }
-            }
-        }
-    }
-
     private func activatePhoneInputLayout() {
         activateInputLayout(.phone)
     }
@@ -1308,7 +1101,7 @@ struct AuthenticationSignInView: View {
     }
 
     private func scale(in proxy: GeometryProxy) -> CGFloat {
-        min(proxy.size.width / designSize.width, proxy.size.height / designSize.height)
+        DARCiAdaptiveLayout.authenticationScale(viewportWidth: proxy.size.width)
     }
 }
 
@@ -1345,14 +1138,6 @@ private struct AuthenticationBundledImage: View {
         return UIImage(contentsOfFile: url.path)
     }
     #endif
-}
-
-private extension View {
-    func revealOrder(_ order: Int, visibleItemCount: Int, scale: CGFloat) -> some View {
-        opacity(visibleItemCount > order ? 1 : 0)
-            .offset(y: visibleItemCount > order ? 0 : 10 * scale)
-            .accessibilityHidden(visibleItemCount <= order)
-    }
 }
 
 #Preview {

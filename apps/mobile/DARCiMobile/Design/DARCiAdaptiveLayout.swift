@@ -1,6 +1,22 @@
 import CoreGraphics
 
 enum DARCiAdaptiveLayout {
+    static func contentFittingSheetHeight(
+        contentHeight: CGFloat,
+        actionsHeight: CGFloat,
+        viewportHeight: CGFloat
+    ) -> CGFloat {
+        // Measure natural content, not the scroll viewport, to avoid a sizing loop.
+        // Long lists scroll; the footer remains pinned and the page stays visible.
+        let maximum = max(0, viewportHeight * 0.82)
+        return min(maximum, max(240, ceil(contentHeight + actionsHeight)))
+    }
+
+    // Keyboard avoidance must reduce the scroll viewport, not font/control sizes.
+    static func authenticationScale(viewportWidth: CGFloat) -> CGFloat {
+        min(viewportWidth / 440, 1)
+    }
+
     static func shouldStackActions(
         viewportWidth: CGFloat,
         isAccessibilityText: Bool

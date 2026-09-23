@@ -51,6 +51,8 @@ jobs:
       - name: Select and start the pinned iPhone simulator
         run: |
           set -euo pipefail
+          # Exercise keyboard avoidance with the full onscreen keyboard.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
           simulator_id="$(xcrun simctl list devices available -j | node -e '
             let input="";process.stdin.on("data",b=>input+=b);process.stdin.on("end",()=>{
               const devices=JSON.parse(input).devices[process.env.DARCI_IOS_RUNTIME] ?? [];

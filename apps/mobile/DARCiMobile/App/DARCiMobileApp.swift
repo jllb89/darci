@@ -6,6 +6,7 @@ struct DARCiMobileApp: App {
 
     init() {
         #if DEBUG
+        if ProcessInfo.processInfo.environment["DARCI_MOCK_INTAKE_KEYBOARD"] != nil { return }
         if ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_SELECTION"] != nil { return }
         #endif
         MobileAuthTelemetry.start()
@@ -14,7 +15,9 @@ struct DARCiMobileApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG
-            if let size = ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_SELECTION"] {
+            if ProcessInfo.processInfo.environment["DARCI_MOCK_INTAKE_KEYBOARD"] != nil {
+                IntakeKeyboardRegressionScreen()
+            } else if let size = ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_SELECTION"] {
                 NotarySelectionRegressionScreen()
                     .dynamicTypeSize(size == "accessibility" ? .accessibility5 : .large)
             } else {
@@ -40,7 +43,10 @@ private struct NotarySelectionRegressionScreen: View {
                     firstName: "Test", lastName: "Member", emailConfirmedAt: nil, phoneConfirmedAt: nil, lastSignInAt: nil, lastAuthSyncedAt: nil)),
                 documentId: "fixture",
                 onSentToSelectedNotary: { _ in submitted = true },
-                apiClient: MockDocumentIntakeAPIClient(signingStatus: "pending_notary")
+                apiClient: MockDocumentIntakeAPIClient(
+                    signingStatus: "pending_notary",
+                    availableNotaryCount: min(30, max(0, Int(ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_COUNT"] ?? "1") ?? 1))
+                )
             )
         }
     }

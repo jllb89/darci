@@ -171,17 +171,23 @@ struct AppRootView: View {
                 }
             )
         }
+        // Intake owns its accessory so its UIKit date and SwiftUI fields share
+        // a single Done action. Other screens (including login) inherit this one.
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
+                if intakeRoute == nil {
+                    Spacer()
 
-                Button("Done") {
-                    UIApplication.shared.sendAction(
-                        #selector(UIResponder.resignFirstResponder),
-                        to: nil,
-                        from: nil,
-                        for: nil
-                    )
+                    Button("Done") {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                    .tint(.blue)
+                    .foregroundStyle(.blue)
                 }
             }
         }

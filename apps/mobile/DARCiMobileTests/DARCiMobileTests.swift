@@ -6,6 +6,19 @@ import UIKit
 #endif
 
 final class DARCiAdaptiveLayoutTests: XCTestCase {
+    func testNotarySheetFitsContentAndCapsLongLists() {
+        XCTAssertEqual(DARCiAdaptiveLayout.contentFittingSheetHeight(contentHeight: 100, actionsHeight: 86, viewportHeight: 800), 240)
+        XCTAssertEqual(DARCiAdaptiveLayout.contentFittingSheetHeight(contentHeight: 430, actionsHeight: 86, viewportHeight: 800), 516)
+        XCTAssertEqual(DARCiAdaptiveLayout.contentFittingSheetHeight(contentHeight: 2000, actionsHeight: 86, viewportHeight: 800), 656)
+        XCTAssertEqual(DARCiAdaptiveLayout.contentFittingSheetHeight(contentHeight: 500, actionsHeight: 150, viewportHeight: 200), 164)
+    }
+
+    func testAuthenticationSizingDependsOnWidthNotKeyboardHeight() {
+        XCTAssertEqual(DARCiAdaptiveLayout.authenticationScale(viewportWidth: 440), 1)
+        XCTAssertEqual(DARCiAdaptiveLayout.authenticationScale(viewportWidth: 375), 375.0 / 440.0)
+        XCTAssertEqual(DARCiAdaptiveLayout.authenticationScale(viewportWidth: 1024), 1)
+    }
+
     func testActionsStayHorizontalOnRegularWidthAndText() {
         XCTAssertFalse(DARCiAdaptiveLayout.shouldStackActions(
             viewportWidth: 390,

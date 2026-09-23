@@ -26,6 +26,7 @@ test('iOS CI pins its toolchain and dependency graph while retaining every test'
   assert.match(ios, /-onlyUsePackageVersionsFromResolvedFile/);
   assert.match(ios, /-skipPackageUpdates/);
   assert.match(ios, /-parallel-testing-enabled NO/);
+  assert.match(ios, /defaults write com\.apple\.iphonesimulator ConnectHardwareKeyboard -bool false/);
   assert.doesNotMatch(ios, /-only-testing|-skip-testing|continue-on-error|\.env\.staging/);
 });
 

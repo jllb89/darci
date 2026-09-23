@@ -186,6 +186,7 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     var reviewDocumentType = "poa_document"
     var failsResave = false
     var signingStatus = "pending_signature"
+    var availableNotaryCount = 1
 
     func listMemberFormJurisdictions(modeKey: String, accessToken: String) async throws -> MemberFormJurisdictionsResponse {
         MemberFormJurisdictionsResponse(mode: nil, jurisdictions: jurisdictions, message: nil)
@@ -490,9 +491,9 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
         AvailableNotariesResponse(
             document: AvailableNotariesDocument(id: documentId, status: "pending_notary", jurisdiction: "US-CA", normalizedJurisdiction: "US-CA", productFlowMode: "poa_only"),
             notarization: AvailableNotarizationState(activeRequestId: nil, activeRequestStatus: nil, assignedNotaryUserId: nil, submittedAt: nil),
-            notaries: [
-                AvailableNotary(userId: "notary-1", displayName: "Adam Eberts", jurisdiction: "US-CA", serviceAreaKind: "county", serviceAreaName: "Sonoma County", commissionExpiresAt: "2027-01-01T00:00:00.000Z")
-            ],
+            notaries: (0..<max(0, availableNotaryCount)).map { index in
+                AvailableNotary(userId: "notary-\(index + 1)", displayName: index == 0 ? "Adam Eberts" : "Test Notary \(index + 1)", jurisdiction: "US-CA", serviceAreaKind: "county", serviceAreaName: "Sonoma County", commissionExpiresAt: "2027-01-01T00:00:00.000Z")
+            },
             message: nil
         )
     }
