@@ -1,5 +1,26 @@
 # iOS CI performance
 
+## 23 September follow-up — current candidate
+
+The sections below this update retain the 22 September experiment history. This update supersedes their statements about the current command shape and test counts.
+
+[Run 35825002577](https://github.com/jllb89/darci/actions/runs/35825002577), revision `452fe26`, failed `testLaunchesOnboardingSplash`; **115 unit tests and 16/17 UI tests passed**. The disabled Continue assertion was valid: the UI driver tapped Email below the visible form and typed the email into Last name, leaving Email empty. This was reproduced locally, including the screen recording. The ScrollView's accessibility frame still spans the full screen with the keyboard open, so a generic `swipeUp()` starts on the keyboard rather than the visible form. The corrected test drags between visible name controls, targets uniquely identified inputs, and asserts the actual name/last-name/email values before submitting. The app now exposes unique profile-field identifiers instead of repeating one identifier. No application validation is weakened.
+
+Measured GitHub time: **18m44 total**, including **2m19 restoring 359 MiB of packages**, a **build-cache miss**, and **15m35 in the combined build/test step**. UI execution was **413 seconds**, and unit execution approximately **31 seconds**. The remaining combined-step time includes compilation, simulator preparation and teardown—not just tests. A failed test caused the previous cache action's post-job save to be skipped, discarding otherwise successful compilation. The workflow-file hash also invalidated the entire build-cache prefix when only keyboard-test workflow settings changed.
+
+Current changes:
+
+- Build once for the **exact pinned simulator**, save successful compilation immediately, then execute both complete suites from that build's `.xctestrun` file. Unlike the earlier rejected experiment, this is not a generic simulator build and the test invocation does not reopen the project or resolve its package graph.
+- Preserve explicit Xcode/XcodeGen/runtime/project/lockfile cache boundaries; replace the workflow-file hash with a versioned `ios-build-v2` prefix. Xcode still evaluates changed sources and build settings on every run. The new prefix will be cold once.
+- Keep all 115 unit and 17 UI tests, visible software-keyboard coverage, serial execution and failure artifacts. No retries, skipped tests, test-timeout inflation, credentials or larger runner.
+- Show totals and failing assertion/test names in the GitHub job summary, with the `.xcresult` artifact retained for recordings and diagnostics.
+
+Validation: **115 unit + 17 UI tests passed, zero failures or skipped tests**, using the new concrete-device `build-for-testing`/`.xctestrun` execution path on local Xcode 26.2/iOS 26.2. The final test operation took **319.459 seconds**, including **302.118 seconds of UI tests**. The corrected onboarding case also passed independently before the complete run. All **17 workflow/helper regression checks**, `actionlint`, and whitespace checks pass. The summary helper was exercised against both real failing and passing result bundles. Local evidence: `/private/tmp/darci-ios-final-regression.xcresult` and `/private/tmp/darci-ios-final-summary.json`.
+
+No revised GitHub run has been dispatched by this task. Local validation is not a claim of GitHub Xcode 26.6/iOS 26.5 acceptance. Cache persistence is a recovery improvement, not evidence of a four-minute remote run; GitHub cold/warm timings must still be measured after the next push. No tests were removed or skipped and no runtime auth/validation behavior changed; the only app-code change is unique accessibility identifiers.
+
+## Historical 22 September investigation
+
 ## Scope and safety constraints
 
 This report covers only the standalone `.github/workflows/ios.yml` workflow and its generated Xcode project inputs. Server CI and deployment remain unchanged. The workflow still has `contents: read`, path filtering, superseded-run cancellation, project generation through XcodeGen, secret-free loopback test configuration, serial unit/UI execution, and failure uploads for `.xcresult` diagnostics.

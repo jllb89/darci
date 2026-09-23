@@ -326,12 +326,30 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Email"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Phone number"].waitForExistence(timeout: 5))
 
-        app.textFields["Name"].tap()
-        app.typeText("Jorge Luis")
-        app.textFields["Last name"].tap()
-        app.typeText("Lopez")
-        app.textFields["Email"].tap()
-        app.typeText("lopezb.jl@gmail.com")
+        let profileName = app.textFields["complete-info-profileName"]
+        let profileLastName = app.textFields["complete-info-profileLastName"]
+        profileName.tap()
+        profileName.typeText("Jorge Luis")
+        XCTAssertEqual(profileName.value as? String, "Jorge Luis")
+        profileLastName.tap()
+        profileLastName.typeText("Lopez")
+        XCTAssertEqual(profileLastName.value as? String, "Lopez")
+        // The full software keyboard covers Email on this scrollable form.
+        // An offscreen tap can leave Last name focused and send typing there.
+        // XCTest reports the ScrollView's full-screen accessibility frame even
+        // with the keyboard open; swipeUp() would start on the keyboard itself.
+        // Drag between two currently visible controls inside the actual form.
+        profileLastName.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: profileName.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0)))
+        let profileEmail = app.textFields["complete-info-profileEmail"]
+        XCTAssertTrue(profileEmail.isHittable)
+        if app.keyboards.firstMatch.exists {
+            XCTAssertLessThanOrEqual(profileEmail.frame.maxY, app.keyboards.firstMatch.frame.minY)
+        }
+        profileEmail.tap()
+        profileEmail.typeText("lopezb.jl@gmail.com")
+        XCTAssertEqual(profileEmail.value as? String, "lopezb.jl@gmail.com")
+        XCTAssertEqual(profileLastName.value as? String, "Lopez")
         // Scope to the form: iOS also exposes the keyboard return key as Continue.
         let completeInfoContinue = app.scrollViews["authentication-complete-info"].buttons["Continue"]
         XCTAssertTrue(completeInfoContinue.isEnabled)

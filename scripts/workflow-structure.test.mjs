@@ -11,9 +11,11 @@ test('server deployment reuses exact-commit CI instead of running the suite twic
   assert.doesNotMatch(deploy, /uses: .*ci\.yml/);
   assert.match(job(deploy, 'validate'), /node scripts\/workflow-gates\.mjs wait-ci/);
   assert.doesNotMatch(ci, /\n  ios:/);
-  assert.match(ios, /xcodebuild test/);
-  assert.doesNotMatch(ios, /build-for-testing|test-without-building/);
-  assert.match(ios, /actions\/cache@v4/);
+  assert.equal(ios.match(/xcodebuild build-for-testing/g)?.length, 1);
+  assert.equal(ios.match(/xcodebuild test-without-building/g)?.length, 1);
+  assert.doesNotMatch(ios, /xcodebuild test -/);
+  assert.match(ios, /xcodebuild test-without-building -xctestrun/);
+  assert.doesNotMatch(ios, /generic\/platform=iOS Simulator/);
 });
 
 test('iOS CI pins its toolchain and dependency graph while retaining every test', () => {
@@ -31,7 +33,14 @@ test('iOS CI pins its toolchain and dependency graph while retaining every test'
 });
 
 test('iOS CI separates stable packages from incremental products and preserves diagnostics', () => {
-  assert.equal(ios.match(/uses: actions\/cache@v4/g)?.length, 2);
+  assert.equal(ios.match(/uses: actions\/cache\/restore@v4/g)?.length, 2);
+  assert.equal(ios.match(/uses: actions\/cache\/save@v4/g)?.length, 2);
+  assert.ok(ios.indexOf('Save successful build products') < ios.indexOf('Run the full unit and UI test suites'));
+  assert.match(ios, /steps\.build\.outcome == 'success'/);
+  assert.match(ios, /steps\.build-cache\.outputs\.cache-primary-key/);
+  assert.doesNotMatch(ios, /hashFiles\([^\n]*ios\.yml/);
+  assert.match(ios, /node scripts\/summarize-ios-tests\.mjs/);
+  assert.match(ios, /darci-ios-test-summary\.json/);
   assert.match(ios, /darci-ios-packages/);
   assert.match(ios, /darci-ios-build\/Build/);
   assert.match(ios, /darci-ios-build\/ModuleCache\.noindex/);

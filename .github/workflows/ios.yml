@@ -5,11 +5,13 @@ on:
       - 'apps/mobile/**'
       - 'api/**'
       - '.github/workflows/ios.yml'
+      - 'scripts/summarize-ios-tests*'
   pull_request:
     paths:
       - 'apps/mobile/**'
       - 'api/**'
       - '.github/workflows/ios.yml'
+      - 'scripts/summarize-ios-tests*'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +34,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Validate workflow and result-summary helpers
+        run: node --test scripts/workflow-structure.test.mjs scripts/summarize-ios-tests.test.mjs
       - name: Generate the Xcode project from its tracked specification
         run: |
           set -euo pipefail
@@ -63,37 +67,80 @@ jobs:
           echo "DARCI_CI_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
           xcrun simctl boot "$simulator_id"
       - name: Cache locked Swift packages
-        uses: actions/cache@v4
+        id: packages
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/darci-ios-packages
           key: ios-spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/mobile/Package.resolved') }}
       - name: Cache incremental build products
-        uses: actions/cache@v4
+        id: build-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ runner.temp }}/darci-ios-build/Build
             ${{ runner.temp }}/darci-ios-build/ModuleCache.noindex
             ${{ runner.temp }}/darci-ios-build/SDKStatCaches.noindex
-          key: ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('.github/workflows/ios.yml', 'apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-${{ github.sha }}
+          key: ios-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ env.DARCI_IOS_RUNTIME }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-${{ github.sha }}
           restore-keys: |
-            ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('.github/workflows/ios.yml', 'apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-
-      - name: Build and run the full unit and UI test suites
+            ios-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ env.DARCI_IOS_RUNTIME }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-
+      - name: Build the app and full test suites once
+        id: build
         run: |
           set -euo pipefail
-          xcodebuild test -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
+          xcodebuild build-for-testing -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
             -configuration Debug -destination "platform=iOS Simulator,id=$DARCI_CI_SIMULATOR" \
             -derivedDataPath "$RUNNER_TEMP/darci-ios-build" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/darci-ios-packages" \
             -onlyUsePackageVersionsFromResolvedFile -skipPackageUpdates -showBuildTimingSummary \
-            -resultBundlePath "$RUNNER_TEMP/darci-ios-test-results.xcresult" \
             -parallel-testing-enabled NO COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
             DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
             DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
+      # Persist successful compilation even when a later UI assertion fails.
+      # A cache hit never substitutes for building/testing the current revision.
+      - name: Save resolved Swift packages
+        if: steps.build.outcome == 'success' && steps.packages.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/darci-ios-packages
+          key: ${{ steps.packages.outputs.cache-primary-key }}
+      - name: Save successful build products
+        if: steps.build.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/darci-ios-build/Build
+            ${{ runner.temp }}/darci-ios-build/ModuleCache.noindex
+            ${{ runner.temp }}/darci-ios-build/SDKStatCaches.noindex
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
+      - name: Run the full unit and UI test suites without rebuilding
+        run: |
+          set -euo pipefail
+          test_run="$(node -e '
+            const fs=require("node:fs"),path=require("node:path");
+            const dir=path.join(process.env.RUNNER_TEMP,"darci-ios-build/Build/Products");
+            const files=fs.readdirSync(dir).filter(f=>f.startsWith("DARCiMobile_")&&f.endsWith(".xctestrun"));
+            if(files.length!==1)throw new Error("Expected exactly one DARCi test bundle, got "+files.length);
+            console.log(path.join(dir,files[0]));')"
+          xcodebuild test-without-building -xctestrun "$test_run" \
+            -destination "platform=iOS Simulator,id=$DARCI_CI_SIMULATOR" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/darci-ios-test-results.xcresult"
+      - name: Summarize test results
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          if test -d "$RUNNER_TEMP/darci-ios-test-results.xcresult"; then
+            xcrun xcresulttool get test-results summary \
+              --path "$RUNNER_TEMP/darci-ios-test-results.xcresult" --compact \
+              > "$RUNNER_TEMP/darci-ios-test-summary.json"
+            node scripts/summarize-ios-tests.mjs "$RUNNER_TEMP/darci-ios-test-summary.json"
+          fi
       - name: Preserve iOS test diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: darci-ios-test-results
-          path: ${{ runner.temp }}/darci-ios-test-results.xcresult
+          path: |
+            ${{ runner.temp }}/darci-ios-test-results.xcresult
+            ${{ runner.temp }}/darci-ios-test-summary.json
           if-no-files-found: ignore
           retention-days: 7

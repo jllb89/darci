@@ -136,7 +136,7 @@ struct PhoneCountryPickerSheet: View {
 
 struct AuthenticationSignInView: View {
 
-    private enum Field {
+    private enum Field: String {
         case phone
         case email
         case otp
@@ -781,7 +781,7 @@ struct AuthenticationSignInView: View {
                         .frame(height: max(0.5, scaled(0.5, in: proxy)))
                 }
                 .accessibilityLabel(title)
-                .accessibilityIdentifier("complete-info-field")
+                .accessibilityIdentifier("complete-info-\(field.rawValue)")
         }
     }
 
