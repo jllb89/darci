@@ -12,7 +12,8 @@ process.umask(0o077);
 assert(process.argv.includes('--approved-operator-live-test'));
 const dir=realpathSync(process.argv[2]);assert(dir.startsWith(resolve('.recovery-private')+'/production-operator-billing-'));
 const activation=JSON.parse(readFileSync(dir+'/activation.json'));assert.equal(activation.passed,true);assert.equal(activation.operatorUserId,operatorUserId);
-const prepare=process.argv.includes('--prepare');assert(prepare||process.argv.includes('--verify'));
+const resume=process.argv.includes('--resume-prepared-checkout');
+const prepare=process.argv.includes('--prepare')||resume;assert(prepare||process.argv.includes('--verify'));
 const file=dir+'/checkout.json';
 const aws=(...a)=>JSON.parse(execFileSync('aws',[...a,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
 const ok=r=>{assert(!r.error,'Provider operation failed: '+(r.error?.code??r.error?.status??'unknown'));return r.data;};
@@ -38,6 +39,10 @@ try {
   const Stripe=require('../../backend/node_modules/stripe'),stripe=new Stripe(secret.STRIPE_SECRET_KEY,{apiVersion:'2026-07-29.dahlia',timeout:20000,maxNetworkRetries:1});
   assert.equal((await stripe.accounts.retrieve()).id,'acct_1HxKd9ETAqmB3GAq');
   if(prepare){
+    if(resume){
+      report=JSON.parse(readFileSync(file));assert.equal(report.operatorUserId,operatorUserId);assert.equal(report.priceCode,operatorPriceCode);
+      assert(report.checkoutSessionId);assert.equal(report.negativeFixtureRevoked,true);
+    }else{
     assert(!existsSync(file),'Checkout preparation already attempted: inspect before retry');
     Object.assign(report,{at:new Date().toISOString(),operatorUserId,priceCode:operatorPriceCode,idempotencyToken:'operator-live-20260923-'+randomUUID(),paid:false});
     writeFileSync(file,JSON.stringify(report),{flag:'wx',mode:0o600});
@@ -69,10 +74,11 @@ try {
     const result=await api('/billing/member-membership/checkout',{priceCode:operatorPriceCode,idempotencyToken:report.idempotencyToken});
     assert.equal(result.status,201,'Operator Checkout failed; inspect response code without logging personal data');
     report.checkoutSessionId=result.body.checkoutSessionId;report.checkoutUrl=result.body.checkoutUrl;save();
+    }
     const session=await stripe.checkout.sessions.retrieve(report.checkoutSessionId);
     assert(session.livemode);assert.equal(session.amount_total,999);assert.equal(session.currency,'usd');assert.equal(session.metadata.darci_owner_user_id,operatorUserId);assert.equal(session.mode,'subscription');
     assert(session.expires_at*1000<=Date.parse(activation.expiresAt));
-    const repeated=await api('/billing/member-membership/checkout',{priceCode:operatorPriceCode,idempotencyToken:report.idempotencyToken});assert.equal(repeated.status,201);assert.equal(repeated.body.checkoutSessionId,session.id);assert.equal(repeated.body.reused,true);
+    const repeated=await api('/billing/member-membership/checkout',{priceCode:operatorPriceCode,idempotencyToken:report.idempotencyToken});assert.equal(repeated.status,200);assert.equal(repeated.body.checkoutSessionId,session.id);assert.equal(repeated.body.reused,true);
     report.checks.push('Exact $9.99 monthly live Checkout and same-key reuse; session expires within approved operator window');
     report.checkoutPrepared=true;save();
     console.log(JSON.stringify({checkoutPrepared:true,checkoutUrl:report.checkoutUrl,expiresAt:new Date(session.expires_at*1000).toISOString(),paid:false,evidence:file}));
@@ -98,8 +104,46 @@ try {
       }
       assert.equal(status.status,200);assert.equal(status.body.membership.state,'active');assert.equal(status.body.membership.cancelAtPeriodEnd,true);
       assert.equal(status.body.membership.priceCode,operatorPriceCode);assert.equal(status.body.membership.allowance.total,3);assert.equal(status.body.membership.allowance.used,0);
+      phase='duplicate paid webhook acceptance';
+      const received=ok(await db.from('stripe_webhook_events').select('*').eq('provider_environment','live').eq('event_type','invoice.paid').eq('object_id',invoice.id).single());
+      assert.equal(received.status,'processed','Wait for the real paid callback to finish before replay');
+      const paidEvent=await stripe.events.retrieve(received.event_id);assert.equal(paidEvent.data.object.id,invoice.id);assert(paidEvent.livemode);
+      const entitlementSnapshot=()=>db.from('billing_entitlements').select('*').eq('owner_user_id',operatorUserId).order('id').then(ok);
+      const beforeEntitlements=await entitlementSnapshot();
+      const payload=JSON.stringify(paidEvent);
+      // Explicit synthetic replays of an already-processed real event; never invent a paid event.
+      for(let i=0;i<2;i++){
+        const signature=stripe.webhooks.generateTestHeaderString({payload,secret:secret.STRIPE_WEBHOOK_SECRET});
+        const replay=await fetch('https://api.illuminotary.com/webhooks/stripe',{method:'POST',headers:{'Content-Type':'application/json','Stripe-Signature':signature},body:payload,signal:AbortSignal.timeout(20000)});
+        assert.equal(replay.status,200);assert.deepEqual(await replay.json(),{received:true,duplicate:true});
+      }
+      assert.deepEqual(ok(await db.from('stripe_webhook_events').select('*').eq('id',received.id).single()),received);
+      assert.deepEqual(await entitlementSnapshot(),beforeEntitlements);
+      report.duplicatePaidEventPassed=true;report.checks.push('Two signed synthetic replays of the real processed invoice.paid event returned duplicate=true; receipt and entitlements unchanged');save();
       const portal=await api('/billing/customer-portal-session',{});assert.equal(portal.status,201);assert.equal(new URL(portal.body.portalUrl).hostname,'billing.stripe.com');
       report.portalUrl=portal.body.portalUrl;report.checks.push('Actual paid invoice; webhook-derived active three-workflow entitlement; period-end cancellation projected; authorized Portal session created');save();
+      phase='deployed AWS reconciliation';
+      const svc=aws('ecs','describe-services','--cluster','darci-production','--services','darci-production-api').services[0];
+      assert.equal(svc.deployments.length,1);assert.equal(svc.deployments[0].rolloutState,'COMPLETED');
+      const code=`const assert=require('node:assert/strict');
+        assert.equal(process.env.SUPABASE_URL,'https://jdrgluisxhgegdsesman.supabase.co');
+        require('./dist/services/billingOperationsService').getBillingOperationsReport({includeProvider:true}).then(r=>{
+          console.log(JSON.stringify({operatorReconciliation:true,providerEnvironment:r.providerEnvironment,providerScanComplete:r.providerScanComplete,
+            blockingIssueCount:r.readiness.blockingIssueCount,counts:r.counts}));
+          assert.equal(r.providerEnvironment,'live');assert.equal(r.providerScanComplete,true);assert.equal(r.readiness.blockingIssueCount,0);process.exit(0);
+        }).catch(()=>{console.log(JSON.stringify({operatorReconciliation:true,passed:false}));process.exit(1);});`;
+      const run=aws('ecs','run-task','--cli-input-json',JSON.stringify({cluster:'darci-production',taskDefinition:svc.taskDefinition,launchType:'FARGATE',networkConfiguration:svc.networkConfiguration,count:1,
+        startedBy:'operator-billing-reconciliation',overrides:{containerOverrides:[{name:'api',command:['node','-e',code]}]}}));
+      assert.equal(run.failures.length,0);report.reconciliationTask=run.tasks[0].taskArn;save();
+      let stopped;
+      for(let i=0;i<90;i++){
+        await new Promise(r=>setTimeout(r,5000));
+        const task=aws('ecs','describe-tasks','--cluster','darci-production','--tasks',report.reconciliationTask).tasks[0];
+        if(task.lastStatus==='STOPPED'){stopped=task;break;}
+      }
+      if(!stopped){aws('ecs','stop-task','--cluster','darci-production','--task',report.reconciliationTask,'--reason','Read-only billing acceptance timeout');throw Error('Reconciliation timeout');}
+      assert.equal(stopped.containers[0].exitCode,0,'Deployed reconciliation found a blocker; inspect task logs');
+      report.reconciliationPassed=true;report.checks.push('Deployed AWS billing report completed live provider scan with zero blocking issues');save();
       console.log(JSON.stringify({paid:true,amountCents:999,allowance:3,cancelAtPeriodEnd:true,portalUrl:report.portalUrl,evidence:file}));
     }
   }

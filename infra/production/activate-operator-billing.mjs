@@ -5,6 +5,7 @@ import {readFileSync,writeFileSync,mkdtempSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {withOperatorBilling,operatorUserId,operatorPriceCode} from './operator-billing-setup.mjs';
 import {productionStripeEvents,productionWebhookUrl} from './provider-setup.mjs';
+import {withProductionSmsReceipts} from './sms-receipt-setup.mjs';
 const require=createRequire(import.meta.url),{Client}=require('../../backend/node_modules/pg');
 process.umask(0o077);
 assert(process.argv.includes('--approved-operator-live-test'));
@@ -21,7 +22,9 @@ try {
   const stack=aws('cloudformation','describe-stacks','--stack-name','darci-production-runtime').Stacks[0];assert.equal(stack.StackStatus,'UPDATE_COMPLETE');
   const raw=aws('cloudformation','get-template','--stack-name',stack.StackName).TemplateBody,baseline=typeof raw==='string'?JSON.parse(raw):raw;
   const startsAt=new Date().toISOString(),expiresAt=new Date(Date.now()+23*3600000).toISOString();
-  const template=withOperatorBilling(baseline,{startsAt,expiresAt});
+  const smsStack=aws('cloudformation','describe-stacks','--stack-name','darci-production-sms-delivery').Stacks[0];
+  assert(['CREATE_COMPLETE','UPDATE_COMPLETE'].includes(smsStack.StackStatus));
+  const template=withOperatorBilling(withProductionSmsReceipts(baseline),{startsAt,expiresAt});
   const tag=`phase2-${release.head_sha.slice(0,7)}-${runId}-${release.run_attempt}`;
   for(const service of ['api','worker','web']) {
     const image=stack.Parameters.find(p=>p.ParameterKey===service+'Image').ParameterValue;

@@ -2,7 +2,9 @@ const statuses = new Set(['SUCCESSFUL','DELIVERED','PENDING','INVALID','UNREACHA
 function sanitize(event) {
   if (!event || !statuses.has(event.messageStatus) || !/^TEXT_[A-Z_]+$/.test(event.eventType ?? '')
       || !/^[a-zA-Z0-9_-]{8,128}$/.test(event.messageId ?? '')) throw new Error('Invalid SMS delivery event');
-  const safe = {kind:'auth_sms_delivery', environment:'staging', messageId:event.messageId,
+  const environment=process.env.APP_ENV ?? 'staging';
+  if (!['staging','production'].includes(environment)) throw new Error('Invalid receipt environment');
+  const safe = {kind:'auth_sms_delivery', environment, messageId:event.messageId,
     eventType:event.eventType, status:event.messageStatus, isFinal:event.isFinal === true,
     // SUCCESSFUL means carrier acceptance, not device delivery.
     deviceDelivered:event.messageStatus === 'DELIVERED',

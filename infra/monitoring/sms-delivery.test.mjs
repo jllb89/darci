@@ -25,3 +25,17 @@ test('stack scopes publisher and subscriber and does not purchase a sender or ex
   assert.equal(r.TopicPolicy.Properties.PolicyDocument.Statement[1].Principal.Service,'sms-voice.amazonaws.com');
   assert(!JSON.stringify(r.Role).includes('sns:Publish')); assert(!JSON.stringify(r).includes('AWS::SMSVOICE::PhoneNumber'));
 });
+test('production receipt infrastructure cannot reference staging resources',()=>{
+  const template=buildSmsDeliveryTemplate('production');
+  // Lambda source supports both environments; inspect resource properties without source.
+  const copy=structuredClone(template);delete copy.Resources.Handler.Properties.Code;
+  assert(!JSON.stringify(copy).includes('staging'));
+  assert.equal(template.Resources.Handler.Properties.Environment.Variables.APP_ENV,'production');
+  assert.equal(template.Resources.Configuration.Properties.ConfigurationSetName,'darci-production-auth-sms');
+  assert.throws(()=>buildSmsDeliveryTemplate('other'));
+});
+test('production receipt sanitizer labels production and still strips sensitive data',()=>{
+  const before=process.env.APP_ENV;
+  try{process.env.APP_ENV='production';assert.equal(sanitize(event).environment,'production');}
+  finally{if(before===undefined)delete process.env.APP_ENV;else process.env.APP_ENV=before;}
+});
