@@ -2,7 +2,7 @@
 
 Status: **test instructions, not a record of passed tests**. Owner: Jorge. Environment: staging API/web, Stripe test mode, new TestFlight build. Production and real cards/charges are outside this exercise.
 
-The proposed $9.99/$19.99/$59.99 monthly and $99/$199/$599 annual catalog is **not implemented yet**. Test the deployed catalog as displayed; execute section 13 only after the pricing proposal is approved, implemented and deployed. A TestFlight upload now will not magically include the proposed plans.
+The $9.99/$19.99/$59.99 monthly and $99/$199/$599 annual catalog is **approved and implemented locally**; the staging migration and six inactive Stripe test mappings are prepared. Deploy the compatible API/web and distribute this TestFlight build, then activate the catalog using [the rollout record](member-pricing-v2-rollout-2026-09-23.md). Section 13 is required after activation; the old catalog remains visible until then. Existing subscribers retain their legacy contracts.
 
 ## How to run and report
 
@@ -173,10 +173,10 @@ These are not instructions for Jorge to perform database edits, kill shared serv
 - [ ] Production configuration/keys/domains and Apple distribution/purchase review are separately accepted before launch. TestFlight success is not App Store approval.
 - [ ] Jorge records pass/fail and outstanding issues. Do not set the lifecycle acceptance flag simply to clear a warning.
 
-## 13. Additional tests AFTER approval/implementation of new pricing
+## 13. Approved v2 pricing tests AFTER deployment and catalog activation
 
 - [ ] PRICE-01 All six tier/cadence choices agree across web, iOS, Checkout, Portal, invoice and operator view; old-client behavior is safe and intentional.
-- [ ] PRICE-02 Annual plan charges the full approved annual amount once, not its monthly equivalent; renewal date is annual, allowance reset date monthly if that proposal is approved.
+- [ ] PRICE-02 Annual plan charges the full approved annual amount once, not its monthly equivalent; renewal date is annual and allowance reset date monthly.
 - [ ] PRICE-03 Annual finite allowance resets monthly without a new invoice; no full-year quota up front, no rollover, no duplicate/missed reset after downtime or repeated webhooks. Include month-end/leap-year boundaries with test clocks.
 - [ ] PRICE-04 Unlimited user completes more than 25 workflows without quota denial; usage remains audited. Unsubscribed/misconfigured account cannot be mistaken for unlimited. File/page/concurrency abuse limits still apply.
 - [ ] PRICE-05 Same-cadence upgrades, scheduled downgrades, monthly→annual and annual→monthly have correct effective dates, paid amounts and preserved current-month usage. Failed payment gives no unearned upgrade.

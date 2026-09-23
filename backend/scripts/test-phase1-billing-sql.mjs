@@ -16,11 +16,14 @@ try {
   assert.equal((await db.query('select stripe_environment from public.billing_runtime_configuration where singleton')).rows[0].stripe_environment, 'test');
   assert.equal((await db.query("select count(*)::int n from public.billing_provider_price_mappings where status='verified'")).rows[0].n, 0,
     'Use the disposable migration instance, not an instance with configured provider objects');
-  for (const file of ['member_billing_phase01.test.sql', 'member_billing_phase23.test.sql']) {
+  for (const file of ['member_billing_phase01.test.sql', 'member_billing_phase23.test.sql', 'member_billing_v2.test.sql']) {
     stage = file;
     const source = await readFile(new URL(`../../supabase/tests/${file}`, import.meta.url), 'utf8');
     assert(/^begin;/i.test(source.trim()) && /rollback;$/i.test(source.trim()), 'SQL proof must roll back');
     await db.query('begin');
+    if (process.argv.includes('--rehearse-pricing-v2')) {
+      await db.query(await readFile(new URL('../../supabase/migrations/20260923030000_member_pricing_v2.sql', import.meta.url), 'utf8'));
+    }
     // Fresh migrations intentionally do not activate purchasable plans. Emulate
     // only the catalog prerequisites inside this rolled-back local transaction.
     await db.query(`update public.billing_catalog_prices set is_active=true

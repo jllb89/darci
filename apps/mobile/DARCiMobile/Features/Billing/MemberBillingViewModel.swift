@@ -10,6 +10,9 @@ final class MemberBillingViewModel: ObservableObject {
     @Published private(set) var checkoutResult: String?
     @Published var errorMessage: String?
     @Published var selectedPriceCode = MemberBillingPriceCode.plus
+    @Published var billingCadence = "month"
+    @Published private(set) var changingPlan = false
+    @Published private(set) var planChangeMessage: String?
 
     private let apiClient: MemberBillingAPIProviding
     private let refreshSession: () async -> AuthSession?
@@ -35,9 +38,18 @@ final class MemberBillingViewModel: ObservableObject {
 
     var plans: [MemberBillingPlan] {
         guard let plans = payload?.plans, plans.isEmpty == false else {
-            return MemberBillingPlan.fallbackPlans
+            return []
         }
         return plans
+    }
+
+    var offeredPlans: [MemberBillingPlan] {
+        plans.filter { $0.availableForPurchase != false && $0.billingInterval == billingCadence }
+    }
+
+    func selectCadence(_ cadence: String) {
+        billingCadence = cadence
+        selectedPriceCode = offeredPlans.first(where: { $0.displayName == "Plus" })?.priceCode ?? offeredPlans.first?.priceCode ?? ""
     }
 
     var membership: MemberMembershipPayload.Membership? {
@@ -47,12 +59,30 @@ final class MemberBillingViewModel: ObservableObject {
     var canCheckout: Bool {
         payload?.actions.canCheckout == true &&
             payload?.actions.iosCheckoutAvailable == true &&
-            membership?.state == "none" &&
+            ["none", "canceled", "expired", "incomplete_expired"].contains(membership?.state ?? "") &&
             isLoading == false
     }
 
     func updateAccessToken(_ nextAccessToken: String) {
         accessToken = nextAccessToken
+    }
+
+    func changePlan(to plan: MemberBillingPlan) async {
+        guard !changingPlan, payload?.actions.planChangeAvailable == true,
+              payload?.actions.iosCheckoutAvailable == true,
+              plan.availableForPurchase != false, membership?.priceCode != plan.priceCode else { return }
+        changingPlan = true
+        defer { changingPlan = false }
+        do {
+            let token = UUID().uuidString
+            let result = try await requestWithTokenRefresh { accessToken in
+                try await apiClient.changePlan(priceCode: plan.priceCode, idempotencyToken: token, accessToken: accessToken)
+            }
+            planChangeMessage = result.changeType == "upgrade" ? "Stripe is confirming your upgrade. This month’s usage stays unchanged." : "Your plan change is scheduled for your paid-through renewal date."
+            await load(quietly: true)
+        } catch {
+            errorMessage = Self.userFacingMessage(for: error, fallback: "We could not change your plan.")
+        }
     }
 
     func load(quietly: Bool = false) async {
@@ -70,6 +100,9 @@ final class MemberBillingViewModel: ObservableObject {
                 try await apiClient.getMembership(accessToken: accessToken)
             }
             payload = nextPayload
+            if !offeredPlans.contains(where: { $0.priceCode == selectedPriceCode }) {
+                selectCadence(billingCadence)
+            }
             onMembershipUpdated(nextPayload)
             errorMessage = nil
 
@@ -91,7 +124,7 @@ final class MemberBillingViewModel: ObservableObject {
     }
 
     func createCheckout() async -> URL? {
-        guard startingPriceCode == nil, canCheckout else { return nil }
+        guard startingPriceCode == nil, canCheckout, offeredPlans.contains(where: { $0.priceCode == selectedPriceCode }) else { return nil }
 
         let priceCode = selectedPriceCode
         startingPriceCode = priceCode

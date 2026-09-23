@@ -13,7 +13,13 @@ struct MemberBillingPlan: Decodable, Equatable, Identifiable, Sendable {
     let unitAmountCents: Int
     let billingInterval: String
     let intervalCount: Int
-    let documentWorkflowAllowance: Int
+    let documentWorkflowAllowance: Int?
+    var isUnlimited: Bool? = nil
+    var availableForPurchase: Bool? = nil
+
+    var allowanceDescription: String {
+        isUnlimited == true ? "Unlimited documents" : "\(documentWorkflowAllowance.map(String.init) ?? "—") documents / month"
+    }
 
     var id: String { priceCode }
 
@@ -82,6 +88,9 @@ struct MemberMembershipPayload: Decodable, Equatable, Sendable {
         let used: Int
         let remaining: Int?
         let exhausted: Bool
+        var isUnlimited: Bool? = nil
+        var periodStart: String? = nil
+        var periodEnd: String? = nil
     }
 
     struct Eligibility: Decodable, Equatable, Sendable {
@@ -110,7 +119,7 @@ extension MemberMembershipPayload.Membership {
     }
 
     var needsRecovery: Bool {
-        ["past_due", "paused", "incomplete", "unpaid", "canceled", "expired"].contains(state)
+        ["past_due", "paused", "incomplete", "unpaid", "canceled", "expired", "incomplete_expired"].contains(state)
     }
 }
 
@@ -125,6 +134,16 @@ struct MemberCheckoutResponse: Decodable, Equatable, Sendable {
 }
 
 struct MemberBillingPortalRequest: Encodable, Equatable, Sendable {}
+
+struct MemberPlanChangeRequest: Encodable, Sendable {
+    let targetPriceCode: String
+    let idempotencyToken: String
+}
+struct MemberPlanChangeResponse: Decodable, Sendable {
+    let changeType: String
+    let status: String
+    let effectiveAt: String?
+}
 
 struct MemberBillingPortalResponse: Decodable, Equatable, Sendable {
     let portalUrl: String

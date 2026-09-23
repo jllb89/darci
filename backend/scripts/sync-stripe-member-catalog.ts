@@ -3,15 +3,13 @@ import { randomUUID } from "crypto";
 import {
   assertStripeObjectIsTestMode,
   getStripeClient,
+  getStripeEnvironment,
   getStripeReturnUrl,
   STRIPE_API_VERSION,
 } from "../src/config/stripe";
 
-const PRICE_CODES = [
-  "member_starter_monthly",
-  "member_plus_monthly",
-  "member_volume_monthly",
-] as const;
+import { MEMBER_PRICING_V2 } from "../src/config/memberPricing";
+const PRICE_CODES = MEMBER_PRICING_V2.map(price => price.priceCode);
 
 type CatalogPrice = {
   id: string;
@@ -21,8 +19,9 @@ type CatalogPrice = {
   unit_amount_cents: number;
   billing_interval: string;
   interval_count: number;
-  included_entitlement_quantity: number;
-  usage_limit_quantity: number;
+  included_entitlement_quantity: number | null;
+  usage_limit_quantity: number | null;
+  is_unlimited: boolean;
   product_id: string;
 };
 
@@ -35,13 +34,14 @@ const required = (name: string) => {
 const supabase = createClient(required("SUPABASE_URL"), required("SUPABASE_SERVICE_ROLE_KEY"), {
   auth: { persistSession: false },
 });
+if (getStripeEnvironment() !== "test") throw new Error("This catalog operation is test-mode only; live activation is a separate approval");
 const stripe = getStripeClient();
 
 const loadCatalog = async () => {
   const { data, error } = await supabase
     .from("billing_catalog_prices")
     .select(
-      "id, price_code, display_name, currency_code, unit_amount_cents, billing_interval, interval_count, included_entitlement_quantity, usage_limit_quantity, product_id",
+      "id, price_code, display_name, currency_code, unit_amount_cents, billing_interval, interval_count, included_entitlement_quantity, usage_limit_quantity, is_unlimited, product_id",
     )
     .in("price_code", [...PRICE_CODES])
     .order("sort_order");
@@ -54,10 +54,13 @@ const loadCatalog = async () => {
   return PRICE_CODES.map((code) => {
     const row = byCode.get(code);
     if (!row) throw new Error(`Missing catalog price ${code}`);
+    const policy = MEMBER_PRICING_V2.find(price => price.priceCode === code)!;
     if (
-      row.unit_amount_cents <= 0 ||
+      row.unit_amount_cents !== policy.amount ||
       row.currency_code !== "USD" ||
-      row.billing_interval !== "month" ||
+      row.billing_interval !== policy.interval ||
+      row.is_unlimited !== policy.unlimited ||
+      row.included_entitlement_quantity !== policy.allowance ||
       row.interval_count !== 1 ||
       row.included_entitlement_quantity !== row.usage_limit_quantity
     ) {
@@ -83,7 +86,7 @@ const findOrCreateProduct = async () => {
     ? await stripe.products.update(matches[0].id, {
         active: true,
         name: "DARCi Member Membership",
-        description: "Monthly DARCi membership; tiers differ only by included document workflows.",
+        description: "DARCi membership with monthly document allowances. Notary fees separate; prices before applicable taxes.",
         metadata: {
           darci_product_code: "member_membership",
           darci_environment: "test",
@@ -94,7 +97,7 @@ const findOrCreateProduct = async () => {
         {
           active: true,
           name: "DARCi Member Membership",
-          description: "Monthly DARCi membership; tiers differ only by included document workflows.",
+          description: "DARCi membership with monthly document allowances. Notary fees separate; prices before applicable taxes.",
           metadata: {
             darci_product_code: "member_membership",
             darci_environment: "test",
@@ -124,12 +127,14 @@ const findOrCreatePrices = async (productId: string, catalog: CatalogPrice[]) =>
         nickname: internal.display_name,
         currency: internal.currency_code.toLowerCase(),
         unit_amount: internal.unit_amount_cents,
-        recurring: { interval: "month", interval_count: 1, usage_type: "licensed" },
+        recurring: { interval: internal.billing_interval as "month" | "year", interval_count: 1, usage_type: "licensed" },
+        tax_behavior: "exclusive",
         metadata: {
           darci_price_code: internal.price_code,
           darci_product_code: "member_membership",
           darci_environment: "test",
-          darci_workflow_allowance: String(internal.included_entitlement_quantity),
+          darci_workflow_allowance: internal.is_unlimited ? "unlimited" : String(internal.included_entitlement_quantity),
+          darci_allowance_period: "month",
         },
       },
       { idempotencyKey: `darci:test:catalog:${internal.price_code}:v1` },
@@ -142,7 +147,8 @@ const findOrCreatePrices = async (productId: string, catalog: CatalogPrice[]) =>
       price.unit_amount !== internal.unit_amount_cents ||
       price.currency.toUpperCase() !== internal.currency_code ||
       price.type !== "recurring" ||
-      price.recurring?.interval !== "month" ||
+      price.recurring?.interval !== internal.billing_interval ||
+      price.tax_behavior !== "exclusive" ||
       price.recurring.interval_count !== 1 ||
       price.lookup_key !== internal.price_code
     ) {
@@ -262,15 +268,17 @@ const main = async () => {
     });
   }
 
-  const { error: activateError } = await supabase
-    .from("billing_catalog_prices")
-    .update({ is_active: true, updated_at: new Date().toISOString() })
-    .in("price_code", [...PRICE_CODES]);
-  if (activateError) throw new Error(`Unable to activate DARCi prices: ${activateError.message}`);
-
   const portal = await syncPortalConfiguration(product.id, mappedPrices.map(({ price }) => price.id));
+  // Preparing mappings never exposes annual/null-limit plans to older clients.
+  const activate = process.argv.includes("--activate");
+  if (activate) {
+    if (!process.argv.includes("--confirm-compatible-clients")) throw new Error("Deploy and validate the v2 API, web and iOS clients before activation; then pass --confirm-compatible-clients");
+    const { error } = await supabase.rpc("activate_member_pricing_v2");
+    if (error) throw new Error(`Catalog activation failed: ${error.message}`);
+  }
   console.log(JSON.stringify({
     environment: "test",
+    activated: activate,
     apiVersion: STRIPE_API_VERSION,
     productId: product.id,
     prices: mappedPrices.map(({ internal, price }) => ({

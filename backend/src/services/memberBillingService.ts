@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { MEMBER_PRICE_CODES, MEMBER_PRICING_V2, classifyMemberPlanChange, isMemberPricingV2 } from "../config/memberPricing";
+import { refreshMemberAllowanceWindow } from "./memberAllowanceWindowService";
 import {
   assertStripeObjectMatchesEnvironment,
   getStripeEnvironment,
@@ -17,11 +19,7 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } },
 );
 
-const ALLOWED_PRICE_CODES = new Set([
-  "member_starter_monthly",
-  "member_plus_monthly",
-  "member_volume_monthly",
-]);
+const ALLOWED_PRICE_CODES = new Set<string>(MEMBER_PRICE_CODES);
 
 const EFFECTIVE_SUBSCRIPTION_STATUSES = [
   "pending",
@@ -32,6 +30,7 @@ const EFFECTIVE_SUBSCRIPTION_STATUSES = [
   "incomplete",
   "unpaid",
 ];
+const ENDED_SUBSCRIPTION_STATUSES = new Set(["canceled", "expired", "incomplete_expired"]);
 
 type AppUser = {
   id: string;
@@ -47,8 +46,10 @@ type CatalogPrice = {
   display_name: string;
   currency_code: string;
   unit_amount_cents: number;
-  included_entitlement_quantity: number;
-  usage_limit_quantity: number;
+  included_entitlement_quantity: number | null;
+  usage_limit_quantity: number | null;
+  is_unlimited?: boolean;
+  billing_interval?: "month" | "year";
 };
 
 type MemberSubscriptionRecord = {
@@ -64,7 +65,8 @@ type MemberSubscriptionRecord = {
 type MemberSubscriptionItemRecord = {
   id: string;
   price_code_snapshot: string;
-  usage_limit_quantity: number;
+  usage_limit_quantity: number | null;
+  is_unlimited?: boolean;
 };
 
 export class MemberBillingServiceError extends Error {
@@ -149,9 +151,10 @@ const loadPrice = async (priceCode: string) => {
 
   const { data: price, error } = await supabaseAdmin
     .from("billing_catalog_prices")
-    .select("id, product_id, price_code, display_name, currency_code, unit_amount_cents, included_entitlement_quantity, usage_limit_quantity")
+    .select("id, product_id, price_code, display_name, currency_code, unit_amount_cents, included_entitlement_quantity, usage_limit_quantity, is_unlimited, billing_interval")
     .eq("price_code", priceCode)
     .eq("is_active", true)
+    .eq("available_for_purchase", true)
     .single();
   if (error || !price) {
     throw new MemberBillingServiceError(409, "billing_price_unavailable", "Membership price is not available");
@@ -201,7 +204,7 @@ const loadEffectiveMemberSubscription = async (billingAccountId: string) => {
 
   const { data: item, error: itemError } = await supabaseAdmin
     .from("billing_subscription_items")
-    .select("id, price_code_snapshot, usage_limit_quantity")
+    .select("id, price_code_snapshot, usage_limit_quantity, is_unlimited")
     .eq("subscription_id", subscription.id)
     .eq("role_context", "member")
     .single();
@@ -219,7 +222,7 @@ const recordPlanChangeRequest = async (input: {
   subscription: MemberSubscriptionRecord;
   actorUserId: string;
   idempotencyKey: string;
-  changeType: "upgrade" | "downgrade";
+  changeType: "upgrade" | "downgrade" | "cadence_change";
   currentPriceCode: string;
   targetPriceCode: string;
   effectiveAt: string | null;
@@ -284,7 +287,7 @@ export const changeMemberMembershipPlan = async (input: {
     && recordedPlanChange.idempotency_key === input.idempotencyKey
     && recordedPlanChange.target_price_code === targetPrice.price_code
   ) {
-    const type = recordedPlanChange.type === "upgrade" ? "upgrade" : "downgrade";
+    const type = recordedPlanChange.type === "upgrade" ? "upgrade" : recordedPlanChange.type === "cadence_change" ? "cadence_change" : "downgrade";
     return {
       changeType: type,
       status: type === "upgrade" ? "pending_webhook" as const : "scheduled" as const,
@@ -318,9 +321,10 @@ export const changeMemberMembershipPlan = async (input: {
     throw new MemberBillingServiceError(409, "billing_plan_unchanged", "This is already your current plan");
   }
 
-  const changeType = targetPrice.usage_limit_quantity > current.item.usage_limit_quantity
-    ? "upgrade" as const
-    : "downgrade" as const;
+  const changeType = classifyMemberPlanChange(
+    { priceCode: current.item.price_code_snapshot, limit: current.item.usage_limit_quantity, unlimited: current.item.is_unlimited === true },
+    { priceCode: targetPrice.price_code, limit: targetPrice.usage_limit_quantity, unlimited: targetPrice.is_unlimited === true },
+  );
   const stripe = getStripeClient();
   let subscription = await stripe.subscriptions.retrieve(current.subscription.provider_subscription_id);
   assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
@@ -396,7 +400,7 @@ export const changeMemberMembershipPlan = async (input: {
       metadata: {
         darci_environment: getStripeEnvironment(),
         darci_billing_account_id: account.id,
-        darci_plan_change_kind: "downgrade",
+        darci_plan_change_kind: changeType,
       },
       phases: [
         {
@@ -407,11 +411,11 @@ export const changeMemberMembershipPlan = async (input: {
         },
         {
           start_date: phaseEnd,
-          duration: { interval: "month", interval_count: 1 },
+          duration: { interval: targetPrice.billing_interval ?? "month", interval_count: 1 },
           items: [{ price: targetMapping.provider_price_id, quantity: 1 }],
           proration_behavior: "none",
           metadata: {
-            darci_plan_change_kind: "downgrade",
+            darci_plan_change_kind: changeType,
             darci_requested_price_code: targetPrice.price_code,
             darci_plan_change_token: input.idempotencyKey,
           },
@@ -736,7 +740,7 @@ export const createMemberCustomerPortalSession = async (input: { dbUserId: strin
   return { portalUrl: session.url };
 };
 
-export const getMemberMembershipStatus = async (input: { dbUserId: string }) => {
+export const getMemberMembershipStatus = async (input: { dbUserId: string; catalogVersion?: number }) => {
   const { data: user, error: userError } = await supabaseAdmin
     .from("users")
     .select("id, status")
@@ -752,7 +756,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
   const { data: rawCatalog, error: catalogError } = await supabaseAdmin
     .from("billing_catalog_prices")
     .select(
-      "id, price_code, display_name, currency_code, unit_amount_cents, billing_interval, interval_count, included_entitlement_quantity, usage_limit_quantity, sort_order",
+      "id, price_code, display_name, currency_code, unit_amount_cents, billing_interval, interval_count, included_entitlement_quantity, usage_limit_quantity, is_unlimited, available_for_purchase, sort_order",
     )
     .in("price_code", Array.from(ALLOWED_PRICE_CODES))
     .eq("is_active", true)
@@ -773,7 +777,14 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
   let entitlement: Record<string, unknown> | null = null;
   let activationPending = false;
 
+  const v2Catalog = (rawCatalog ?? []).filter(price => isMemberPricingV2(price.price_code));
+  const v2Available = v2Catalog.length === MEMBER_PRICING_V2.length;
+  if (v2Available && input.catalogVersion !== 2) {
+    throw new MemberBillingServiceError(426, "billing_client_update_required", "Update DARCi to view monthly, annual and Unlimited memberships. Your existing documents remain available.");
+  }
+
   if (account) {
+    await refreshMemberAllowanceWindow(account.id);
     const [{ data: subscriptionData, error: subscriptionError }, { count: pendingOrderCount, error: pendingError }] = await Promise.all([
       supabaseAdmin
         .from("billing_subscriptions")
@@ -797,7 +808,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
     if (subscriptionError) throw new Error(`Subscription status lookup failed: ${subscriptionError.message}`);
     if (pendingError) throw new Error(`Pending Checkout status lookup failed: ${pendingError.message}`);
     subscription = subscriptionData as Record<string, unknown> | null;
-    activationPending = !subscription && (pendingOrderCount ?? 0) > 0;
+    activationPending = (!subscription || ENDED_SUBSCRIPTION_STATUSES.has(String(subscription.status))) && (pendingOrderCount ?? 0) > 0;
 
     if (subscription?.id) {
       const { data: itemData, error: itemError } = await supabaseAdmin
@@ -812,7 +823,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
       if (subscriptionItem?.id) {
         const { data: entitlementData, error: entitlementError } = await supabaseAdmin
           .from("billing_entitlements")
-          .select("id, status, quantity_total, quantity_used, starts_at, ends_at")
+          .select("id, status, quantity_total, quantity_used, is_unlimited, starts_at, ends_at")
           .eq("subscription_item_id", String(subscriptionItem.id))
           .eq("entitlement_type", "document_workflow_capacity")
           .order("starts_at", { ascending: false })
@@ -853,13 +864,16 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
     providerEnvironment: getStripeEnvironment(),
     paymentsReal: getStripeEnvironment() === "live",
     enforcementMode: getBillingEnforcementMode(),
-    plans: (rawCatalog ?? []).map((price) => ({
+    catalogVersion: v2Available ? 2 : 1,
+    plans: (rawCatalog ?? []).filter(price => !isMemberPricingV2(price.price_code) || v2Available).map((price) => ({
       priceCode: price.price_code,
       displayName: price.display_name,
       currencyCode: price.currency_code,
       unitAmountCents: price.unit_amount_cents,
       billingInterval: price.billing_interval,
       intervalCount: price.interval_count,
+      isUnlimited: price.is_unlimited === true,
+      availableForPurchase: price.available_for_purchase !== false && (v2Available ? isMemberPricingV2(price.price_code) : true),
       documentWorkflowAllowance:
         price.usage_limit_quantity ?? price.included_entitlement_quantity,
     })),
@@ -873,7 +887,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
         ? subscriptionItem.display_name_snapshot
         : null,
       pendingPlanChange: scheduledTargetPriceCode ? {
-        type: planChange?.type === "downgrade" ? "downgrade" : "upgrade",
+        type: planChange?.type === "cadence_change" ? "cadence_change" : planChange?.type === "downgrade" ? "downgrade" : "upgrade",
         status: planChange?.status === "scheduled" ? "scheduled" : "pending_webhook",
         targetPriceCode: scheduledTargetPriceCode,
         effectiveAt: typeof planChange?.effective_at === "string" ? planChange.effective_at : null,
@@ -886,6 +900,9 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
         : null,
       cancelAtPeriodEnd: subscription?.cancel_at_period_end === true,
       allowance: {
+        isUnlimited: entitlement?.is_unlimited === true,
+        periodStart: entitlement?.starts_at ?? null,
+        periodEnd: entitlement?.ends_at ?? null,
         total,
         used,
         remaining,
@@ -900,7 +917,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
       reasonCode: policy.reasonCode,
     },
     actions: {
-      canCheckout: !subscription && !activationPending,
+      canCheckout: (!subscription || ENDED_SUBSCRIPTION_STATUSES.has(subscriptionStatus ?? "")) && !activationPending,
       iosCheckoutAvailable: process.env.IOS_MEMBER_CHECKOUT_ENABLED === "true",
       canOpenPortal: Boolean(subscription),
       planChangeAvailable: ["active", "trialing"].includes(subscriptionStatus ?? "")

@@ -90,6 +90,7 @@ app.use(
       "X-Request-Id",
       "X-Request-Signature",
       "X-DARCi-Profile",
+      "X-Darci-Billing-Catalog",
     ],
     exposedHeaders: ["X-DARCI-Auth-Otp-Logger", "X-DARCI-Auth-Otp-Trace-Id", "X-Request-Id"],
   })

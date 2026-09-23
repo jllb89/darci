@@ -14,6 +14,7 @@ struct MemberBillingView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var viewModel: MemberBillingViewModel
+    @State private var proposedPlan: MemberBillingPlan?
 
     init(
         session: AuthSession,
@@ -56,7 +57,7 @@ struct MemberBillingView: View {
                         showsSpinner: true,
                         proxy: proxy
                     )
-                } else if let membership = viewModel.membership, membership.needsRecovery {
+                } else if let membership = viewModel.membership, membership.needsRecovery, viewModel.payload?.actions.canCheckout != true {
                     recoveryScreen(membership, proxy: proxy)
                 } else {
                     paywall(proxy: proxy)
@@ -83,6 +84,18 @@ struct MemberBillingView: View {
             Task { await viewModel.refreshAfterReturningToApp() }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .confirmationDialog("Confirm plan change", isPresented: Binding(get: { proposedPlan != nil }, set: { if !$0 { proposedPlan = nil } }), titleVisibility: .visible) {
+            if let plan = proposedPlan {
+                Button("Confirm \(plan.displayName) · \(formattedPrice(plan))/\(plan.billingInterval)") {
+                    Task { await viewModel.changePlan(to: plan) }
+                }
+            }
+            Button("Cancel", role: .cancel) { proposedPlan = nil }
+        } message: {
+            if let plan = proposedPlan {
+                Text(planChangeConfirmation(plan))
+            }
+        }
     }
 
     private func paywall(proxy: GeometryProxy) -> some View {
@@ -122,12 +135,27 @@ struct MemberBillingView: View {
                         .foregroundStyle(.black)
                         .padding(.top, 29 * scale)
 
+                    if viewModel.membership?.needsRecovery == true {
+                        Text("Your previous membership has ended. Choose a plan to subscribe again; your existing records remain preserved.")
+                            .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     VStack(spacing: 9 * scale) {
-                        ForEach(viewModel.plans) { plan in
+                        if viewModel.plans.contains(where: { $0.billingInterval == "year" }) {
+                            cadenceSelector(scale: scale, dark: false)
+                        }
+                        ForEach(viewModel.offeredPlans) { plan in
                             billingPlanRow(plan, scale: scale)
                         }
                     }
                     .padding(.top, 22 * scale)
+
+                    Text("USD, before applicable taxes. Notary fees are separate. One trust package, standalone POA or uploaded notarization counts as one workflow. No rollover. Unlimited is subject to normal file-size, rate and anti-abuse safeguards.")
+                        .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
+                        .foregroundStyle(Color.black.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 12 * scale)
 
                     if let errorMessage = viewModel.errorMessage {
                         billingError(errorMessage, scale: scale)
@@ -217,7 +245,7 @@ struct MemberBillingView: View {
                         .font(DARCiFont.maisonNeue(.medium, size: 14 * scale))
                         .foregroundStyle(isSelected ? Color.white : Color.black)
 
-                    Text("\(plan.documentWorkflowAllowance) documents / month")
+                    Text(plan.allowanceDescription)
                         .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
                         .foregroundStyle(isSelected ? Color.white.opacity(0.58) : Color.black.opacity(0.42))
                 }
@@ -230,7 +258,7 @@ struct MemberBillingView: View {
                         .font(DARCiFont.maisonNeue(.medium, size: 14 * scale))
                         .foregroundStyle(isSelected ? Color.white : Color.black)
 
-                    Text("per month")
+                    Text(plan.billingInterval == "year" ? "per year" : "per month")
                         .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
                         .foregroundStyle(isSelected ? Color.white.opacity(0.58) : Color.black.opacity(0.42))
                 }
@@ -250,15 +278,16 @@ struct MemberBillingView: View {
             .contentShape(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(plan.displayName), \(plan.documentWorkflowAllowance) documents per month, \(formattedPrice(plan))")
+        .accessibilityLabel("\(plan.displayName), \(plan.allowanceDescription), \(formattedPrice(plan)) per \(plan.billingInterval)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("member-billing-plan-\(plan.priceCode)")
     }
 
+    @ViewBuilder
     private func paywallFooter(scale: CGFloat) -> some View {
-        let plan = selectedPlan
-
-        return VStack(spacing: 0) {
+        Group {
+        if let plan = selectedPlan {
+        VStack(spacing: 0) {
             if viewModel.payload?.actions.iosCheckoutAvailable == true {
                 Button {
                     Task {
@@ -267,7 +296,7 @@ struct MemberBillingView: View {
                     }
                 } label: {
                     Text(viewModel.startingPriceCode == nil
-                        ? "Continue with \(plan.displayName) · \(formattedPrice(plan))/mo"
+                        ? "Continue with \(plan.displayName) · \(formattedPrice(plan))/\(plan.billingInterval == "year" ? "yr" : "mo")"
                         : "Opening Stripe…")
                         .font(DARCiFont.maisonNeue(.medium, size: 15 * scale))
                         .foregroundStyle(.white)
@@ -291,7 +320,7 @@ struct MemberBillingView: View {
                     .accessibilityIdentifier("member-billing-purchase-policy-notice")
             }
 
-            Text("\(plan.documentWorkflowAllowance) documents every month · No rollover")
+            Text(plan.billingInterval == "year" ? "Billed annually upfront · Allowance resets monthly · No rollover" : "\(plan.allowanceDescription) · No rollover")
                 .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
                 .foregroundStyle(Color.black.opacity(0.45))
                 .padding(.top, 11 * scale)
@@ -339,6 +368,10 @@ struct MemberBillingView: View {
             .foregroundStyle(Color.black.opacity(0.42))
             .padding(.top, 13 * scale)
             .padding(.bottom, 40 * scale)
+        }
+        } else {
+            Text("Load membership options to continue.").font(DARCiFont.maisonNeue(.book, size: 12 * scale)).padding()
+        }
         }
         .background(Color.white)
     }
@@ -390,7 +423,7 @@ struct MemberBillingView: View {
                                 Text(membership.planName ?? plan?.displayName ?? "DARCi membership")
                                     .font(DARCiFont.maisonNeue(.book, size: 20 * scale))
 
-                                Text(plan.map { "\(formattedPrice($0)) per month" } ?? "Monthly membership")
+                                Text(plan.map { "\(formattedPrice($0)) per \($0.billingInterval)" } ?? "Membership")
                                     .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
                                     .foregroundStyle(Color.black.opacity(0.55))
                             }
@@ -449,8 +482,8 @@ struct MemberBillingView: View {
                             .fill(Color.white.opacity(0.22))
                             .frame(height: 0.5)
                         statusRow(
-                            "Current period",
-                            value: "\(formattedDate(membership.currentPeriodStart)) – \(formattedDate(membership.currentPeriodEnd))",
+                            "Document allowance period",
+                            value: "\(formattedDate(membership.allowance.periodStart ?? membership.currentPeriodStart)) – \(formattedDate(membership.allowance.periodEnd ?? membership.currentPeriodEnd))",
                             scale: scale
                         )
                         Rectangle()
@@ -511,7 +544,42 @@ struct MemberBillingView: View {
                     .padding(.top, 26 * scale)
                     .accessibilityIdentifier("member-billing-portal-button")
 
-                    Text("Stripe manages payment methods, invoice history and cancellation. Plan switching is unavailable during private beta.")
+                    if viewModel.payload?.actions.iosCheckoutAvailable == true {
+                        VStack(alignment: .leading, spacing: 14 * scale) {
+                            Text("Change your plan").font(DARCiFont.maisonNeue(.book, size: 20 * scale))
+                            Text("Same-frequency upgrades are prorated immediately and preserve this month’s usage. Downgrades and frequency changes begin at your paid-through renewal date.")
+                                .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
+                                .fixedSize(horizontal: false, vertical: true)
+                            cadenceSelector(scale: scale, dark: true)
+                            ForEach(viewModel.offeredPlans) { option in
+                                Button {
+                                    proposedPlan = option
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("\(option.displayName) · \(formattedPrice(option))/\(option.billingInterval)")
+                                        Text(option.allowanceDescription)
+                                        Text(option.priceCode == membership.priceCode ? "Current plan" : "Request plan change")
+                                    }
+                                    .font(DARCiFont.maisonNeue(.book, size: 13 * scale))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(14 * scale)
+                                    .background(Color.white.opacity(0.12))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.changingPlan || option.priceCode == membership.priceCode || membership.pendingPlanChange?.targetPriceCode == option.priceCode || viewModel.payload?.actions.planChangeAvailable != true)
+                            }
+                            if let change = membership.pendingPlanChange {
+                                Text(change.type == "upgrade" ? "Upgrade awaiting Stripe confirmation." : "Plan change scheduled for \(formattedDate(change.effectiveAt)).")
+                                    .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
+                            } else if let message = viewModel.planChangeMessage {
+                                Text(message).font(DARCiFont.maisonNeue(.book, size: 12 * scale))
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.top, 26 * scale)
+                    }
+
+                    Text("Stripe manages payment methods, invoice history and cancellation. Prices are before applicable taxes; notary fees are separate.")
                         .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
                         .lineSpacing(3 * scale)
                         .foregroundStyle(Color.white.opacity(0.42))
@@ -699,10 +767,9 @@ struct MemberBillingView: View {
         }
     }
 
-    private var selectedPlan: MemberBillingPlan {
-        viewModel.plans.first(where: { $0.priceCode == viewModel.selectedPriceCode })
-            ?? viewModel.plans.first
-            ?? MemberBillingPlan.fallbackPlans[1]
+    private var selectedPlan: MemberBillingPlan? {
+        viewModel.offeredPlans.first(where: { $0.priceCode == viewModel.selectedPriceCode })
+            ?? viewModel.offeredPlans.first
     }
 
     private func currentPlan(for membership: MemberMembershipPayload.Membership) -> MemberBillingPlan? {
@@ -715,7 +782,8 @@ struct MemberBillingView: View {
         formatter.numberStyle = .currency
         formatter.locale = Locale(identifier: "en_US")
         formatter.currencyCode = plan.currencyCode
-        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = plan.unitAmountCents % 100 == 0 ? 0 : 2
+        formatter.maximumFractionDigits = 2
         return formatter.string(from: amount as NSDecimalNumber) ?? "$\(plan.unitAmountCents / 100)"
     }
 
@@ -739,10 +807,42 @@ struct MemberBillingView: View {
     }
 
     private func remainingCopy(_ allowance: MemberMembershipPayload.Allowance) -> String {
+        if allowance.isUnlimited == true { return "Unlimited documents. Usage is recorded for your records." }
         guard let remaining = allowance.remaining else {
             return "Usage updates whenever a document workflow begins."
         }
         return "\(remaining) document\(remaining == 1 ? "" : "s") remaining in the current period."
+    }
+
+    private func planChangeConfirmation(_ plan: MemberBillingPlan) -> String {
+        let membership = viewModel.membership
+        let current = viewModel.plans.first { $0.priceCode == membership?.priceCode }
+        let currentLimit = membership?.allowance.isUnlimited == true ? Int.max : membership?.allowance.total ?? 0
+        let targetLimit = plan.isUnlimited == true ? Int.max : plan.documentWorkflowAllowance ?? 0
+        let immediate = current?.billingInterval == plan.billingInterval && targetLimit > currentLimit
+        let timing = immediate ? "This upgrade is prorated immediately and preserves this month’s usage." : "This change starts on \(formattedDate(membership?.currentPeriodEnd)); your current plan remains until then."
+        return "\(formattedPrice(plan)) per \(plan.billingInterval), before applicable taxes. Notary fees are separate. \(timing)"
+    }
+
+    private func cadenceSelector(scale: CGFloat, dark: Bool) -> some View {
+        HStack(spacing: 8 * scale) {
+            ForEach(["month", "year"], id: \.self) { cadence in
+                let selected = viewModel.billingCadence == cadence
+                Button { viewModel.selectCadence(cadence) } label: {
+                    Text(cadence == "year" ? "Annual" : "Monthly")
+                        .font(DARCiFont.maisonNeue(.book, size: 13 * scale))
+                        .foregroundStyle(selected ? (dark ? Color.black : Color.white) : (dark ? Color.white : Color.black))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(selected ? (dark ? DARCiTheme.onboardingGreen : Color.black) : Color.gray.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("member-billing-cadence-\(cadence)")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Billing frequency")
     }
 
     private func recoveryCopy(for state: String) -> (title: String, body: String) {

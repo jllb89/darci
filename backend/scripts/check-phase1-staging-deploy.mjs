@@ -18,7 +18,8 @@ try {
   };
   const schema=await get('');
   const required = ['claim_document_invite','record_protected_identity_verification','record_document_render_provenance',
-    'commit_hash_only_output','complete_hash_only_package','is_auth_session_active'];
+    'commit_hash_only_output','complete_hash_only_package','is_auth_session_active',
+    'refresh_member_billing_window','refresh_due_member_billing_windows','activate_member_pricing_v2'];
   const missing = required.filter(rpc => !schema.paths?.[`/rpc/${rpc}`]);
   assert.equal(missing.length, 0, `Missing Phase 1 database capabilities: ${missing.join(', ')}. Apply reviewed migrations before deployment.`);
   const config=await get('billing_runtime_configuration?singleton=eq.true&select=stripe_environment');

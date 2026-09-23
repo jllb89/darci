@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  FALLBACK_MEMBER_PLANS,
+  LEGACY_MEMBER_PLAN_FIXTURES,
   createCheckoutIdempotencyToken,
   isActiveMembershipState,
   isRecoveryMembershipState,
 } from "./memberBilling";
 
 describe("member billing helpers", () => {
-  it("keeps the simplified catalog limited to three document allowances", () => {
-    expect(FALLBACK_MEMBER_PLANS.map((plan) => plan.documentWorkflowAllowance)).toEqual([
+  it("preserves the three historical contracts without using them as storefront fallbacks", () => {
+    expect(LEGACY_MEMBER_PLAN_FIXTURES.map((plan) => plan.documentWorkflowAllowance)).toEqual([
       3, 10, 25,
     ]);
-    expect(new Set(FALLBACK_MEMBER_PLANS.map((plan) => plan.billingInterval))).toEqual(
+    expect(new Set(LEGACY_MEMBER_PLAN_FIXTURES.map((plan) => plan.billingInterval))).toEqual(
       new Set(["month"]),
     );
   });
@@ -31,7 +31,7 @@ describe("member billing helpers", () => {
   });
 
   it("keeps plan prices ordered from Starter through Volume", () => {
-    expect(FALLBACK_MEMBER_PLANS.map((plan) => plan.unitAmountCents)).toEqual([
+    expect(LEGACY_MEMBER_PLAN_FIXTURES.map((plan) => plan.unitAmountCents)).toEqual([
       4900, 9900, 19900,
     ]);
   });

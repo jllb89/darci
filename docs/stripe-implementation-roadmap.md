@@ -1,7 +1,7 @@
 # DARCi Stripe Implementation Roadmap
 
 - Status: **active implementation roadmap**
-- Revised: 2026-08-27
+- Revised: 2026-09-23
 - Release authority: [Production readiness roadmap, 2026-09-17](production-readiness-roadmap-2026-09-17.md)
 - Historical client request: `docs/DARCi_Payment_Logic_Spec.md`
 
@@ -9,7 +9,7 @@
 
 ## Purpose
 
-Implement the paid scope that DARCi has actually approved: three monthly member subscription tiers with identical features and different document-workflow allowances.
+Implement the approved member membership: three tiers with identical features, monthly or annual payment, and monthly document-workflow allowances (3, 25, Unlimited). The 23 September v2 approval supersedes earlier annual/Unlimited exclusions; other dated phase snapshots below remain history. [Current implementation and staged rollout](member-pricing-v2-rollout-2026-09-23.md).
 
 The implementation must remain small enough for the current engagement while preserving clean extension points for the broader client payment proposal if that work is separately approved and paid for later.
 
@@ -27,21 +27,23 @@ This roadmap supersedes every earlier DARCi roadmap statement that assigns subsc
 
 ### Launch plans
 
-DARCi offers one membership product with three monthly recurring prices. Every tier receives the same application features; only the monthly document-workflow allowance changes.
+DARCi offers one membership product with six new recurring Prices: three tiers × two cadences. Annual plans are paid upfront but retain monthly allowances. USD, before applicable taxes; notary fees separate.
 
-| Internal price code | Display name | Monthly allowance | Price |
-| --- | --- | ---: | --- |
-| `member_starter_monthly` | Member Starter | 3 workflows | $49 USD/month |
-| `member_plus_monthly` | Member Plus | 10 workflows | $99 USD/month |
-| `member_volume_monthly` | Member Volume | 25 workflows | $199 USD/month |
+| Tier | Monthly allowance | Monthly | Annual |
+| --- | --- | --- | --- |
+| Starter | 3 workflows | $9.99 | $99 |
+| Plus | 25 workflows | $19.99 | $199 |
+| Unlimited | No workflow quota | $59.99 | $599 |
+
+New codes use `member_{starter,plus,unlimited}_{monthly,annual}_v2`. Legacy codes/mappings remain for existing subscriptions; do not repoint or migrate them. New test Prices are verified but DARCi activation waits for the compatible API/web/TestFlight release.
 
 The client-facing reasoning and market context are recorded in `docs/member-membership-pricing-rationale.md`.
 
 Rules:
 
-- Monthly billing only for the current scope.
-- No annual prices at launch.
-- No unlimited tier at launch.
+- Monthly or annual billing; annual payment does not grant the full year's finite allowance at once.
+- Monthly-anniversary reset, without rollover. Genuine Unlimited uses an explicit flag, not a fake high quota.
+- Any cadence change takes effect at the existing paid-through renewal date; annual downgrades wait until annual renewal.
 - No automatic overage charges.
 - Unused allowance does not roll over.
 - When the allowance is exhausted, the member must upgrade or wait for the next billing period.
@@ -589,9 +591,9 @@ Authorization:
 
 ## Future Paid Expansion Path
 
-The following sequence describes compatibility goals, not authorized implementation:
+The following sequence describes compatibility goals; only annual member billing was subsequently approved in v2:
 
-1. **Annual member billing** — add annual provider Prices mapped to the same membership product and entitlement metric.
+1. **Annual member billing** — approved and implemented in v2, with monthly allowance windows; staged rollout pending application release.
 2. **One-time Trust registration** — activate a separate one-time catalog product/order fulfillment path.
 3. **Dynamic POA** — define a separate product entitlement and lifecycle; do not overload `document_workflow` usage.
 4. **Pro credit bundles** — activate wallet/lot/ledger logic, with 12-month expiry and its own atomic reservation/commit policy.

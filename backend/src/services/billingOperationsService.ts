@@ -47,6 +47,7 @@ type SubscriptionItemSnapshot = {
   subscription_id: string;
   price_code_snapshot: string;
   usage_limit_quantity: number | null;
+  is_unlimited?: boolean;
   current_period_start: string | null;
   current_period_end: string | null;
   metadata: Record<string, unknown> | null;
@@ -58,6 +59,7 @@ type EntitlementSnapshot = {
   subscription_item_id: string | null;
   status: string;
   quantity_total: number | null;
+  is_unlimited?: boolean;
   quantity_used: number;
   starts_at: string | null;
   ends_at: string | null;
@@ -187,9 +189,19 @@ export const analyzeBillingReconciliation = (
   const subscriptionById = new Map(snapshot.subscriptions.map((row) => [row.id, row]));
   const providerById = new Map(snapshot.providerSubscriptions.map((row) => [row.id, row]));
   const itemBySubscription = new Map(snapshot.subscriptionItems.map((row) => [row.subscription_id, row]));
+  const itemById = new Map(snapshot.subscriptionItems.map(row => [row.id, row]));
   const entitlementByItem = new Map(
     snapshot.entitlements
       .filter((row) => row.subscription_item_id)
+      .sort((a, b) => Date.parse(a.starts_at ?? "") - Date.parse(b.starts_at ?? ""))
+      .filter((row) => {
+        const item = itemById.get(row.subscription_item_id!);
+        const subscription = item ? subscriptionById.get(item.subscription_id) : undefined;
+        // Terminal contracts reconcile their final window, including synthetic
+        // test-clock renewals in the future. Active contracts need today's window.
+        if (subscription && !ENTITLED_SUBSCRIPTION_STATUSES.has(subscription.status)) return true;
+        return !row.starts_at || Date.parse(row.starts_at) <= now.getTime();
+      })
       .map((row) => [row.subscription_item_id as string, row]),
   );
   const accountByOwner = new Map(snapshot.accounts.map((row) => [row.owner_user_id, row]));
@@ -322,7 +334,7 @@ export const analyzeBillingReconciliation = (
     }
 
     const entitlement = entitlementByItem.get(item.id);
-    if (ENTITLED_SUBSCRIPTION_STATUSES.has(provider.status) && !entitlement) {
+    if (ENTITLED_SUBSCRIPTION_STATUSES.has(provider.status) && (!entitlement || (entitlement.ends_at && Date.parse(entitlement.ends_at) <= now.getTime()))) {
       issues.push(issue({
         code: "active_entitlement_missing",
         severity: "critical",
@@ -347,7 +359,9 @@ export const analyzeBillingReconciliation = (
         repairAction: "resync_subscription",
       }));
     }
-    if (item.usage_limit_quantity !== entitlement.quantity_total) {
+    if (item.usage_limit_quantity !== entitlement.quantity_total
+      || Boolean(item.is_unlimited) !== Boolean(entitlement.is_unlimited)
+      || (entitlement.is_unlimited ? entitlement.quantity_total !== null : entitlement.quantity_total === null)) {
       issues.push(issue({
         code: "allowance_mismatch",
         severity: "high",
@@ -541,8 +555,8 @@ export const getBillingOperationsReport = async (input?: {
   ] = await Promise.all([
     supabaseAdmin.from("billing_accounts").select("id, owner_user_id, status").eq("account_key", "default"),
     supabaseAdmin.from("billing_subscriptions").select("id, billing_account_id, provider_subscription_id, provider_environment, status, current_period_start, current_period_end, cancel_at_period_end, updated_at").eq("role_context", "member"),
-    supabaseAdmin.from("billing_subscription_items").select("id, subscription_id, price_code_snapshot, usage_limit_quantity, current_period_start, current_period_end, metadata").eq("role_context", "member"),
-    supabaseAdmin.from("billing_entitlements").select("id, billing_account_id, subscription_item_id, status, quantity_total, quantity_used, starts_at, ends_at").eq("entitlement_type", "document_workflow_capacity"),
+    supabaseAdmin.from("billing_subscription_items").select("id, subscription_id, price_code_snapshot, usage_limit_quantity, is_unlimited, current_period_start, current_period_end, metadata").eq("role_context", "member"),
+    supabaseAdmin.from("billing_entitlements").select("id, billing_account_id, subscription_item_id, status, quantity_total, is_unlimited, quantity_used, starts_at, ends_at").eq("entitlement_type", "document_workflow_capacity"),
     supabaseAdmin.from("billing_usage_events").select("id, billing_account_id, entitlement_id, document_id, event_kind, quantity_delta, occurred_at").eq("metric_code", "document_workflow"),
     supabaseAdmin.from("document_release_controls").select("id, document_id, release_status, updated_at, documents!inner(owner_id)"),
     supabaseAdmin.from("stripe_webhook_events").select("id, event_id, event_type, object_id, status, attempt_count, next_attempt_at, processing_lease_expires_at, last_error_code, error_message, dead_lettered_at, received_at, processed_at, payload_retention_until").order("received_at", { ascending: false }).limit(webhookLimit),

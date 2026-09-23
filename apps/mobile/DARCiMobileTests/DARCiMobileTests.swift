@@ -3157,6 +3157,39 @@ private struct TestHomeAPIClient: HomeAPIProviding {
 }
 
 final class MemberBillingTests: XCTestCase {
+    func testAnnualUnlimitedCatalogDecodesExplicitQuotaAndCadence() throws {
+        let data = Data(#"{"priceCode":"member_unlimited_annual_v2","displayName":"Unlimited","currencyCode":"USD","unitAmountCents":59900,"billingInterval":"year","intervalCount":1,"documentWorkflowAllowance":null,"isUnlimited":true,"availableForPurchase":true}"#.utf8)
+        let plan = try JSONDecoder().decode(MemberBillingPlan.self, from: data)
+        XCTAssertNil(plan.documentWorkflowAllowance)
+        XCTAssertEqual(plan.isUnlimited, true)
+        XCTAssertEqual(plan.availableForPurchase, true)
+        XCTAssertEqual(plan.billingInterval, "year")
+        XCTAssertEqual(plan.allowanceDescription, "Unlimited documents")
+    }
+
+    func testMissingQuotaIsNotLabeledUnlimited() throws {
+        let data = Data(#"{"priceCode":"broken","displayName":"Unknown","currencyCode":"USD","unitAmountCents":0,"billingInterval":"month","intervalCount":1,"documentWorkflowAllowance":null}"#.utf8)
+        let plan = try JSONDecoder().decode(MemberBillingPlan.self, from: data)
+        XCTAssertNotEqual(plan.isUnlimited, true)
+        XCTAssertNotEqual(plan.allowanceDescription, "Unlimited documents")
+    }
+
+    func testMemberPlanChangeUsesServerTimingAndNoClientAmount() async throws {
+        let session = makeStubbedURLSession { request in
+            XCTAssertEqual(request.url?.path, "/billing/member-membership/plan-change")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Darci-Billing-Catalog"), "2")
+            let body = try self.requestBodyData(for: request)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(payload["targetPriceCode"], "member_plus_annual_v2")
+            XCTAssertNil(payload["amount"])
+            let response = try XCTUnwrap(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil))
+            return (response, Data(#"{"changeType":"cadence_change","status":"scheduled","effectiveAt":"2027-09-23T00:00:00Z"}"#.utf8))
+        }
+        let client = MemberBillingAPIClient(authClient: AuthAPIClient(config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!), urlSession: session))
+        let response = try await client.changePlan(priceCode: "member_plus_annual_v2", idempotencyToken: "fixture-annual", accessToken: "access-token")
+        XCTAssertEqual(response.changeType, "cadence_change")
+        XCTAssertEqual(response.status, "scheduled")
+    }
     override func tearDown() {
         AuthURLProtocolStub.requestHandler = nil
         super.tearDown()
@@ -3220,6 +3253,7 @@ final class MemberBillingTests: XCTestCase {
         let urlSession = makeStubbedURLSession { request in
             XCTAssertEqual(request.url?.path, "/billing/member-membership")
             XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Darci-Billing-Catalog"), "2")
 
             let response = try XCTUnwrap(HTTPURLResponse(
                 url: request.url!,

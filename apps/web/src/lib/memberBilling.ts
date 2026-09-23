@@ -6,6 +6,8 @@ export const MEMBER_PRICE_CODES = [
   "member_starter_monthly",
   "member_plus_monthly",
   "member_volume_monthly",
+  "member_starter_monthly_v2", "member_plus_monthly_v2", "member_unlimited_monthly_v2",
+  "member_starter_annual_v2", "member_plus_annual_v2", "member_unlimited_annual_v2",
 ] as const;
 
 export type MemberPriceCode = (typeof MEMBER_PRICE_CODES)[number];
@@ -17,7 +19,9 @@ export type MemberBillingPlan = {
   unitAmountCents: number;
   billingInterval: string;
   intervalCount: number;
-  documentWorkflowAllowance: number;
+  documentWorkflowAllowance: number | null;
+  isUnlimited?: boolean;
+  availableForPurchase?: boolean;
 };
 
 export type MemberMembershipState =
@@ -45,7 +49,7 @@ export type MemberMembershipPayload = {
     priceCode: MemberPriceCode | null;
     planName: string | null;
     pendingPlanChange: {
-      type: "upgrade" | "downgrade";
+      type: "upgrade" | "downgrade" | "cadence_change";
       status: "pending_webhook" | "scheduled";
       targetPriceCode: MemberPriceCode;
       effectiveAt: string | null;
@@ -58,6 +62,9 @@ export type MemberMembershipPayload = {
       used: number;
       remaining: number | null;
       exhausted: boolean;
+      isUnlimited?: boolean;
+      periodStart?: string | null;
+      periodEnd?: string | null;
     };
     heldFinalPackageCount: number;
   };
@@ -76,7 +83,8 @@ export type MemberMembershipPayload = {
   };
 };
 
-export const FALLBACK_MEMBER_PLANS: MemberBillingPlan[] = [
+// Historical contract fixtures only. Runtime purchase options always come from the API.
+export const LEGACY_MEMBER_PLAN_FIXTURES: MemberBillingPlan[] = [
   {
     priceCode: "member_starter_monthly",
     displayName: "Starter",
@@ -116,6 +124,7 @@ const requestWithTokenRefresh = async (
   const run = (token: string) => {
     const headers = new Headers(init?.headers ?? {});
     headers.set("Authorization", `Bearer ${token}`);
+    headers.set("X-Darci-Billing-Catalog", "2");
 
     return fetch(`${apiBaseUrl}${path}`, {
       ...init,
@@ -215,7 +224,7 @@ export const changeMemberPlan = async (
   );
 
   return readResponse<{
-    changeType: "upgrade" | "downgrade";
+    changeType: "upgrade" | "downgrade" | "cadence_change";
     status: "pending_webhook" | "scheduled";
     currentPriceCode: MemberPriceCode;
     targetPriceCode: MemberPriceCode;

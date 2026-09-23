@@ -1,10 +1,10 @@
-# Member pricing v2 — review proposal, NOT applied
+# Member pricing v2 — approved decisions
 
-Requested by Jorge, 23 September 2026 UTC. This is a decision/implementation draft. **No Stripe product/price/subscription, database catalog, application pricing or commercial policy is changed by this document.** Existing prices still apply to the current deployed build.
+Requested and approved by Jorge, 23 September 2026 UTC: defaults 1–6 accepted, USD/monthly document allowances confirmed, notary fees separate, displayed prices before applicable taxes. Implementation and inactive Stripe test preparation are complete; the compatible application release and catalog activation remain separate. See [the implementation/rollout record](member-pricing-v2-rollout-2026-09-23.md). Existing beta subscriptions remain unchanged.
 
 ## 1. Requested amounts and recommended presentation
 
-USD is assumed from the existing catalog; confirm before implementation. Proposed display names: Starter, Plus, Unlimited. Features stay identical; only document-workflow volume and payment cadence differ. Notaries and invited signers remain free in those roles; no Dynamic POA.
+Currency: USD. Display names: Starter, Plus, Unlimited. Features stay identical; only document-workflow volume and payment cadence differ. Notaries and invited signers remain free in those roles; no Dynamic POA.
 
 | Plan | Included workflows (proposed monthly reset) | Monthly charge | Annual charge, paid up front | Stripe amounts in cents: month / year |
 | --- | --- | --- | --- | --- |
@@ -14,7 +14,7 @@ USD is assumed from the existing catalog; confirm before implementation. Propose
 
 Annual prices save $20.88, $40.88 and $120.88 respectively against twelve monthly payments (approximately 17%). Prefer “Save with annual billing” over an inaccurate universal “20% off” or “two months free.” If showing monthly equivalents, clearly pair $8.25 / $16.58 / $49.92 with **billed $99 / $199 / $599 annually**; rounding must never determine the actual invoice amount.
 
-## 2. Decisions to approve before application
+## 2. Approved defaults and remaining legal boundaries
 
 1. **Annual allowance:** recommend the same 3/25 monthly allowance whether payment is monthly or annual. Annual means prepayment, not only 3/25 for an entire year or 36/300 immediately available. Reset on the subscription's monthly anniversary; no rollover. This requires a monthly entitlement window separate from the annual invoice period.
 2. **What counts:** retain one unit per submitted workflow: one Trust package (even with several PDFs), standalone POA or uploaded-document notarization. Drafts, regeneration/retries, extra package artifacts, signatures, notary steps and downloads do not consume more. Use “document workflows” in explanatory copy so “3 documents” does not imply three PDFs inside one Trust package exhaust the plan.
@@ -22,13 +22,13 @@ Annual prices save $20.88, $40.88 and $120.88 respectively against twelve monthl
 4. **Plan changes:** recommend same-cadence upgrades immediately after the required payment, with proration and existing monthly usage preserved; downgrades at the next paid renewal. Any monthly↔annual change at the existing paid-through date for the initial simple implementation, clearly previewed. Annual downgrade therefore waits until annual renewal. Do not infer upgrade/downgrade from dollar amount alone or grant more quota just by changing cadence.
 5. **Cancellation:** cancel future renewal; access lasts until the paid-through date. Annual members continue receiving their monthly allowance during the paid year. Accepted work continues after lapse; newly completed final packages remain held until reactivation; already released packages remain accessible. No blanket refund entitlement or exclusion is approved here.
 6. **Existing subscriptions:** preserve all current beta subscriptions, invoices, usage and historical Price mappings. Publish the new catalog for new controlled fixtures after approval. No silent mass migration; fresh production starts with approved new catalog only.
-7. **Commercial copy:** confirm whether the membership includes the notary's in-person fee or only platform access. Notaries being free platform users does **not** answer what members pay the notary. Confirm USD, tax-inclusive/exclusive presentation, refunds/support exceptions and trial/promotion posture before publishing terms. Recommendation: no new trials, coupons, automatic overages or one-time charges in this change.
+7. **Commercial copy:** notary fees are separate; prices are USD before applicable taxes. No new trials, coupons, automatic overages or one-time charges are introduced. Tax registration/collection and exact refund/support exceptions still require their own configuration/review; tax-exclusive Prices do not establish tax compliance.
 
-Items 1–6 are proposed defaults, not existing approved policy changes. Item 7 needs actual commercial answers; do not invent a tax classification or legal fee rule.
+Items 1–6 are approved. The remaining legal/tax boundaries do not reopen the approved amounts, allowances or notary-fee separation.
 
-## 3. What the code currently supports—and what is missing
+## 3. Historical gap analysis before this implementation
 
-The current scope lock explicitly excludes annual and unlimited plans. The three original monthly prices are $49/3, $99/10 and $199/25; these new requirements supersede them only after approval and implementation.
+The original scope lock excluded annual and unlimited plans. The approved v2 decision supersedes that restriction. The original monthly prices ($49/3, $99/10 and $199/25) remain historical contracts, not the new catalog. This table records the starting gaps; current completion evidence is in the rollout record.
 
 | Area | Evidence in repository | Required change |
 | --- | --- | --- |
@@ -63,7 +63,7 @@ Paywall title/CTA: **Make it official**. Toggle: **Monthly / Annual**.
 - Usage reset: “Unused monthly allowance does not roll over.”
 - Cancellation: “Cancel renewal anytime. Your membership remains active until [paid-through date].” Avoid suggesting a full annual payment is month-to-month or promising refunds before policy approval.
 - Unlimited detail: “No monthly workflow quota. Standard file, security and processing limits apply.” Not a license to hide a numerical quota elsewhere.
-- Notary-fee sentence: **pending commercial confirmation**. Do not claim “notarization included” or “notary fees extra” until confirmed.
+- Notary-fee sentence, now confirmed: “Notary fees are separate. Prices are in USD before applicable taxes.”
 
 This is product copy for review, not legal approval of subscription/consumer terms. Exact refund, tax, retention, identity and jurisdiction wording belongs in the existing review package.
 
@@ -77,8 +77,8 @@ This is product copy for review, not legal approval of subscription/consumer ter
 6. Deploy staging backend/web; then generate the TestFlight build with the new payload support. Verify old-build behavior and new-storefront disclosure before enabling new prices broadly. Current Phase 1 payment evidence is a baseline, not automatic certification of annual/unlimited behavior.
 7. Team completes the new-pricing section of [the release checklist](release-team-test-checklist-2026-09-23.md); review terms and production activation separately.
 
-## 7. Review reply requested
+## 7. Approval received
 
-Confirm or amend: **USD; annual billing with monthly 3/25 reset and no rollover; true Unlimited; one workflow per Trust/POA/upload; immediate paid same-cadence upgrades and renewal-effective downgrades/cadence changes; existing beta subscriptions unchanged.**
+Jorge approved **USD; annual billing with monthly 3/25 reset and no rollover; true Unlimited; one workflow per Trust/POA/upload; immediate paid same-cadence upgrades and renewal-effective downgrades/cadence changes; existing beta subscriptions unchanged.**
 
-Then answer: **Are notary in-person fees included, and are displayed prices before applicable tax?** Refund/support rules can be drafted for separate review, but are not silently applied.
+Jorge confirmed **notary fees separate** and **prices before applicable taxes**. Refund/support rules and actual tax configuration are not silently invented. No further pricing-default question is pending.

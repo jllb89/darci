@@ -86,6 +86,28 @@ const healthySnapshot = (): BillingReconciliationSnapshot => ({
 });
 
 describe("billing operations reconciliation", () => {
+  it("reconciles the final window of a canceled test-clock contract, not earlier history", () => {
+    const snapshot = healthySnapshot();
+    snapshot.subscriptions[0]!.status = "canceled";
+    snapshot.providerSubscriptions[0]!.status = "canceled";
+    snapshot.subscriptionItems[0]!.usage_limit_quantity = 3;
+    snapshot.entitlements.push({...snapshot.entitlements[0]!,id:"final-clock-window",starts_at:periodEnd,ends_at:"2026-10-01",status:"canceled",quantity_total:3,quantity_used:0});
+    expect(analyzeBillingReconciliation(snapshot,new Date("2026-08-27"))).toEqual([]);
+  });
+  it("uses the current monthly window regardless of historical row order", () => {
+    const snapshot = healthySnapshot();
+    snapshot.entitlements.push({ ...snapshot.entitlements[0]!, id: "old-window", starts_at: "2026-07-01T00:00:00Z", ends_at: periodStart, status: "expired", quantity_used: 99 });
+    expect(analyzeBillingReconciliation(snapshot, new Date("2026-08-27"))).toEqual([]);
+  });
+  it("accepts explicit Unlimited and rejects an accidental null allowance", () => {
+    const snapshot = healthySnapshot();
+    snapshot.subscriptionItems[0]!.usage_limit_quantity = null;
+    snapshot.entitlements[0]!.quantity_total = null;
+    expect(analyzeBillingReconciliation(snapshot, new Date("2026-08-27")).some(issue => issue.code === "allowance_mismatch")).toBe(true);
+    snapshot.subscriptionItems[0]!.is_unlimited = true;
+    snapshot.entitlements[0]!.is_unlimited = true;
+    expect(analyzeBillingReconciliation(snapshot, new Date("2026-08-27"))).toEqual([]);
+  });
   it("reports no drift for a synchronized test membership", () => {
     expect(analyzeBillingReconciliation(
       healthySnapshot(),

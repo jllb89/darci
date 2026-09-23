@@ -6,7 +6,6 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStoredAuth } from "@/lib/auth";
 import {
-  FALLBACK_MEMBER_PLANS,
   changeMemberPlan,
   createMemberCheckout,
   createMemberPortalSession,
@@ -19,7 +18,7 @@ import {
 } from "@/lib/memberBilling";
 
 const PLAN_COPY: Record<
-  MemberPriceCode,
+  string,
   { description: string; popular: boolean }
 > = {
   member_starter_monthly: {
@@ -73,7 +72,8 @@ const formatMoney = (plan: MemberBillingPlan) => {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: plan.currencyCode,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: plan.unitAmountCents % 100 ? 2 : 0,
+    maximumFractionDigits: 2,
   }).format(plan.unitAmountCents / 100);
 };
 
@@ -88,6 +88,13 @@ const formatDate = (value: string | null) => {
     year: "numeric",
   }).format(new Date(value));
 };
+
+const allowanceLabel = (plan: MemberBillingPlan) => plan.isUnlimited ? "Unlimited documents" : `${plan.documentWorkflowAllowance ?? "—"} documents / month`;
+function BillingCadence({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return <div className="my-5 flex justify-center gap-2" aria-label="Billing frequency">
+    {[["month", "Monthly"], ["year", "Annual"]].map(([cadence, label]) => <button key={cadence} type="button" aria-pressed={value === cadence} onClick={() => onChange(cadence)} className={`min-h-11 rounded-full border px-5 text-sm ${value === cadence ? "border-black bg-black text-white" : "border-gray-300"}`}>{label}</button>)}
+  </div>;
+}
 
 const statusLabel = (state: string) => {
   if (state === "trialing") return "Trial active";
@@ -210,6 +217,7 @@ function ActiveMembershipManagement({
   onChangePlan,
 }: ActiveMembershipManagementProps) {
   const { membership } = payload;
+  const [cadence, setCadence] = useState("month");
   const currentPlan = plans.find((plan) => plan.priceCode === membership.priceCode) ?? null;
   const total = membership.allowance.total;
   const used = membership.allowance.used;
@@ -244,7 +252,7 @@ function ActiveMembershipManagement({
 
       {membership.pendingPlanChange ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-          {membership.pendingPlanChange.type === "downgrade"
+          {membership.pendingPlanChange.type !== "upgrade"
             ? `${pendingTargetPlan?.displayName ?? "Your new plan"} is scheduled for ${formatDate(membership.pendingPlanChange.effectiveAt)}. Your current allowance remains available until then.`
             : `Stripe is confirming your upgrade to ${pendingTargetPlan?.displayName ?? "the selected plan"}. Used documents will remain unchanged.`}
         </div>
@@ -261,7 +269,7 @@ function ActiveMembershipManagement({
               </span>
             </div>
             <p className="mt-1 text-sm text-Color-Neutral">
-              {currentPlan ? `${formatMoney(currentPlan)} per month · ${currentPlan.documentWorkflowAllowance} documents` : "Monthly membership"}
+              {currentPlan ? `${formatMoney(currentPlan)} per ${currentPlan.billingInterval} · ${allowanceLabel(currentPlan)}` : "Membership"}
             </p>
           </div>
           {payload.actions.canOpenPortal ? (
@@ -285,7 +293,7 @@ function ActiveMembershipManagement({
             </div>
             <p className="mt-2 text-xs leading-5 text-Color-Neutral">
               {remaining === null
-                ? "Usage updates whenever a document workflow begins."
+                ? membership.allowance.isUnlimited ? "Unlimited documents. Usage is recorded for your records." : "Usage updates whenever a document workflow begins."
                 : `${remaining} document${remaining === 1 ? "" : "s"} remaining in the current period.`}
             </p>
             {!membership.allowance.exhausted ? (
@@ -301,9 +309,9 @@ function ActiveMembershipManagement({
               <dd className="font-medium">{statusLabel(membership.state)}</dd>
             </div>
             <div className="flex items-center justify-between gap-4 py-3">
-              <dt className="text-Color-Neutral">Current period</dt>
+              <dt className="text-Color-Neutral">Document allowance period</dt>
               <dd className="text-right font-medium">
-                {formatDate(membership.currentPeriodStart)} – {formatDate(membership.currentPeriodEnd)}
+                {formatDate(membership.allowance.periodStart ?? membership.currentPeriodStart)} – {formatDate(membership.allowance.periodEnd ?? membership.currentPeriodEnd)}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4 py-3">
@@ -314,13 +322,13 @@ function ActiveMembershipManagement({
             </div>
             <div className="flex items-center justify-between gap-4 pt-3">
               <dt className="text-Color-Neutral">Billing interval</dt>
-              <dd className="font-medium">Monthly</dd>
+              <dd className="font-medium">{currentPlan?.billingInterval === "year" ? "Annual · paid upfront" : "Monthly"}</dd>
             </div>
           </dl>
         </div>
 
         <div className="border-t border-Color-Scheme-1-Border/50 pt-4 text-xs leading-5 text-Color-Neutral">
-          Stripe manages payment methods, invoice history, and cancellation. Plan switching is not available during private beta.
+          Stripe manages payment methods, invoice history, and cancellation. Prices are before applicable taxes; notary fees are separate.
         </div>
       </section>
 
@@ -329,12 +337,13 @@ function ActiveMembershipManagement({
           <div>
             <h2 className="text-lg font-medium">Change monthly allowance</h2>
             <p className="mt-1 text-sm text-Color-Neutral">
-              Upgrades are prorated immediately. Downgrades begin at the next billing period. Used documents never reset.
+              Same-frequency upgrades are prorated immediately. Downgrades and billing-frequency changes begin at your paid-through renewal date. Upgrades preserve this month’s usage.
             </p>
           </div>
         </div>
+        {plans.some(plan => plan.billingInterval === "year") ? <BillingCadence value={cadence} onChange={setCadence} /> : null}
         <div className="mt-5 grid gap-3 md:grid-cols-3">
-          {plans.map((plan) => {
+          {plans.filter(plan => plan.availableForPurchase !== false && plan.billingInterval === cadence).map((plan) => {
             const isCurrent = plan.priceCode === membership.priceCode;
             const isPending = plan.priceCode === membership.pendingPlanChange?.targetPriceCode;
             return (
@@ -343,7 +352,7 @@ function ActiveMembershipManagement({
                   <div>
                     <div className="text-sm font-medium">{plan.displayName}</div>
                     <div className="mt-1 text-xs text-Color-Neutral">
-                      {plan.documentWorkflowAllowance} documents · {formatMoney(plan)}/month
+                      {allowanceLabel(plan)} · {formatMoney(plan)}/{plan.billingInterval}
                     </div>
                   </div>
                   {isCurrent ? <span className="text-[10px] font-medium uppercase tracking-wide">Current</span> : null}
@@ -359,7 +368,8 @@ function ActiveMembershipManagement({
                       ? "Requesting change…"
                       : isPending
                         ? "Change pending"
-                        : plan.documentWorkflowAllowance > (total ?? 0)
+                        : plan.billingInterval !== currentPlan?.billingInterval ? "Schedule frequency change"
+                        : (plan.isUnlimited ? Infinity : plan.documentWorkflowAllowance ?? 0) > (membership.allowance.isUnlimited ? Infinity : total ?? 0)
                           ? "Upgrade"
                           : "Schedule downgrade"}
                   </button>
@@ -374,7 +384,7 @@ function ActiveMembershipManagement({
         <section className="max-w-5xl rounded-lg border border-Color-Scheme-1-Border/60 bg-white px-4 py-4 text-sm">
           <div className="font-medium">Monthly allowance reached</div>
           <p className="mt-1 text-Color-Neutral">
-            New workflows become available when the period renews on {formatDate(membership.currentPeriodEnd)}. Already accepted notary work can still finish.
+            New workflows become available when the allowance resets on {formatDate(membership.allowance.periodEnd ?? membership.currentPeriodEnd)}. Already accepted notary work can still finish.
           </p>
         </section>
       ) : null}
@@ -385,7 +395,7 @@ function ActiveMembershipManagement({
             {membership.heldFinalPackageCount} final package{membership.heldFinalPackageCount === 1 ? " is" : "s are"} safely held
           </div>
           <p className="mt-1 leading-6 text-white/65">
-            Completed files remain preserved. Download, hash, ledger, and public verification access resume while membership is active.
+            Completed files remain preserved. Held-package downloads and verification resume while membership is active.
           </p>
         </section>
       ) : null}
@@ -415,7 +425,7 @@ function PlanCard({
   isStarting,
   onCheckout,
 }: PlanCardProps) {
-  const copy = PLAN_COPY[plan.priceCode] ?? PLAN_COPY.member_starter_monthly;
+  const copy = PLAN_COPY[plan.priceCode] ?? (plan.priceCode.includes("plus") ? PLAN_COPY.member_plus_monthly : plan.isUnlimited ? PLAN_COPY.member_volume_monthly : PLAN_COPY.member_starter_monthly);
 
   return (
     <article
@@ -440,12 +450,13 @@ function PlanCard({
 
       <div className="mt-5 flex items-end gap-2 border-b border-Color-Scheme-1-Border pb-5">
         <span className="text-3xl font-medium leading-none">{formatMoney(plan)}</span>
-        <span className="pb-1 text-sm text-Color-Neutral">/ month</span>
+        <span className="pb-1 text-sm text-Color-Neutral">/ {plan.billingInterval}</span>
       </div>
 
       <p className="mt-4 text-sm font-medium">
-        {plan.documentWorkflowAllowance} documents / month
+        {allowanceLabel(plan)}
       </p>
+      {plan.billingInterval === "year" ? <p className="mt-2 text-xs text-Color-Neutral">Billed annually upfront. Document allowance resets monthly.</p> : null}
       <ul className="mt-4 space-y-3">
         {PLAN_FEATURES.map((feature) => (
           <li className="flex gap-3 text-[13px] leading-5" key={feature}>
@@ -491,6 +502,7 @@ export default function BillingPage() {
   const [startingPlan, setStartingPlan] = useState<MemberPriceCode | null>(null);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
   const [changingPriceCode, setChangingPriceCode] = useState<MemberPriceCode | null>(null);
+  const [cadence, setCadence] = useState("month");
   const billingResult = searchParams.get("billing");
   const hasMemberBillingContext = user?.role === "member" || user?.role === "pro";
 
@@ -536,7 +548,7 @@ export default function BillingPage() {
   }, [billingResult, loadMembership, payload?.membership.state]);
 
   const plans = useMemo(() => {
-    return payload?.plans.length ? payload.plans : FALLBACK_MEMBER_PLANS;
+    return payload?.plans ?? [];
   }, [payload?.plans]);
 
   const handleCheckout = async (priceCode: MemberPriceCode) => {
@@ -573,6 +585,11 @@ export default function BillingPage() {
 
   const handlePlanChange = async (targetPriceCode: MemberPriceCode) => {
     if (!accessToken || changingPriceCode || !payload?.actions.planChangeAvailable) return;
+    const target = plans.find(plan => plan.priceCode === targetPriceCode);
+    const current = plans.find(plan => plan.priceCode === payload.membership.priceCode);
+    if (!target) return;
+    const immediate = target.billingInterval === current?.billingInterval && (target.isUnlimited ? Infinity : target.documentWorkflowAllowance ?? 0) > (payload.membership.allowance.isUnlimited ? Infinity : payload.membership.allowance.total ?? 0);
+    if (!window.confirm(`${target.displayName}: ${formatMoney(target)} per ${target.billingInterval}, before applicable taxes. ${immediate ? "This upgrade will be prorated immediately; this month’s usage stays unchanged." : `This change starts on ${formatDate(payload.membership.currentPeriodEnd)}; your current plan remains until then.`} Notary fees are separate. Continue?`)) return;
     setChangingPriceCode(targetPriceCode);
     setErrorMessage(null);
     try {
@@ -601,7 +618,7 @@ export default function BillingPage() {
 
   const membershipState = payload?.membership.state ?? "none";
   const canCheckout = Boolean(
-    payload?.actions.canCheckout && membershipState === "none" && !isLoading,
+    payload?.actions.canCheckout && ["none", "canceled", "expired", "incomplete_expired"].includes(membershipState) && !isLoading,
   );
 
   if (payload && isActiveMembershipState(membershipState)) {
@@ -638,7 +655,7 @@ export default function BillingPage() {
           Create, sign, notarize, and securely verify trusts, powers of attorney, and uploaded documents. Choose only how many you need each month.
         </p>
         <p className="mt-5 text-xs font-medium text-Color-Neutral">
-          Same features on every plan · Monthly billing · Secure Stripe checkout
+          Same features on every plan · Secure Stripe checkout
         </p>
       </header>
 
@@ -676,8 +693,10 @@ export default function BillingPage() {
           </p>
         </div>
 
+        {plans.some(plan => plan.billingInterval === "year") ? <BillingCadence value={cadence} onChange={setCadence} /> : null}
+        <p className="mb-5 text-center text-xs leading-5 text-Color-Neutral">Prices in USD, before applicable taxes. Notary fees are separate. One trust package, standalone POA or uploaded notarization counts as one document workflow. Monthly allowances do not roll over. Unlimited remains subject to normal file-size, rate and anti-abuse safeguards.</p>
         <div className="grid gap-5 lg:grid-cols-3">
-          {plans.map((plan) => (
+          {plans.filter(plan => plan.availableForPurchase !== false && plan.billingInterval === cadence).map((plan) => (
             <PlanCard
               canCheckout={canCheckout}
               isCurrent={payload?.membership.priceCode === plan.priceCode}
@@ -718,7 +737,7 @@ export default function BillingPage() {
             {
               number: "03",
               title: "Keep verifiable proof",
-              body: "Receive the seal, acknowledgment, hash, ledger record, and public verification for the final package.",
+              body: "Receive the seal, acknowledgment, SHA-256 integrity evidence, and public status/hash verification for the final package.",
             },
           ].map((benefit, index) => (
             <article
@@ -761,7 +780,7 @@ export default function BillingPage() {
           <strong>
             {payload.membership.heldFinalPackageCount} final package{payload.membership.heldFinalPackageCount === 1 ? " is" : "s are"} safely held.
           </strong>{" "}
-          The completed files remain preserved, but download, hash, ledger, and public verification access stay hidden until membership is restored.
+          The completed files remain preserved, but held-package downloads and verification stay hidden until membership is restored.
         </section>
       ) : null}
 

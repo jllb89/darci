@@ -1,5 +1,7 @@
 # DARCi Member Membership Pricing Rationale
 
+> Historical rationale, superseded for new sales on 23 September 2026: Jorge approved $9.99/3, $19.99/25 and $59.99/Unlimited monthly, or $99/$199/$599 annually with the same monthly allowances. USD, before applicable taxes; notary fees separate. See [approved pricing](member-pricing-v2-review-proposal-2026-09-23.md) and [rollout/evidence](member-pricing-v2-rollout-2026-09-23.md). Existing beta subscriptions remain unchanged. The old recommendation below is retained as history, not current pricing.
+
 - Decision date: 2026-08-26
 - Initial currency: USD
 - Billing interval: monthly

@@ -16,11 +16,12 @@ vi.mock("../../src/config/stripe", () => ({
 import { changeMemberMembershipPlan } from "../../src/services/memberBillingService";
 
 describe("member downgrade provider contract", () => {
+  let records: Record<string, any>;
   const start = 1790107200, end = 1792699200;
   const subscription = { id: "internal-sub", provider_subscription_id: "sub_fixture", status: "active", cancel_at_period_end: false, metadata: {} };
   beforeEach(() => {
     vi.resetAllMocks();
-    const records: Record<string, unknown> = {
+    records = {
       users: { id: "user-fixture", email: "fixture@example.invalid", status: "active", email_confirmed_at: "2026-09-22" },
       billing_accounts: { id: "account-fixture", status: "active" },
       billing_catalog_prices: { id: "catalog-fixture", price_code: "member_starter_monthly", usage_limit_quantity: 3 },
@@ -65,5 +66,20 @@ describe("member downgrade provider contract", () => {
     expect(mocks.createSchedule).not.toHaveBeenCalled();
     expect(mocks.retrieveSchedule).toHaveBeenCalledWith("sched_existing");
     expect(mocks.updateSchedule.mock.calls[0]?.[0]).toBe("sched_existing");
+  });
+  it("defers a monthly-to-annual change and uses a full annual target phase", async () => {
+    records.billing_catalog_prices = {id:"catalog-annual",price_code:"member_plus_annual_v2",usage_limit_quantity:25,billing_interval:"year",is_unlimited:false};
+    const result = await changeMemberMembershipPlan({dbUserId:"user-fixture",targetPriceCode:"member_plus_annual_v2",idempotencyKey:"annual-fixture"});
+    expect(result.changeType).toBe("cadence_change");
+    expect(mocks.updateSchedule.mock.calls[0]?.[1].phases[1]).toMatchObject({start_date:end,duration:{interval:"year",interval_count:1},proration_behavior:"none"});
+  });
+  it("keeps an annual downgrade at the paid-through annual renewal", async () => {
+    records.billing_subscription_items = {price_code_snapshot:"member_unlimited_annual_v2",usage_limit_quantity:null,is_unlimited:true};
+    records.billing_catalog_prices = {id:"catalog-annual",price_code:"member_starter_annual_v2",usage_limit_quantity:3,billing_interval:"year",is_unlimited:false};
+    const annualEnd = start + 365*24*60*60;
+    mocks.retrieveSubscription.mockResolvedValue({id:"sub_fixture",schedule:null,items:{data:[{price:{id:"price_annual"},current_period_start:start,current_period_end:annualEnd}]}});
+    mocks.createSchedule.mockResolvedValue({id:"sched_annual",current_phase:{start_date:start,end_date:annualEnd}});
+    const result = await changeMemberMembershipPlan({dbUserId:"user-fixture",targetPriceCode:"member_starter_annual_v2",idempotencyKey:"annual-down"});
+    expect(result).toMatchObject({changeType:"downgrade",effectiveAt:new Date(annualEnd*1000).toISOString()});
   });
 });

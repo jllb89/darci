@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { refreshMemberAllowanceWindow } from "./memberAllowanceWindowService";
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -34,6 +35,7 @@ type EntitlementRecord = {
   subscription_item_id: string | null;
   status: string;
   quantity_total: number | null;
+  is_unlimited?: boolean;
   quantity_used: number;
   starts_at: string | null;
   ends_at: string | null;
@@ -111,7 +113,7 @@ const getCurrentEntitlement = async (billingAccountId: string) => {
   const { data, error } = await supabaseAdmin
     .from("billing_entitlements")
     .select(
-      "id, billing_account_id, subscription_item_id, status, quantity_total, quantity_used, starts_at, ends_at",
+      "id, billing_account_id, subscription_item_id, status, quantity_total, quantity_used, is_unlimited, starts_at, ends_at",
     )
     .eq("billing_account_id", billingAccountId)
     .eq("entitlement_type", "document_workflow_capacity")
@@ -187,6 +189,7 @@ export const evaluateMemberBillingPolicy = async (ownerUserId: string) => {
     });
   }
 
+  await refreshMemberAllowanceWindow(account.id);
   const entitlement = await getCurrentEntitlement(account.id);
   if (!entitlement) {
     return buildDecision({
@@ -197,7 +200,8 @@ export const evaluateMemberBillingPolicy = async (ownerUserId: string) => {
     });
   }
 
-  if (entitlement.quantity_total === null) {
+  if ((entitlement.quantity_total === null && entitlement.is_unlimited !== true)
+      || (entitlement.quantity_total !== null && entitlement.is_unlimited === true)) {
     return buildDecision({
       mode,
       account,
@@ -207,7 +211,7 @@ export const evaluateMemberBillingPolicy = async (ownerUserId: string) => {
     });
   }
 
-  if (entitlement.quantity_used >= entitlement.quantity_total) {
+  if (entitlement.quantity_total !== null && entitlement.quantity_used >= entitlement.quantity_total) {
     return buildDecision({
       mode,
       account,

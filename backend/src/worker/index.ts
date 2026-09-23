@@ -17,6 +17,7 @@ import {
   getBillingOperationsReport,
   runStripeWebhookRetentionCleanup,
 } from "../services/billingOperationsService";
+import { refreshDueMemberAllowanceWindows } from "../services/memberAllowanceWindowService";
 
 type HashingJobData = {
   documentId: string;
@@ -370,6 +371,7 @@ const runBillingReconciliationOnce = async () => {
   if (billingReconciliationRunInFlight) return;
   billingReconciliationRunInFlight = true;
   try {
+    await refreshDueMemberAllowanceWindows();
     const report = await getBillingOperationsReport({ includeProvider: true, webhookLimit: 500 });
     if (report.readiness.blockingIssueCount > 0) {
       const error = new Error(`Billing reconciliation found ${report.readiness.blockingIssueCount} blocking issue(s)`);

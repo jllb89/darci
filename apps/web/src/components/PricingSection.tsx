@@ -3,23 +3,26 @@ import Link from "next/link";
 const plans = [
   {
     name: "Member Starter",
-    price: "$49",
-    allowance: "3 document workflows",
+    price: "$9.99",
+    annualPrice: "$99",
+    allowance: "Up to 3 document workflows each month",
     description: "A simple monthly allowance for occasional Trust, POA, or uploaded-document needs.",
     featured: false,
   },
   {
     name: "Member Plus",
-    price: "$99",
-    allowance: "10 document workflows",
+    price: "$19.99",
+    annualPrice: "$199",
+    allowance: "Up to 25 document workflows each month",
     description: "More room for active households managing several important documents throughout the month.",
     featured: true,
   },
   {
-    name: "Member Volume",
-    price: "$199",
-    allowance: "25 document workflows",
-    description: "The same complete DARCi experience with a larger monthly document allowance.",
+    name: "Member Unlimited",
+    price: "$59.99",
+    annualPrice: "$599",
+    allowance: "Unlimited document workflows",
+    description: "The same complete DARCi experience without a monthly workflow quota. Standard security and processing limits apply.",
     featured: false,
   },
 ] as const;
@@ -73,6 +76,7 @@ export default function PricingSection() {
                 </span>
               </div>
               <div className="mt-5 text-base font-medium">{plan.allowance}</div>
+              <p className="mt-2 text-sm">Or {plan.annualPrice} billed annually upfront.</p>
               <p className={`mt-3 text-sm leading-6 ${plan.featured ? "text-white/60" : "text-Color-Neutral"}`}>
                 {plan.description}
               </p>
@@ -102,7 +106,7 @@ export default function PricingSection() {
         </div>
 
         <p className="mt-8 text-xs leading-5 text-Color-Neutral">
-          Monthly billing only. Unused workflows do not roll over. Notaries and invited signees do not pay DARCi.
+          USD, before applicable taxes. Notary fees are separate. Annual plans retain the same monthly allowance; unused workflows do not roll over. Notaries and invited signees do not pay DARCi.
           Private-beta Checkout uses Stripe test mode, so no real funds move.
         </p>
       </div>

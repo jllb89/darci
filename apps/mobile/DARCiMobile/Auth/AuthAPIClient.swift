@@ -203,6 +203,9 @@ struct AuthAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if path.hasPrefix("/billing/") {
+            request.setValue("2", forHTTPHeaderField: "X-Darci-Billing-Catalog")
+        }
         request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Request-Id")
 
         if let accessToken, accessToken.isEmpty == false {

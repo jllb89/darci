@@ -39,6 +39,17 @@ const buildApp = () => {
 };
 
 describe("member membership Checkout API", () => {
+  it.each(["member_starter_monthly_v2", "member_plus_monthly_v2", "member_unlimited_monthly_v2", "member_starter_annual_v2", "member_plus_annual_v2", "member_unlimited_annual_v2"])("accepts the approved versioned code %s without client-side prices", async priceCode => {
+    mocks.checkout.mockResolvedValue({checkoutUrl: "https://checkout.stripe.com/test"});
+    const response = await request(buildApp()).post("/billing/member-membership/checkout").send({priceCode,idempotencyToken:"new-price-fixture"});
+    expect(response.status).toBe(201);
+    expect(mocks.checkout).toHaveBeenCalledWith({dbUserId:"db-user-1",priceCode,idempotencyKey:"new-price-fixture"});
+  });
+  it("passes explicit catalog capability without trusting a price or amount", async () => {
+    mocks.status.mockResolvedValue({plans: []});
+    await request(buildApp()).get("/billing/member-membership").set("X-Darci-Billing-Catalog", "2").expect(200);
+    expect(mocks.status).toHaveBeenCalledWith({dbUserId:"db-user-1",catalogVersion:2});
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

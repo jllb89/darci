@@ -8,22 +8,16 @@ import {
   MemberBillingServiceError,
 } from "../services/memberBillingService";
 import { captureMessage } from "../utils/sentry";
+import { MEMBER_PRICE_CODES } from "../config/memberPricing";
+const allowedMemberPriceCodes: ReadonlySet<string> = new Set(MEMBER_PRICE_CODES);
 
 const checkoutSchema = z.object({
-  priceCode: z.enum([
-    "member_starter_monthly",
-    "member_plus_monthly",
-    "member_volume_monthly",
-  ]),
+  priceCode: z.string().refine(value => allowedMemberPriceCodes.has(value)),
   idempotencyToken: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/),
 }).strict();
 
 const planChangeSchema = z.object({
-  targetPriceCode: z.enum([
-    "member_starter_monthly",
-    "member_plus_monthly",
-    "member_volume_monthly",
-  ]),
+  targetPriceCode: z.string().refine(value => allowedMemberPriceCodes.has(value)),
   idempotencyToken: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/),
 }).strict();
 
@@ -101,7 +95,9 @@ export const getMemberMembership = async (req: Request, res: Response) => {
     });
   }
   try {
-    return res.status(200).json(await getMemberMembershipStatus({ dbUserId: req.user.dbUserId }));
+    return res.status(200).json(await getMemberMembershipStatus({ dbUserId: req.user.dbUserId,
+      ...(req.get("X-Darci-Billing-Catalog") === "2" ? { catalogVersion: 2 } : {}),
+    }));
   } catch (error) {
     return respondWithError(res, error);
   }
