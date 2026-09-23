@@ -2828,7 +2828,12 @@ const buildDocumentSigningState = async (input: {
   ]);
 
   const systemValues = Array.isArray(rawSystemValues) ? rawSystemValues : [];
-  const versions = Array.isArray(rawVersions) ? rawVersions : [];
+  const allVersions = Array.isArray(rawVersions) ? rawVersions : [];
+  const canAccessFinalPackage = !allVersions.some(isFinalPackageDocumentVersion) || await canViewerAccessFinalPackage({
+    documentId: input.document.id,
+    viewerRole: input.viewerRole,
+  });
+  const versions = allVersions.filter(version => canAccessFinalPackage || !isFinalPackageDocumentVersion(version));
   const generationRuns = Array.isArray(rawGenerationRuns) ? rawGenerationRuns : [];
   const reviewApproval = parseReviewApprovalValue(
     systemValues.find((value) => value.system_key === "review_approval")?.value_json,

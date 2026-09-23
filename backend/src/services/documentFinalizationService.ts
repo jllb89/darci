@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { loadPdfForProcessing, saveValidatedPdf, validateRenderedPdf } from "./pdfProcessingService";
 import { captureMessage } from "../utils/sentry";
+import { resumePendingFinalPackageRelease } from "./finalPackageRecoveryService";
 import path from "path";
 import {
   PDFDocument as PdfLibDocument,
@@ -2380,11 +2381,18 @@ export const watermarkWithNotice = async (input: {
       throw new DocumentFinalizationConflictError("Completed final package requires review");
     }
     for (const item of reusableItems) await assertStoredWatermarkEvidence(item);
-    // A retry on any already-completed package is read-only: never
-    // rewrite its receipt, release decision, acknowledgment, PDF or workflow.
+    const result = await loadExistingWatermarkResult({ document: context.document, request: context.request, executions: existingWatermarks });
+    // Completion and billing are separate transactions. Recover only the
+    // explicitly pending decision left by a crash between them; terminal
+    // held/released decisions and every PDF/evidence byte remain unchanged.
+    const releaseControl = await resumePendingFinalPackageRelease({
+      ownerUserId: context.document.owner_id, documentId: context.document.id,
+      documentVersionId: result.version.id, documentHashRecordId: result.hashRecord.id,
+      actorUserId: context.actorUserId,
+    });
     return {
-      ...(await loadExistingWatermarkResult({ document: context.document, request: context.request, executions: existingWatermarks })),
-      releaseControl: await getDocumentReleaseControl(context.document.id),
+      ...result,
+      releaseControl,
     };
   }
 

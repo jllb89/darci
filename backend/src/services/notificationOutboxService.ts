@@ -731,7 +731,10 @@ export const deriveNotificationJobStatus = (input: {
     }
   }
 
-  if (failedCount > 0 && input.attemptCount < maxAttempts) {
+  // Provider bounces, complaints and suppressions are terminal. Only a
+  // retryable failed delivery may schedule another worker attempt.
+  const retryableFailedCount = input.deliveries.filter(delivery => delivery.status === "failed").length;
+  if (retryableFailedCount > 0 && input.attemptCount < maxAttempts) {
     return {
       status: "scheduled" as NotificationJobStatus,
       shouldRetry: true,

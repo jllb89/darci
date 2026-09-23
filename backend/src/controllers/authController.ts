@@ -73,6 +73,21 @@ const refreshSchema = z.object({
   refreshToken: z.string().trim().min(1),
 });
 
+const isTransientAuthProviderFailure = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { status?: unknown; name?: unknown };
+  return (typeof value.status === "number" && (value.status === 429 || value.status >= 500))
+    || value.name === "AuthRetryableFetchError" || value.name === "TypeError";
+};
+
+const sendRefreshProviderUnavailable = (req: Request, res: Response, error: unknown) => {
+  reportAuthIssue({ area: "session", operation: "refresh", reason: "provider_unavailable", level: "error",
+    requestId: getRequestTraceId(req), method: req.method, path: req.originalUrl ?? req.path,
+    statusCode: 503, provider: "supabase", error });
+  res.setHeader("Retry-After", "5");
+  return res.status(503).json({ error: "auth_temporarily_unavailable", message: "Session service is temporarily unavailable. Please try again." });
+};
+
 const emailActionSchema = z.object({
   email: z.string().email(),
   returnTo: returnToSchema,
@@ -1270,6 +1285,11 @@ export const refresh = async (req: Request, res: Response) => {
       refresh_token: parsed.data.refreshToken,
     });
   } catch (refreshError) {
+    // A provider outage must not be reported as a revoked/expired credential:
+    // clients intentionally clear their session on an authentication 401.
+    if (isTransientAuthProviderFailure(refreshError) || !(refreshError && typeof refreshError === "object" && "status" in refreshError)) {
+      return sendRefreshProviderUnavailable(req, res, refreshError);
+    }
     console.warn("[auth.refresh]", {
       component: "auth.refresh",
       event: "refresh_session_failed",
@@ -1295,6 +1315,8 @@ export const refresh = async (req: Request, res: Response) => {
   }
 
   const { data, error } = refreshedSession;
+
+  if (isTransientAuthProviderFailure(error)) return sendRefreshProviderUnavailable(req, res, error);
 
   if (error || !data.session || !data.user) {
     reportAuthIssue({

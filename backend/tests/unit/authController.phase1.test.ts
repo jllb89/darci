@@ -107,6 +107,30 @@ describe("auth controller Phase 1", () => {
     mocks.resendSendMock.mockResolvedValue({ error: null });
   });
 
+  it.each([429, 500, 503])("does not invalidate a session when refresh provider returns %s", async status => {
+    const refreshSession = vi.fn().mockResolvedValue({data:{session:null,user:null},error:{status,message:"PRIVATE PROVIDER DETAIL"}});
+    mocks.createClientMock.mockReturnValue({auth:{refreshSession}});
+    const {refresh}=await import("../../src/controllers/authController");const response=buildResponse();
+    await refresh({body:{refreshToken:"private-refresh"},headers:{},method:"POST",path:"/auth/refresh"} as unknown as Request,response.res);
+    expect(response.status).toHaveBeenCalledWith(503);expect(response.setHeader).toHaveBeenCalledWith("Retry-After","5");
+    expect(response.json.mock.calls[0]?.[0]).toMatchObject({error:"auth_temporarily_unavailable"});
+    expect(JSON.stringify(response.json.mock.calls)).not.toContain("PRIVATE PROVIDER DETAIL");
+  });
+
+  it("keeps genuinely rejected refresh credentials unauthorized", async()=>{
+    mocks.createClientMock.mockReturnValue({auth:{refreshSession:vi.fn().mockResolvedValue({data:{session:null,user:null},error:{status:400,message:"Invalid refresh token"}})}});
+    const {refresh}=await import("../../src/controllers/authController");const response=buildResponse();
+    await refresh({body:{refreshToken:"revoked"},headers:{}} as unknown as Request,response.res);
+    expect(response.status).toHaveBeenCalledWith(401);
+  });
+
+  it("reports a thrown network failure as retryable, not expired authentication",async()=>{
+    mocks.createClientMock.mockReturnValue({auth:{refreshSession:vi.fn().mockRejectedValue(new TypeError("fetch failed"))}});
+    const {refresh}=await import("../../src/controllers/authController");const response=buildResponse();
+    await refresh({body:{refreshToken:"still-valid"},headers:{}} as unknown as Request,response.res);
+    expect(response.status).toHaveBeenCalledWith(503);
+  });
+
   it("creates a confirmation-aware signup without bypassing Supabase email confirmation", async () => {
     const signUpMock = vi.fn().mockResolvedValue({
       data: {

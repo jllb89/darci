@@ -7,6 +7,10 @@ import {
 } from "../../src/services/notificationOutboxService";
 
 describe("notificationOutboxService", () => {
+  it.each(["bounced", "complained", "suppressed"] as const)("does not retry terminal provider %s", status => {
+    expect(deriveNotificationJobStatus({ deliveries: [{ status }], attemptCount: 1 })).toMatchObject({ shouldRetry: false, isTerminal: true });
+    expect(deriveNotificationJobStatus({ deliveries: [{ status }, { status: "delivered" }], attemptCount: 1 })).toMatchObject({ status: "partially_sent", shouldRetry: false, isTerminal: true });
+  });
   it("marks a job completed when all deliveries have terminal success statuses", () => {
     const result = deriveNotificationJobStatus({
       deliveries: [{ status: "delivered" }, { status: "opened" }, { status: "accepted" }],

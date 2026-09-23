@@ -80,6 +80,15 @@ This exercises **log → metric → alarm → SNS**, not all originating applica
 
 ## Current limitations
 
+### 23 September acceptance update
+
+See [the acceptance closeout](phase1-acceptance-closeout-2026-09-23.md) for actual source-failure, callback, crash and continuity results; the older limitations below retain their dated scope.
+
+- Auth provider outages now return 503/Retry-After rather than an invalid-session 401. Retry without clearing otherwise valid credentials; actual invalid credentials still return 401.
+- Completed finalization with a matching **pending** release control can resume billing evaluation after actor/package/exact-byte validation. Do not manually set release status or re-render. Terminal held/released controls remain unchanged; missing/mismatched evidence needs review.
+- Bounces, complaints and suppression are terminal for automatic outbox retries. A deferred provider delivery stays sent; it is not permission to send another email. Migration `20260923012000` permits suppression-event persistence without rewriting history.
+- To forward captured isolated source signals through the existing approved email drill, add `--source-receipts <private-recovery-directory>` to the detector command. This explicitly labels them synthetic and preserves correlation; it does not manufacture hosted errors or watchdog success.
+
 - Source emitters/watchdog and completed-package retry are deployed and verified at `d166019`. Remaining originating-failure drills are tracked separately in the Phase 1 record.
 - Human non-billing step-up/enrollment UI is deployed and its API boundary tested; full UI interaction acceptance remains. Controlled deployed deferral/no-resend, recovered-app/worker restart, selective restored-job resumption and the recovered held/signer access matrix pass. Remaining scope includes OTP/bounce/suppression and physical-device faults.
 - Jorge approved disabling unverified OTLP. Running staging API `104`/worker `90` explicitly set `OTEL_SDK_DISABLED=1`, verified against their exact deployed image digests with no conflicting secret entry. CloudWatch logs and all eight operational alarms remain enabled; this route does not depend on OTLP or Sentry. Recheck effective task configuration on future rollouts; an old value in the source app secret is not the task's effective override.

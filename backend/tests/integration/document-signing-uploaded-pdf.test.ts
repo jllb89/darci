@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  canViewerAccessFinalPackageMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
   getOrCreateUserIdMock: vi.fn(),
   getUserIdBySupabaseIdMock: vi.fn(),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   createDocumentDownloadUrlMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   getUserIdentityContextBySupabaseIdMock: vi.fn(),
+}));
+vi.mock("../../src/services/billingPolicyService", async importOriginal => ({
+  ...await importOriginal<typeof import("../../src/services/billingPolicyService")>(),
+  canViewerAccessFinalPackage: mocks.canViewerAccessFinalPackageMock,
 }));
 
 vi.mock("../../src/services/documentService", async (importOriginal) => {
@@ -87,6 +92,7 @@ const signToken = (payload: TokenPayload) => {
 
 describe("uploaded-pdf signing state", () => {
   beforeEach(() => {
+    mocks.canViewerAccessFinalPackageMock.mockReset().mockResolvedValue(false);
     process.env.SUPABASE_JWT_SECRET = "test-secret";
     mocks.getDocumentByIdMock.mockReset();
     mocks.getOrCreateUserIdMock.mockReset();
@@ -112,6 +118,25 @@ describe("uploaded-pdf signing state", () => {
       signedUrl: "https://example.test/signing.pdf",
       expiresInSeconds: 3600,
     });
+  });
+
+  it.each([false,true])("filters final signing assets before URL minting; released=%s", async released => {
+    mocks.canViewerAccessFinalPackageMock.mockResolvedValue(released);
+    mocks.getDocumentByIdMock.mockResolvedValue({id:"doc-1",owner_id:"owner-1",idn:"AB12CD34EF56",status:"completed",document_type:"generic",jurisdiction:"US-CA",intake_status:"submitted",output_bundle:[{outputKey:"uploaded_document",outputLabel:"Upload",isRequired:true,sortOrder:0}],created_at:"2026-03-05T00:00:00Z"});
+    mocks.getOrCreateUserIdMock.mockResolvedValue("owner-1");mocks.getUserIdBySupabaseIdMock.mockResolvedValue("owner-1");
+    mocks.listDocumentSystemValuesMock.mockResolvedValue([{system_key:"review_approval",value_json:{approvedAt:"2026-03-05T00:00:00Z",reviewSource:"uploaded_pdf",approvedOutputKeys:["uploaded_document"],approvedVersionIds:["original"]}}]);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      {id:"final",version:3,generation_run_id:"run",storage_path:"owner/doc/finalization/watermark/final.pdf",mime_type:"application/pdf",is_final:true,created_at:"2026-03-05T02:00:00Z"},
+      {id:"ack",version:2,generation_run_id:"run",storage_path:"owner/doc/finalization/acknowledgment/doc-acknowledged-v2.pdf",mime_type:"application/pdf",is_final:false,created_at:"2026-03-05T01:00:00Z"},
+      {id:"original",version:1,generation_run_id:"run",storage_path:"owner/doc/original.pdf",mime_type:"application/pdf",is_final:false,created_at:"2026-03-05T00:00:00Z"},
+    ].reverse());
+    mocks.listDocumentGenerationRunsMock.mockResolvedValue([{id:"run",output_key:"uploaded_document",document_key:"uploaded_document",status:"rendered",created_at:"2026-03-05T00:01:00Z",document_version_id:"original",blocking_requirements_json:[]}]);
+    mocks.listDocumentOutputSignersMock.mockResolvedValue([]);mocks.listDocumentSignaturesMock.mockResolvedValue([]);mocks.listDocumentPartiesMock.mockResolvedValue([]);
+    const response=await request(app).get('/documents/doc-1/signing').set('Authorization','Bearer '+signToken({sub:'member',role:'member'}));
+    expect(response.status).toBe(200);
+    expect(response.body.signing.outputs[0].versionId).toBe(released?'final':'original');
+    expect(JSON.stringify(mocks.createDocumentDownloadUrlMock.mock.calls)).not.toContain(released?'original.pdf':'finalization/');
+    if(!released)expect(JSON.stringify(response.body)).not.toContain('finalization/');
   });
 
   it("repairs uploaded-pdf approvals into a ready signing state", async () => {

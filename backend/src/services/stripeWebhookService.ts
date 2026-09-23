@@ -297,7 +297,9 @@ export const processStoredStripeWebhook = async (input: {
     p_max_attempts: 8,
   });
   if (error) throw new Error(`Stripe webhook claim failed: ${error.message}`);
-  if (!data) return { claimed: false };
+  // PostgREST serializes a NULL composite return as an object whose fields
+  // are all null. It is truthy, but does not represent an acquired lease.
+  if (!data?.id) return { claimed: false };
 
   const claimed = data as StoredWebhook;
   try {

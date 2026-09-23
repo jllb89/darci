@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {categories} from './stack.mjs';
 assert(process.argv.includes('--approve-staging-alert-drill'),'Explicit staging detector email drill approval required');
 const aws=args=>JSON.parse(execFileSync('aws',[...args,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']})||'{}');
@@ -10,6 +11,17 @@ assert(['CREATE_COMPLETE','UPDATE_COMPLETE'].includes(stack.StackStatus));
 const run='phase1-detector-drill-'+randomUUID(),group='/ecs/darci-staging-api';
 aws(['logs','create-log-stream','--log-group-name',group,'--log-stream-name',run]);
 const timestamp=Date.now();
-const events=categories.flatMap(category=>Array.from({length:category==='auth'?5:1},()=>({timestamp,message:JSON.stringify({kind:'darci_critical_signal',category,environment:'staging',correlationId:randomUUID(),synthetic:true,drill:run,at:new Date(timestamp).toISOString()})})));
+const receiptIndex=process.argv.indexOf('--source-receipts');
+let signals;
+if(receiptIndex!==-1){
+ const folder=process.argv[receiptIndex+1];assert(folder,'Source receipt directory required');
+ const source=JSON.parse(readFileSync(folder+'/source-failures-report.json','utf8'));
+ const document=JSON.parse(readFileSync(folder+'/finalization-crash-report.json','utf8'));
+ assert(source.passed&&document.passed);
+ signals=[...source.cases.flatMap(c=>c.signals),...document.signals];
+ for(const category of categories)assert(signals.filter(s=>s.category===category).length>=(category==='auth'?5:1));
+ for(const s of signals)assert(s.kind==='darci_critical_signal'&&categories.includes(s.category)&&s.correlationId);
+}else signals=categories.flatMap(category=>Array.from({length:category==='auth'?5:1},()=>({category,correlationId:randomUUID()})));
+const events=signals.map(s=>({timestamp,message:JSON.stringify({kind:'darci_critical_signal',category:s.category,environment:'staging',correlationId:s.correlationId,synthetic:true,drill:run,sourceEnvironment:s.environment??'synthetic',sourceAt:s.at??null,documentId:s.documentId??null,at:new Date(timestamp).toISOString()})}));
 aws(['logs','put-log-events','--log-group-name',group,'--log-stream-name',run,'--log-events',JSON.stringify(events)]);
-console.log(JSON.stringify({run,logGroup:group,at:new Date(timestamp).toISOString(),categories,eventCount:events.length,scope:'Log -> metric -> alarm -> SNS route only. Does not represent actual client failures or certify source instrumentation. No synthetic watchdog success is emitted.'}));
+console.log(JSON.stringify({run,logGroup:group,at:new Date(timestamp).toISOString(),categories,eventCount:events.length,scope:signals[0]?.environment?'Captured isolated application failures forwarded through staging metrics/alarms/SNS; not hosted client failures. No synthetic watchdog success.':'Log -> metric -> alarm -> SNS route only; not source instrumentation proof.'}));
