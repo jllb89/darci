@@ -1,5 +1,9 @@
 # Phase 2 execution — 23 September 2026
 
+**Latest readback:** the first scheduled 02:00 backup completed and its exact-version PDF/index restore check passed; all five production tasks and ten alarms remain healthy. Release verification was strengthened locally and tested against actual running image digests read-only. [Continuation evidence](production-release-verification-2026-09-23.md) supersedes historical “no objects / not yet published / first scheduled run pending” notes below. Protected OIDC rollout, deliberate health-failure rollback, consecutive backup cadence and provider activation remain open.
+
+**Later follow-through:** the deployment files below were committed in `4f29c95` (the historical “local/uncommitted” notes are superseded). GitHub OIDC production promotion has still not run. The fresh project now contains the explicitly approved unsigned recovery fixtures, not customer data. Exact production-image Auth/Storage/API/PDF/key and selective worker reconstruction passed; see [the recovery acceptance record](production-recovery-acceptance-2026-09-23.md). Automatic cadence, application-health rollback and the broader Phase 2 gates remain open.
+
 ## Current status
 
 **The private production application and HTTPS routing are deployed; broader Phase 2 acceptance and public launch remain open.** Staging remains the team's test environment. No client documents, subscriptions, signatures or PDF bytes were changed.
@@ -37,11 +41,11 @@
 | Cache bounds | 1 GB maximum storage / 1,000 ECPUs/sec maximum; launch capacity still requires load/queue testing. Database-driven queue reconstruction remains necessary; this is not a proven cache recovery drill. |
 | Supabase | `illuminotary-production`, project `jdrgluisxhgegdsesman`, healthy in `us-east-1`, DARCi organization `crtrwwmuscgueqlsgjdj` |
 | Supabase data | 103 original rehearsed migrations plus tested `20260923050000` = **104**. Production namespace `live`, activation **false**; live mutations and test entitlements rejected. No beta import or customer fixtures |
-| Storage | `documents`, `signatures`, `notarized-copies` private; no production PDF objects yet |
+| Storage | `documents`, `signatures`, `notarized-copies` private; one approved unsigned synthetic two-page TEST PDF in each, no customer PDFs |
 | Auth | Production app origin configured; public/email signup disabled during provisioning; no production messaging provider activated |
 | Secrets | `/darci/production/app` and `/darci/production/recovery-source`; newly generated production credentials/key, no staging-secret copy. Values are never committed. |
 | Recovery vault | Stack `darci-production-backup`; private versioned S3 bucket `darci-production-backup-427057633951-us-east-1`; rotating KMS key; scoped no-delete writer and separate recovery reader |
-| GitHub | `production` environment, required reviewer `jllb89`, only `master`. Approved machine release roles created; public anon key configured as an environment variable. Workflow/script files prepared locally, **not yet published or exercised through OIDC**. Master branch protection unchanged |
+| GitHub | `production` environment, required reviewer `jllb89`, only `master`. Approved machine release roles created; public anon key configured as an environment variable. Workflow published in `4f29c95`, **not yet exercised through OIDC**. Follow-up verifier/read-permission changes local. Master branch protection unchanged |
 | TLS | ACM certificate `c700d210-3e78-4a4f-931e-4bb3e5697d45`, **ISSUED** 23 September 04:33:35 UTC; both app/API domain validations SUCCESS |
 
 The first backup-stack create failed during validation because a inherited log-group name collided with staging. No resources were created by that failed attempt. Only its verified-empty failed stack record was removed; the corrected production log group is `/darci/production/recovery/backup`. Staging backup resources were preserved.

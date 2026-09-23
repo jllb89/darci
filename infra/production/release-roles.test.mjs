@@ -8,6 +8,9 @@ test('release requires the production environment; cannot read credentials or ad
   assert.equal(r.AssumeRolePolicyDocument.Statement[0].Condition.StringEquals['token.actions.githubusercontent.com:sub'],'repo:jllb89/darci:environment:production');
   const text=JSON.stringify(t);
   assert(text.includes('elasticloadbalancing:DescribeLoadBalancers'));
+  const reads=r.Policies[0].PolicyDocument.Statement;
+  assert.equal(reads.find(s=>s.Action.includes('ecs:ListTasks')).Condition.ArnEquals['ecs:cluster'],'arn:aws:ecs:us-east-1:427057633951:cluster/darci-production');
+  assert.equal(reads.find(s=>s.Action.includes('ecs:DescribeTasks')).Resource,'arn:aws:ecs:us-east-1:427057633951:task/darci-production/*');
   for(const disallowed of ['secretsmanager:GetSecretValue','ecs:RunTask','ecs:DeregisterTaskDefinition','iam:CreateRole','ec2:AuthorizeSecurityGroupIngress','darci-staging']) assert(!text.includes(disallowed));
 });
 test('production workflow is manual, exact-CI gated, serial and protected',()=>{
@@ -18,4 +21,7 @@ test('production workflow is manual, exact-CI gated, serial and protected',()=>{
   const promote=readFileSync(new URL('./promote-images.mjs',import.meta.url),'utf8');
   assert(promote.includes('--use-previous-template')); assert(promote.includes('UsePreviousValue:true'));
   assert(promote.includes("assert.equal(m.revision,process.env.GITHUB_SHA)"));
+  assert(promote.includes('verifyReleaseSnapshot'));
+  assert(source.includes('production-release-receipt'));
+  assert(source.includes('if: always()'));
 });

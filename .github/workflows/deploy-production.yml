@@ -45,3 +45,11 @@ jobs:
           path: /tmp/production-images.json
       - name: Scan and promote images; preserve network and payment gates
         run: node infra/production/promote-images.mjs /tmp/production-images.json
+      - name: Preserve release verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-release-receipt
+          path: /tmp/production-release-receipt.json
+          if-no-files-found: warn
+          retention-days: 30

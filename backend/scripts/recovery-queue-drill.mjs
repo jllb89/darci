@@ -23,7 +23,7 @@ const assert=require('node:assert/strict'),{randomUUID,createHash}=require('node
 const {createClient}=require('@supabase/supabase-js'),{Queue,Worker}=require('bullmq'),Redis=require('ioredis');
 const {spawn}=require('node:child_process');
 const {isRecoveryQuarantined}=require('./dist/worker/recoveryQuarantine');
-assert(isRecoveryQuarantined());assert.equal(process.env.APP_ENV,'recovery');
+assert(isRecoveryQuarantined());assert(['recovery','production'].includes(process.env.APP_ENV));assert.equal(process.env.RECOVERY_QUARANTINE,'true');
 assert.equal(new URL(process.env.SUPABASE_URL).hostname,'gateway');
 assert.equal(new URL(process.env.REDIS_URL).hostname,'redis');
 assert(!process.env.STRIPE_SECRET_KEY&&!process.env.RESEND_API_KEY);

@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { recoveryTarget } from './recovery-target.mjs';
 const require = createRequire(import.meta.url), jwt = require('jsonwebtoken');
 const execute = promisify(execFile);
 const root = path.resolve(new URL('../..', import.meta.url).pathname);
@@ -14,7 +15,7 @@ const folder = process.argv[2];
 assert(process.argv.includes('--confirm-isolated') && path.isAbsolute(folder ?? ''), 'Explicit private backup directory and isolation confirmation required');
 process.umask(0o077);
 const manifest = JSON.parse(await readFile(path.join(folder, 'manifest.json'), 'utf8'));
-assert(manifest.complete && manifest.sourceProject === 'oqferisuloumoojgbjde');
+const target = recoveryTarget(process.argv.slice(3), manifest);
 const name = `darci-app-recovery-${randomUUID().slice(0, 8)}`;
 // Colima shares the user workspace, not macOS /var/folders. Keep private
 // reconstructed bytes in an explicitly ignored, mode-0700 shared directory.
@@ -65,7 +66,7 @@ try {
   });
   await sql(`alter role postgres password ${literal(password)}; alter role authenticator login password ${literal(password)}; alter role service_role bypassrls; grant anon,authenticated,service_role to authenticator;`);
   const installed=new Set(JSON.parse(await sql("select coalesce(json_agg(version),'[]') from supabase_migrations.schema_migrations")));
-  for(const file of (await readdir(path.join(root,'supabase/migrations'))).filter(f=>/^20260917\d{6}_.*\.sql$/.test(f)).sort()){
+  for(const file of (await readdir(path.join(root,'supabase/migrations'))).filter(f=>!target.production && /^20260917\d{6}_.*\.sql$/.test(f)).sort()){
     const version=file.slice(0,14);if(installed.has(version))continue;
     const source=await readFile(path.join(root,'supabase/migrations',file),'utf8');
     // Only the already-reviewed Phase 1 set, and only this isolated restored copy.
@@ -115,14 +116,15 @@ try {
   stage='start recovered application';
   await launch('redis','redis:7.4-alpine');
   const appEnv={
-    NODE_ENV:'production',APP_ENV:'recovery',PORT:'4000',SUPABASE_URL:base,SUPABASE_ANON_KEY:anon,SUPABASE_SERVICE_ROLE_KEY:service,SUPABASE_JWT_SECRET:secret,
+    NODE_ENV:'production',APP_ENV:target.production?'production':'recovery',PORT:'4000',SUPABASE_URL:base,SUPABASE_ANON_KEY:anon,SUPABASE_SERVICE_ROLE_KEY:service,SUPABASE_JWT_SECRET:secret,
     DATABASE_URL:connection('postgres'),OTEL_SDK_DISABLED:'1',SENTRY_ENABLED:'false',SENTRY_DSN:'',DISABLE_REDIS_QUEUES:'true',REDIS_URL:'redis://redis:6379',
     NOTIFICATION_OUTBOX_RUNNER_ENABLED:'false',STRIPE_WEBHOOK_RUNNER_ENABLED:'false',BILLING_RECONCILIATION_RUNNER_ENABLED:'false',STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED:'false',
-    STRIPE_ENVIRONMENT:'test',BILLING_ENFORCEMENT_MODE:'observe',LEDGER_ANCHOR_MODE:'hash_only',LEDGER_ALLOW_STUB_PROVIDER:'false',
+    STRIPE_PROVIDER_ENVIRONMENT:target.production?'live':'test',STRIPE_LIVE_MODE_ENABLED:'false',RECOVERY_QUARANTINE:'true',BILLING_ENFORCEMENT_MODE:'observe',LEDGER_ANCHOR_MODE:'hash_only',LEDGER_ALLOW_STUB_PROVIDER:'false',ABUSE_RATE_KEY_SECRET:randomBytes(32).toString('hex'),
     IDENTITY_FIELD_ENCRYPTION_KEY:key.key,IDENTITY_FIELD_ENCRYPTION_KEY_ID:key.keyId,
     CORS_ALLOWED_ORIGINS:'http://127.0.0.1:3000'};
-  await launch('api','darci-api:phase1-19',appEnv,[],[`${root}/backend/dist:/app/dist:ro`]);
-  await launch('worker','darci-api:phase1-19',appEnv,[],[`${root}/backend/dist:/app/dist:ro`],[],['node','dist/worker/index.js']);
+  const codeMounts=target.production?[]:[`${root}/backend/dist:/app/dist:ro`];
+  await launch('api',target.apiImage,appEnv,[],codeMounts);
+  await launch('worker',target.workerImage,appEnv,[],codeMounts,[],['node','dist/worker/index.js']);
   const localApi='http://api:4000';
   for(let i=0;;i++){
     try { await docker(['exec',`${name}-gateway`,'node','-e',`fetch('${localApi}/health/live',{signal:AbortSignal.timeout(2000)}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))`]);break; } catch { /* wait */ }
@@ -137,6 +139,6 @@ try {
   console.error(JSON.stringify({status:'failed',stage,code:error.code??'RECOVERY_ASSERTION_FAILED',message:String(error.message).replace(/postgresql:\/\/\S+/g,'[redacted]').slice(0,150),work}));
   process.exitCode=1;
 } finally {
-  await writeFile(path.join(work,'runtime.json'),JSON.stringify({name,containers,started,backupFolder:folder,snapshotId:manifest.snapshotId,stage,success,base,anon,service,secret,password},null,2),{mode:0o600});
+  await writeFile(path.join(work,'runtime.json'),JSON.stringify({name,containers,started,backupFolder:folder,snapshotId:manifest.snapshotId,target,stage,success,base,anon,service,secret,password},null,2),{mode:0o600});
   console.log(JSON.stringify({stage,work,elapsedSeconds:(Date.now()-started)/1000,sourceChanged:false,networkInternal:true,success}));
 }

@@ -1,7 +1,8 @@
 // Run behind the required production GitHub environment approval.
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
+import {readReleaseSnapshot, verifyReleaseSnapshot} from './release-verification.mjs';
 const aws=(...args)=>JSON.parse(execFileSync('aws',[...args,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','inherit']}));
 assert.equal(process.env.GITHUB_REF,'refs/heads/master');
 assert.equal(process.env.GITHUB_REPOSITORY,'jllb89/darci');
@@ -9,7 +10,8 @@ assert.equal(aws('sts','get-caller-identity').Account,'427057633951');
 const m=JSON.parse(readFileSync(process.argv[2],'utf8'));
 assert.equal(m.revision,process.env.GITHUB_SHA);
 assert.equal(m.runtimeTrackedChanges,false,'Automated promotion requires clean runtime source');
-const stack=aws('cloudformation','describe-stacks','--stack-name','darci-production-runtime').Stacks[0];
+const before=readReleaseSnapshot(aws);
+const stack=before.stack;
 assert(['CREATE_COMPLETE','UPDATE_COMPLETE','UPDATE_ROLLBACK_COMPLETE'].includes(stack.StackStatus));
 const parameters=stack.Parameters.map(p=>({ParameterKey:p.ParameterKey,UsePreviousValue:true}));
 for(const service of ['api','worker','web']) {
@@ -37,12 +39,15 @@ for(const service of ['api','worker','web']) {
   delete p.UsePreviousValue; p.ParameterValue=uri;
 }
 // Deliberately preserve all non-image parameters and the deployed template.
-console.log(JSON.stringify(aws('cloudformation','update-stack','--stack-name','darci-production-runtime','--use-previous-template',
-  '--parameters',JSON.stringify(parameters),'--role-arn','arn:aws:iam::427057633951:role/darci-production-cfn-release','--capabilities','CAPABILITY_NAMED_IAM')));
-execFileSync('aws',['cloudformation','wait','stack-update-complete','--stack-name','darci-production-runtime','--region','us-east-1'],{stdio:'inherit'});
-for(const service of ['api','worker','web']) {
-  const s=aws('ecs','describe-services','--cluster','darci-production','--services',`darci-production-${service}`).services[0];
-  assert.equal(s.runningCount,s.desiredCount); assert.equal(s.pendingCount,0);
-  assert(s.deployments.length===1&&s.deployments[0].rolloutState==='COMPLETED');
+const receipt={revision:m.revision,startedAt:new Date().toISOString(),verified:false};
+try {
+  console.log(JSON.stringify(aws('cloudformation','update-stack','--stack-name','darci-production-runtime','--use-previous-template',
+    '--parameters',JSON.stringify(parameters),'--role-arn','arn:aws:iam::427057633951:role/darci-production-cfn-release','--capabilities','CAPABILITY_NAMED_IAM')));
+  execFileSync('aws',['cloudformation','wait','stack-update-complete','--stack-name','darci-production-runtime','--region','us-east-1'],{stdio:'inherit'});
+  Object.assign(receipt,verifyReleaseSnapshot({before,after:readReleaseSnapshot(aws),images:m.images}));
+  console.log('PASS: exact production digests and preserved configuration verified; services completed rollout.');
+} finally {
+  // A failed waiter or verification must remain a failed job, not a successful rollback.
+  receipt.finishedAt=new Date().toISOString();
+  writeFileSync('/tmp/production-release-receipt.json',JSON.stringify(receipt,null,2),{mode:0o600});
 }
-console.log('PASS: exact-revision production images deployed; closed-launch configuration and access boundary preserved.');

@@ -44,9 +44,19 @@ async function login(email) {
 let original, objectPath;
 const started=Date.now();
 try {
-  const candidates=await sql(`select coalesce(json_agg(x),'[]') from (select d.id,d.idn,u.supabase_user_id,a.email,v.id as version_id,v.storage_path,h.hash,r.release_status from documents d join users u on u.id=d.owner_id join auth.users a on a.id=u.supabase_user_id join document_versions v on v.document_id=d.id and v.is_final join document_hash_records h on h.document_version_id=v.id and h.status='completed' left join document_release_controls r on r.document_version_id=v.id where u.status='active' and u.role='member' order by v.created_at desc limit 100) x`);
+  const production=runtime.target?.production===true;
+  // Fresh production has unsigned, clearly labeled test drafts only. Never
+  // manufacture completed notarization/hash/release evidence to make a drill pass.
+  const candidates=await sql(production
+    ? `select coalesce(json_agg(x),'[]') from (select d.id,d.idn,u.supabase_user_id,a.email,v.id as version_id,v.storage_path from documents d join users u on u.id=d.owner_id join auth.users a on a.id=u.supabase_user_id join document_versions v on v.document_id=d.id and not v.is_final where d.status='draft' and a.raw_user_meta_data->>'synthetic_recovery_test'='true' and v.file_name='SYNTHETIC RECOVERY - UNSIGNED - NO LEGAL EFFECT.pdf') x`
+    : `select coalesce(json_agg(x),'[]') from (select d.id,d.idn,u.supabase_user_id,a.email,v.id as version_id,v.storage_path,h.hash,r.release_status from documents d join users u on u.id=d.owner_id join auth.users a on a.id=u.supabase_user_id join document_versions v on v.document_id=d.id and v.is_final join document_hash_records h on h.document_version_id=v.id and h.status='completed' left join document_release_controls r on r.document_version_id=v.id where u.status='active' and u.role='member' order by v.created_at desc limit 100) x`);
+  if(production) {
+    assert.equal(candidates.length,1,'Require the explicitly approved unsigned production fixture');
+    candidates[0].hash=manifest.objects.find(o=>o.bucket_id==='documents'&&o.name===candidates[0].storage_path)?.backup.sha256;
+    assert(candidates[0].hash,'Unsigned fixture must be in exact backup manifest');
+  }
   const candidate=candidates.find(c=>manifest.objects.some(o=>o.name===c.storage_path && o.backup.sha256===c.hash));
-  assert(candidate,'No backed-up final PDF with matching persisted hash and Auth owner');
+  assert(candidate,'No backed-up PDF with matching hash and Auth owner');
   const object=manifest.objects.find(o=>o.name===candidate.storage_path && o.backup.sha256===candidate.hash);
   const before=await sql(`select json_build_object('versions',(select json_agg(v order by id) from document_versions v where document_id='${candidate.id}'),'hashes',(select json_agg(h order by id) from document_hash_records h where document_id='${candidate.id}'),'release',(select json_agg(r order by id) from document_release_controls r where document_id='${candidate.id}'))`);
   const owner=await login(candidate.email);
@@ -69,7 +79,20 @@ try {
   assert(mint.status>=400,'Member must not bypass application release checks by minting Storage URLs');
   const bytes=await inside(`const r=await fetch(v.url,{headers:{Authorization:'Bearer '+v.token},signal:AbortSignal.timeout(10000)});const b=Buffer.from(await r.arrayBuffer());console.log(JSON.stringify({status:r.status,bytes:b.length,sha256:require('node:crypto').createHash('sha256').update(b).digest('hex')}));`,{url:'http://gateway:8000/storage/v1/object/authenticated'+objectRoute,token:runtime.service});
   assert.equal(bytes.status,200);assert.equal(bytes.bytes,object.backup.bytes);assert.equal(bytes.sha256,candidate.hash);
-  pass('Recovered Storage serves exact backed-up final PDF bytes; direct member URL minting remains denied');
+  pass('Recovered Storage serves exact backed-up PDF bytes; direct member URL minting remains denied');
+  if(production) {
+    assert.equal(manifest.objects.length,3,'Production fixture drill expects three approved unsigned test objects');
+    for(const item of manifest.objects) {
+      const url='http://gateway:8000/storage/v1/object/authenticated/'+item.bucket_id+'/'+item.name.split('/').map(encodeURIComponent).join('/');
+      const actual=await inside(`const r=await fetch(v.url,{headers:{Authorization:'Bearer '+v.token}});const b=Buffer.from(await r.arrayBuffer());console.log(JSON.stringify({status:r.status,sha256:require('node:crypto').createHash('sha256').update(b).digest('hex')}));`,{url,token:runtime.service});
+      assert.equal(actual.status,200);assert.equal(actual.sha256,item.backup.sha256);
+      assert((await call(url,other.access_token)).status>=400);
+      assert((await call(url)).status>=400);
+    }
+    pass('All three recovered private buckets serve exact synthetic objects and reject anonymous/unrelated access');
+    await inside(`const {encryptIdentityValue,decryptIdentityValue}=require('./dist/services/protectedIdentityService');const id=require('node:crypto').randomUUID(),meeting=require('node:crypto').randomUUID();const value='SYNTHETIC-IDENTITY-NO-LEGAL-EFFECT';const encrypted=encryptIdentityValue(value,id,meeting);assert.equal(decryptIdentityValue(encrypted,id,meeting),value);assert.throws(()=>decryptIdentityValue(encrypted,id,require('node:crypto').randomUUID()));`,{},runtime.name+'-api');
+    pass('Recovered identity key encrypts/decrypts synthetic evidence and rejects the wrong record context');
+  }
   const publicResult=await call('http://api:4000/verify/'+candidate.idn);
   assert([200,404].includes(publicResult.status));
   assert(!/signedUrl|downloadUrl|storagePath|fileName|\/storage\/v1/.test(JSON.stringify(publicResult.body)));
@@ -111,7 +134,7 @@ try {
   }
   assert(ready);assert.deepEqual(await queueState(),queueBefore);
   pass('Real isolated worker stop, natural heartbeat expiry, unhealthy readiness and restart recovery; durable queues unchanged');
-  await writeFile(path.join(work,'functional-report.json'),JSON.stringify({snapshotId:manifest.snapshotId,checks,completedAt:new Date().toISOString(),functionalSeconds:(Date.now()-started)/1000,sourceChanged:false,workerReplayEnabled:false,limitations:['No claim of full queue reconstruction or physical-device acceptance','Historical source readability exceptions remain preserved','Auth/Storage use isolated privileged database connections; production credentials are not restored']},null,2),{mode:0o600});
+  await writeFile(path.join(work,'functional-report.json'),JSON.stringify({snapshotId:manifest.snapshotId,checks,completedAt:new Date().toISOString(),functionalSeconds:(Date.now()-started)/1000,sourceChanged:false,workerReplayEnabled:false,limitations:[...(production?['Unsigned synthetic production draft only; no completed legal package or released-final acceptance claimed']:[]),'No claim of full queue reconstruction or physical-device acceptance','Historical source readability exceptions remain preserved','Auth/Storage use isolated privileged database connections; production credentials are not restored']},null,2),{mode:0o600});
 } finally {
   if(original && objectPath)await writeFile(objectPath,original);
 }

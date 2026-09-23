@@ -6,7 +6,7 @@ Updated: 23 September 2026. Owner/release approver: Jorge (`jllb89`).
 
 Production is an **IP-restricted candidate**, not an open customer service. App/API HTTPS routing and API/web/worker infrastructure are provisioned. Signup, outbound messaging and live payment activation remain closed. Do not invite clients to use this environment until the production-readiness roadmap's remaining provider, security, legal and acceptance gates pass.
 
-The implementation and workflow files from this pass are local until committed/pushed. AWS provisioning happened directly with Jorge's authorized CLI access. **The new GitHub workflow is not available in Actions until its YAML and scripts are on `master`.** Creating its AWS roles does not publish or execute it.
+The initial workflow and deployment implementation were published in `4f29c95`; **Deploy Production Candidate** is available in Actions, but its actual GitHub OIDC execution remains unproven. AWS provisioning happened directly with Jorge's authorized CLI access. The subsequent [release-verification hardening](production-release-verification-2026-09-23.md) is still local and requires its scoped ECS read-permission update before running the new verifier.
 
 ## Environment map
 
@@ -67,7 +67,7 @@ After these files have been committed/pushed and server CI has passed:
 5. It builds three ARM64 images. The web image is rebuilt with **production** public URLs/key; do not reuse the staging web bundle.
 6. It resolves immutable ECR digests and requires completed scans with zero HIGH/CRITICAL findings.
 7. CloudFormation updates **only the three image parameters**, keeping the previous template, secret version, IP allowlist and closed-payment configuration.
-8. ECS rolls tasks with readiness checks and a deployment circuit breaker with rollback enabled. The workflow verifies completed service rollouts and expected running counts.
+8. ECS rolls tasks with readiness checks and a deployment circuit breaker with rollback enabled. The published baseline verifies completed rollouts and running counts. The local hardening additionally verifies actual running digests/task health and unchanged template, non-image parameters and service configuration; publish it and update the scoped read permissions first.
 9. From the approved network, check the app, API readiness, document access denials and monitoring. Full product acceptance is separate from a green service rollout.
 
 CLI equivalent for starting the workflow:
@@ -80,7 +80,7 @@ gh run list --workflow deploy-production.yml --repo jllb89/darci --limit 5
 
 The workflow uploads `production-image-manifest` containing the source revision and immutable image references. Keep accepted manifests for rollback. Automated releases refuse tracked runtime modifications; the initial CLI bootstrap separately records its local patch fingerprint.
 
-The one-time local CLI deployment was tested. **An end-to-end GitHub OIDC release is not claimed until this workflow is pushed and actually run.**
+The one-time local CLI deployment was tested. **The workflow is published, but an end-to-end GitHub OIDC release is not claimed until it actually runs.** The hardened workflow also preserves a sanitized `production-release-receipt` artifact; a rollback/failure remains a failed release.
 
 ## Where configuration belongs
 

@@ -26,6 +26,8 @@ export function buildReleaseRoles() {
         statement(['cloudformation:DescribeStacks','cloudformation:DescribeStackEvents','cloudformation:GetTemplate','cloudformation:UpdateStack'],'arn:aws:cloudformation:us-east-1:427057633951:stack/darci-production-runtime/*'),
         statement(['iam:PassRole'],updaterRole,{Condition:{StringEquals:{'iam:PassedToService':'cloudformation.amazonaws.com'}}}),
         statement(['ecs:DescribeServices'],prodServices),
+        statement(['ecs:ListTasks'],'*',{Condition:{ArnEquals:{'ecs:cluster':'arn:aws:ecs:us-east-1:427057633951:cluster/darci-production'}}}),
+        statement(['ecs:DescribeTasks'],'arn:aws:ecs:us-east-1:427057633951:task/darci-production/*'),
       ]}}]}},
   };
   return {AWSTemplateFormatVersion:'2010-09-09',Description:'Manual production image release only. No DNS, secrets reads, payment activation, IAM editing or beta service access.',Resources};

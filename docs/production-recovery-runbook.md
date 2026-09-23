@@ -1,5 +1,7 @@
 # DARCi recovery runbook
 
+**Production supplement — 23 September:** approved unsigned-fixture recovery is now demonstrated in [this evidence record](production-recovery-acceptance-2026-09-23.md). The staging commands and historical evidence below remain staging-specific. For production, `recovery-snapshot.mjs restore-check` requires `--environment=production` and an exact manifest/version. `recovery-application-drill.mjs` additionally requires `--environment=production`, `--api-image=<production API repository@sha256:digest>` and `--worker-image=<production worker repository@sha256:digest>`. It rejects cross-environment manifests, uses the exact shipped code without mounting local dist, and keeps providers/queues quarantined on an internal-only network. Never run production fixture creation again against customer-populated production; its fresh-baseline guard intentionally refuses that case. Source fixtures and backups are retained, not legal evidence. Scheduled production cadence and scale remain separate acceptance gates.
+
 Status: **controlled staging recovery demonstrated — not production recovery certification**.
 
 Responder: Jorge, `lopezb.jl@gmail.com`. Sole-responder coverage is explicitly accepted for now (18 September); no secondary coverage is claimed.
