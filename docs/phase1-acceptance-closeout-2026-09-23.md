@@ -45,7 +45,7 @@ The recovery topology has no external provider keys or published ports. Realtime
 This closes the specific automated interruption/continuity/source-callback gaps; **it does not justify checking every original Phase 1 box**. Remaining acceptance must stay explicit:
 
 - Physical-device/cross-device network/refresh/Apple Pay and the full CA/OH Trust/POA/upload product-content matrix; exact legal/commercial/retention reviewer approval.
-- Actual SMS delivery/failure acceptance needs an authorized operator phone number; requested once, no client number used. Hosted role matrix, operator MFA browser interaction and actual email OTP are now demonstrated above.
+- Actual SMS delivery/failure acceptance is not passed: Jorge supplied his number and one request returned 200, but he reported no SMS received. See [the subsequent delivery investigation](phase1-sms-acceptance-2026-09-23.md). Hosted role matrix, operator MFA browser interaction and actual email OTP are demonstrated above.
 - Final production origins, credentials, cost/rotation/isolation policy and repeat verification against the fresh production environment. These are distinct from staging engineering correctness.
 - Branch protection and Sentry remain **explicitly deferred**, not unanswered questions or passed controls. No automatic identity deletion. Sole responder remains Jorge.
 
@@ -71,6 +71,6 @@ Deployment and post-deployment results are appended below only after verificatio
 | 1D Payment correctness | Real test-mode lifecycle/upgrade/concurrency, abrupt payment crashes, held/released access and accepted-work continuity | Commercial approval and final production pause/rollback acceptance; no live charges authorized |
 | 1E Actionable alerts | Actual source failures, thresholds/SNS/recovery, real email OTP, callbacks/no-resend, sole-responder route | Real SMS delivery to an authorized operator number; Sentry explicitly deferred |
 
-This register separates finished engineering from remaining acceptance. It does **not** mark the complete Phase 1 acceptance gate or production launch approved. No new engineering approval is pending for the fixes delivered in this pass; the only unanswered test-input question is the operator's SMS destination.
+This register separates finished engineering from remaining acceptance. It does **not** mark the complete Phase 1 acceptance gate or production launch approved. No new engineering approval is pending for the fixes delivered in this pass. Subsequent SMS testing now has an authorized destination but failed recipient delivery; its routing/correlation investigation remains open rather than an unanswered phone-number question.
 
 Final runtime receipt: `/private/tmp/darci-phase1-runtime23c-receipt.json`. Final deployed-regression receipt: `/private/tmp/darci-phase1-postdeploy22-receipt.json` (revision field identifies this rerun). Nine private receipts are retained with a checksum manifest under ignored `.recovery-private/phase1-closeout-20260923/`; interruption reports remain under the recovery instance directory. No secrets or private request logs are committed.
