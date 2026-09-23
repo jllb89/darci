@@ -117,6 +117,34 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    private func scrollToward(_ target: XCUIElement, in form: XCUIElement, app: XCUIApplication) {
+        // A SwiftUI ScrollView can expose a full-screen AX frame while the
+        // keyboard clips its visible viewport. Keep the whole gesture above
+        // both the keyboard and its accessory bar, not just its destination.
+        let bounds = form.frame.intersection(app.frame)
+        var bottom = bounds.maxY
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists {
+            bottom = min(bottom, keyboard.frame.minY)
+            let done = app.buttons.matching(identifier: "Done").firstMatch
+            if done.exists { bottom = min(bottom, done.frame.minY) }
+            bottom -= 44
+        }
+        let top = max(bounds.minY, app.frame.minY + 64)
+        XCTAssertGreaterThan(bottom - top, 80, "No visible form area available for scrolling")
+        // Focusing the phone collapses the large heading. The retained scroll
+        // offset can leave Continue ABOVE the viewport; blindly swiping up
+        // moves it farther away. Follow its actual frame in either direction.
+        let centerY = (top + bottom) / 2
+        let halfDistance = min(70, (bottom - top) / 4)
+        let direction: CGFloat = target.frame.midY < centerY ? 1 : -1
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: bounds.midX - app.frame.minX, dy: centerY - direction * halfDistance - app.frame.minY))
+        let end = origin.withOffset(CGVector(dx: bounds.midX - app.frame.minX, dy: centerY + direction * halfDistance - app.frame.minY))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    @MainActor
     func testLoginAtLargestAccessibilitySizeCanScrollToActions() throws {
         let app = makeApp()
         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
@@ -132,13 +160,19 @@ final class DARCiMobileUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(identifier: "Done").count, 1)
         let submit = app.buttons["auth-continue-button"]
-        for _ in 0..<6 where !submit.isHittable { form.swipeUp() }
-        XCTAssertTrue(submit.isHittable)
-        XCTAssertGreaterThan(submit.frame.width, app.frame.width * 0.8)
+        XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 200, "An accessory-only keyboard does not exercise this accessibility regression")
+        // Reproduce the remote failure deterministically: scroll to the lower
+        // disclosure/contact area, then recover the action above the viewport.
+        let emailOption = app.buttons["Use email instead."]
+        for _ in 0..<3 { scrollToward(emailOption, in: form, app: app) }
+        XCTAssertLessThan(submit.frame.maxY, app.frame.minY + 64)
+        for _ in 0..<6 where !submit.isHittable { scrollToward(submit, in: form, app: app) }
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = "login-largest-accessibility"
         attachment.lifetime = .keepAlways
         add(attachment)
+        XCTAssertTrue(submit.isHittable)
+        XCTAssertGreaterThan(submit.frame.width, app.frame.width * 0.8)
     }
 
     @MainActor

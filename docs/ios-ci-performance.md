@@ -2,6 +2,14 @@
 
 ## 23 September follow-up — current candidate
 
+### Actual GitHub follow-through
+
+The approved iOS-only commit `5fa2526` was pushed and [run 35887526166](https://github.com/jllb89/darci/actions/runs/35887526166) completed. The original onboarding test **passed on GitHub**. A different assertion failed in `testLoginAtLargestAccessibilitySizeCanScrollToActions`: its upward-only scroll loop moved away from Continue after the heading collapsed and left that button above the viewport. The downloaded recording confirms this; the app was displaying the lower legal/contact content rather than the Continue button. Totals were 115/115 unit tests and 16/17 UI tests.
+
+The narrow follow-up makes that test scroll toward the target's actual frame in either direction, with gestures bounded above the keyboard/accessory. It explicitly checks for a full software keyboard (not just the accessory bar), deliberately scrolls past Continue, and proves the button can be reached again. Failure screenshots are attached before assertions. Local reproduction/recovery passes; the follow-up still requires GitHub acceptance. No app validation, test skips, retries or timeouts were changed.
+
+Measured remote timings: **21m38s total**, **4m44s package-cache restore**, **4m31s build**, **9s successful build-cache save**, and **10m39s test execution/startup/teardown** (UI tests themselves: 485.553 seconds). Cache persistence worked despite the failed assertion, but this cold run is **not** a speed improvement. Server CI and staging deployment passed at the same revision. The staged production-recovery work was excluded from the commit and retained unchanged.
+
 The sections below this update retain the 22 September experiment history. This update supersedes their statements about the current command shape and test counts.
 
 [Run 35825002577](https://github.com/jllb89/darci/actions/runs/35825002577), revision `452fe26`, failed `testLaunchesOnboardingSplash`; **115 unit tests and 16/17 UI tests passed**. The disabled Continue assertion was valid: the UI driver tapped Email below the visible form and typed the email into Last name, leaving Email empty. This was reproduced locally, including the screen recording. The ScrollView's accessibility frame still spans the full screen with the keyboard open, so a generic `swipeUp()` starts on the keyboard rather than the visible form. The corrected test drags between visible name controls, targets uniquely identified inputs, and asserts the actual name/last-name/email values before submitting. The app now exposes unique profile-field identifiers instead of repeating one identifier. No application validation is weakened.
