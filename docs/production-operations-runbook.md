@@ -1,6 +1,6 @@
 # DARCi critical operations runbook
 
-Status, 22 September 2026: source emitters/watchdog deployed at `d166019`; all eight AWS operational alarm actions enabled after genuine heartbeat verification, all eight OK on recheck. This is staging proof, not production monitoring acceptance or proof of every incident source.
+Status, 23 September UTC / 22 September local 2026: cumulative runtime hardening deployed at `cbc19b9`; API/worker have OTLP explicitly disabled as approved. All eight AWS operational alarm actions remain enabled and all eight are OK; three genuine new-worker heartbeats and readiness were verified. This is staging proof, not production monitoring acceptance or proof of every incident source.
 
 Responder: Jorge, `lopezb.jl@gmail.com`. No secondary responder is configured. Sentry provider work remains deferred.
 
@@ -82,5 +82,5 @@ This exercises **log → metric → alarm → SNS**, not all originating applica
 
 - Source emitters/watchdog and completed-package retry are deployed and verified at `d166019`. Remaining originating-failure drills are tracked separately in the Phase 1 record.
 - Human non-billing step-up/enrollment UI is deployed and its API boundary tested; full UI interaction acceptance remains. Controlled deployed deferral/no-resend, recovered-app/worker restart, selective restored-job resumption and the recovered held/signer access matrix pass. Remaining scope includes OTP/bounce/suppression and physical-device faults.
-- Jorge approved disabling unverified OTLP. Staging API/worker deployment definitions now explicitly set `OTEL_SDK_DISABLED=1`; verify both running task definitions after deployment. CloudWatch logs and all eight operational alarms remain enabled; this route does not depend on OTLP or Sentry.
+- Jorge approved disabling unverified OTLP. Running staging API `104`/worker `90` explicitly set `OTEL_SDK_DISABLED=1`, verified against their exact deployed image digests with no conflicting secret entry. CloudWatch logs and all eight operational alarms remain enabled; this route does not depend on OTLP or Sentry. Recheck effective task configuration on future rollouts; an old value in the source app secret is not the task's effective override.
 - Production has no equivalent stack yet; this staging-only template must not be pointed at production by changing its account checks.
