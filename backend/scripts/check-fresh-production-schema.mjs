@@ -15,6 +15,7 @@ const root = new URL('../../supabase/migrations/', import.meta.url);
 const files = (await readdir(root)).filter(f => /^\d{14}_.+\.sql$/.test(f)).sort();
 await db.connect();
 try {
+  await db.query(await readFile(new URL('../../supabase/tests/backend_only_tables.test.sql', import.meta.url), 'utf8'));
   await db.query('begin transaction isolation level repeatable read read only');
   await db.query("set local statement_timeout='15s'");
   const versions = (await db.query('select version from supabase_migrations.schema_migrations order by version')).rows.map(r => r.version);

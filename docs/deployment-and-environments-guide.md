@@ -6,7 +6,7 @@ Updated: 23 September 2026. Owner/release approver: Jorge (`jllb89`).
 
 Production is an **IP-restricted candidate**, not an open customer service. App/API HTTPS routing and API/web/worker infrastructure are provisioned. Signup, outbound messaging and live payment activation remain closed. Do not invite clients to use this environment until the production-readiness roadmap's remaining provider, security, legal and acceptance gates pass.
 
-The initial workflow and deployment implementation were published in `4f29c95`; **Deploy Production Candidate** is available in Actions, but its actual GitHub OIDC execution remains unproven. AWS provisioning happened directly with Jorge's authorized CLI access. The subsequent [release-verification hardening](production-release-verification-2026-09-23.md) is still local and requires its scoped ECS read-permission update before running the new verifier.
+The initial workflow was published in `4f29c95`; release-verification hardening was published in `442baee`. Jorge approved **Deploy Production Candidate** run **35894433475**, which passed through actual GitHub OIDC, scans, promotion and exact running-image/configuration verification. The two production-scoped ECS read permissions are applied. See [release evidence](production-release-verification-2026-09-23.md). This validates a private release, not signup/provider activation or public launch.
 
 ## Environment map
 
@@ -23,7 +23,7 @@ The initial workflow and deployment implementation were published in `4f29c95`; 
 | AWS application secret | `/darci/staging/app` | `/darci/production/app` |
 | Recovery source secret | `/darci/staging/recovery-source` | `/darci/production/recovery-source` |
 | Recovery stack | `darci-recovery` | `darci-production-backup` |
-| Payment environment | `test`; existing acceptance configuration preserved | `live` namespace selected, **live activation false**, no live Stripe key |
+| Payment environment | `test`; existing acceptance configuration preserved | `live` namespace selected, **live activation false**; live keys saved locally, six prices/Portal mapped, runtime callback/key rollout pending |
 | Data | Existing beta retained | Fresh, no beta import |
 | Deployment trigger | Existing master-push/manual staging workflow | **Manual** production workflow and required environment approval |
 
@@ -54,7 +54,7 @@ The GitHub environment `production` requires Jorge's approval and allows only `m
 4. Verify `/health/ready`, the relevant team flows and alerts.
 5. API/web deployment does **not** distribute a new TestFlight build. Device release/acceptance is separate.
 
-The new additive migration `20260923050000_production_billing_preactivation.sql` was rehearsed locally and applied to the fresh production database. Staging remained at the previously verified 103 migrations during this deployment pass; apply the reviewed additive migration to staging through the normal controlled migration process before treating both histories as equal. It preserves staging test-mode behavior.
+Production has 105 migrations, including `20260923050000_production_billing_preactivation.sql` and `20260923190000_close_backend_only_table_access.sql`. Both were rehearsed before production application. Staging remains at the prior 103; **Jorge explicitly requested production-only application of the backend-table access fix**. Do not push pending migrations to staging without new approval or treat the histories as equal. Clean disposable CI installs the full checkout; that is not a staging mutation.
 
 ## Normal production application release
 
@@ -67,7 +67,7 @@ After these files have been committed/pushed and server CI has passed:
 5. It builds three ARM64 images. The web image is rebuilt with **production** public URLs/key; do not reuse the staging web bundle.
 6. It resolves immutable ECR digests and requires completed scans with zero HIGH/CRITICAL findings.
 7. CloudFormation updates **only the three image parameters**, keeping the previous template, secret version, IP allowlist and closed-payment configuration.
-8. ECS rolls tasks with readiness checks and a deployment circuit breaker with rollback enabled. The published baseline verifies completed rollouts and running counts. The local hardening additionally verifies actual running digests/task health and unchanged template, non-image parameters and service configuration; publish it and update the scoped read permissions first.
+8. ECS rolls tasks with readiness checks and a deployment circuit breaker with rollback enabled. The workflow verifies actual running digests/task health, completed rollouts/counts and unchanged template, non-image parameters and service configuration.
 9. From the approved network, check the app, API readiness, document access denials and monitoring. Full product acceptance is separate from a green service rollout.
 
 CLI equivalent for starting the workflow:
@@ -80,7 +80,7 @@ gh run list --workflow deploy-production.yml --repo jllb89/darci --limit 5
 
 The workflow uploads `production-image-manifest` containing the source revision and immutable image references. Keep accepted manifests for rollback. Automated releases refuse tracked runtime modifications; the initial CLI bootstrap separately records its local patch fingerprint.
 
-The one-time local CLI deployment was tested. **The workflow is published, but an end-to-end GitHub OIDC release is not claimed until it actually runs.** The hardened workflow also preserves a sanitized `production-release-receipt` artifact; a rollback/failure remains a failed release.
+The one-time local CLI deployment and actual approved GitHub OIDC release **35894433475** passed. The workflow preserves a sanitized `production-release-receipt` artifact; a rollback/failure remains a failed release. Deliberate health-failure recovery is tracked separately from successful promotion.
 
 ## Where configuration belongs
 
@@ -109,11 +109,27 @@ darci-production-1695242078.us-east-1.elb.amazonaws.com
 
 Keep the two underscore-prefixed ACM validation CNAMEs; they support certificate renewal. Do not point production to staging or delete the validation records when the certificate is issued.
 
-The edge security group and host-routing rules restrict access to the approved operator IPv4 `/32`. If Jorge changes network, enables a VPN or tests over cellular, requests can time out: this does not necessarily mean the app is down. Inspect the stack's `OperatorCidr` parameter and request a reviewed replacement/additional tester boundary. **Do not solve access trouble by opening `0.0.0.0/0`.**
+Application host-routing rules restrict access to the approved operator IPv4 `/32`. The approved email setup adds one public exception: **POST `api.illuminotary.com/webhooks/resend`**, validated by the backend's separate Resend signing secret. HTTPS port 443 is reachable to support provider callbacks, but the listener defaults to 403 and all other app/API routes remain operator-only. Port 80 remains operator-only. If Jorge changes networks, a 403 can mean the allowlist needs updating, not an outage. Inspect `OperatorCidr` and request a reviewed replacement/additional tester boundary. **Never remove source-IP conditions or make the default listener action forward publicly.**
+
+### Production email configuration release
+
+The approved 23 September email configuration was deployed with `infra/production/deploy-email.mjs` and the tested `email-setup.mjs` overlay. It preserves the running image digests, private application routes, database/storage and disabled payment/signup gates. Only Resend credentials were merged into a new pinned version of `/darci/production/app`; existing values were preserved. Sender: `DARCi <notifications@notify.illuminotary.com>`; Reply-To: `lopezb.jl@gmail.com`. Auth email failures are strict, not silent fallback. The notification runner remains **disabled**; installing credentials is not approval to drain client jobs.
+
+Normal image releases use the **previous deployed template** and preserve this overlay. Do not run the original bootstrap `deploy-runtime.mjs` to update email configuration: its pre-provider guard intentionally refuses provider-bearing secrets. For later key/configuration changes, review the current deployed template and secret version, preserve all existing fields, and perform a separate scoped configuration release. Never copy the secret to logs or Git. Temporary CloudFormation listener/security-group permissions for this setup were removed after `UPDATE_COMPLETE`.
+
+The operator-only acceptance tool is `run-email-acceptance.mjs --send-approved-operator-test`. It starts one short-lived task using the deployed API image/config, checks public denial and callback signatures, sends only to Jorge, and retains explicitly labeled notification evidence. It does not start the general runner. Do not rerun casually; inspect its retained delivery record before any repeat send. See the [provider evidence](production-email-acceptance-2026-09-23.md).
+
+On 23 September, a real network change caused exactly this timeout. After Jorge approved the replacement, only `OperatorCidr` was changed through CloudFormation; the old firewall rules were removed and both host routes adopted the new `/32`. API readiness and web returned **200** afterward. The normal image-release role deliberately cannot change ingress. The operator temporarily granted the stack execution role access to only the production edge security group and the two routing-rule ARNs, plus required read APIs; the temporary policy was removed after the stable update. No new permanent network permission, extra CIDR, service/image/secret change or public access was retained.
 
 After changing a CNAME, authoritative DNS can be correct while an ISP or device retains a previous negative/incorrect result. Compare authoritative DNS and a public resolver; do not keep rewriting a correct record.
 
 ## Read-only health checks
+
+**Server Maps config release, 23 September 19:05 UTC:** API7/worker6/web4 use the same accepted images. The runtime now pins `cb42c704-cd85-49a0-8884-48d83502f7e3`; only API injects `GOOGLE_MAPS_SERVER_API_KEY` and enables `GOOGLE_MAPS_GEOCODE_USE_SERVER`. Existing Resend values are preserved. `maps-setup.mjs` defines this overlay; `deploy-maps.mjs` records the exact operator-approved rollout. Production browser Maps remains disabled. Shared-key Geocoding fallback passed in both zones; legacy Places remains denied and browser restriction review needs the Google project owner. Preserve the current deployed template on image releases.
+
+Direct production PostgreSQL/pooler access also has an allowlist: NAT egress `18.213.200.166/32`, `34.231.72.82/32`, and current operator `187.247.134.158/32`. On a future operator-network change, update the operator entry in both the ALB gate and Supabase DB network restrictions, preserving both NATs. Client testers need application access only, not direct DB access. Supabase HTTPS Auth/Storage/REST is not protected by the DB IP allowlist; RLS and application authorization remain required.
+
+The separate `darci-production-edge-audit` stack owns production WAF, retained CloudTrail logs and ten capacity alarms. Its source is `infra/production/edge-audit.mjs`; supply the production ALB ARN plus API/web target-group full names when deploying, preserving existing parameters on updates. Managed common rules start count-only. Do not remove those controls during an image-only runtime release. Current evidence: [provider/access hardening](production-provider-hardening-2026-09-23.md).
 
 ```sh
 aws sts get-caller-identity
@@ -132,7 +148,7 @@ Containers run as UID 1000 with read-only root filesystems. Explicit Docker `VOL
 
 1. Do not disable readiness or remove the circuit breaker to force a green deployment.
 2. Inspect the production stack events, service events and correlated application logs; do not dump runtime secrets.
-3. ECS/CloudFormation are configured to revert a failed rolling deployment to a prior completed deployment. **Configuration is not a claim that a deliberate failed-rollout drill has passed.**
+3. ECS/CloudFormation revert a failed rolling deployment to a prior completed deployment. The approved **23 September API HTTP-503 drill passed automatic ECS and CloudFormation rollback**, preserving original healthy capacity and exact configuration/images. See [the measured drill and limits](production-release-verification-2026-09-23.md); this does not guarantee recovery from every failure class.
 4. For a controlled operator rollback, use the previous **accepted production image manifest**, keep the deployed template and all non-image parameters unchanged, and update the three image parameters through CloudFormation. Recheck scans, dependencies, service counts and exact digests. Do not substitute staging images or rebuild an old tag.
 5. Never restore the entire database simply to roll back app images. Migrations need backward-compatible planning; document bytes and billing effects must not be overwritten to undo a deployment.
 6. An image-only role cannot modify IAM/network/secret configuration. Infrastructure failures require the authorized operator, not wider GitHub permissions added ad hoc.
