@@ -87,6 +87,7 @@ jobs:
           node backend/scripts/test-phase1-finalization-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-identity-provenance-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-auth-session-sql.mjs --confirm-isolated
+          node backend/scripts/test-private-realtime-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-auth-session-api.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
           node backend/scripts/test-phase1-billing-sql.mjs --confirm-isolated
           node backend/scripts/test-legacy-reverification-sql.mjs --confirm-isolated

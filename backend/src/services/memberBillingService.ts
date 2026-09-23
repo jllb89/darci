@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { liveBillingAccess, OPERATOR_PRICE_CODE } from "../config/liveBillingAccess";
 import { MEMBER_PRICE_CODES, MEMBER_PRICING_V2, classifyMemberPlanChange, isMemberPricingV2 } from "../config/memberPricing";
 import { refreshMemberAllowanceWindow } from "./memberAllowanceWindowService";
 import {
@@ -79,6 +80,12 @@ export class MemberBillingServiceError extends Error {
     this.name = "MemberBillingServiceError";
   }
 }
+
+const assertLiveBillingAccess = (userId: string, action: "checkout" | "portal" | "plan_change", priceCode?: string) => {
+  const access = liveBillingAccess(userId, action, priceCode);
+  if (!access.allowed) throw new MemberBillingServiceError(403, "billing_purchase_unavailable", "Membership purchases are not available for this account.");
+  return access;
+};
 
 const getAppUser = async (dbUserId: string): Promise<AppUser> => {
   const { data, error } = await supabaseAdmin
@@ -272,6 +279,7 @@ export const changeMemberMembershipPlan = async (input: {
   targetPriceCode: string;
   idempotencyKey: string;
 }) => {
+  assertLiveBillingAccess(input.dbUserId, "plan_change", input.targetPriceCode);
   const user = await getAppUser(input.dbUserId);
   const account = await getOrCreateBillingAccount(user);
   const [{ price: targetPrice, mapping: targetMapping }, current] = await Promise.all([
@@ -539,6 +547,7 @@ export const createMemberMembershipCheckout = async (input: {
   priceCode: string;
   idempotencyKey: string;
 }) => {
+  const access = assertLiveBillingAccess(input.dbUserId, "checkout", input.priceCode);
   const user = await getAppUser(input.dbUserId);
   const account = await getOrCreateBillingAccount(user);
   const { price, mapping } = await loadPrice(input.priceCode);
@@ -648,6 +657,7 @@ export const createMemberMembershipCheckout = async (input: {
   const session = await getStripeClient().checkout.sessions.create(
     {
       mode: "subscription",
+      ...(access.checkoutExpiresAt ? { expires_at: access.checkoutExpiresAt } : {}),
       customer: customer.provider_customer_id,
       client_reference_id: orderId,
       line_items: [{ price: mapping.provider_price_id, quantity: 1 }],
@@ -702,6 +712,7 @@ export const createMemberMembershipCheckout = async (input: {
 };
 
 export const createMemberCustomerPortalSession = async (input: { dbUserId: string }) => {
+  assertLiveBillingAccess(input.dbUserId, "portal");
   const user = await getAppUser(input.dbUserId);
   const account = await getOrCreateBillingAccount(user);
   const { data: customer, error } = await supabaseAdmin
@@ -873,7 +884,8 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
       billingInterval: price.billing_interval,
       intervalCount: price.interval_count,
       isUnlimited: price.is_unlimited === true,
-      availableForPurchase: price.available_for_purchase !== false && (v2Available ? isMemberPricingV2(price.price_code) : true),
+      availableForPurchase: price.available_for_purchase !== false && (v2Available ? isMemberPricingV2(price.price_code) : true)
+        && liveBillingAccess(input.dbUserId, "checkout", price.price_code).allowed,
       documentWorkflowAllowance:
         price.usage_limit_quantity ?? price.included_entitlement_quantity,
     })),
@@ -917,11 +929,13 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
       reasonCode: policy.reasonCode,
     },
     actions: {
-      canCheckout: (!subscription || ENDED_SUBSCRIPTION_STATUSES.has(subscriptionStatus ?? "")) && !activationPending,
-      iosCheckoutAvailable: process.env.IOS_MEMBER_CHECKOUT_ENABLED === "true",
-      canOpenPortal: Boolean(subscription),
+      canCheckout: (!subscription || ENDED_SUBSCRIPTION_STATUSES.has(subscriptionStatus ?? "")) && !activationPending
+        && liveBillingAccess(input.dbUserId, "checkout", OPERATOR_PRICE_CODE).allowed,
+      iosCheckoutAvailable: process.env.IOS_MEMBER_CHECKOUT_ENABLED === "true"
+        && liveBillingAccess(input.dbUserId, "checkout", OPERATOR_PRICE_CODE).allowed,
+      canOpenPortal: Boolean(subscription) && liveBillingAccess(input.dbUserId, "portal").allowed,
       planChangeAvailable: ["active", "trialing"].includes(subscriptionStatus ?? "")
-        && subscription?.cancel_at_period_end !== true,
+        && subscription?.cancel_at_period_end !== true && liveBillingAccess(input.dbUserId, "plan_change").allowed,
       planChangeReason: subscription?.cancel_at_period_end === true
         ? "resume_membership_before_plan_change"
         : subscriptionStatus && !["active", "trialing"].includes(subscriptionStatus)

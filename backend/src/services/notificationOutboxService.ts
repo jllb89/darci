@@ -960,7 +960,7 @@ const buildResendAdapter = (): NotificationProviderAdapter => {
           { name: "job_id", value: input.job.id },
           { name: "delivery_id", value: input.delivery.id },
         ],
-      });
+      }, { idempotencyKey: `darci-notification:${input.delivery.id}` });
 
       if (error || !data) {
         const resendErrorMessage = error?.message ?? "Resend returned no data";

@@ -502,6 +502,7 @@ describe("notification outbox Resend runtime", () => {
           { name: "delivery_id", value: "delivery-1" },
         ],
       }),
+      { idempotencyKey: "darci-notification:delivery-1" },
     );
     expect(result).toEqual(
       expect.objectContaining({
@@ -541,6 +542,7 @@ describe("notification outbox Resend runtime", () => {
         from: "DARCI Staging <onboarding@resend.dev>",
         replyTo: "staging-support@example.com",
       }),
+      { idempotencyKey: "darci-notification:delivery-1" },
     );
   });
 

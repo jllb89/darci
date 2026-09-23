@@ -7,6 +7,7 @@ import {
 } from "../services/supabaseAuthSmsHookService";
 import { captureException } from "../utils/sentry";
 import { logSmsHandoff, smsHookHash, smsPhoneHash } from "../telemetry/smsTelemetry";
+import { withAuthSmsHookReceipt } from "../services/authSmsHookReceiptService";
 
 const sendSmsHookPayloadSchema = z.object({
   user: z.object({
@@ -93,13 +94,16 @@ export const receiveSupabaseAuthSmsHook = async (req: Request, res: Response) =>
   const hookHash = smsHookHash(headers["webhook-id"]);
   const phoneHash = smsPhoneHash(parsed.data.user.phone);
   try {
-    const result = await sendSupabaseAuthSms({
+    const result = await withAuthSmsHookReceipt({
+      hookId: headers["webhook-id"], rawBody, signingSecret: hookSecret,
+      send: () => sendSupabaseAuthSms({
       phone: parsed.data.user.phone,
       otp: parsed.data.sms.otp,
       userId: parsed.data.user.id ?? null,
       hookHash,
+      }),
     });
-    logSmsHandoff({ outcome: "accepted", hookHash, phoneHash, messageId: result.messageId });
+    if (!result.replayed) logSmsHandoff({ outcome: "accepted", hookHash, phoneHash, messageId: result.messageId });
 
     return res.status(200).json({});
   } catch (error) {

@@ -111,7 +111,8 @@ let smsClient: PinpointSMSVoiceV2Client | null = null;
 
 const getSmsClient = () => {
   if (!smsClient) {
-    smsClient = new PinpointSMSVoiceV2Client({ region: resolveSnsRegion() });
+    // The send API has no idempotency token. An SDK timeout retry can send twice.
+    smsClient = new PinpointSMSVoiceV2Client({ region: resolveSnsRegion(), maxAttempts: 1 });
   }
 
   return smsClient;

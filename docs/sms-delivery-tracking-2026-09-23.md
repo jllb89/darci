@@ -1,5 +1,15 @@
 # Staging SMS delivery tracking and three-minute validity
 
+## Live follow-up — 23 September, 20:14 UTC
+
+The tracking code is now deployed in staging at `988df47`. The correct operator phone produced exactly one recorded AWS handoff at 20:14:28 UTC, message `22f3fc51-a705-419f-b056-156df6945227`, followed by final `DELIVERED` at 20:14:33. Jorge confirmed receipt. Two preceding `SUCCESSFUL` events share this same message ID; they are status observations, not two send requests.
+
+After successful SMS verification at 20:14:42–43, the backend required **email step-up** for the linked-account identity mismatch and sent one email. The app's explicit “second code” message refers to that email, not a duplicate SMS. Full email verification/login was not yet confirmed. No account mapping was changed.
+
+The earlier 19:50 request near the failed attempt used a different phone fingerprint (one middle digit different, same country/last four) and ended `UNREACHABLE`. Do not attribute that to iOS formatting or claim definitive user-input provenance from server logs alone. Production's separately confirmed email/SMS receipt at 19:55 does not establish staging behavior. Details: [phase acceptance evidence](production-phase23-acceptance-2026-09-23.md).
+
+The historical implementation/deployment status below predates this live acceptance.
+
 ## Scope and release boundary
 
 Jorge approved SMS delivery tracking, message correlation and **180-second** OTP validity. Production, sender number, provider, phone linking, test-code overrides, rate limits and client records remain unchanged. No real SMS is sent by the infrastructure deployment or the synthetic receipt drill.
