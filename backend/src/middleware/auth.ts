@@ -12,6 +12,7 @@ import {
 import { getUserIdentityContextBySupabaseId, normalizeRuntimeRole } from "../services/userRoleService";
 import { reportAuthIssue } from "../telemetry/authTelemetry";
 import { isAuthSessionActive } from "../services/authSessionService";
+import { AuthDependencyError } from "../auth/readAuthDependency";
 
 const publicPaths = [
   "/health",
@@ -275,9 +276,21 @@ export const requireAuth = async (
         const isVitestRuntime = process.env.NODE_ENV === "test" && !shouldFailClosedOnMissingIdentity()
           && (process.env.VITEST === "true" || process.env.VITEST === "1");
         if (!isVitestRuntime) {
+          const diagnostic = error instanceof AuthDependencyError ? {
+            dependencyOperation: error.operation,
+            dependencyFailure: error.code,
+            attempts: error.attempts,
+            elapsedMs: error.elapsedMs,
+            retryable: error.retryable,
+            providerStatus: error.providerStatus,
+          } : { dependencyOperation: "identity_lookup", dependencyFailure: "AUTH_READ_UNKNOWN" };
+          if (process.env.NODE_ENV !== "test") {
+            // Safe structured diagnostics remain available even when Sentry is disabled.
+            console.error(JSON.stringify({ kind: "auth_dependency_failed", requestId: req.requestId, ...diagnostic }));
+          }
           reportAuthIssue({
             area: "session",
-            operation: "identity_lookup",
+            operation: diagnostic.dependencyOperation,
             reason: "dependency_failed",
             level: "error",
             requestId: req.requestId,
@@ -287,6 +300,7 @@ export const requireAuth = async (
             identifier: user.id,
             error,
             provider: "supabase",
+            details: diagnostic,
           });
           return res.status(503).json({ error: "identity_unavailable", message: "Your account could not be checked. Please try again." });
         }

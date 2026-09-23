@@ -22,3 +22,17 @@ The successful retry does not establish why the first attempt failed or prove pr
 No additional SMS send is needed to establish this receipt. Complete phone login **in the app**, plus the remaining wrong/expired/replayed-code and any linked-email step-up acceptance cases in the release checklist. Do not mark all phone-auth acceptance passed from receipt alone; do not send further codes without a request.
 
 Private receipts: `/private/tmp/darci-sms-operator23-receipt.json`, `/private/tmp/darci-sms-diagnostic23-receipt.json`. The full number and credentials are not committed.
+
+## Recurrence reported after the mobile signing investigation
+
+Read-only checks at approximately 19:22–19:26 UTC on September 23:
+
+- The staging API received a phone OTP request at `18:42:20.461Z` (12:42 p.m. Mexico City), request ID `20D68671-1732-48AB-9D27-855B4F04CC2E`.
+- An audit record for the operator number ending 0675 at `18:42:20.790991Z` records `auth.otp_requested`, `delivery=phone_sms`. This is evidence that Supabase accepted the request, **not** carrier delivery. No new SMS was sent during this investigation.
+- Hosted staging Auth settings were checked directly: phone auth enabled, Send SMS hook enabled and pointing to the staging API, hook secret present, no configured test OTP overrides. The stored native SMS provider setting is `twilio`, but the enabled custom send hook is the configured delivery integration; this alone is not evidence of a Twilio send.
+- SMS OTP length is eight digits and validity is only **60 seconds**. A late message can already be unusable. This is a separate usability risk, not proof of why a message did not arrive.
+- AWS still shows the existing active toll-free identity with international sending enabled. The operator number was not found on its `Default` opt-out list; no opt-out was changed.
+- AWS SMS configuration sets are still absent. The hook still discards the provider message ID. Consequently, neither a successful AWS handoff for this specific request nor its carrier outcome can be established from the current evidence.
+- Additional audit correlation gap: `requestPhoneOtp` places `request_id` in metadata, but `recordAuditEvent` overwrites it with its separate optional `requestId` argument (not passed by `recordAuthEvent`). This audit row therefore contains a null request ID. Time and scoped phone lookup correlate this request; the row does not provide exact request-ID correlation.
+
+Recommended next implementation: preserve safe hook/provider message correlation, configure AWS SMS delivery-event capture with a reviewed destination/access policy, fix the auth audit request-ID plumbing, and approve a more usable OTP validity window (proposed five minutes). Keep codes/full destinations/message bodies out of operational logs; do not add blind send retries or change the SMS provider. Provider/configuration changes and another test send have not been performed or approved by this recurrence report.

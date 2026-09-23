@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { readAuthDependency } from "../auth/readAuthDependency";
 import {
   duplicatePhoneMessage,
   isDuplicatePhoneUniqueConstraintError,
@@ -254,18 +255,16 @@ const getUserSelect = () => {
 };
 
 const selectUserRowBySupabaseId = async (supabaseUserId: string) => {
-  const runSelect = (selectColumns: string) => supabaseAdmin
+  const runSelect = (selectColumns: string, signal: AbortSignal) => supabaseAdmin
     .from("users")
     .select(selectColumns)
     .eq("supabase_user_id", supabaseUserId)
     .limit(1)
+    .abortSignal(signal)
     .maybeSingle();
 
-  const { data, error } = await runWithAuthMirrorColumnFallback(() => runSelect(getUserSelect()));
-
-  if (error) {
-    throw new Error(describeSupabaseError(error, "User lookup by Supabase id"));
-  }
+  const { data } = await readAuthDependency("identity_lookup", signal =>
+    runWithAuthMirrorColumnFallback(() => runSelect(getUserSelect(), signal)));
 
   return normalizeUserRow(data as Partial<UserRow> | null);
 };
@@ -288,15 +287,12 @@ const selectUserRowById = async (userId: string) => {
 };
 
 const selectRoleRowsByUserId = async (userId: string) => {
-  const { data, error } = await supabaseAdmin
+  const { data } = await readAuthDependency("role_lookup", signal => supabaseAdmin
     .from("user_roles")
     .select("id, role, status, is_active_profile, granted_reason, created_at, updated_at")
     .eq("user_id", userId)
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    throw new Error(error.message);
-  }
+    .order("created_at", { ascending: true })
+    .abortSignal(signal));
 
   return (data as UserRoleRow[] | null) ?? [];
 };

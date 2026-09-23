@@ -72,6 +72,7 @@ const createSelectBuilder = (table: string) => {
   });
 
   const builder = {
+    abortSignal() { return builder; },
     eq(column: string, value: unknown) {
       filters.push({ column, operator: "eq", value });
       return builder;
