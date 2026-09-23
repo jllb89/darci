@@ -5,7 +5,7 @@ Owner: Jorge (`lopezb.jl@gmail.com`). Scope: staging and isolated recovery; no p
 ## Defects actually found and corrected
 
 1. **Held final PDF exposed by the signing read endpoint.** Signing now filters final/acknowledgment versions with the same billing policy as review/version reads, before minting any download URL. Accepted pre-final signing remains available. Held/released regression tests cover both outcomes.
-2. **Crash after atomic completion, before billing release decision.** Completed retries revalidate the actor, package and stored bytes, then recover only an explicitly `pending` release decision whose version/hash match. Existing held/released decisions stay unchanged. Missing/mismatched evidence fails closed.
+2. **Crash after atomic completion, before workflow/billing release decision.** Completed retries revalidate the actor, package and stored bytes, resume the interrupted workflow projection, then recover only an explicitly `pending` release decision whose version/hash match. A failed workflow repair blocks release. Existing held/released decisions stay unchanged. Missing/mismatched evidence fails closed. All ten crash cases were rerun with actual workflow rows and assert completed workflow status (01:48 UTC).
 3. **Empty Stripe claim represented as an all-null PostgreSQL composite.** No acquired event ID means no work; duplicate workers do not process an undefined event.
 4. **Auth-provider outage returned as invalid credentials.** Provider 429/5xx/network errors now return sanitized 503 plus Retry-After, and emit actionable auth signals. Genuine invalid credentials remain 401. Web clears credentials only for 400/401, not this outage response.
 5. **Terminal provider bounce/suppression/complaint rescheduled jobs.** Only retryable `failed` deliveries schedule another attempt; terminal outcomes do not cycle through the worker.
@@ -25,12 +25,16 @@ Owner: Jorge (`lopezb.jl@gmail.com`). Scope: staging and isolated recovery; no p
 | Alert route | Twelve captured signals forwarded, explicitly labeled synthetic, through existing staging log filters, metrics, alarms and SNS. All seven categories alarmed; SNS alarm/recovery actions observed; all eight alarms naturally returned to OK. No fake heartbeat or forced alarm state. Existing recipient confirmation remains on record; no claim of a new inbox acknowledgment. |
 | Delivery callbacks | Actual isolated delivered/deferred/bounced/suppressed persistence; duplicate event ID stored once; no extra worker attempt. No external email/SMS delivery claimed from these callbacks. Prior actual Resend delivery/recipient confirmation remains valid. |
 | Environment separation | Real Stripe SDK signature tests reject opposite-mode signed events, wrong endpoint secrets and modified raw bytes before inbox persistence; existing key/production activation tests pass. |
-| Consolidated gate | **724 backend tests / 102 files**, 72 web tests, shared/backend builds, web typecheck, catalog/KPIs, 28 infrastructure/workflow checks, diff validation: all pass. |
+| Consolidated gate | **725 backend tests / 102 files**, 72 web tests, shared/backend builds, web typecheck, catalog/KPIs, 28 infrastructure/workflow checks, diff validation: all pass. |
+| Hosted access extension | **98 deployed matrix requests**, all six human JWTs denied direct Storage signing; held public verification 404, released 200 with no PDF path; revoked signer denied; exact finalized bytes unchanged. Three privileged roles revoked, six sessions logged out. Synthetic fixture prerequisites, not a legal notarization. |
+| Real email OTP | One actual operator-owned alias email reported delivered by Resend; immediate repeat sends nothing extra, wrong code 401, correct code 200, replay 401. Test session globally logged out. Actual phone delivery is not inferred. |
+| Browser operator MFA | Real staging browser enrollment, wrong-code rejection, successful TOTP/AAL2, setup-key removal and sensitive API authorization through input validation pass. Synthetic administrator privilege, factor and session removed; no valid customer mutation submitted. |
 
 ### Evidence locations
 
 - Ignored private recovery directory: `.recovery-private/darci-app-recovery-4886104a/`, reports `payment-crash`, `finalization-crash`, `continuity`, `source-failures`, `notification-delivery`.
-- Final local gate: `darci-phase1-gate-80uKzh/report.json` in the operator's private temporary directory.
+- Final local gate: `darci-phase1-gate-WTR790/report.json` in the operator's private temporary directory.
+- Hosted access, real OTP and browser receipts: `/private/tmp/darci-hosted-access23-receipt.json`, `/private/tmp/darci-otp23-receipt.json`, `/private/tmp/darci-admin-ui23-receipt.json`.
 - Staging schema receipt: `/private/tmp/darci-suppression-migration23-receipt.json`.
 - Alert stream: `/ecs/darci-staging-api`, `phase1-detector-drill-e3abe328-9366-4f23-aa60-6bb612dc727a`, 01:15:10 UTC.
 
@@ -41,8 +45,15 @@ The recovery topology has no external provider keys or published ports. Realtime
 This closes the specific automated interruption/continuity/source-callback gaps; **it does not justify checking every original Phase 1 box**. Remaining acceptance must stay explicit:
 
 - Physical-device/cross-device network/refresh/Apple Pay and the full CA/OH Trust/POA/upload product-content matrix; exact legal/commercial/retention reviewer approval.
-- Full hosted equivalent of the expanded recovered-role matrix, actual operator UI interaction, and actual OTP/SMS delivery/failure acceptance. Existing deployed API/MFA/Resend proofs cover narrower cases.
+- Actual SMS delivery/failure acceptance needs an authorized operator phone number; requested once, no client number used. Hosted role matrix, operator MFA browser interaction and actual email OTP are now demonstrated above.
 - Final production origins, credentials, cost/rotation/isolation policy and repeat verification against the fresh production environment. These are distinct from staging engineering correctness.
 - Branch protection and Sentry remain **explicitly deferred**, not unanswered questions or passed controls. No automatic identity deletion. Sole responder remains Jorge.
 
 Deployment and post-deployment results are appended below only after verification. This document is not production launch authorization.
+
+## Verified deployment and integrated recovery
+
+- `cb1cacbd79a9e0192b0266e5399968ed54aea728`: exact CI **35806787496** and staging deployment **35806787493** succeeded. API **106**, worker **92**, unchanged web **65** have completed 1/1 rollouts. Readiness, four genuine worker heartbeats, explicit OTLP disablement and eight enabled/OK alarms verified at 01:41 UTC. Receipt: `/private/tmp/darci-phase1-runtime23b-receipt.json`.
+- Integrated continuity rerun at **01:45 UTC** injects a real PDF failure during the same accepted-work session. No final package or extra usage is published; a correlated document signal is emitted. Retrying completes and holds the package; eligibility restoration releases the original bytes. Run `68f4d099-78c1-45b6-a3cb-c3f4543302ba`, document `43445a76-3d67-4c64-98b1-fbd1f8bc26c2`, SHA-256 `5a9635b617d6a4584c9ebc900886052ebb18b45256a522ba04937f4b4a3bef73`.
+- Its one captured failure signal was forwarded, explicitly synthetic, to the existing staging detector at **01:48 UTC**, correlation `ebbd74d8-79f3-4de7-8c7d-9a01dcd27399`. Detector/SNS recovery is recorded separately after observation; no recipient acknowledgment is invented.
+- The final workflow-projection follow-up is locally validated by the 725-test gate and all ten real crash drills; its exact deployment is recorded after rollout.

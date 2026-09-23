@@ -2389,6 +2389,17 @@ export const watermarkWithNotice = async (input: {
       ownerUserId: context.document.owner_id, documentId: context.document.id,
       documentVersionId: result.version.id, documentHashRecordId: result.hashRecord.id,
       actorUserId: context.actorUserId,
+      resumeWorkflow: async () => {
+        if (!context.request.workflow_id) return;
+        await transitionIlluminotarizationWorkflowStatus({
+          workflowId: context.request.workflow_id, nextStatus: "completed",
+          changedByUserId: context.actorUserId ?? context.request.assigned_notary_id ?? undefined,
+          changeSource: "system", changeReason: "Resume verified package completion after interruption",
+          legacyRequestId: context.request.id,
+          metadata: { documentId: context.document.id, documentVersionId: result.version.id,
+            hashRecordId: result.hashRecord.id, recovery: "pending_release" },
+        });
+      },
     });
     return {
       ...result,

@@ -6,7 +6,8 @@ process.env.REALTIME_BROADCASTS_DISABLED='true';
 const originalFetch=global.fetch;global.fetch=async(...args)=>{const r=await originalFetch(...args);if(!r.ok&&String(args[0]).includes('/rest/v1/')){const e=await r.clone().json().catch(()=>({}));console.error('DATABASE_DIAGNOSTIC '+JSON.stringify({status:r.status,code:e.code,message:e.message}));}return r;};
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false}}),roles=require('./dist/services/userRoleService');
 const ok=r=>{assert(!r.error,JSON.stringify({code:r.error?.code,message:r.error?.message}));return r.data;};
-const run=randomUUID(),actors=[],checks=[],matrix=[],billingNow=Date.now();let requestCount=0,server,base;
+const run=randomUUID(),actors=[],checks=[],matrix=[],signals=[],billingNow=Date.now();let requestCount=0,server,base;
+const originalError=console.error;console.error=(...args)=>{for(const x of args)if(typeof x==='string'){try{const v=JSON.parse(x);if(v.kind==='darci_critical_signal')signals.push(v);}catch{}}originalError(...args);};
 async function api(actor,route,body){requestCount++;const r=await fetch(base+route,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(actor?{Authorization:'Bearer '+actor.token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(60000)});return {status:r.status,body:await r.json()};}
 const expect=(r,status,label)=>{assert.equal(r.status,status,label+': '+JSON.stringify(r.body));return r.body;};
 async function actor(label,role='member'){
@@ -56,7 +57,13 @@ async function snapshot(owner,account,price,status){
  const venue={state:'CA',county:'SYNTHETIC County',city:'SYNTHETIC City',addressLine1:'1 SYNTHETIC TEST PLACE',locationLabel:'NO LEGAL EFFECT'};
  expect(await api(notary,'/notary/requests/'+req.id+'/meeting/identity-verification',{participantRole:'member',verificationMethod:'in_person_document',status:'verified',subjectName:'SYNTHETIC owner',documentType:'state_driver_license',documentNumber:'D0000001',issuingJurisdiction:'US-CA',documentExpirationDate:'2030-12-31',venue,notes:'Synthetic identity fixture; no real identity verified'}),201,'Identity');
  expect(await api(notary,'/notary/requests/'+req.id+'/sign',{acknowledgment:{signerAppeared:true,signerAcknowledged:true},notes:'SYNTHETIC TEST ONLY'}),200,'Acknowledgment');
- expect(await api(notary,'/notary/requests/'+req.id+'/session/advance',{}),200,'Complete meeting');
+ const storage=require('./dist/services/storageService'),download=storage.downloadDocumentObject;
+ storage.downloadDocumentObject=async()=>Buffer.from('SYNTHETIC INVALID TRANSIENT RESPONSE');
+ try{const failure=await api(notary,'/notary/requests/'+req.id+'/session/advance',{});assert(failure.status>=400||failure.status===201,'Injected invalid PDF must not finalize');}finally{storage.downloadDocumentObject=download;}
+ assert.notEqual(ok(await db.from('documents').select('status').eq('id',doc).single()).status,'completed');
+ assert.equal(ok(await db.from('document_versions').select('id').eq('document_id',doc).eq('is_final',true)).length,0);
+ assert.deepEqual(ok(await db.from('billing_usage_events').select('*').eq('document_id',doc).order('id')),usage);
+ assert(signals.some(s=>s.category==='document'),'Originating PDF failure signal missing');
  const finished=await api(notary,'/notary/requests/'+req.id+'/submit',{});expect(finished,200,'Complete');
  checks.push('Lapsed workflow proceeds through actual assigned-notary approval, session start/check-in, proximity, protected identity, acknowledgment and completion APIs; all identity/location inputs synthetic');
  const control=ok(await db.from('document_release_controls').select('*').eq('document_id',doc).single());assert.equal(control.release_status,'billing_held');
@@ -81,5 +88,5 @@ async function snapshot(owner,account,price,status){
  assert.deepEqual(ok(await db.from('billing_usage_events').select('*').eq('document_id',doc).order('id')),usage);
  ok(await db.from('document_access_invites').update({status:'revoked'}).eq('id',invite.id));assert.equal((await api(signer,'/documents/'+doc+'/signing')).status,404);
  checks.push('Held/released seven-route by seven-role matrix; direct Storage denied; same bytes released and original single usage unchanged; revoked signer denied');
- console.log('RESULT '+JSON.stringify({passed:true,run,documentId:doc,requestId:req.id,checks,matrix,requestCount,hash:hash.hash,scope:'Actual isolated API flow; provider snapshot, invited-signature placement, identity, venue and coordinates are synthetic, not a real IPEN session'}));
+ console.log('RESULT '+JSON.stringify({passed:true,run,documentId:doc,requestId:req.id,checks,matrix,signals,crossTrackFailureRecovered:true,requestCount,hash:hash.hash,scope:'Actual isolated API flow; provider snapshot, invited-signature placement, identity, venue and coordinates are synthetic, not a real IPEN session; Realtime disabled'}));
 })().catch(e=>{console.error(e.stack);process.exitCode=1;}).finally(async()=>{for(const a of actors){if(a.role!=='member')await roles.upsertUserRoleAssignmentBySupabaseUserId({supabaseUserId:a.authId,role:a.role,status:'revoked',makeActive:false,grantedReason:'isolated continuity drill complete'});await a.client.auth.signOut({scope:'global'});}if(server)await new Promise(r=>server.close(r));const redis=require('./dist/middleware/productionSafety').getSafetyRedis();if(redis)redis.disconnect();});

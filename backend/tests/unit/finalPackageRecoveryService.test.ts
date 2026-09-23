@@ -5,6 +5,13 @@ import { resumePendingFinalPackageRelease } from "../../src/services/finalPackag
 const input={ownerUserId:"owner",documentId:"doc",documentVersionId:"version",documentHashRecordId:"hash",actorUserId:"notary"};
 beforeEach(()=>vi.clearAllMocks());
 describe("interrupted completed-package billing decision",()=>{
+  it("repairs the interrupted workflow before release and fails closed if that repair fails",async()=>{
+    mocks.read.mockResolvedValue({release_status:"pending",document_version_id:"version",document_hash_record_id:"hash"});
+    const resumeWorkflow=vi.fn().mockRejectedValueOnce(new Error("workflow unavailable")).mockResolvedValue(undefined);
+    await expect(resumePendingFinalPackageRelease({...input,resumeWorkflow})).rejects.toThrow("workflow unavailable");expect(mocks.apply).not.toHaveBeenCalled();
+    await resumePendingFinalPackageRelease({...input,resumeWorkflow});expect(mocks.apply).toHaveBeenCalledExactlyOnceWith(input);
+    mocks.read.mockResolvedValue({release_status:"released"});resumeWorkflow.mockClear();await resumePendingFinalPackageRelease({...input,resumeWorkflow});expect(resumeWorkflow).not.toHaveBeenCalled();
+  });
   it.each(["released","billing_held"])("preserves terminal %s state without reevaluating membership",async release_status=>{
     const row={release_status,document_version_id:"version",document_hash_record_id:"hash"};mocks.read.mockResolvedValue(row);
     expect(await resumePendingFinalPackageRelease(input)).toBe(row);expect(mocks.apply).not.toHaveBeenCalled();

@@ -8,6 +8,7 @@ export async function resumePendingFinalPackageRelease(input: {
   documentVersionId: string;
   documentHashRecordId: string;
   actorUserId?: string | null;
+  resumeWorkflow?: () => Promise<unknown>;
 }) {
   const control = await getDocumentReleaseControl(input.documentId);
   if (!control) throw new Error("Completed package has no release evidence; operator review required");
@@ -16,5 +17,7 @@ export async function resumePendingFinalPackageRelease(input: {
   if (control.document_version_id !== input.documentVersionId || control.document_hash_record_id !== input.documentHashRecordId) {
     throw new Error("Pending release does not match the verified final package");
   }
-  return applyFinalPackageBillingPolicy(input);
+  const { resumeWorkflow, ...billingInput } = input;
+  if (resumeWorkflow) await resumeWorkflow();
+  return applyFinalPackageBillingPolicy(billingInput);
 }

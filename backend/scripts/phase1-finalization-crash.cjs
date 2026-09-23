@@ -34,7 +34,8 @@ async function child(input){return new Promise((resolve,reject)=>{
  const cases=[],signals=[];
  for(const jurisdiction of ['US-CA','US-OH'])for(const fault of ['upload','output','completion','database','malformed-second']){
   const doc=ok(await db.from('documents').insert({owner_id:owner.id,document_type:'document',jurisdiction,status:'pending_notary',idn:randomUUID().replaceAll('-','').slice(0,12).toUpperCase()}).select('id').single());
-  const request=ok(await db.from('notarization_requests').insert({document_id:doc.id,assigned_notary_id:notary.id,status:'in_review'}).select('id').single());
+  const workflow=await require('./dist/services/illuminotarizationWorkflowService').createIlluminotarizationWorkflow({ownerUserId:owner.id,primaryDocumentId:doc.id,createdByUserId:owner.id,status:'in_review',assignedNotaryUserId:notary.id,metadata:{fixture:run}});
+  const request=ok(await db.from('notarization_requests').insert({document_id:doc.id,assigned_notary_id:notary.id,status:'in_review',workflow_id:workflow.id}).select('id').single());
   ok(await db.from('meetings').insert({request_id:request.id,status:'completed'}));
   const sources=[];
   for(let index=0;index<2;index++){
@@ -54,6 +55,7 @@ async function child(input){return new Promise((resolve,reject)=>{
   const versions=ok(await db.from('document_versions').select('*').eq('document_id',doc.id).eq('is_final',true).order('id'));assert.equal(versions.length,2);
   for(const old of committed){assert(versions.some(v=>v.id===old.id&&v.storage_path===old.storage_path),'Committed output replaced');}
   const after=ok(await db.from('document_release_controls').select('*').eq('document_id',doc.id).single());assert.equal(after.release_status,'billing_held');
+  assert.equal(ok(await db.from('illuminotarization_workflows').select('status').eq('id',workflow.id).single()).status,'completed','Workflow completion recovered');
   const hashes=ok(await db.from('document_hash_records').select('*').eq('document_id',doc.id).order('id'));assert.equal(hashes.length,2);
   for(const v of versions){const bytes=Buffer.from(await ok(await db.storage.from('documents').download(v.storage_path)).arrayBuffer());assert.equal(createHash('sha256').update(bytes).digest('hex'),hashes.find(h=>h.document_version_id===v.id).hash);await require('./dist/services/pdfProcessingService').validateRenderedPdf(bytes,1);}
   for(const s of sources)assert(Buffer.from(await ok(await db.storage.from('documents').download(s.path)).arrayBuffer()).equals(source));
