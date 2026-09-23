@@ -4,32 +4,37 @@ import { readFileSync } from 'node:fs';
 const read = name => readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
 const ci = read('ci'), deploy = read('deploy-staging'), ios = read('ios');
 const mobileMake = readFileSync(new URL('../apps/mobile/Makefile', import.meta.url), 'utf8');
+const mobileProject = readFileSync(new URL('../apps/mobile/project.yml', import.meta.url), 'utf8');
 const job = (source, name) => source.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0] ?? '';
 
 test('server deployment reuses exact-commit CI instead of running the suite twice', () => {
   assert.doesNotMatch(deploy, /uses: .*ci\.yml/);
   assert.match(job(deploy, 'validate'), /node scripts\/workflow-gates\.mjs wait-ci/);
   assert.doesNotMatch(ci, /\n  ios:/);
-  assert.match(ios, /xcodebuild build-for-testing/);
-  assert.match(ios, /xcodebuild test-without-building/);
+  assert.match(ios, /xcodebuild test/);
+  assert.doesNotMatch(ios, /build-for-testing|test-without-building/);
   assert.match(ios, /actions\/cache@v4/);
 });
 
 test('iOS CI pins its toolchain and dependency graph while retaining every test', () => {
+  assert.match(ios, /permissions:\n  contents: read/);
+  assert.match(ios, /cancel-in-progress: true/);
   assert.match(ios, /DEVELOPER_DIR: \/Applications\/Xcode_26\.6\.app\/Contents\/Developer/);
   assert.match(ios, /DARCI_IOS_RUNTIME: com\.apple\.CoreSimulator\.SimRuntime\.iOS-26-5/);
   assert.match(mobileMake, /cp \$\(PACKAGE_LOCK\) \$\(GENERATED_PACKAGE_LOCK\)/);
+  assert.match(mobileProject, /test:\n      config: Debug\n      targets:\n        - DARCiMobileTests\n        - DARCiMobileUITests/);
   assert.match(ios, /-onlyUsePackageVersionsFromResolvedFile/);
-  assert.match(ios, /-disableAutomaticPackageResolution/);
+  assert.match(ios, /-skipPackageUpdates/);
   assert.match(ios, /-parallel-testing-enabled NO/);
   assert.doesNotMatch(ios, /-only-testing|-skip-testing|continue-on-error|\.env\.staging/);
 });
 
 test('iOS CI separates stable packages from incremental products and preserves diagnostics', () => {
+  assert.equal(ios.match(/uses: actions\/cache@v4/g)?.length, 2);
   assert.match(ios, /darci-ios-packages/);
   assert.match(ios, /darci-ios-build\/Build/);
   assert.match(ios, /darci-ios-build\/ModuleCache\.noindex/);
-  assert.match(ios, /darci-ios-\*-results\.xcresult/);
+  assert.match(ios, /darci-ios-test-results\.xcresult/);
   assert.match(ios, /COMPILER_INDEX_STORE_ENABLE=NO/);
 });
 

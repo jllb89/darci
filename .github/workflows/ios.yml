@@ -72,32 +72,19 @@ jobs:
             ${{ runner.temp }}/darci-ios-build/Build
             ${{ runner.temp }}/darci-ios-build/ModuleCache.noindex
             ${{ runner.temp }}/darci-ios-build/SDKStatCaches.noindex
-          key: ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-${{ github.sha }}
+          key: ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('.github/workflows/ios.yml', 'apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-${{ github.sha }}
           restore-keys: |
-            ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-
-      - name: Build iOS tests while the simulator boots
+            ios-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('.github/workflows/ios.yml', 'apps/mobile/project.yml', 'apps/mobile/Package.resolved') }}-
+      - name: Build and run the full unit and UI test suites
         run: |
           set -euo pipefail
-          xcodebuild build-for-testing -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
-            -configuration Debug -destination "generic/platform=iOS Simulator" \
-            -derivedDataPath "$RUNNER_TEMP/darci-ios-build" \
-            -clonedSourcePackagesDirPath "$RUNNER_TEMP/darci-ios-packages" \
-            -onlyUsePackageVersionsFromResolvedFile -showBuildTimingSummary \
-            -resultBundlePath "$RUNNER_TEMP/darci-ios-build-results.xcresult" \
-            ARCHS=arm64 COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
-            DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
-            DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
-      - name: Run the full unit and UI test suites without rebuilding
-        run: |
-          set -euo pipefail
-          xcrun simctl bootstatus "$DARCI_CI_SIMULATOR" -b
-          xcodebuild test-without-building -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
+          xcodebuild test -project apps/mobile/DARCiMobile.xcodeproj -scheme DARCiMobile \
             -configuration Debug -destination "platform=iOS Simulator,id=$DARCI_CI_SIMULATOR" \
             -derivedDataPath "$RUNNER_TEMP/darci-ios-build" \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/darci-ios-packages" \
-            -disableAutomaticPackageResolution -showBuildTimingSummary \
+            -onlyUsePackageVersionsFromResolvedFile -skipPackageUpdates -showBuildTimingSummary \
             -resultBundlePath "$RUNNER_TEMP/darci-ios-test-results.xcresult" \
-            -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            -parallel-testing-enabled NO COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
             DARCI_API_BASE_URL=http://127.0.0.1:1 DARCI_SUPABASE_URL=http://127.0.0.1:1 \
             DARCI_SUPABASE_ANON_KEY=test-anon-key DARCI_SENTRY_DSN=
       - name: Preserve iOS test diagnostics
@@ -105,6 +92,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: darci-ios-test-results
-          path: ${{ runner.temp }}/darci-ios-*-results.xcresult
+          path: ${{ runner.temp }}/darci-ios-test-results.xcresult
           if-no-files-found: ignore
           retention-days: 7
