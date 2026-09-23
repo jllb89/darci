@@ -41,7 +41,7 @@ jobs:
       - name: Validate production isolation templates
         run: node --test ../infra/production/*.test.mjs
       - name: Validate workflow deployment boundaries
-        run: node --test ../scripts/workflow-gates.test.mjs ../scripts/workflow-structure.test.mjs
+        run: node --test ../scripts/workflow-gates.test.mjs ../scripts/workflow-structure.test.mjs ../scripts/supabase-ci-bootstrap.test.mjs
 
   database-security:
     runs-on: ubuntu-24.04
@@ -74,8 +74,7 @@ jobs:
           supabase init --workdir "$drill_root"
           mkdir -p "$drill_root/supabase/migrations"
           cp supabase/migrations/*.sql "$drill_root/supabase/migrations/"
-          supabase start --workdir "$drill_root" -x studio,imgproxy,logflare,vector,supavisor,realtime,edge-runtime > "$drill_root/start.log" 2>&1
-          supabase status --workdir "$drill_root" -o json > "$drill_root/status.json"
+          node scripts/supabase-ci-bootstrap.mjs "$drill_root"
       - name: Verify fresh bootstrap contains reference data, not beta accounts or provider mappings
         run: PHASE2_TEST_DATABASE_URL="$PHASE1_TEST_DATABASE_URL" node backend/scripts/check-fresh-production-schema.mjs --confirm-isolated
       - name: Exercise actual SQL, role and Storage boundaries
@@ -88,6 +87,14 @@ jobs:
           node backend/scripts/test-phase1-billing-sql.mjs --confirm-isolated
           node backend/scripts/test-legacy-reverification-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-storage-boundary.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
+      - name: Preserve sanitized bootstrap diagnostics
+        if: failure() && env.DARCI_SQL_DRILL_ROOT != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-bootstrap
+          path: ${{ env.DARCI_SQL_DRILL_ROOT }}/bootstrap.sanitized.log
+          retention-days: 7
+          if-no-files-found: warn
       - name: Stop disposable database
         if: always() && env.DARCI_SQL_DRILL_ROOT != ''
         run: supabase stop --workdir "$DARCI_SQL_DRILL_ROOT" --no-backup

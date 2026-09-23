@@ -65,6 +65,18 @@ test('digest scans and database-security tests remain mandatory', () => {
   assert.match(ci, /test-phase1-billing-sql\.mjs/);
 });
 
+test('database bootstrap keeps sanitized failure evidence without publishing credentials', () => {
+  const database = job(ci, 'database-security');
+  assert.match(database, /node scripts\/supabase-ci-bootstrap\.mjs "\$drill_root"/);
+  assert.match(database, /if: failure\(\) && env\.DARCI_SQL_DRILL_ROOT != ''/);
+  assert.match(database, /path: \$\{\{ env\.DARCI_SQL_DRILL_ROOT \}\}\/bootstrap\.sanitized\.log/);
+  assert.match(database, /retention-days: 7/);
+  assert.doesNotMatch(database, /path:.*(?:status\.json|start\.log|\/\*\*)/);
+  assert.doesNotMatch(database, /continue-on-error|ignore-health-check/);
+  assert.match(database, /if: always\(\) && env\.DARCI_SQL_DRILL_ROOT != ''/);
+  assert.match(ci, /node --test .*supabase-ci-bootstrap\.test\.mjs/);
+});
+
 test('failed-rollout changes and runtime templates remain in the next build', () => {
   assert.match(job(deploy, 'changes'), /workflow-gates\.mjs baseline/);
   assert.match(job(deploy, 'changes'), /base: \$\{\{ steps\.baseline\.outputs\.base \}\}/);
