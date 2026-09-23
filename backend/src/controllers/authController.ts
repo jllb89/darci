@@ -1076,6 +1076,7 @@ const recordAuthEvent = async (input: {
   metadata?: Record<string, unknown>;
 }) => {
   await recordAuditEvent({
+    ...(typeof input.metadata?.request_id === "string" ? { requestId: input.metadata.request_id } : {}),
     ...(input.actorSupabaseId ? { actorSupabaseId: input.actorSupabaseId } : {}),
     entityType: "auth",
     entityId: null,
@@ -2399,6 +2400,8 @@ export const requestPhoneOtp = async (req: Request, res: Response) => {
       delivery: "phone_sms",
     },
   });
+
+  logPhoneOtpEvent("info", "provider_request_accepted", req, { phone, provider: "supabase" });
 
   return res.status(200).json({
     status: "ok",

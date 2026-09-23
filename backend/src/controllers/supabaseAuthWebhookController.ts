@@ -6,6 +6,7 @@ import {
   SupabaseAuthSmsHookError,
 } from "../services/supabaseAuthSmsHookService";
 import { captureException } from "../utils/sentry";
+import { logSmsHandoff, smsHookHash, smsPhoneHash } from "../telemetry/smsTelemetry";
 
 const sendSmsHookPayloadSchema = z.object({
   user: z.object({
@@ -89,24 +90,34 @@ export const receiveSupabaseAuthSmsHook = async (req: Request, res: Response) =>
     return sendHookError(res, 400, "Supabase Auth SMS hook payload is invalid");
   }
 
+  const hookHash = smsHookHash(headers["webhook-id"]);
+  const phoneHash = smsPhoneHash(parsed.data.user.phone);
   try {
-    await sendSupabaseAuthSms({
+    const result = await sendSupabaseAuthSms({
       phone: parsed.data.user.phone,
       otp: parsed.data.sms.otp,
       userId: parsed.data.user.id ?? null,
+      hookHash,
     });
+    logSmsHandoff({ outcome: "accepted", hookHash, phoneHash, messageId: result.messageId });
 
     return res.status(200).json({});
   } catch (error) {
+    logSmsHandoff({ outcome: "failed", hookHash, phoneHash,
+      ...(error instanceof SupabaseAuthSmsHookError && error.providerFailure ? { providerFailure: error.providerFailure } : {}),
+      failure: error instanceof SupabaseAuthSmsHookError ? error.code : "unexpected_provider_failure" });
     if (error instanceof SupabaseAuthSmsHookError) {
       captureException(error, {
         tags: {
           source: "supabase_auth_sms_hook",
           error_code: error.code,
+          telemetry_area: "auth",
+          provider_failure: error.providerFailure,
         },
         contexts: {
           smsHook: {
-            userId: parsed.data.user.id ?? null,
+            hookHash,
+            phoneHash,
           },
         },
       });
@@ -114,7 +125,7 @@ export const receiveSupabaseAuthSmsHook = async (req: Request, res: Response) =>
       return sendHookError(res, error.statusCode, error.message);
     }
 
-    captureException(error, {
+    captureException(new Error("Supabase Auth SMS hook failed"), {
       tags: { source: "supabase_auth_sms_hook" },
     });
 

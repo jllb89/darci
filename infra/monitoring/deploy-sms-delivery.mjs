@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {buildSmsDeliveryTemplate} from './sms-delivery-stack.mjs';
+assert(process.argv.includes('--approved-staging-sms-tracking'));
+const aws=(...args)=>JSON.parse(execFileSync('aws',[...args,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}) || '{}');
+assert.equal(aws('sts','get-caller-identity').Account,'427057633951');
+const dir=mkdtempSync(join(tmpdir(),'darci-sms-tracking-')), file=join(dir,'template.json');
+writeFileSync(file,JSON.stringify(buildSmsDeliveryTemplate()),{mode:0o600});
+aws('cloudformation','validate-template','--template-body','file://'+file);
+execFileSync('aws',['cloudformation','deploy','--region','us-east-1','--stack-name','darci-staging-sms-delivery','--template-file',file,'--capabilities','CAPABILITY_IAM','--tags','Environment=staging','CostCenter=darci-monitoring','--no-fail-on-empty-changeset'],{stdio:'inherit'});
+console.log(JSON.stringify({stack:'darci-staging-sms-delivery',configuration:'darci-staging-auth-sms',note:'Requires API release with the configuration-set parameter. No SMS sent.'}));

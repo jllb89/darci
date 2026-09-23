@@ -657,6 +657,7 @@ describe("auth controller Phase 1", () => {
     const { res, status, json } = buildResponse();
     const req = {
       headers: {},
+      authOtpRequestId: "8f35c96b-e82f-4699-813a-e454af8054c1",
       body: { phone: "+15551234567", returnTo: "/mobile" },
     } as unknown as Request;
 
@@ -671,6 +672,7 @@ describe("auth controller Phase 1", () => {
     expect(mocks.recordAuditEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "auth.otp_requested",
+        requestId: "8f35c96b-e82f-4699-813a-e454af8054c1",
         metadata: expect.objectContaining({
           phone: "+15551234567",
           return_to: "/app",

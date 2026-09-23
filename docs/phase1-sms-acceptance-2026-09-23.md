@@ -1,5 +1,7 @@
 # Phase 1 operator SMS acceptance — receipt confirmed; login acceptance pending
 
+**Latest update:** Jorge approved delivery tracking and a three-minute OTP window. Staging validity is now 180 seconds; tracking/correlation implementation and its release boundary are documented in [SMS delivery tracking](sms-delivery-tracking-2026-09-23.md). The historical investigation and approvals below are retained as evidence; they are not the latest configuration state.
+
 Jorge explicitly authorized an initial SMS request and then one controlled retry to his existing staging-linked phone, ending **0675**. He confirmed receipt after the retry. No new account, phone reassignment, client message or role change was performed. Receipt is not yet evidence of completing phone login.
 
 ## Observed

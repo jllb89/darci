@@ -3,26 +3,31 @@ import {
   SendTextMessageCommand,
   type MessageType,
 } from "@aws-sdk/client-pinpoint-sms-voice-v2";
+import { smsPhoneHash } from "../telemetry/smsTelemetry";
 
 type SendSupabaseAuthSmsInput = {
   phone: string;
   otp: string;
   userId?: string | null;
+  hookHash?: string;
 };
 
 export class SupabaseAuthSmsHookError extends Error {
   statusCode: number;
   code: string;
+  providerFailure: string | undefined;
 
-  constructor(statusCode: number, code: string, message: string) {
+  constructor(statusCode: number, code: string, message: string, providerFailure?: string) {
     super(message);
     this.name = "SupabaseAuthSmsHookError";
     this.statusCode = statusCode;
     this.code = code;
+    this.providerFailure = providerFailure;
   }
 }
 
 const truthyValues = new Set(["1", "true", "yes", "on"]);
+const safeProviderFailures = new Set(["AccessDeniedException", "ValidationException", "ThrottlingException", "ResourceNotFoundException", "ServiceQuotaExceededException", "InternalServerException", "ConflictException", "TimeoutError"]);
 
 const isHookEnabled = () => {
   const raw = process.env.SUPABASE_AUTH_SMS_HOOK_ENABLED?.trim().toLowerCase();
@@ -143,6 +148,7 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
 
   const originationIdentity = resolveOriginationIdentity();
   const messageType = resolveMessageType();
+  const configurationSet = process.env.SUPABASE_AUTH_SMS_CONFIGURATION_SET?.trim();
 
   try {
     const response = await getSmsClient().send(
@@ -151,6 +157,11 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
         OriginationIdentity: originationIdentity,
         MessageBody: message,
         MessageType: messageType,
+        ...(configurationSet ? { ConfigurationSetName: configurationSet } : {}),
+        Context: {
+          phoneHash: smsPhoneHash(phone),
+          ...(input.hookHash ? { hookHash: input.hookHash } : {}),
+        },
       }),
     );
 
@@ -176,7 +187,8 @@ export const sendSupabaseAuthSms = async (input: SendSupabaseAuthSmsInput) => {
     throw new SupabaseAuthSmsHookError(
       502,
       "sns_api_error",
-      error instanceof Error ? error.message : "Pinpoint SMS Voice v2 send failed",
+      "SMS provider could not accept the message",
+      error instanceof Error && safeProviderFailures.has(error.name) ? error.name : "UnknownProviderFailure",
     );
   }
 };

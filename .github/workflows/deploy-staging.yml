@@ -452,6 +452,7 @@ jobs:
             AUTH_OTP_FROM_ADDRESS: process.env.STAGING_AUTH_OTP_FROM_ADDRESS,
             RESEND_FAILURE_MODE: "strict",
             AUTH_EMAIL_SEND_COOLDOWN_SECONDS: "60",
+            SUPABASE_AUTH_SMS_CONFIGURATION_SET: "darci-staging-auth-sms",
             GOOGLE_MAPS_GEOCODE_USE_SERVER: process.env.STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER || "true",
             APP_ENV: "staging",
             OTEL_SDK_DISABLED: "1",
