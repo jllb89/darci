@@ -1,6 +1,6 @@
 # DARCi critical operations runbook
 
-Status, 23 September UTC / 22 September local 2026: cumulative runtime hardening deployed at `cbc19b9`; API/worker have OTLP explicitly disabled as approved. All eight AWS operational alarm actions remain enabled and all eight are OK; three genuine new-worker heartbeats and readiness were verified. This is staging proof, not production monitoring acceptance or proof of every incident source.
+Status, 23 September UTC / 22 September local 2026: cumulative runtime hardening deployed at `d120826`; API107/worker93 have OTLP explicitly disabled as approved, web65 unchanged. All eight AWS operational alarm actions remain enabled and all eight are OK; three genuine new-worker heartbeats and readiness verified at 02:01 UTC. Source-failure/SNS/recovery, real browser MFA and email OTP evidence is in the acceptance closeout. This is staging proof, not final production monitoring acceptance.
 
 Responder: Jorge, `lopezb.jl@gmail.com`. No secondary responder is configured. Sentry provider work remains deferred.
 
@@ -85,9 +85,11 @@ This exercises **log → metric → alarm → SNS**, not all originating applica
 See [the acceptance closeout](phase1-acceptance-closeout-2026-09-23.md) for actual source-failure, callback, crash and continuity results; the older limitations below retain their dated scope.
 
 - Auth provider outages now return 503/Retry-After rather than an invalid-session 401. Retry without clearing otherwise valid credentials; actual invalid credentials still return 401.
-- Completed finalization with a matching **pending** release control can resume billing evaluation after actor/package/exact-byte validation. Do not manually set release status or re-render. Terminal held/released controls remain unchanged; missing/mismatched evidence needs review.
+- Completed finalization with a matching **pending** release control resumes the interrupted workflow projection before billing evaluation, after actor/package/exact-byte validation. A failed workflow repair blocks release. Do not manually set release status or re-render. Terminal held/released controls remain unchanged; missing/mismatched evidence needs review.
 - Bounces, complaints and suppression are terminal for automatic outbox retries. A deferred provider delivery stays sent; it is not permission to send another email. Migration `20260923012000` permits suppression-event persistence without rewriting history.
 - To forward captured isolated source signals through the existing approved email drill, add `--source-receipts <private-recovery-directory>` to the detector command. This explicitly labels them synthetic and preserves correlation; it does not manufacture hosted errors or watchdog success.
+- Seven actual source categories passed the alarm/SNS/recovery route. The integrated PDF/usage/release recovery signal additionally alarmed at 01:49 UTC and naturally recovered at 01:54 UTC, both SNS actions successful. Existing recipient acknowledgment proves the route, not a new acknowledgment for each email.
+- Real staging browser enrollment/invalid-code/TOTP/AAL2 and real email OTP delivery/cooldown/wrong-code/replay checks now pass. The older limitation bullets below are historical; actual SMS and physical-device acceptance remain unverified.
 
 - Source emitters/watchdog and completed-package retry are deployed and verified at `d166019`. Remaining originating-failure drills are tracked separately in the Phase 1 record.
 - Human non-billing step-up/enrollment UI is deployed and its API boundary tested; full UI interaction acceptance remains. Controlled deployed deferral/no-resend, recovered-app/worker restart, selective restored-job resumption and the recovered held/signer access matrix pass. Remaining scope includes OTP/bounce/suppression and physical-device faults.

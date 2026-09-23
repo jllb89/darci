@@ -1,5 +1,7 @@
 # Phase 1 final engineering pass
 
+**Superseded status:** this is the earlier batch's historical evidence. The [23 September acceptance closeout](phase1-acceptance-closeout-2026-09-23.md) now proves the broader held-route/continuity, abrupt-payment, originating-failure, combined incident, hosted-role, email OTP and browser MFA checks described as remaining at the bottom of this note. Use that record and Section 7 of the production roadmap for current status; do not reopen completed checks from this historical list.
+
 ## Fixed execution order
 
 Requested by Jorge: implement the remaining engineering work first, then perform one consolidated verification stage. Do not expand this pass into another production audit or repeat already accepted legacy backfills.
