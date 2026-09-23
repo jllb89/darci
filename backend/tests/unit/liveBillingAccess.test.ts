@@ -36,6 +36,9 @@ describe("production billing rollout gate", () => {
   it("requires an explicit open mode for general sales", () => {
     expect(liveBillingAccess("another-user","plan_change",undefined,{...env,BILLING_LIVE_ACCESS_MODE:"open"},start).allowed).toBe(true);
   });
+  it("cannot bypass the production gate with whitespace accepted by Stripe configuration", () => {
+    expect(liveBillingAccess("another-user","checkout",OPERATOR_PRICE_CODE,{...env,APP_ENV:" production ",STRIPE_PROVIDER_ENVIRONMENT:" live "},start).allowed).toBe(false);
+  });
 });
 
 const from = vi.hoisted(() => vi.fn(() => { throw new Error("Database must not be accessed"); }));

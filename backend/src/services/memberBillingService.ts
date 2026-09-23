@@ -179,7 +179,7 @@ const loadPrice = async (priceCode: string) => {
     throw new MemberBillingServiceError(
       503,
       "billing_catalog_not_ready",
-      "Stripe test catalog is not fully configured",
+      "Stripe membership catalog is not fully configured",
     );
   }
 

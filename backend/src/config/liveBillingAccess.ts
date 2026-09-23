@@ -11,8 +11,10 @@ export function liveBillingAccess(
   env: Environment = process.env,
   now = Date.now(),
 ): { allowed: boolean; checkoutExpiresAt?: number } {
-  if (env.APP_ENV !== "production" && env.STRIPE_PROVIDER_ENVIRONMENT !== "live") return { allowed: true };
-  if (env.APP_ENV !== "production" || env.STRIPE_PROVIDER_ENVIRONMENT !== "live"
+  const appEnvironment = env.APP_ENV?.trim();
+  const stripeEnvironment = env.STRIPE_PROVIDER_ENVIRONMENT?.trim();
+  if (appEnvironment !== "production" && stripeEnvironment !== "live") return { allowed: true };
+  if (appEnvironment !== "production" || stripeEnvironment !== "live"
     || env.STRIPE_LIVE_MODE_ENABLED !== "true") return { allowed: false };
   if (env.BILLING_LIVE_ACCESS_MODE === "open") return { allowed: true };
   if (env.BILLING_LIVE_ACCESS_MODE !== "operator") return { allowed: false };

@@ -238,7 +238,7 @@ export const analyzeBillingReconciliation = (
         entityType: "subscription",
         entityId: subscription.id,
         billingAccountId: subscription.billing_account_id,
-        message: `Private-beta subscription is stored as ${subscription.provider_environment}.`,
+        message: `Subscription environment ${subscription.provider_environment} does not match ${getStripeEnvironment()}.`,
         repairAction: "inspect",
       }));
     }
@@ -249,20 +249,20 @@ export const analyzeBillingReconciliation = (
         entityType: "subscription",
         entityId: subscription.id,
         billingAccountId: subscription.billing_account_id,
-        message: "DARCi has a Stripe subscription ID that Stripe test mode did not return.",
+        message: "DARCi has a Stripe subscription ID that the configured Stripe environment did not return.",
         repairAction: "inspect",
       }));
       continue;
     }
     if (!provider) continue;
-    if (provider.livemode) {
+    if (provider.livemode !== (getStripeEnvironment() === "live")) {
       issues.push(issue({
         code: "provider_environment_mismatch",
         severity: "critical",
         entityType: "subscription",
         entityId: subscription.id,
         billingAccountId: subscription.billing_account_id,
-        message: "A live-mode Stripe subscription appeared in the private-beta reconciliation set.",
+        message: "Stripe subscription mode does not match the configured billing environment.",
         repairAction: "inspect",
       }));
     }
@@ -415,7 +415,7 @@ export const analyzeBillingReconciliation = (
         entityType: "invoice",
         entityId: payment.id,
         billingAccountId: payment.billing_account_id,
-        message: "Private-beta invoice transaction is not marked test mode.",
+        message: "Invoice transaction does not match the configured billing environment.",
         repairAction: "inspect",
       }));
     }

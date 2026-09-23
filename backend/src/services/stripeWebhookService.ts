@@ -131,7 +131,7 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
     subscription.metadata.darci_environment !== getStripeEnvironment() ||
     price.metadata.darci_product_code !== "member_membership"
   ) {
-    throw new Error("Stripe subscription is outside the DARCi test member allowlist");
+    throw new Error("Stripe subscription is outside the configured DARCi member allowlist");
   }
 
   const billingAccountId = subscription.metadata.darci_billing_account_id;

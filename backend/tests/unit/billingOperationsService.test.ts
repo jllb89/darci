@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   analyzeBillingReconciliation,
   type BillingReconciliationSnapshot,
@@ -86,6 +86,18 @@ const healthySnapshot = (): BillingReconciliationSnapshot => ({
 });
 
 describe("billing operations reconciliation", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it.each(["test", "live"] as const)("accepts matching %s provider mode and still rejects the opposite mode", mode => {
+    vi.stubEnv("APP_ENV", mode === "live" ? "production" : "staging");
+    vi.stubEnv("STRIPE_PROVIDER_ENVIRONMENT", mode);
+    const snapshot = healthySnapshot();
+    snapshot.subscriptions[0]!.provider_environment = mode;
+    snapshot.payments[0]!.provider_environment = mode;
+    snapshot.providerSubscriptions[0]!.livemode = mode === "live";
+    expect(analyzeBillingReconciliation(snapshot, new Date("2026-08-27"))).toEqual([]);
+    snapshot.providerSubscriptions[0]!.livemode = mode !== "live";
+    expect(analyzeBillingReconciliation(snapshot, new Date("2026-08-27")).map(i => i.code)).toContain("provider_environment_mismatch");
+  });
   it("reconciles the final window of a canceled test-clock contract, not earlier history", () => {
     const snapshot = healthySnapshot();
     snapshot.subscriptions[0]!.status = "canceled";
