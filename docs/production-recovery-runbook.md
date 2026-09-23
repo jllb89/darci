@@ -1,11 +1,11 @@
 # DARCi recovery runbook
 
-Status: **rehearsal in progress — not a production recovery certification**.
+Status: **controlled staging recovery demonstrated — not production recovery certification**.
 
 Responder: Jorge, `lopezb.jl@gmail.com`. Sole-responder coverage is explicitly accepted for now (18 September); no secondary coverage is claimed.
-Approved targets: RPO ≤24 hours; RTO ≤4 hours. Neither target is proven yet.
+Approved targets: RPO ≤24 hours; RTO ≤4 hours. The 22–23 September controlled exercise met both: snapshot approximately 2h44 old at start, approximately 1h46 through recovered authentication, exact PDF access, selective generation and the held/signer access matrix. This is selective, quarantined resumption, not approval to replay historical customer/provider queues.
 
-22 September update: the independently restored 20:00 UTC snapshot has **2,533/2,533 exact object checksums**, 2,405 readable PDFs and 50 preserved historical source exceptions. Auth/Storage/API/Redis and a quarantined worker were reconstructed; eight functional checks, including a real worker stop/natural heartbeat expiry/restart, pass. This is stronger than the earlier offline-Postgres proof but **not full queue/job or all-held-route recovery certification**. See the [current evidence record](production-readiness-phase1-pass-2026-09-22.md).
+23 September update: the independently restored 20:00 UTC snapshot has **2,533/2,533 exact object checksums**, 2,405 readable PDFs and 50 preserved historical source exceptions. Auth/Storage/API/Redis and a quarantined worker were reconstructed; eight functional checks, selective queue reconstruction/real rendering/interruption checks and a 32-request held/signer/notary/admin access matrix pass. See the [final-pass evidence](phase1-final-pass-2026-09-23.md). Historical unreadable files remain exceptions, not repaired artifacts.
 
 ## Safety boundaries
 
@@ -88,6 +88,8 @@ With a verified object directory and cached compatible Docker images:
 ```sh
 node backend/scripts/recovery-application-drill.mjs /ABSOLUTE/PRIVATE/RESTORE_DIRECTORY --confirm-isolated
 node backend/scripts/recovery-functional-drill.mjs /ABSOLUTE/WORKSPACE/.recovery-private/EXACT_PRINTED_RUN --confirm-isolated
+node backend/scripts/recovery-queue-drill.mjs /ABSOLUTE/WORKSPACE/.recovery-private/EXACT_PRINTED_RUN --confirm-isolated
+node backend/scripts/recovery-access-drill.mjs /ABSOLUTE/WORKSPACE/.recovery-private/EXACT_PRINTED_RUN --confirm-isolated
 ```
 
 The bootstrap requires all object checksums, allowing only explicitly reported source-readability exceptions. It creates a new Docker `--internal` network with no published ports, restores a fresh database, reconstructs file Storage metadata, and starts Auth, PostgREST, gateway, API, Redis and worker. API/worker code comes from the current compiled `backend/dist`; record its tested revision before accepting a run. The runtime image and Supabase versions are currently pinned in the script to the rehearsed versions; this is a local operator tool, not a generic production launcher.
@@ -96,7 +98,15 @@ Private runtime files live in ignored, mode-0700 `.recovery-private/` so Colima 
 
 The functional test generates an internal magic link without sending email and verifies it against restored Auth. It checks owner linkage, anonymous/unrelated denial, Storage URL restrictions, exact final bytes, safe public verification, missing/corrupt-copy detection and denied external egress. It stops **only its own recovered worker**, waits for the real heartbeat to expire, observes readiness 503, restarts it and verifies readiness 200 with unchanged durable queues. Fault injection changes only the isolated file copy and restores exact bytes afterward.
 
-All provider/outbox runners and BullMQ replay are disabled; no hosted provider credentials are passed. Auth/Storage use isolated privileged DB credentials, so restored production role ownership/password rotation is not claimed. The reported functional time excludes prior transfer/bootstrap/debugging; use a complete incident timeline for an RTO claim. Full selective job reconstruction, held/signer-route coverage and recovered-key acceptance remain required. Stop the exact named containers after collecting the private report; do not prune unrelated Docker resources or erase preserved source exceptions.
+Run the three drills sequentially: each fingerprints preserved state and must not overlap another fixture mutation. The queue drill uses a separate queue prefix and explicitly selected new synthetic run IDs; it does not resume customer queues. The access drill requires that queue receipt and changes only its synthetic documents/accounts. It revokes its temporary privileged roles and logs out fixture sessions afterward.
+
+All provider/outbox runners and normal BullMQ replay are hard-disabled by `APP_ENV=recovery` or `RECOVERY_QUARANTINE=1`; no hosted provider credentials are passed. Auth/Storage use isolated privileged DB credentials, so restored production role ownership/password rotation is not claimed. Individual script timings exclude prior transfer/bootstrap/debugging; use a complete incident timeline for an RTO claim. Stop the exact named containers after collecting the private reports; do not prune unrelated Docker resources or erase preserved source exceptions.
+
+### Storage compatibility and interrupted generation
+
+The versioned-object snapshot requires the digest-pinned Storage 1.79.14 in the bootstrap. Storage 1.35.3 could read existing files but failed new uploads with PostgreSQL 42P10. Do not weaken the recovered uniqueness constraints to accommodate an old server. The compatible server may apply its own reviewed Storage grant migration inside the isolated clone. Native metadata reconstruction uses the current synchronous extended-attribute API; exact bytes alone do not restore content-type/cache behavior.
+
+In normal staging operation, the dispatcher reconstructs missing Redis delivery only for durable `queued` generation runs, with stable job IDs. It never resets `rendering`, completed, failed, blocked or canceled runs. The abrupt-exit drill proves an upload followed by process death cannot create a published version or release a package. A remaining `rendering` run requires operator inspection of its private uploaded bytes and evidence; do not automatically reset it, overwrite a final artifact, or replay a whole restored queue. Existing queue-age alerts remain the escalation path.
 
 For the offline database component, use the private artifact directory printed by that check:
 

@@ -11,6 +11,8 @@ import { runDueStripeWebhookEvents } from "../services/stripeWebhookService";
 import { publishWorkerHeartbeat } from "../services/operationalHealthService";
 import { getSafetyRedis } from "../middleware/productionSafety";
 import { runOperationalWatchdog } from "../services/operationalWatchdogService";
+import { reconcileQueuedGenerationRuns } from "../services/generationQueueRecoveryService";
+import { isRecoveryQuarantined } from "./recoveryQuarantine";
 import {
   getBillingOperationsReport,
   runStripeWebhookRetentionCleanup,
@@ -71,13 +73,16 @@ let billingReconciliationInterval: NodeJS.Timeout | null = null;
 let billingReconciliationRunInFlight = false;
 let stripeRetentionInterval: NodeJS.Timeout | null = null;
 let stripeRetentionRunInFlight = false;
+let generationRecoveryInterval: NodeJS.Timeout | null = null;
+let generationRecoveryInFlight = false;
+const recoveryQuarantined = isRecoveryQuarantined();
 
 const parsePositiveInt = (value: string | undefined, fallback: number, max: number) => {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
 };
 
-const notificationOutboxRunnerEnabled = process.env.NOTIFICATION_OUTBOX_RUNNER_ENABLED !== "false";
+const notificationOutboxRunnerEnabled = !recoveryQuarantined && process.env.NOTIFICATION_OUTBOX_RUNNER_ENABLED !== "false";
 const notificationOutboxIntervalMs = parsePositiveInt(
   process.env.NOTIFICATION_OUTBOX_RUNNER_INTERVAL_SECONDS,
   60,
@@ -88,7 +93,7 @@ const notificationOutboxRunLimit = parsePositiveInt(
   25,
   100,
 );
-const stripeWebhookRunnerEnabled = process.env.STRIPE_WEBHOOK_RUNNER_ENABLED !== "false";
+const stripeWebhookRunnerEnabled = !recoveryQuarantined && process.env.STRIPE_WEBHOOK_RUNNER_ENABLED !== "false";
 const stripeWebhookIntervalMs = parsePositiveInt(
   process.env.STRIPE_WEBHOOK_RUNNER_INTERVAL_SECONDS,
   30,
@@ -99,13 +104,13 @@ const stripeWebhookRunLimit = parsePositiveInt(
   25,
   100,
 );
-const billingReconciliationRunnerEnabled = process.env.BILLING_RECONCILIATION_RUNNER_ENABLED !== "false";
+const billingReconciliationRunnerEnabled = !recoveryQuarantined && process.env.BILLING_RECONCILIATION_RUNNER_ENABLED !== "false";
 const billingReconciliationIntervalMs = parsePositiveInt(
   process.env.BILLING_RECONCILIATION_INTERVAL_SECONDS,
   15 * 60,
   24 * 60 * 60,
 ) * 1000;
-const stripeRetentionRunnerEnabled = process.env.STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED !== "false";
+const stripeRetentionRunnerEnabled = !recoveryQuarantined && process.env.STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED !== "false";
 const stripeRetentionIntervalMs = parsePositiveInt(
   process.env.STRIPE_WEBHOOK_RETENTION_INTERVAL_SECONDS,
   24 * 60 * 60,
@@ -259,6 +264,26 @@ if (!redisConnection) {
   );
 
   workers.forEach(attachWorkerTelemetry);
+}
+
+// A Redis restart/restore must not strand a durably queued document. This only
+// reconstructs delivery for queued runs; interrupted rendering requires review.
+if (redisConnection && !recoveryQuarantined && process.env.GENERATION_RECOVERY_RUNNER_ENABLED !== "false") {
+  const recover = async () => {
+    if (generationRecoveryInFlight) return;
+    generationRecoveryInFlight = true;
+    try {
+      const result = await reconcileQueuedGenerationRuns();
+      if (result.enqueued) console.log("Generation delivery reconstructed", result);
+    } catch {
+      captureException(new Error("Generation delivery reconstruction failed"), {
+        level: "error", tags: { service: "worker", worker_queue: "generation-runs" },
+        fingerprint: ["worker", "generation-runs", "recovery"],
+      });
+    } finally { generationRecoveryInFlight = false; }
+  };
+  generationRecoveryInterval = setInterval(() => { void recover(); }, 60_000);
+  void recover();
 }
 
 const runNotificationOutboxOnce = async () => {
@@ -422,6 +447,7 @@ if (stripeRetentionRunnerEnabled) {
 }
 
 const shutdown = async () => {
+  if (generationRecoveryInterval) clearInterval(generationRecoveryInterval);
   if (watchdogInterval) clearInterval(watchdogInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (notificationOutboxInterval) {

@@ -851,7 +851,7 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string }) => 
 
   return {
     providerEnvironment: getStripeEnvironment(),
-    paymentsReal: false,
+    paymentsReal: getStripeEnvironment() === "live",
     enforcementMode: getBillingEnforcementMode(),
     plans: (rawCatalog ?? []).map((price) => ({
       priceCode: price.price_code,

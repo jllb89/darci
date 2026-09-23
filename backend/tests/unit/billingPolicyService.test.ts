@@ -38,4 +38,20 @@ describe("billing policy helpers", () => {
     expect(isFinalPackageReleaseUnavailable({ release_status: "released" } as never)).toBe(false);
     expect(isFinalPackageReleaseUnavailable({ release_status: "billing_held" } as never)).toBe(true);
   });
+
+  it.each(["observe", "enforced"])("never exposes pending or held final artifacts in %s mode", mode => {
+    process.env.BILLING_ENFORCEMENT_MODE = mode;
+    for (const release_status of ["pending", "billing_held"] as const) {
+      expect(isFinalPackageReleaseUnavailable({ release_status } as never)).toBe(true);
+    }
+    expect(isFinalPackageReleaseUnavailable({ release_status: "released" } as never)).toBe(false);
+  });
+
+  it.each([
+    { is_final: true, file_name: "ordinary.pdf" },
+    { is_final: false, file_name: "POA-ACKNOWLEDGED-V17.PDF" },
+    { storage_path: "owner/doc/trust-finalized-v99.pdf" },
+  ])("recognizes final-package variants before signing download URLs: %j", version => {
+    expect(isFinalPackageDocumentVersion(version)).toBe(true);
+  });
 });

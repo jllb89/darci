@@ -83,6 +83,22 @@ describe("resolveClaimedSignerInviteAccess", () => {
     );
   });
 
+  it.each([null, "", "another-user"])("rejects an unbound or differently bound claim (%s), even with matching email", async claimedUserId => {
+    supabaseMocks.state.document_access_invites = [{ id: "legacy", document_id: "document-1", document_output_signer_id: "signer-1", claimed_user_id: claimedUserId, status: "claimed" }];
+    supabaseMocks.state.invite_recipients = [{ invite_id: "legacy", channel: "email", delivery_address: "signer@example.invalid", is_primary: true }];
+    expect(await resolveClaimedSignerInviteAccess({ documentId: "document-1", viewerUserId: "viewer-1", viewerEmail: "signer@example.invalid" })).toBeNull();
+    expect(await resolveClaimedSignerInviteAccess({ documentId: "document-1", viewerUserId: "viewer-1" })).toBeNull();
+  });
+
+  it("rejects revoked claims and mismatched recipient email", async () => {
+    const row = { id: "claim", document_id: "document-1", document_output_signer_id: "signer-1", claimed_user_id: "viewer-1", status: "revoked" };
+    supabaseMocks.state.document_access_invites = [row];
+    supabaseMocks.state.invite_recipients = [{ invite_id: "claim", channel: "email", delivery_address: "signer@example.invalid", is_primary: true }];
+    expect(await resolveClaimedSignerInviteAccess({ documentId: "document-1", viewerUserId: "viewer-1", viewerEmail: "signer@example.invalid" })).toBeNull();
+    row.status = "claimed";
+    expect(await resolveClaimedSignerInviteAccess({ documentId: "document-1", viewerUserId: "viewer-1", viewerEmail: "other@example.invalid" })).toBeNull();
+  });
+
   it("keeps completed claimed invites readable by the same signer", async () => {
     supabaseMocks.state.document_access_invites = [
       {

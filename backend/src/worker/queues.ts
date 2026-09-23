@@ -1,7 +1,9 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
+import { isRecoveryQuarantined } from "./recoveryQuarantine";
 
 const redisQueuesDisabled =
+  isRecoveryQuarantined() ||
   process.env.DISABLE_REDIS_QUEUES === "true" ||
   process.env.DISABLE_REDIS_QUEUES === "1";
 const redisUrl = redisQueuesDisabled ? undefined : process.env.REDIS_URL;
@@ -23,4 +25,3 @@ export const webhookQueue = connection
 export const generationQueue = connection
   ? new Queue("generation-runs", { connection, prefix: bullMqPrefix })
   : null;
-

@@ -109,7 +109,9 @@ export const resolveClaimedSignerInviteAccess = async (input: {
 
   for (const invite of candidateInvites) {
     const claimedUserId = invite.claimed_user_id?.trim() ?? null;
-    if (claimedUserId && claimedUserId !== viewerUserId) {
+    // A recipient address/status is not proof of a completed claim. Legacy or
+    // partially written rows without a bound user must never grant access.
+    if (!claimedUserId || claimedUserId !== viewerUserId) {
       continue;
     }
 

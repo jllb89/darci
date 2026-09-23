@@ -816,6 +816,31 @@ describe("requestReadModelService", () => {
     ]);
   });
 
+  it.each([false, true])("gates final download URL creation while preserving pre-final accepted work (released=%s)", async released => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({ id: "req-1", document_id: "doc-1", workflow_id: null, assigned_notary_id: "notary-db-1", status: "completed" });
+    mocks.getDocumentByIdMock.mockResolvedValue({ id: "doc-1", owner_id: "member-db-1", status: "completed", document_type: "notarize_document", product_flow_mode: "notarize_document", output_bundle: [] });
+    mocks.canViewerAccessFinalPackageMock.mockResolvedValue(released);
+    mocks.isFinalPackageDocumentVersionMock.mockImplementation(version => version.is_final);
+    mocks.listDocumentVersionsMock.mockResolvedValue([
+      { id: "source", version: 1, storage_path: "doc/source.pdf", file_name: "source.pdf", mime_type: "application/pdf", is_final: false, created_at: "2026-09-22" },
+      { id: "final", version: 2, storage_path: "doc/final.pdf", file_name: "final.pdf", mime_type: "application/pdf", is_final: true, created_at: "2026-09-22" },
+    ]);
+    const detail = await getSharedRequestDetail({ requestId: "req-1", role: "member", viewerUserId: "member-db-1" });
+    expect(mocks.canViewerAccessFinalPackageMock).toHaveBeenCalledWith({ documentId: "doc-1", viewerRole: "member" });
+    expect(detail?.document.reviewDocuments.some(v => v.id === "final")).toBe(released);
+    if (!released) {
+      expect(mocks.createDocumentDownloadUrlMock).not.toHaveBeenCalledWith("doc/final.pdf");
+      expect(detail?.document.reviewDocuments.some(v => v.id === "source")).toBe(true);
+    }
+  });
+
+  it.each([['member', 'unrelated-member'], ['notary', 'unassigned-notary']] as const)("rejects %s %s before minting document URLs", async (role, viewerUserId) => {
+    mocks.getNotarizationRequestByIdMock.mockResolvedValue({ id: "req-1", document_id: "doc-1", assigned_notary_id: "notary-db-1", status: "completed" });
+    mocks.getDocumentByIdMock.mockResolvedValue({ id: "doc-1", owner_id: "member-db-1", status: "completed" });
+    await expect(getSharedRequestDetail({ requestId: "req-1", role, viewerUserId })).resolves.toBeNull();
+    expect(mocks.createDocumentDownloadUrlMock).not.toHaveBeenCalled();
+  });
+
   it("builds a shared request timeline for an authorized member", async () => {
     mocks.getNotarizationRequestByIdMock.mockResolvedValue({
       id: "req-1",

@@ -93,7 +93,9 @@ try {
     GOTRUE_JWT_SECRET:secret,GOTRUE_JWT_ISSUER:base+'/auth/v1',GOTRUE_JWT_EXP:'3600',GOTRUE_JWT_ADMIN_ROLES:'service_role',GOTRUE_JWT_AUD:'authenticated',GOTRUE_JWT_DEFAULT_GROUP_NAME:'authenticated',
     GOTRUE_EXTERNAL_EMAIL_ENABLED:'true',GOTRUE_MAILER_AUTOCONFIRM:'true',GOTRUE_DISABLE_SIGNUP:'true',GOTRUE_EXTERNAL_PHONE_ENABLED:'false',
     GOTRUE_MFA_TOTP_ENROLL_ENABLED:'true',GOTRUE_MFA_TOTP_VERIFY_ENABLED:'true',GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED:'true',GOTRUE_RATE_LIMIT_VERIFY:'1000'});
-  await launch('storage','public.ecr.aws/supabase/storage-api:v1.35.3',{
+  // Versioned-object schemas (migration 72+) require a matching Storage server.
+  // The old 1.35 server could read restored PDFs but failed all new uploads.
+  await launch('storage','public.ecr.aws/supabase/storage-api:v1.79.14@sha256:b2525671e665c3bf15bfaba4b0cc1754f0cb8f36cdb9d6dce13beed58b854ae1',{
     DATABASE_URL:connection('postgres'),ANON_KEY:anon,SERVICE_KEY:service,AUTH_JWT_SECRET:secret,
     STORAGE_BACKEND:'file',FILE_STORAGE_BACKEND_PATH:'/mnt',TENANT_ID:'recovery',GLOBAL_S3_BUCKET:'recovery',REGION:'local',STORAGE_S3_REGION:'local',FILE_SIZE_LIMIT:'52428800',
     ENABLE_IMAGE_TRANSFORMATION:'false',S3_PROTOCOL_ENABLED:'false',TUS_USE_FILE_VERSION_SEPARATOR:'false'},[],[`${storageRoot}:/mnt`,`${root}/backend/scripts/recovery-storage-metadata.cjs:/restore-metadata.cjs:ro`]);

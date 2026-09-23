@@ -454,6 +454,7 @@ jobs:
             AUTH_EMAIL_SEND_COOLDOWN_SECONDS: "60",
             GOOGLE_MAPS_GEOCODE_USE_SERVER: process.env.STAGING_GOOGLE_MAPS_GEOCODE_USE_SERVER || "true",
             APP_ENV: "staging",
+            OTEL_SDK_DISABLED: "1",
             LEDGER_ANCHOR_MODE: "hash_only",
             LEDGER_ALLOW_STUB_PROVIDER: "false",
             AUTH_ALLOW_MISSING_DB_USER_FALLBACK: "false",
@@ -537,6 +538,7 @@ jobs:
           );
           const workerEnv = {
             APP_ENV: "staging",
+            OTEL_SDK_DISABLED: "1",
             LEDGER_ANCHOR_MODE: "hash_only",
             LEDGER_ALLOW_STUB_PROVIDER: "false",
             AUTH_ALLOW_MISSING_DB_USER_FALLBACK: "false",

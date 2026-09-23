@@ -21,6 +21,7 @@ test('application recovery is isolated, private, and quarantines every provider 
   assert.match(s,/options=-csearch_path%3Dauth/);assert.match(s,/GOTRUE_JWT_ISSUER:base\+'\/auth\/v1'/);
   for(const name of ['NOTIFICATION_OUTBOX_RUNNER_ENABLED','STRIPE_WEBHOOK_RUNNER_ENABLED','BILLING_RECONCILIATION_RUNNER_ENABLED','STRIPE_WEBHOOK_RETENTION_RUNNER_ENABLED'])assert(s.includes(name+":'false'"));
   assert.match(s,/DISABLE_REDIS_QUEUES:'true'/);assert.match(s,/mode:0o600/);
+  assert.match(s,/storage-api:v1\.79\.14@sha256:[a-f0-9]{64}/);
   assert(readFileSync(new URL('../../.gitignore',import.meta.url),'utf8').includes('.recovery-private/'));
   assert.doesNotMatch(s,/sk_live_|get-secret-value|sns.*publish|\['127\.0\.0\.1:/);
 });
@@ -51,4 +52,33 @@ test('functional recovery tests real authentication, exact bytes, denial and nat
   assert.match(s,/docker\(\['stop','--time','5',runtime\.name\+'-worker'\]\)/);
   assert.match(s,/assert\.deepEqual\(await queueState\(\),queueBefore\)/);
   assert.doesNotMatch(s,/redis.*(del|set)|set-alarm-state/);
+});
+
+test('selective queue recovery is synthetic, isolated and preserves provider queues',()=>{
+  const s=script('recovery-queue-drill.mjs');
+  assert.match(s,/assert\.equal\(network\.Internal,true\)/);
+  assert.match(s,/assert\.deepEqual\(Object\.keys\(api\.NetworkSettings\.Networks\),\[runtime\.name\]\)/);
+  assert.match(s,/assert\(isRecoveryQuarantined\(\)\)/);
+  assert.match(s,/assert\(!process\.env\.STRIPE_SECRET_KEY&&!process\.env\.RESEND_API_KEY\)/);
+  assert.match(s,/assert\.equal\(after,before/);
+  assert.match(s,/process\.exit\(77\)/);
+  assert.match(s,/runIds:\[crash\.id\]/);
+  assert.doesNotMatch(s,/flushall|flushdb|obliterate|set-alarm-state/i);
+});
+
+test('staging deliberately disables unverified OTLP on API and worker without disabling AWS signals',()=>{
+  const workflow=readFileSync(new URL('../../.github/workflows/deploy-staging.yml',import.meta.url),'utf8');
+  assert.equal((workflow.match(/OTEL_SDK_DISABLED: "1"/g)??[]).length,2);
+  assert.doesNotMatch(workflow,/WatchdogHeartbeat.*false|HeartbeatActionsEnabled=false/);
+});
+
+test('recovered access matrix uses internal-only real APIs and synthetic bound identities',()=>{
+  const s=script('recovery-access-drill.mjs');
+  assert.match(s,/\.Internal,true/);
+  assert.match(s,/ownerRow\.email==='recovery-'\+input\.fixture\+'@example\.invalid'/);
+  assert.match(s,/claimed_user_id:signer\.id/);
+  assert.match(s,/status:'revoked'/);
+  assert.match(s,/Direct Storage mint must be denied/);
+  assert.match(s,/Legacy code cannot replace assigned notary/);
+  assert.match(s,/assert\(bytes\.equals\(original\)\)/);
 });

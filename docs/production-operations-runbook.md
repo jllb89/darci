@@ -44,6 +44,8 @@ Check outbox jobs overdue by five minutes and recent failed/partially sent jobs.
 
 Check generation queued/rendering beyond five minutes or PDF/storage/signing/finalization exceptions. Preserve the source, current version, hash and release control. Diagnose by correlation and document UUID; inspect bytes only through authorized tooling. Resume safe idempotent work. Never overwrite a final PDF or manufacture acknowledgment/signature evidence. Completed retries must verify and return the existing package.
 
+The generation dispatcher can reconstruct lost Redis delivery from durable `queued` runs once per minute; stable IDs prevent duplicate delivery creation. Existing jobs and non-queued states are not reset. A stale `rendering` run, including death after upload but before version creation, remains an operator investigation, not an automatic retry. Set `GENERATION_RECOVERY_RUNNER_ENABLED=false` to pause reconstruction without changing document state. Recovery environments hard-disable provider runners and normal queues regardless of per-runner flags.
+
 ### audit
 
 Treat a missing material audit as an integrity incident. Verify the related transaction rolled back, then restore database access and retry the authorized operation. Generic audit-helper failures are separately signaled. Do not insert an invented completion record or change ledger/hash evidence to make an alert disappear.
@@ -79,6 +81,6 @@ This exercises **log → metric → alarm → SNS**, not all originating applica
 ## Current limitations
 
 - Source emitters/watchdog and completed-package retry are deployed and verified at `d166019`. Remaining originating-failure drills are tracked separately in the Phase 1 record.
-- Human non-billing step-up/enrollment UI is deployed and its API boundary tested; full UI interaction acceptance remains. Controlled deployed deferral/no-resend and recovered-app/worker restart checks pass. Remaining scope includes OTP/bounce/suppression, physical-device faults and selective restored-job resumption.
-- OTLP ingestion/disablement must still be verified; this route does not depend on OTLP or Sentry.
+- Human non-billing step-up/enrollment UI is deployed and its API boundary tested; full UI interaction acceptance remains. Controlled deployed deferral/no-resend, recovered-app/worker restart, selective restored-job resumption and the recovered held/signer access matrix pass. Remaining scope includes OTP/bounce/suppression and physical-device faults.
+- Jorge approved disabling unverified OTLP. Staging API/worker deployment definitions now explicitly set `OTEL_SDK_DISABLED=1`; verify both running task definitions after deployment. CloudWatch logs and all eight operational alarms remain enabled; this route does not depend on OTLP or Sentry.
 - Production has no equivalent stack yet; this staging-only template must not be pointed at production by changing its account checks.
