@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url); const { Client } = require('pg');
 assert(process.argv.includes('--confirm-isolated'));
 const url = new URL(process.env.PHASE1_TEST_DATABASE_URL ?? '');
-assert.equal(url.hostname, '127.0.0.1'); assert.equal(url.port, '54322'); assert.equal(url.pathname, '/postgres');
+assert.equal(url.hostname, '127.0.0.1'); assert(['54322', '55322'].includes(url.port)); assert.equal(url.pathname, '/postgres');
 const db = new Client({ connectionString: url.toString() }); await db.connect();
 const user = randomUUID(), other = randomUUID(), session = randomUUID();
 const sql = (q, p = []) => db.query(q, p);

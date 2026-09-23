@@ -29,6 +29,10 @@ ENV XDG_CACHE_HOME=/tmp/darci-cache
 # Packages are installed in the builder; the running API needs no package manager.
 RUN npm uninstall --global npm
 
+# ECS bind mounts otherwise initialize as root:0755, breaking non-root PDF work.
+RUN chown node:node /tmp && chmod 1777 /tmp
+VOLUME ["/tmp"]
+
 USER node
 # Copy compiled output and production node_modules
 COPY --from=builder /app/backend/dist ./dist

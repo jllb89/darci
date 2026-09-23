@@ -7,7 +7,7 @@ const { Client } = require('pg');
 assert(process.argv.includes('--confirm-isolated'), 'Disposable local database confirmation required');
 const url = new URL(process.env.PHASE1_TEST_DATABASE_URL ?? '');
 assert.equal(url.hostname, '127.0.0.1');
-assert.equal(url.port, '54322');
+assert(['54322', '55322'].includes(url.port));
 assert.equal(url.pathname, '/postgres');
 const db = new Client({ connectionString: url.toString() });
 await db.connect();
@@ -50,6 +50,17 @@ try {
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal((await db.query("select has_table_privilege($1,'public.billing_runtime_configuration','UPDATE') ok", [role])).rows[0].ok, false);
   }
+  // Production may be provisioned before paid launch, but neither test-mode
+  // entitlements nor unapproved live writes can enter its selected namespace.
+  await db.query("update public.billing_runtime_configuration set stripe_environment='live',live_activation_approved=false where singleton");
+  await db.query('savepoint prelaunch_live');
+  await assert.rejects(db.query("select public.assert_stripe_runtime_environment('live')"), /STRIPE_LIVE_ACTIVATION_DISABLED/);
+  await db.query('rollback to savepoint prelaunch_live');
+  await db.query('savepoint prelaunch_test');
+  await assert.rejects(db.query("select public.assert_stripe_runtime_environment('test')"), /STRIPE_RUNTIME_ENVIRONMENT_MISMATCH/);
+  await db.query('rollback to savepoint prelaunch_test');
+  await db.query("update public.billing_runtime_configuration set live_activation_approved=true where singleton");
+  await db.query("select public.assert_stripe_runtime_environment('live')");
   await db.query('rollback');
   assert.equal((await db.query("select count(*)::int n from public.billing_provider_price_mappings where status='verified'")).rows[0].n, 0);
   console.log('PASS: live/invalid/missing environment rejected; app roles cannot change the database payment environment; no fixture mappings persisted.');

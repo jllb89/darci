@@ -1,0 +1,47 @@
+name: Deploy Production Candidate
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require passing server CI for this exact revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/workflow-gates.mjs wait-ci
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::427057633951:role/darci-production-github-release
+          aws-region: us-east-1
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production-only images without runtime secrets
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://jdrgluisxhgegdsesman.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.PRODUCTION_SUPABASE_ANON_KEY }}
+        run: |
+          test -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY"
+          node infra/production/build-images.mjs "phase2-${GITHUB_SHA::7}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" /tmp/production-images.json --public-config
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-image-manifest
+          path: /tmp/production-images.json
+      - name: Scan and promote images; preserve network and payment gates
+        run: node infra/production/promote-images.mjs /tmp/production-images.json

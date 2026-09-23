@@ -13,7 +13,8 @@ assert(process.argv.includes('--confirm-isolated') && path.isAbsolute(folder ?? 
 process.umask(0o077);
 const manifest = JSON.parse(await readFile(path.join(folder, 'manifest.json'), 'utf8'));
 assert.equal(manifest.format, 1); assert.equal(manifest.complete, true);
-assert.equal(manifest.sourceProject, 'oqferisuloumoojgbjde');
+const expectedProject = process.argv.includes('--production-source') ? 'jdrgluisxhgegdsesman' : 'oqferisuloumoojgbjde';
+assert.equal(manifest.sourceProject, expectedProject);
 const dump = path.join(folder, 'database.dump');
 assert.equal((await stat(dump)).size, manifest.database.bytes);
 const digest = createHash('sha256'); for await (const chunk of createReadStream(dump)) digest.update(chunk);

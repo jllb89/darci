@@ -26,6 +26,10 @@ RUN apk upgrade --no-cache && apk add --no-cache qpdf poppler-utils font-liberat
 ENV XDG_CACHE_HOME=/tmp/darci-cache
 RUN npm uninstall --global npm
 
+# Preserve writable scratch ownership when ECS mounts the task-local volume.
+RUN chown node:node /tmp && chmod 1777 /tmp
+VOLUME ["/tmp"]
+
 USER node
 COPY --from=builder /app/backend/dist ./dist
 COPY --from=builder /app/backend/node_modules ./node_modules

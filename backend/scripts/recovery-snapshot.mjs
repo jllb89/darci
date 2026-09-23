@@ -17,7 +17,12 @@ const flags = Object.fromEntries(process.argv.slice(3).map(a => {
   const i = a.indexOf('='); return [a.slice(2, i), a.slice(i + 1)];
 }));
 const region = flags.region ?? 'us-east-1';
-const stackName = flags.stack ?? 'darci-recovery';
+const environment = flags.environment ?? 'staging';
+assert(['staging', 'production'].includes(environment), 'Unsupported recovery environment');
+const sourceProject = environment === 'production' ? 'jdrgluisxhgegdsesman' : 'oqferisuloumoojgbjde';
+const expectedStack = environment === 'production' ? 'darci-production-backup' : 'darci-recovery';
+const stackName = flags.stack ?? expectedStack;
+assert.equal(stackName, expectedStack, 'Recovery stack/environment mismatch');
 const maxBytes = Number(flags['max-bytes'] ?? 5 * 1024 ** 3);
 assert(Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= 10 * 1024 ** 3, 'Invalid approved backup size bound');
 const sha256 = b => createHash('sha256').update(b).digest('hex');
@@ -172,6 +177,7 @@ async function main() {
     await aws(['s3api', 'get-object', '--bucket', stack.Bucket, '--key', flags.manifest, '--version-id', flags.version, manifestFile]);
     const manifest = JSON.parse(await readFile(manifestFile, 'utf8'));
     assert.equal(manifest.format, 1); assert.equal(manifest.complete, true);
+    assert.equal(manifest.sourceProject, sourceProject, 'Restore manifest belongs to a different environment');
     assert(manifest.totalBytes <= maxBytes, 'Restore exceeds approved size bound');
     stage = 'restore database archive';
     await download(manifest.database, path.join(folder, 'database.dump'));
@@ -218,19 +224,20 @@ async function main() {
   }
   assert.equal(process.argv[2], 'backup', 'Use backup or restore-check');
   stage = 'load source configuration';
-  const sourceSecret = scheduledTask ? '/darci/staging/recovery-source' : '/darci/staging/app';
-  assert.equal(flags['secret-id'] ?? sourceSecret, sourceSecret, 'Unexpected staging recovery secret');
+  const sourceSecret = `/darci/${environment}/${scheduledTask ? 'recovery-source' : 'app'}`;
+  assert.equal(flags['secret-id'] ?? sourceSecret, sourceSecret, 'Unexpected recovery secret');
   const secret = await aws(['secretsmanager', 'get-secret-value', '--secret-id', sourceSecret]);
   const config = JSON.parse(secret.SecretString);
-  assert(new URL(config.SUPABASE_URL).hostname === 'oqferisuloumoojgbjde.supabase.co', 'Unexpected Supabase source');
+  assert(new URL(config.SUPABASE_URL).hostname === `${sourceProject}.supabase.co`, 'Unexpected Supabase source');
   if (flags['session-pooler'] === 'true') {
     // The CLI's already-linked endpoint is authoritative; never guess a tenant
     // or send the database password to a caller-supplied host.
-    const pooler = scheduledTask
-      ? new URL('postgresql://postgres.oqferisuloumoojgbjde@aws-1-us-east-1.pooler.supabase.com:5432/postgres')
+    const pooler = environment === 'production'
+      ? new URL('postgresql://postgres.jdrgluisxhgegdsesman@aws-0-us-east-1.pooler.supabase.com:5432/postgres')
+      : scheduledTask ? new URL('postgresql://postgres.oqferisuloumoojgbjde@aws-1-us-east-1.pooler.supabase.com:5432/postgres')
       : new URL((await readFile(new URL('../../supabase/.temp/pooler-url', import.meta.url), 'utf8')).trim());
     assert(/^aws-\d+-us-east-1\.pooler\.supabase\.com$/.test(pooler.hostname), 'Unexpected linked pooler');
-    assert(decodeURIComponent(pooler.username) === 'postgres.oqferisuloumoojgbjde', 'Wrong linked project');
+    assert(decodeURIComponent(pooler.username) === `postgres.${sourceProject}`, 'Wrong linked project');
     const connection = new URL(config.DATABASE_URL);
     connection.hostname = pooler.hostname;
     connection.username = pooler.username;
@@ -243,7 +250,7 @@ async function main() {
   if (!scheduledTask) await useRole('WriterRoleArn');
   const snapshotId = `${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}`;
   try {
-    const lock = (await observer.query("select pg_try_advisory_lock(hashtextextended('darci.recovery.staging.snapshot',0)) acquired")).rows[0].acquired;
+    const lock = (await observer.query('select pg_try_advisory_lock(hashtextextended($1,0)) acquired', [`darci.recovery.${environment}.snapshot`])).rows[0].acquired;
     if (!lock) { console.log(JSON.stringify({ status: 'skipped', reason: 'another_snapshot_is_running' })); return; }
     stage = 'export database snapshot';
     await db.query('begin isolation level repeatable read read only');
@@ -311,13 +318,13 @@ async function main() {
       assert(totalBytes <= maxBytes, 'Backup exceeds approved size bound');
     }
     stage = 'commit complete snapshot manifest';
-    const manifest = { format: 1, complete: true, snapshotId, sourceProject: 'oqferisuloumoojgbjde',
+    const manifest = { format: 1, complete: true, snapshotId, sourceProject,
       startedAt: new Date(started).toISOString(), completedAt: new Date().toISOString(), secretVersionId: secret.VersionId,
       sourceAppSecretVersion: config.SOURCE_APP_SECRET_VERSION ?? secret.VersionId,
       database, objects: entries, identityKey, totalBytes, retention: 'No automatic deletion; approved policy pending' };
     const file = path.join(folder, 'manifest.json'); await writeFile(file, JSON.stringify(manifest, null, 2));
     const receipt = await upload(file, `snapshots/${snapshotId}/manifest.json`);
-    await aws(['cloudwatch', 'put-metric-data', '--namespace', 'DARCi/Recovery', '--metric-data', JSON.stringify([{ MetricName: 'SnapshotCompleted', Value: 1, Unit: 'Count', Dimensions: [{ Name: 'Environment', Value: 'staging' }] }])]);
+    await aws(['cloudwatch', 'put-metric-data', '--namespace', 'DARCi/Recovery', '--metric-data', JSON.stringify([{ MetricName: 'SnapshotCompleted', Value: 1, Unit: 'Count', Dimensions: [{ Name: 'Environment', Value: environment }] }])]);
     console.log(JSON.stringify({ snapshotId, manifest: receipt.key, version: receipt.versionId, objectCount: entries.length,
       totalBytes, elapsedSeconds: (Date.now() - started) / 1000, artifactDirectory: folder }));
   } finally { await db.end(); await observer.end(); }
