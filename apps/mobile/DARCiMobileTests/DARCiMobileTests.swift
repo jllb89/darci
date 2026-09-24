@@ -617,6 +617,7 @@ actor RecordingMemberSessionAPIClient: RequestsAPIProviding {
 
 @MainActor
 final class TestMemberSessionLocationProvider: NotarySessionLocationProviding {
+    var captureError: Error?
     private(set) var captureStages: [String] = []
     private(set) var prepareCallCount = 0
     private(set) var stopPreparingCallCount = 0
@@ -631,6 +632,7 @@ final class TestMemberSessionLocationProvider: NotarySessionLocationProviding {
 
     func currentGeolocation(captureStage: String) async throws -> NotaryGeolocationPayload {
         captureStages.append(captureStage)
+        if let captureError { throw captureError }
         return NotaryGeolocationPayload(
             latitude: 41.4993,
             longitude: -81.6944,
@@ -887,11 +889,16 @@ final class DARCiMobileTests: XCTestCase {
             nextAction: initial.nextAction
         )
         let apiClient = RecordingMemberSessionAPIClient(responses: [initial, updated])
+        // This test isolates realtime invalidation, not automatic GPS check-in.
+        // Never depend on the simulator's persisted location permission.
+        let locationProvider = TestMemberSessionLocationProvider()
+        locationProvider.captureError = NotarySessionLocationError.permissionDenied
         let realtimeClient = TestNotarySessionRealtimeClient()
         let session = makeAuthSession()
         let viewModel = MemberInPersonSessionViewModel(
             requestId: "request-1",
             apiClient: apiClient,
+            locationProvider: locationProvider,
             realtimeClient: realtimeClient
         )
 

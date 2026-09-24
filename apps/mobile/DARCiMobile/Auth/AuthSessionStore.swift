@@ -22,7 +22,7 @@ final class KeychainAuthSessionStore: AuthSessionStore {
 
     init(
         service: String = Bundle.main.bundleIdentifier.map { "\($0).auth-session" } ?? "com.illuminote.darci.auth-session",
-        account: String = "current",
+        account: String = MobileEnvironment.keychainAccount(),
         encoder: JSONEncoder = JSONEncoder(),
         decoder: JSONDecoder = JSONDecoder()
     ) {

@@ -22,6 +22,7 @@ apps/mobile/DerivedData/
 apps/mobile/build/
 apps/mobile/Config/Debug.local.xcconfig
 apps/mobile/Config/Release.local.xcconfig
+apps/mobile/Config/Production.local.xcconfig
 
 # Logs
 npm-debug.log*

@@ -19,7 +19,7 @@ final class KeychainPushInstallationStore: PushInstallationStoring {
 
     init(
         service: String = Bundle.main.bundleIdentifier.map { "\($0).push-installation" } ?? "com.illuminote.darci.push-installation",
-        account: String = "current"
+        account: String = MobileEnvironment.keychainAccount()
     ) {
         self.service = service
         self.account = account

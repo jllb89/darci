@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: "24"
       - name: Validate workflow and result-summary helpers
-        run: node --test scripts/workflow-structure.test.mjs scripts/summarize-ios-tests.test.mjs
+        run: node --test scripts/workflow-structure.test.mjs scripts/summarize-ios-tests.test.mjs apps/mobile/scripts/*.test.mjs
       - name: Generate the Xcode project from its tracked specification
         run: |
           set -euo pipefail

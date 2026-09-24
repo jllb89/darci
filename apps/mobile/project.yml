@@ -9,6 +9,7 @@ options:
 configs:
   Debug: debug
   Release: release
+  Production: release
 
 packages:
   Supabase:
@@ -27,7 +28,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 38K3YA2857
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "16"
+    CURRENT_PROJECT_VERSION: "21"
     IPHONEOS_DEPLOYMENT_TARGET: "18.0"
 
 targets:
@@ -40,11 +41,11 @@ targets:
       properties:
         aps-environment: $(APS_ENVIRONMENT)
         com.apple.developer.associated-domains:
-          - applinks:app.staging.darciregistry.dev
-          - applinks:app.darciregistry.dev
+          - applinks:$(DARCI_ASSOCIATED_DOMAIN)
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
+      Production: Config/Production.xcconfig
     info:
       path: DARCiMobile/App/Info.plist
       properties:
@@ -52,6 +53,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         DARCI_API_BASE_URL: $(DARCI_API_BASE_URL)
+        DARCI_WEB_BASE_URL: $(DARCI_WEB_BASE_URL)
+        DARCI_ENVIRONMENT: $(DARCI_ENVIRONMENT)
         DARCI_APNS_ENVIRONMENT: $(APS_ENVIRONMENT)
         DARCI_SUPABASE_URL: $(DARCI_SUPABASE_URL)
         DARCI_SUPABASE_ANON_KEY: $(DARCI_SUPABASE_ANON_KEY)
@@ -87,10 +90,14 @@ targets:
       - package: PhoneNumberKit
       - package: Sentry
         product: Sentry-Static
+    preBuildScripts:
+      - name: Validate production environment boundary
+        script: sh "$SRCROOT/scripts/validate-release-environment.sh"
+        basedOnDependencyAnalysis: false
     postBuildScripts:
       - name: Generate Sentry framework dSYM
         script: |
-          if [ "${CONFIGURATION}" != "Release" ]; then
+          if [ "${CONFIGURATION}" = "Debug" ]; then
             exit 0
           fi
 
@@ -110,6 +117,10 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       configs:
         Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: DARCi App Store com.illuminote.darci TF 2026-08-10
+        Production:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Apple Distribution
           PROVISIONING_PROFILE_SPECIFIER: DARCi App Store com.illuminote.darci TF 2026-08-10
@@ -141,6 +152,14 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
+  DARCiMobile-Production:
+    build:
+      targets:
+        DARCiMobile: all
+    run:
+      config: Production
+    archive:
+      config: Production
   DARCiMobile:
     build:
       targets:

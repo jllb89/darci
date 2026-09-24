@@ -7,6 +7,20 @@
         ],
         "components": [
           {
+            "/": "/app",
+            "?": {
+              "billing": "success"
+            },
+            "comment": "Return successful Stripe membership Checkout to DARCi on iOS."
+          },
+          {
+            "/": "/app",
+            "?": {
+              "billing": "canceled"
+            },
+            "comment": "Return canceled Stripe membership Checkout to DARCi on iOS."
+          },
+          {
             "/": "/open/requests/*",
             "comment": "Open member request session links in DARCi on iOS."
           },

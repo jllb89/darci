@@ -1,16 +1,55 @@
 # Phase 3 closeout — 23 September 2026
 
-**Status: not signed off.** Completed work and the remaining gates are separated
-below; no general sales, public signup or client messaging was enabled.
+**Status: Phase 3 closed for enabled private-production providers;
+commercial/legal approval and final email receipt confirmed by Jorge on 23 September.** Scheduled private email/in-app processing is
+enabled and tested. No client messages were sent; public signup/access and new
+purchases remain closed. Production-device/push activation belongs to Phase 4.
+
+**Notification closeout, 22:31 UTC:** worker13 healthy, backlog empty before
+activation, one real operator upload-ready email delivered through the signed
+Resend callback, repeated product action created no duplicate jobs, and the real
+scheduled worker completed an independent in-app-only probe. All fixture jobs are
+completed/suppressed. Jorge confirmed the latest product email arrived.
+**90 infrastructure and 67 notification tests passed.**
+[Exact scope, evidence and corrected probe assumption](production-notification-rollout-2026-09-23.md).
+
+**Live billing acceptance passed:** Jorge personally paid the exact **$9.99**
+Starter monthly Checkout. The invoice is paid, DARCi's webhook-derived membership
+is active with **3 available / 0 used**, and `cancel_at_period_end=true` is set in
+Stripe and projected in DARCi. Two signed synthetic replays of the real processed
+`invoice.paid` event returned duplicate acknowledgments without changing the event
+receipt or entitlements. Authorized Portal session creation passed (not a manual
+Portal UI/Apple Pay test). A read-only task using the deployed AWS image completed
+live-provider reconciliation with **zero blocking issues**, exit 0 (one account,
+one local/provider subscription, zero webhook backlog). The temporary operator
+purchase window was **closed and verified at 22:09 UTC**: authenticated Checkout
+and new Portal sessions return 403, while membership remains active with 3 available,
+0 used and period-end cancellation. Webhook/reconciliation processing remains
+enabled. CloudFormation is `UPDATE_COMPLETE`; services are stable. Do not repeat
+payment or create a second subscription. No refund was made.
+
+**SMS follow-up:** Jorge explicitly authorized one additional code. The fresh
+request at **15:44:40 Mexico City / 21:44:40 UTC** produced message
+`26546e36-ceba-491b-b75d-c32e7486c8ac`; AWS reported DELIVERED and **Jorge confirmed
+receipt**. This closes receipt acceptance for that retry, not a completed login
+or the unexplained absence of the earlier 15:31 message. No automatic retries.
+Evidence: `.recovery-private/production-operator-sms-receipt-20260923-2144.json`.
 
 **SMS acceptance correction, 23 September:** Jorge reports that the recent code
 did **not** arrive; the last visible SMS was approximately 90 minutes earlier.
 Read-only correlation confirms a new request at **15:31:40 Mexico City / 21:31:40 UTC**
 to the approved number ending 0675, followed by a carrier `DELIVERED` event at
 15:31:45 for the same message ID and hook/destination hashes. This is not an older
-receipt and is not user-confirmed delivery. Keep end-to-end SMS acceptance open.
-No additional SMS was sent in response to the report. Carrier/handset filtering
-or inaccurate delivery reporting remain hypotheses, not a diagnosed cause.
+receipt and is not user-confirmed delivery. Retain this as a separate intermittent
+delivery incident; the later 15:44 retry was received. Completed login/device
+acceptance belongs to Phase 4, not a repeat of provider setup.
+No additional SMS was sent in response to the report. Jorge also checked filtered
+messages and confirmed absence. Carrier/handset filtering or inaccurate delivery
+reporting remain hypotheses, not a diagnosed cause. The sender is active with
+completed registration, international sending enabled, and no operator opt-out.
+An [AWS carrier-trace draft](production-sms-delivery-incident-2026-09-23.md) is
+prepared, not submitted: the technical Support API returned
+`SubscriptionRequiredException`. No paid support upgrade was made.
 
 ## Completed this pass
 
@@ -34,11 +73,12 @@ or inaccurate delivery reporting remain hypotheses, not a diagnosed cause.
   Starter monthly only, bounded expiry, no plan changes, no other member purchase
   or Portal access. It does not stop processing previously accepted payments.
 - The guard is deployed and the production Stripe callback/worker are enabled.
-  Runtime activation passed, only Starter monthly is available to the exact
-  operator, and the window expires **24 September 2026 at 20:20:20 UTC**.
+  Runtime activation passed; only Starter monthly was available to the exact
+  operator. Its planned expiry was 24 September at 20:20 UTC; it was instead
+  explicitly closed after successful acceptance on **23 September at 22:09 UTC**.
   Other-member Checkout/plan-change/Portal denial and no billing-account mutation
   passed. The temporary negative fixture was revoked/suspended/banned.
-  One $9.99 live Checkout exists, unpaid at this checkpoint. Same-key reuse passed
+  One $9.99 live Checkout was personally paid by Jorge. Same-key reuse passed
   after correcting the acceptance script's expected HTTP status from 201 to 200;
   the existing session was reused, not recreated. No saved card was charged.
 - Fixed reconciliation incorrectly treating every live subscription as a mode
@@ -47,7 +87,8 @@ or inaccurate delivery reporting remain hypotheses, not a diagnosed cause.
   unconstrained rerun had an intermittent pre-existing notary-IDN fixture 401;
   isolated rerun passed and the subsequent full bounded run passed. CI for the
   follow-up revision also passed. Do not present that intermediate run as green.
-- Infrastructure, workflow and SMS routing checks: **114 passed**. TypeScript build
+- Infrastructure, workflow and SMS routing checks: **116 passed**, including
+  operator closeout preservation/fail-closed tests. TypeScript build
   and observability catalog validation passed.
 - Existing 20 production application/capacity/recovery alarms were `OK`, actions
   enabled. This was a read-only state check, not a fresh alert-delivery test.
@@ -88,46 +129,38 @@ or inaccurate delivery reporting remain hypotheses, not a diagnosed cause.
   `.recovery-private/production-provider-acceptance-5DbFWw/report.json`,
   `.recovery-private/production-operator-billing-W6VAum/activation.json`,
   `.recovery-private/production-operator-billing-W6VAum/checkout.json`,
+  `.recovery-private/production-operator-billing-W6VAum/closeout.json`,
   `.recovery-private/production-sms-permission-aSEQnA/report.json`,
   `.recovery-private/production-operator-sms-receipt-20260923.json`.
 
-## Exact remaining sequence
+## Remaining work, without reopening completed acceptance
 
-1. Release **35920215734** and bounded operator activation are **done**. Do not
-   repeat activation or create another Checkout. The approved callback endpoint
-   `we_1UIw8CETAqmB3GAqJE15Ottu` is enabled; general sale/client-message gates remain closed.
-2. Production SMS configuration-set permission, stable CloudFormation, removal of
-   temporary IAM access and the real carrier **DELIVERED** receipt are **done**.
-3. Have Jorge personally pay the existing operator Checkout. Verify the paid invoice, real webhook projection, three-unit
-   entitlement, duplicate-event behavior, restricted Portal and reconciliation.
-   Cancel only that test subscription at period end, verify that state, and close
-   the purchase window after acceptance. Do not grant entitlement from a redirect.
-4. Resolve the operator's **reported non-receipt** of the 15:31 Mexico City SMS.
-   The receipt pipeline is verified, but carrier `DELIVERED` conflicts with the
-   user's observation. Check the phone's filtered messages and, if absent,
-   investigate the exact carrier trace; do not count this as successful login
-   acceptance or resend automatically. Entering/verifying an OTP is separate.
-5. Obtain client/counsel/finance review of the exact billing draft and the missing
-   tax/refund decisions. Approved prices/defaults are not reopened.
-6. Complete production-build push tap/navigation and invalid-token lifecycle with
-   the Phase 4 archive. Current TestFlight targets staging; the worker drill does
-   not replace device acceptance. Review the initial cohort/queued notifications
-   before enabling general notification runners and complete product-triggered
-   client email acceptance with isolated fixtures.
+Commercial/legal approval is confirmed by Jorge; do not reopen that gate.
+Approved prices/defaults are not reopened. The enabled notification rollout is
+complete, and Jorge confirmed inbox receipt. No remaining Phase 3 receipt check.
+Push activation stays with Phase 4 production-device acceptance.
+
+**Phase 4:** production-build login/recovery, push registration/tap/navigation and
+invalid-token lifecycle, applicable Checkout/Portal/Apple Pay UI acceptance, and
+client product-flow acceptance. Current TestFlight targets staging. The historical
+15:31 SMS non-receipt remains in its incident document; do not repeat payment or
+OTP sends as a generic phase gate.
+
+Completed earlier-phase acceptance is not reopened. Only targeted regressions for
+actual changes apply.
 
 ## Scoped acceptance commands
 
 ```sh
 # Activation and Checkout creation already completed. Do not repeat them.
-# After Jorge personally completes that exact Checkout:
-node infra/production/operator-billing-acceptance.mjs .recovery-private/production-operator-billing-W6VAum \
-  --approved-operator-live-test --verify
+# Paid verification and cancellation completed. Do not rerun the payment.
+# Closeout completed; do not repeat activation, payment, verification or closeout.
 # Read-only carrier inspection; sends nothing:
 node infra/production/operator-sms-receipt-acceptance.mjs --inspect
 ```
 
-The billing verification command cancels future renewal of the exact test subscription. It does
-not refund or create a charge. Session URLs stay in private evidence; share only
+Billing verification canceled future renewal of the exact test subscription. It
+did not refund or create a charge. Session URLs stay in private evidence; share only
 with the operator. Inspect an existing receipt before retrying a partially
 completed operation. No automatic resending of outbox tests is authorized.
 

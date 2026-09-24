@@ -1,15 +1,8 @@
 import Foundation
 
 enum MemberSessionDeepLink {
-    private static let allowedHosts = Set([
-        "app.staging.darciregistry.dev",
-        "app.darciregistry.dev",
-    ])
-
-    static func requestId(from url: URL) -> String? {
-        guard url.scheme?.lowercased() == "https",
-              let host = url.host?.lowercased(),
-              allowedHosts.contains(host) else {
+    static func requestId(from url: URL, production: Bool = MobileEnvironment.isProduction) -> String? {
+        guard MobileEnvironment.acceptsWebURL(url, production: production) else {
             return nil
         }
 

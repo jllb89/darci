@@ -104,10 +104,7 @@ final class MemberInPersonSessionViewModel: ObservableObject {
               context?.document.summary.finalization.isFinalizationReady == true else {
             return nil
         }
-        if let absoluteURL = URL(string: path), absoluteURL.scheme != nil {
-            return absoluteURL
-        }
-        return URL(string: "https://app.staging.darciregistry.dev\(path.hasPrefix("/") ? path : "/\(path)")")
+        return MobileEnvironment.verificationURL(path)
     }
 
     var statusLabel: String {

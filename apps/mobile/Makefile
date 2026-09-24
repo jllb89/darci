@@ -7,7 +7,7 @@ GENERATED_PACKAGE_LOCK ?= DARCiMobile.xcodeproj/project.xcworkspace/xcshareddata
 ARCHIVE_PATH ?= build/DARCiMobile.xcarchive
 APP_STORE_PROFILE ?= DARCi App Store com.illuminote.darci TF 2026-08-10
 
-.PHONY: bootstrap generate release-config build test archive open clean
+.PHONY: bootstrap generate release-config production-config build test archive production-archive open clean
 
 bootstrap:
 	@command -v $(XCODEGEN) >/dev/null || { echo "XcodeGen is missing. Install it with: brew install xcodegen"; exit 1; }
@@ -19,6 +19,12 @@ generate: bootstrap
 
 release-config:
 	zsh ./scripts/generate-release-config.sh
+
+production-config:
+	zsh ./scripts/generate-release-config.sh --environment production
+
+production-archive: production-config generate
+	xcodebuild -scheme DARCiMobile-Production -configuration Production -destination 'generic/platform=iOS' -archivePath 'build/DARCiMobile-Production.xcarchive' PROVISIONING_PROFILE_SPECIFIER='$(APP_STORE_PROFILE)' archive
 
 build: generate
 	xcodebuild -scheme $(SCHEME) -destination '$(DESTINATION)' build

@@ -590,7 +590,7 @@ struct AuthenticationSignInView: View {
     }
 
     private func smsConsentDisclosure(in proxy: GeometryProxy) -> some View {
-        Text("By requesting a code, you agree to DARCi Terms: https://darciregistry.com/terms and Privacy: https://app.staging.darciregistry.dev/privacy. DARCi sends SMS verification codes only. Message/data rates may apply; frequency varies. Reply STOP to opt out or HELP for help.")
+        Text("By requesting a code, you agree to DARCi Terms: https://darciregistry.com/terms and Privacy: \(MobileEnvironment.webBaseURL.appendingPathComponent("privacy").absoluteString). DARCi sends SMS verification codes only. Message/data rates may apply; frequency varies. Reply STOP to opt out or HELP for help.")
             .font(DARCiFont.maisonNeue(.book, size: scaled(13, in: proxy)))
             .lineSpacing(scaled(1.6, in: proxy))
             .foregroundStyle(Color.black.opacity(0.68))

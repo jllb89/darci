@@ -155,15 +155,8 @@ struct MemberBillingReturn: Equatable, Identifiable, Sendable {
 }
 
 enum MemberBillingDeepLink {
-    private static let allowedHosts: Set<String> = [
-        "app.staging.darciregistry.dev",
-        "app.darciregistry.dev",
-    ]
-
-    static func result(from url: URL) -> String? {
-        guard url.scheme?.lowercased() == "https",
-              let host = url.host?.lowercased(),
-              allowedHosts.contains(host),
+    static func result(from url: URL, production: Bool = MobileEnvironment.isProduction) -> String? {
+        guard MobileEnvironment.acceptsWebURL(url, production: production),
               url.path == "/app",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let result = components.queryItems?.first(where: { $0.name == "billing" })?.value?

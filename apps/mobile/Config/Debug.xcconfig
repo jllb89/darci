@@ -1,4 +1,7 @@
 APS_ENVIRONMENT = development
+DARCI_ENVIRONMENT = staging
+DARCI_WEB_BASE_URL = https:/$()/app.staging.darciregistry.dev
+DARCI_ASSOCIATED_DOMAIN = app.staging.darciregistry.dev
 DARCI_API_BASE_URL = https:/$()/api.staging.darciregistry.dev
 DARCI_SENTRY_DSN =
 DARCI_SENTRY_ENVIRONMENT = development

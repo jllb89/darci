@@ -21,3 +21,24 @@ export function withOperatorBilling(baseline,{startsAt,expiresAt}) {
   }
   return next;
 }
+
+// End new purchases without interrupting webhook/cancellation/renewal processing.
+export function withClosedOperatorBilling(baseline) {
+  assert.equal(baseline.Resources.Https.Properties.DefaultActions[0].FixedResponseConfig.StatusCode,'403');
+  for(const service of ['api','web'])assert(baseline.Resources[`${service}Route`].Properties.Conditions.some(c=>c.Field==='source-ip'));
+  const next=structuredClone(baseline);
+  for(const service of ['api','worker']) {
+    const container=next.Resources[`${service}Task`].Properties.ContainerDefinitions[0];
+    const env=Object.fromEntries(container.Environment.map(e=>[e.Name,e.Value]));
+    assert.equal(env.BILLING_LIVE_ACCESS_MODE,'operator');
+    assert.equal(env.BILLING_LIVE_OPERATOR_USER_ID,operatorUserId);
+    assert.equal(env.STRIPE_LIVE_MODE_ENABLED,'true');
+    assert.equal(env.STRIPE_WEBHOOK_RUNNER_ENABLED,service==='worker'?'true':'false');
+    assert.equal(env.BILLING_RECONCILIATION_RUNNER_ENABLED,service==='worker'?'true':'false');
+    assert.equal(env.NOTIFICATION_OUTBOX_RUNNER_ENABLED,'false');
+    assert.equal(env.IOS_MEMBER_CHECKOUT_ENABLED,'false');
+    container.Environment=container.Environment.filter(e=>!['BILLING_LIVE_ACCESS_MODE','BILLING_LIVE_OPERATOR_USER_ID','BILLING_LIVE_OPERATOR_STARTS_AT','BILLING_LIVE_OPERATOR_EXPIRES_AT'].includes(e.Name));
+    container.Environment.push({Name:'BILLING_LIVE_ACCESS_MODE',Value:'closed'});
+  }
+  return next;
+}

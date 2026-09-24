@@ -1,11 +1,62 @@
 # DARCi Production Readiness Roadmap
 
-**SMS acceptance correction — 23 September, after the checkpoint below:** Jorge
+**Current status — Phase 3 closed for the enabled private-production scope;
+Phase 4 started (23 September).** Engineering acceptance passed, commercial/legal
+approval is confirmed, and Jorge confirmed the 16:29 upload-ready email arrived.
+Jorge explicitly reconfirmed commercial/legal approval on 23 September; do not
+reopen this approval gate. Runtime sales/access restrictions remain unchanged.
+Private notification processing is deployed on worker13 after verifying an empty
+backlog. One real document-upload email to Jorge has a signed delivered callback;
+repeating the product action created no duplicate jobs. A separate in-app-only
+probe passed through the persistent scheduled worker. No client messages, SMS or
+push were sent in this pass. New regression results: **90 infrastructure and 67
+notification tests passed**. [Notification evidence](production-notification-rollout-2026-09-23.md).
+Jorge's inbox receipt confirmation for this latest product email is complete.
+Production-build login/push/tap and applicable payment UI acceptance live in
+**Phase 4**. The generic earlier-phase re-verification task has been removed.
+Signup/public access and new purchases stay closed; push activation stays disabled.
+
+**Phase 4 engineering checkpoint — 23 September:** signed production iOS archive
+**0.1.0 (21)** built and passed embedded-configuration, signature/profile and app/Sentry
+dSYM verification. **120 iOS unit tests and 17 configuration/routing/workflow tests pass.**
+Only the two approved GET Apple-association routes are now public; Apple CDN retrieval
+passed and app/API restrictions are preserved. Deployed web login chunks use production
+API/Supabase. A local well-known-file billing-link correction still needs web release;
+TestFlight upload, production-device acceptance and final review materials remain open.
+[Exact artifacts, completed work and next steps](production-phase4-execution-2026-09-23.md).
+
+**Latest live billing result — 23 September:** Jorge personally paid **$9.99**.
+Paid invoice, real webhook-derived **3-document allowance**, duplicate-event
+protection, authorized Portal session creation and deployed reconciliation
+(**zero blocking issues**) passed. Future renewal was canceled at period end in
+Stripe and verified in DARCi. The temporary purchase window is **closed**:
+hosted Checkout/new Portal requests are denied while paid access remains active.
+Webhook/reconciliation processing stays enabled, CloudFormation is stable, and
+general sales remain prohibited. **116 infrastructure/workflow tests passed**.
+This supersedes the unpaid/awaiting-payment checkpoints below; see the
+[current closeout](production-phase3-closeout-2026-09-23.md) for remaining gates.
+
+**Latest SMS result — 23 September, 15:44 Mexico City:** the separately authorized
+retry was sent once, received a carrier DELIVERED receipt, and **Jorge confirmed
+it arrived**. Actual receipt of this retry is passed; completed login and the
+earlier intermittent non-delivery are separate, still-unresolved acceptance items.
+The existing $9.99 operator checkout was subsequently paid and verified above.
+
+### Historical provider checkpoints — superseded by the current results above
+
+The entries in this section preserve chronology, not pending tasks. Use the Phase 3
+checklist and linked closeout for current status; do not repeat a completed payment,
+provider setup or receipt test because an older checkpoint says it was pending.
+
+**Historical SMS acceptance correction — 23 September:** Jorge
 reports **no recent SMS received**. The request at **15:31:40 Mexico City** matched
 his approved destination and a carrier `DELIVERED` event five seconds later, but
 that is not confirmation the code is visible to him. Receipt infrastructure is
 verified; **end-to-end SMS acceptance remains open with a delivery discrepancy**.
-No further code was sent. [Evidence and next checks](production-phase3-closeout-2026-09-23.md).
+No further code was sent. Filtered messages were also checked and absent. Sender,
+registration, international sending and opt-out checks passed; an AWS carrier
+trace is needed. Technical Support API access is unavailable under the current
+account plan; no case or paid upgrade was made. [Incident and prepared escalation](production-sms-delivery-incident-2026-09-23.md).
 
 **Latest Phase 3 checkpoint — 23 September:** protected production release **35920215734 / `e33c05c` succeeded**. API12 (2), worker11 (1), web6 (2) are healthy after the operator-only runtime overlay; signup, public access, general notification runners and iOS purchases remain closed. The exact live Stripe callback and billing worker are enabled, but purchases/Portal are restricted to Jorge's synthetic test member and Starter monthly until **24 September, 20:20 UTC**. Other-member denial and same-key Checkout reuse passed; one **unpaid $9.99 Checkout** is ready for Jorge. No card charge or paid entitlement has been asserted. Email/push outbox messages were received. Production SMS receipt routing is deployed and a real operator request has a **DELIVERED** carrier receipt. The missing configuration-set permission was repaired, CloudFormation is stable, and temporary operator IAM permissions were removed; phone inbox confirmation remains open. **819 backend tests and 114 infrastructure/workflow tests passed.** See the [current closeout and exact remaining gates](production-phase3-closeout-2026-09-23.md). This checkpoint supersedes the historical states below.
 
@@ -522,40 +573,44 @@ Current detailed evidence: [Phase 2 execution record](production-phase2-executio
 **Current checkpoint and exact next actions:** [Phase 3 closeout record](production-phase3-closeout-2026-09-23.md).
 
 - [x] Verify Resend sending-domain DNS and `notify.illuminotary.com` (Jorge's dashboard confirmation, 23 September; not an app-delivery test).
-- [x] Deploy dedicated production Resend credentials/sender/Reply-To and exact signed public callback; verify actual operator delivery, persisted sent/delivered callbacks, invalid/expired signature rejection, logical replay idempotency and private app/API boundaries. Jorge confirmed receipt. General client messaging and runner activation remain closed. See [email acceptance](production-email-acceptance-2026-09-23.md).
-- [x] Configure production Supabase SMTP and secure reauthentication/redirect settings without enabling signup/email/phone login. Actual production OTP/recovery acceptance remains open.
-- [x] Prepare ignored production credential fields, preserve supplied values, reuse the approved distinct staging Maps keys, and keep secrets out of logs/Git. Missing APNs credentials and engineering-generated SMS/Stripe webhook secrets are explicit.
+- [x] Deploy dedicated production Resend credentials/sender/Reply-To and exact signed public callback; verify actual operator delivery, persisted sent/delivered callbacks, invalid/expired signature rejection, logical replay idempotency and private app/API boundaries. Jorge confirmed receipt. See [email acceptance](production-email-acceptance-2026-09-23.md); private runner rollout is tracked separately below.
+- [x] Configure production Supabase SMTP and secure reauthentication/redirect settings. Existing-user email/phone login was subsequently enabled and receipt verified; public signup stays closed. Production-build login/recovery acceptance is in Phase 4.
+- [x] Prepare ignored production credential fields, preserve supplied values, reuse the approved distinct staging Maps keys, and keep secrets out of logs/Git. APNs credentials and engineering-generated SMS/Stripe webhook secrets were subsequently deployed.
 - [x] Verify server Maps Geocoding/place-ID/reverse fallback through both production NATs and deploy the approved shared server key/flag without changing images, routes or purchase gates. API7/worker6/web4 healthy, API/web 200. Browser Maps/legacy Places/restriction-owner acceptance remains open.
 - [x] Verify live Stripe account payments/payouts; create/map the six approved prices and restricted Portal while keeping all application catalog sales/live activation disabled. Disable only the approved misrouted LIVE webhook, preserving the correct test-mode endpoint and existing merchant business.
-- [x] Obtain Jorge's confirmation that the live owner Dashboard has no outstanding requirements; deploy pinned Stripe runtime credentials and the exact callback. Production endpoint remains disabled and all sales/runner gates remain closed pending acceptance.
+- [x] Obtain Jorge's confirmation that the live owner Dashboard has no outstanding requirements; deploy pinned Stripe runtime credentials and the exact callback. Callback/billing processing were subsequently enabled and live acceptance passed below. New purchases are closed again; accepted-payment processing remains enabled.
 - [x] Deploy production SMS hook/sender permissions and existing-user email/phone login with signup closed; enable and prove actual TOTP step-up. Jorge confirmed receipt of production email/SMS. Invalid/expired/modified callback requests are rejected. [Evidence](production-phase23-acceptance-2026-09-23.md).
 - [x] Securely import and deploy production APNs credentials; verify Apple accepts one explicitly approved operator push with HTTP 200. General sending remains disabled. [APNs evidence](production-apns-acceptance-2026-09-23.md).
 - [x] Confirm operator device receipt of the approved test push; Jorge confirmed it arrived.
 - [x] Exercise authenticated production device registration, targeted AWS outbox email/APNs dispatch, no redispatch on a repeated targeted run, actual Resend delivered callback, anonymous-open rejection, idempotent authenticated open API and device deactivation. Jorge confirmed receipt of both worker messages. Only his approved temporary token and synthetic jobs were used; general runners stayed off. Evidence: `.recovery-private/production-operator-outbox-20260923.json`.
-- [ ] Complete the physical **production-build** notification tap/navigation and invalid-token acceptance. The open-API call above was synthetic; the installed TestFlight build still uses staging. This depends on the Phase 4 production archive and is not closed by copying a token for a worker test.
 - [x] Deploy durable production SMS replay receipts and disable implicit SDK retries; verify completed/in-flight/uncertain signed replays at the hosted callback without sending additional SMS. Deploy stable Resend outbox idempotency keys. Staging SMS receipts remain unchanged.
 - [x] Create isolated production carrier receipt infrastructure (`darci-production-sms-delivery`) and its sanitized logs/routing alarms.
 - [x] Attach the production carrier receipt configuration and exact configuration-set permission; verify a real operator OTP request produced `SUCCESSFUL` then `DELIVERED` events, matched to one durable accepted receipt. An earlier request was denied before carrier handoff; no automatic duplicate send was made. CloudFormation recovery completed and temporary IAM permissions were removed. This is delivery evidence, not a completed user login.
-- [ ] Resolve Jorge's reported non-receipt of that recent SMS despite the carrier `DELIVERED` event; confirm actual operator receipt and login before signing off end-to-end production SMS acceptance. Do not substitute provider receipts for user confirmation.
-- [ ] Complete production-build APNs acceptance above and isolated product-triggered email acceptance; general email-runner activation waits for cohort/queued-job review. Server Maps/manual fallback remains approved; browser Maps ownership/restrictions are explicitly deferred. Sentry and unverified OTLP/Grafana remain deferred/disabled.
-- [ ] Reverify the Phase 1 email/alert and Stripe lifecycle controls using the final provider configuration. Any still-missing Phase 1 correctness evidence blocks advancement; it is not deferred to this phase.
-- [ ] Complete separately gated live Checkout/Portal/webhook/reconciliation acceptance. The fail-closed operator guard and reconciliation fix are deployed, the signed callback/worker are enabled, and the exact $9.99 Checkout is prepared. Other-member purchase/Portal denial and same-key reuse passed; the negative fixture was revoked. Jorge must personally pay before paid projection, duplicate paid-event replay, restricted Portal, reconciliation and approved period-end cancellation can be verified. General sales remain prohibited.
-- [ ] Approve member terms, taxes, held-package messaging, support/refund/dispute procedures and customer notices. [Consolidated review draft v0.1](member-billing-review-draft-2026-09-23.md) now supplies proposed notices and precisely identifies tax/refund decisions still missing; this is not a claim final policies already existed or were approved.
+- [x] Confirm actual operator receipt of the separately authorized 15:44 SMS retry. The earlier intermittent missing message remains an operational incident, not a restart of SMS integration. Production-build login acceptance is tracked in Phase 4.
+- [x] Complete enabled private-production notification rollout: inventory showed three completed jobs and zero pending; worker13 scheduled processing is deployed and healthy. One actual operator upload-finalize email has a signed delivered callback; repeating the action created no duplicate jobs. An independent in-app-only scheduled probe completed under `worker-scheduled`. All fixture jobs are completed/suppressed; no client messages were sent. [Evidence and exact scope](production-notification-rollout-2026-09-23.md). Jorge confirmed the latest email arrived. Push activation/device acceptance belongs to Phase 4. Server Maps/manual fallback remains approved; browser Maps ownership/restrictions, Sentry and unverified OTLP/Grafana remain deferred.
+- [x] Complete scoped live billing acceptance: Jorge personally paid the exact $9.99 Starter Checkout; paid invoice, real webhook-derived active 3-document allowance, same-key reuse, two duplicate paid-event replays with unchanged entitlements, authorized Portal session creation and deployed reconciliation with zero issues all passed. Period-end cancellation is set in Stripe and DARCi. The temporary purchase window is closed; hosted new Checkout/Portal requests are denied while paid access and event processing remain active. The negative fixture was revoked. This does not claim a manual Portal UI/Apple Pay test or general-sales approval.
+- [x] Commercial/legal approval for member terms, taxes, held-package messaging, support/refund/dispute procedures and customer notices confirmed by Jorge on 23 September. [Approval provenance](production-phase23-signoff-2026-09-23.md). This records the user's confirmation; it neither invents policy/tax/retention values nor activates general sales.
 
 23 September continuation: final complete backend regression passed **110 files / 819 tests**;
-production infrastructure/workflow/SMS checks passed **114**. `c454d61` is deployed
+production infrastructure/workflow/SMS checks passed **116**. `c454d61` is deployed
 and hosted provider checks passed. `e33c05c` corrects live reconciliation and passed
 CI; its protected production deployment **35920215734 succeeded**. Production SMS
 table migration is applied with RLS/least-privilege/uniqueness checks. Other members
-still cannot purchase; one live Checkout was created for Jorge, with payment still pending.
+still cannot purchase; Jorge paid the one live Checkout, acceptance passed, future
+renewal was canceled, and the temporary operator purchase window is closed.
 
 **Exit:** every enabled external dependency has a configuration owner, delivery/verification evidence, failure/retry path and monitoring. No required workflow relies on an `internal` no-delivery provider.
 
 ### Phase 4 — Build the production web/iOS release candidate
 
-- [ ] Build the web image with production public inputs and inspect API/Supabase/links/caching/CSP.
-- [ ] Generate explicit production iOS config; validate archive/signing/symbols, associated domains and push.
-- [ ] Complete App Store privacy/review materials and accurately document the purchase flow; test supported physical devices and accessibility settings.
+- [x] Inspect the deployed production web candidate's API/Supabase public inputs, links and response caching/security headers. Login/callback chunks reference production, not staging. Existing web6 is unchanged; remaining association-file content release is listed below.
+- [x] Generate explicit production iOS config and build signed **0.1.0 (21)** archive; validate embedded endpoints, signing/profile, app/Sentry symbols, associated domains and APNs entitlement. Production/staging Keychain and link handling are isolated. No TestFlight upload claimed.
+- [x] Deploy only the approved public GET routes for the two Apple association files; Apple CDN fetch succeeds. All other app/API routes remain IP-restricted.
+- [ ] Release the local well-known AASA billing-return parity fix and recheck both live files/CDN. Local regression passes; current deployed well-known file lacks those two mappings.
+- [ ] Validate/upload the production archive to internal TestFlight after confirming build-number availability. [Candidate, evidence and exact device checklist](production-phase4-execution-2026-09-23.md).
+- [ ] Complete physical production-build login/recovery and notification registration, tap/navigation and invalid-token acceptance. Current TestFlight uses staging; the successful production worker/receipt tests are not device UI acceptance.
+- [ ] Complete applicable hosted Checkout/Portal and physical-device Apple Pay UI acceptance. The approved live card payment and backend/Portal-session acceptance already passed and are not reopened.
+- [ ] Complete App Store privacy/review materials and accurately document the purchase flow; test supported physical devices and accessibility settings. [Prepared review checklist](production-app-store-review-2026-09-23.md); publishing approved policy text is not reopening commercial/legal approval.
 
 **Exit:** traceable release candidate per platform; no staging/localhost URLs or secrets; approval/review requirements met before public iOS availability. Web rollout need not wait on unrelated iOS improvements, but must pass its own complete production gate.
 

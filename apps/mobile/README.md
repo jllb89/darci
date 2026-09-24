@@ -7,11 +7,45 @@ This project is intentionally scoped to iOS only for the first mobile milestone.
 ## Project Identity
 
 - Display name: `DARCi`
-- Bundle identifier: `dev.mobile.darci`
+- Bundle identifier: `com.illuminote.darci`
 - Minimum iOS version: `18.0`
 - Project generator: `XcodeGen`
 
-## Setup
+## Production candidate (separate from staging)
+
+The existing `DARCiMobile` scheme still archives staging with `Release`.
+Use **`DARCiMobile-Production` / `Production`** for the real production project.
+They share an App Store bundle ID, so installing one replaces the other on a phone;
+the production Keychain session/installation namespace is separate. Switching to
+production requires a fresh login and never imports beta records.
+
+```sh
+cd /Users/jorge/Desktop/darci/apps/mobile
+zsh scripts/generate-release-config.sh --environment production
+make generate
+open -a Xcode DARCiMobile.xcodeproj
+```
+
+Select `DARCiMobile-Production`, a generic physical iPhone destination, then
+Product → Archive. Or use `make production-archive`. Never run the staging
+`make archive` command for a production release. The generator parses (does not
+execute) `.env.production`, copies only allowlisted public values, and writes the
+ignored `Config/Production.local.xcconfig`. It rejects a staging Supabase project
+or privileged key. Production telemetry remains disabled as requested.
+
+After archiving, verify the actual artifact, not merely source settings:
+
+```sh
+node scripts/verify-production-archive.mjs build/DARCiMobile-Production.xcarchive
+```
+
+The checker validates API/web/Supabase/APNs, signing/profile expiry, environment-
+specific associated domains, privacy manifest and matching executable/dSYM UUIDs.
+It does not upload to TestFlight, send messages or activate purchases. Check the
+build number against App Store Connect before distribution; the tracked next
+candidate is build 21. See the Phase 4 execution record for the tested artifact.
+
+## Development setup
 
 Install XcodeGen once:
 

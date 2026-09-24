@@ -320,10 +320,7 @@ final class NotaryInPersonSessionViewModel: ObservableObject {
         guard let path = context?.finalization?.publicVerifyPath, path.isEmpty == false else {
             return nil
         }
-        if let absoluteURL = URL(string: path), absoluteURL.scheme != nil {
-            return absoluteURL
-        }
-        return URL(string: "https://app.staging.darciregistry.dev\(path.hasPrefix("/") ? path : "/\(path)")")
+        return MobileEnvironment.verificationURL(path)
     }
 
     func load(session: AuthSession?) async {

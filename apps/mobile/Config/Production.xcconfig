@@ -1,0 +1,11 @@
+// Explicit production candidate; never includes the staging local configuration.
+APS_ENVIRONMENT = production
+DARCI_ENVIRONMENT = production
+DARCI_API_BASE_URL = https:/$()/api.illuminotary.com
+DARCI_WEB_BASE_URL = https:/$()/app.illuminotary.com
+DARCI_ASSOCIATED_DOMAIN = app.illuminotary.com
+DARCI_SUPABASE_URL = https:/$()/jdrgluisxhgegdsesman.supabase.co
+DARCI_SENTRY_DSN =
+DARCI_SENTRY_ENVIRONMENT = production
+
+#include? "Production.local.xcconfig"

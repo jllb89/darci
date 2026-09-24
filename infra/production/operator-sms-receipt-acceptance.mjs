@@ -10,7 +10,11 @@ const send=process.argv.includes('--send-approved-operator-otp');
 const retry=process.argv.includes('--retry-after-reviewed-access-denial');
 assert(!retry||send);
 assert(send||process.argv.includes('--inspect'));
-const file='.recovery-private/production-operator-sms-receipt-20260923.json';
+// A separately user-authorized attempt gets its own exclusive receipt. Never
+// overwrite the earlier non-receipt evidence or auto-generate retry identifiers.
+const attempt=process.argv.find(a=>a.startsWith('--approved-attempt='))?.split('=')[1];
+if(attempt)assert(/^\d{8}-\d{4}$/.test(attempt)&&!retry);
+const file=`.recovery-private/production-operator-sms-receipt-${attempt??'20260923'}.json`;
 const aws=(...args)=>JSON.parse(execFileSync('aws',[...args,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
 const ok=r=>{assert(!r.error,'Scoped provider check failed');return r.data;};
 let report;

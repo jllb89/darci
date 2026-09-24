@@ -1,13 +1,8 @@
 import Foundation
 
 enum MemberDocumentDeepLink {
-    private static let trustedHosts = Set([
-        "app.darciregistry.dev",
-        "app.staging.darciregistry.dev",
-    ])
-
-    static func route(from url: URL) -> PushNotificationRoute? {
-        guard let host = url.host?.lowercased(), trustedHosts.contains(host) else {
+    static func route(from url: URL, production: Bool = MobileEnvironment.isProduction) -> PushNotificationRoute? {
+        guard MobileEnvironment.acceptsWebURL(url, production: production) else {
             return nil
         }
 
@@ -35,8 +30,8 @@ enum MemberDocumentDeepLink {
         return nil
     }
 
-    static func inviteToken(from url: URL) -> String? {
-        guard let host = url.host?.lowercased(), trustedHosts.contains(host) else {
+    static func inviteToken(from url: URL, production: Bool = MobileEnvironment.isProduction) -> String? {
+        guard MobileEnvironment.acceptsWebURL(url, production: production) else {
             return nil
         }
 
