@@ -4,6 +4,7 @@ import {readFileSync,writeFileSync,mkdtempSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {productionManagement} from './provider-credentials.mjs';
+import {productionOtpSettings} from './auth-otp-policy.mjs';
 const require=createRequire(import.meta.url);
 assert(process.argv.includes('--approved-isolated-auth'));
 const aws=(...a)=>JSON.parse(execFileSync('aws',[...a,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
@@ -17,7 +18,7 @@ const secret=JSON.parse(aws('secretsmanager','get-secret-value','--secret-id','/
 assert(secret.SUPABASE_AUTH_SMS_HOOK_SECRET===local.SUPABASE_AUTH_SMS_HOOK_SECRET,'Pinned SMS secret mismatch');
 assert(secret.SUPABASE_AUTH_SMS_HOOK_SECRET?.startsWith('v1,whsec_'));
 const before=await productionManagement('/config/auth');assert.equal(before.disable_signup,true);
-const changes={disable_signup:true,external_email_enabled:true,external_phone_enabled:true,
+const changes={...productionOtpSettings,disable_signup:true,external_email_enabled:true,external_phone_enabled:true,
   mfa_totp_enroll_enabled:true,mfa_totp_verify_enabled:true,
   hook_send_sms_enabled:true,hook_send_sms_uri:'https://api.illuminotary.com/webhooks/supabase/auth/send-sms',hook_send_sms_secrets:secret.SUPABASE_AUTH_SMS_HOOK_SECRET};
 await productionManagement('/config/auth',{method:'PATCH',body:changes});

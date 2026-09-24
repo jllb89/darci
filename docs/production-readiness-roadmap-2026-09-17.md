@@ -603,12 +603,18 @@ renewal was canceled, and the temporary operator purchase window is closed.
 
 ### Phase 4 — Build the production web/iOS release candidate
 
+**24 September device-test correction:** production Supabase email/SMS OTP lengths
+were six while DARCi expects eight. Both are now **eight**, with all other auth
+settings unchanged; **97 infrastructure tests pass**. Build 22 needs no rebuild for
+this live configuration fix. Jorge must request fresh codes and confirm login.
+[Cause, applied correction and regression evidence](production-otp-correction-2026-09-24.md).
+
 - [x] Inspect the deployed production web candidate's API/Supabase public inputs, links and response caching/security headers. Login/callback chunks reference production, not staging. Existing web6 is unchanged; remaining association-file content release is listed below.
 - [x] Generate explicit production iOS config and build signed **0.1.0 (21)** archive; validate embedded endpoints, signing/profile, app/Sentry symbols, associated domains and APNs entitlement. Production/staging Keychain and link handling are isolated. No TestFlight upload claimed.
 - [x] Deploy only the approved public GET routes for the two Apple association files; Apple CDN fetch succeeds. All other app/API routes remain IP-restricted.
-- [ ] Release the local well-known AASA billing-return parity fix and recheck both live files/CDN. Local regression passes; current deployed well-known file lacks those two mappings.
-- [ ] Validate/upload the production archive to internal TestFlight after confirming build-number availability. [Candidate, evidence and exact device checklist](production-phase4-execution-2026-09-23.md).
-- [ ] Complete physical production-build login/recovery and notification registration, tap/navigation and invalid-token acceptance. Current TestFlight uses staging; the successful production worker/receipt tests are not device UI acceptance.
+- [x] Release the well-known AASA billing-return parity fix: production run **35939619417**, revision **4fec013**, succeeded; API14/web7/worker14 are fully running. Both live files and Apple CDN return the correct successful/canceled billing mappings (24 September check).
+- [x] Upload the production candidate to TestFlight: Jorge confirmed **build 22**, archived with `DARCiMobile-Production`, and is testing it. Local artifact/signature evidence above belongs to build 21, not an independently inspected build 22. [Candidate, evidence and exact device checklist](production-phase4-execution-2026-09-23.md).
+- [ ] Complete physical production-build login/recovery and notification registration, tap/navigation and invalid-token acceptance. Build 22 testing exposed production's six-digit OTP settings versus the eight-digit app contract; see the dated OTP correction record. Successful message receipt alone is not completed login acceptance.
 - [ ] Complete applicable hosted Checkout/Portal and physical-device Apple Pay UI acceptance. The approved live card payment and backend/Portal-session acceptance already passed and are not reopened.
 - [ ] Complete App Store privacy/review materials and accurately document the purchase flow; test supported physical devices and accessibility settings. [Prepared review checklist](production-app-store-review-2026-09-23.md); publishing approved policy text is not reopening commercial/legal approval.
 
