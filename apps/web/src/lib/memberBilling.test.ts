@@ -4,9 +4,17 @@ import {
   createCheckoutIdempotencyToken,
   isActiveMembershipState,
   isRecoveryMembershipState,
+  isVisibleMembershipPlan,
 } from "./memberBilling";
 
 describe("member billing helpers", () => {
+  it("shows current plans with checkout closed, without resurfacing retired prices", () => {
+    const plan = LEGACY_MEMBER_PLAN_FIXTURES[0];
+    expect(isVisibleMembershipPlan({ ...plan, availableForPurchase: false, visibleInCatalog: true })).toBe(true);
+    expect(isVisibleMembershipPlan({ ...plan, availableForPurchase: false, visibleInCatalog: false })).toBe(false);
+    expect(isVisibleMembershipPlan({ ...plan, availableForPurchase: false })).toBe(false);
+    expect(isVisibleMembershipPlan(plan)).toBe(true);
+  });
   it("preserves the three historical contracts without using them as storefront fallbacks", () => {
     expect(LEGACY_MEMBER_PLAN_FIXTURES.map((plan) => plan.documentWorkflowAllowance)).toEqual([
       3, 10, 25,

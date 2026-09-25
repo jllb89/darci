@@ -3177,6 +3177,42 @@ private struct TestHomeAPIClient: HomeAPIProviding {
 }
 
 final class MemberBillingTests: XCTestCase {
+    @MainActor
+    func testFailedInitialMembershipLoadCanRetryAndShowsReadOnlyPlans() async throws {
+        var attempts = 0
+        let session = makeStubbedURLSession { request in
+            attempts += 1
+            if attempts == 1 { throw URLError(.notConnectedToInternet) }
+            XCTAssertEqual(request.url?.path, "/billing/member-membership")
+            let response = try XCTUnwrap(HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil))
+            let data = Data(#"{"providerEnvironment":"live","paymentsReal":true,"enforcementMode":"enforced","plans":[{"priceCode":"member_plus_monthly_v2","displayName":"Plus","currencyCode":"USD","unitAmountCents":1999,"billingInterval":"month","intervalCount":1,"documentWorkflowAllowance":25,"visibleInCatalog":true,"availableForPurchase":false},{"priceCode":"member_plus_monthly","displayName":"Legacy","currencyCode":"USD","unitAmountCents":9900,"billingInterval":"month","intervalCount":1,"documentWorkflowAllowance":10,"visibleInCatalog":false,"availableForPurchase":false}],"membership":{"state":"none","subscriptionStatus":null,"priceCode":null,"planName":null,"pendingPlanChange":null,"currentPeriodStart":null,"currentPeriodEnd":null,"cancelAtPeriodEnd":false,"allowance":{"total":null,"used":0,"remaining":null,"exhausted":false},"heldFinalPackageCount":0},"eligibility":{"canCreateWorkflow":false,"entitled":false,"wouldBlock":true,"reasonCode":"billing_membership_required"},"actions":{"canCheckout":true,"iosCheckoutAvailable":true,"canOpenPortal":false,"planChangeAvailable":false,"planChangeReason":null}}"#.utf8)
+            return (response, data)
+        }
+        let client = MemberBillingAPIClient(authClient: AuthAPIClient(config: AuthConfig(apiBaseURL: URL(string: "https://api.example.test")!), urlSession: session))
+        let model = MemberBillingViewModel(accessToken: "fixture-token", apiClient: client)
+        await model.load()
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNil(model.payload)
+        await model.refreshAfterReturningToApp()
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.offeredPlans.map(\.priceCode), ["member_plus_monthly_v2"])
+        XCTAssertEqual(model.selectedPriceCode, "member_plus_monthly_v2")
+        XCTAssertFalse(model.canCheckout)
+        let checkout = await model.createCheckout()
+        XCTAssertNil(checkout)
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testCatalogVisibilityDoesNotGrantPurchasePermission() throws {
+        let data = Data(#"{"priceCode":"member_plus_monthly_v2","displayName":"Plus","currencyCode":"USD","unitAmountCents":1999,"billingInterval":"month","intervalCount":1,"documentWorkflowAllowance":25,"visibleInCatalog":true,"availableForPurchase":false}"#.utf8)
+        var plan = try JSONDecoder().decode(MemberBillingPlan.self, from: data)
+        XCTAssertTrue(plan.isVisibleInCatalog)
+        XCTAssertEqual(plan.availableForPurchase, false)
+        plan.visibleInCatalog = false
+        XCTAssertFalse(plan.isVisibleInCatalog)
+        plan.visibleInCatalog = nil
+        XCTAssertFalse(plan.isVisibleInCatalog)
+    }
     func testAnnualUnlimitedCatalogDecodesExplicitQuotaAndCadence() throws {
         let data = Data(#"{"priceCode":"member_unlimited_annual_v2","displayName":"Unlimited","currencyCode":"USD","unitAmountCents":59900,"billingInterval":"year","intervalCount":1,"documentWorkflowAllowance":null,"isUnlimited":true,"availableForPurchase":true}"#.utf8)
         let plan = try JSONDecoder().decode(MemberBillingPlan.self, from: data)

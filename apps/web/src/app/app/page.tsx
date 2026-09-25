@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
+import { MemberMembershipPrompt } from "@/components/app/MemberMembershipPrompt";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
@@ -827,6 +828,10 @@ export default function DashboardPage() {
           </div>
         ) : null}
       </div>
+
+      {accessToken && (activeRole === "member" || activeRole === "pro") ? (
+        <MemberMembershipPrompt key={accessToken} accessToken={accessToken} />
+      ) : null}
 
       {errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

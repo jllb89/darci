@@ -192,7 +192,7 @@ struct MemberBillingView: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 0) {
-                Text("PRIVATE BETA · TEST MODE")
+                Text(viewModel.payload.map { $0.paymentsReal ? "DARCi MEMBERSHIP" : "PRIVATE BETA · TEST MODE" } ?? "MEMBERSHIP")
                     .font(DARCiFont.maisonNeue(.mono, size: 9 * scale))
                     .tracking(0.35 * scale)
                     .foregroundStyle(onDark ? Color.white.opacity(0.72) : Color.black.opacity(0.78))
@@ -310,7 +310,7 @@ struct MemberBillingView: View {
                 .opacity(viewModel.isLoading && viewModel.payload == nil ? 0.55 : 1)
                 .accessibilityIdentifier("member-billing-checkout-button")
             } else {
-                Text("Membership purchase is unavailable in this iOS build while App Review classification is pending.")
+                Text("Membership purchase is not currently available for this account in the app. Contact support to arrange testing access, or refresh if your membership was just activated.")
                     .font(DARCiFont.maisonNeue(.book, size: 11 * scale))
                     .lineSpacing(3 * scale)
                     .foregroundStyle(Color.black.opacity(0.55))
@@ -318,6 +318,10 @@ struct MemberBillingView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12 * scale)
                     .accessibilityIdentifier("member-billing-purchase-policy-notice")
+                Button("Contact support", action: onContactSupport)
+                    .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
+                    .foregroundStyle(.black)
+                    .underline()
             }
 
             Text(plan.billingInterval == "year" ? "Billed annually upfront · Allowance resets monthly · No rollover" : "\(plan.allowanceDescription) · No rollover")
@@ -325,7 +329,7 @@ struct MemberBillingView: View {
                 .foregroundStyle(Color.black.opacity(0.45))
                 .padding(.top, 11 * scale)
 
-            Text("Stripe test mode — no real charge")
+            Text(viewModel.payload?.paymentsReal == false ? "Stripe test mode — no real charge" : "Prices in USD, before applicable taxes")
                 .font(DARCiFont.maisonNeue(.book, size: 10 * scale))
                 .foregroundStyle(Color.black.opacity(0.45))
                 .padding(.top, 3 * scale)
@@ -370,7 +374,24 @@ struct MemberBillingView: View {
             .padding(.bottom, 40 * scale)
         }
         } else {
-            Text("Load membership options to continue.").font(DARCiFont.maisonNeue(.book, size: 12 * scale)).padding()
+            VStack(spacing: 12) {
+                if viewModel.isLoading {
+                    ProgressView("Loading membership options…")
+                } else {
+                    Text(viewModel.errorMessage == nil
+                         ? "Membership options are temporarily unavailable. Retry or contact support for testing access."
+                         : "We couldn’t load membership options. Please try again.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Retry loading membership options") {
+                        Task { await viewModel.load() }
+                    }
+                    .accessibilityIdentifier("member-billing-retry-options-button")
+                }
+                Button("Contact support", action: onContactSupport)
+            }
+            .font(DARCiFont.maisonNeue(.book, size: 12 * scale))
+            .multilineTextAlignment(.center)
+            .padding()
         }
         }
         .background(Color.white)

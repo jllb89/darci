@@ -2,6 +2,11 @@ import XCTest
 @testable import DARCiMobile
 
 final class ProductionEnvironmentTests: XCTestCase {
+    func testNotaryApplicationUsesTheMatchingEnvironmentWithoutSessionTokens() {
+        XCTAssertEqual(MobileEnvironment.notaryApplicationURL(production: true).absoluteString, "https://app.illuminotary.com/app/settings")
+        XCTAssertEqual(MobileEnvironment.notaryApplicationURL(production: false).absoluteString, "https://app.staging.darciregistry.dev/app/settings")
+        XCTAssertNil(MobileEnvironment.notaryApplicationURL().query)
+    }
     func testProductionLinksStayInProduction() throws {
         let id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         XCTAssertEqual(MemberDocumentDeepLink.route(from: try XCTUnwrap(URL(string: "https://app.illuminotary.com/app/documents/\(id)")), production: true), .memberDocument(documentId: id, notificationId: nil))

@@ -1,4 +1,4 @@
-import {beforeEach,describe,expect,it,vi} from "vitest";
+import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
 const mocks=vi.hoisted(()=>({from:vi.fn(),refresh:vi.fn()}));
 vi.mock("@supabase/supabase-js",()=>({createClient:()=>({from:mocks.from})}));
 vi.mock("../../src/services/memberAllowanceWindowService",()=>({refreshMemberAllowanceWindow:mocks.refresh}));
@@ -7,6 +7,7 @@ vi.mock("../../src/config/stripe",()=>({getStripeEnvironment:()=>"test"}));
 import {MEMBER_PRICING_V2} from "../../src/config/memberPricing";
 import {getMemberMembershipStatus} from "../../src/services/memberBillingService";
 describe("membership v2 read contract",()=>{
+  afterEach(() => vi.unstubAllEnvs());
   let records:Record<string,any>, pending:number;
   beforeEach(()=>{
     vi.clearAllMocks();pending=0;
@@ -46,5 +47,30 @@ describe("membership v2 read contract",()=>{
     const result=await getMemberMembershipStatus({dbUserId:"user",catalogVersion:2});
     expect(result.plans).toHaveLength(7);
     expect(result.plans.filter(p=>p.availableForPurchase)).toHaveLength(0);
+    expect(result.plans.filter(p=>p.visibleInCatalog)).toHaveLength(0);
+  });
+  it("shows six current offers with live purchases closed, without enabling checkout or retired prices", async () => {
+    vi.stubEnv("APP_ENV", "production");
+    vi.stubEnv("STRIPE_PROVIDER_ENVIRONMENT", "live");
+    vi.stubEnv("STRIPE_LIVE_MODE_ENABLED", "true");
+    vi.stubEnv("BILLING_LIVE_ACCESS_MODE", "closed");
+    records.billing_subscriptions = null;
+    const result = await getMemberMembershipStatus({ dbUserId: "user", catalogVersion: 2 });
+    expect(result.plans.filter(p => p.visibleInCatalog)).toHaveLength(6);
+    expect(result.plans.find(p => p.priceCode === "member_plus_monthly")?.visibleInCatalog).toBe(false);
+    expect(result.plans.filter(p => p.availableForPurchase)).toHaveLength(0);
+    expect(result.actions.canCheckout).toBe(false);
+    expect(result.actions.iosCheckoutAvailable).toBe(false);
+  });
+  it("keeps a partially published v2 rollout visible without inventing inactive offers", async () => {
+    vi.stubEnv("APP_ENV", "production");
+    vi.stubEnv("STRIPE_PROVIDER_ENVIRONMENT", "live");
+    vi.stubEnv("BILLING_LIVE_ACCESS_MODE", "closed");
+    records.billing_catalog_prices = records.billing_catalog_prices.filter((p:any) => p.price_code === "member_starter_monthly_v2");
+    const result = await getMemberMembershipStatus({ dbUserId: "user", catalogVersion: 2 });
+    expect(result.catalogVersion).toBe(2);
+    expect(result.plans).toHaveLength(1);
+    expect(result.plans[0]).toMatchObject({ priceCode: "member_starter_monthly_v2", visibleInCatalog: true, availableForPurchase: false });
+    await expect(getMemberMembershipStatus({dbUserId:"user"})).rejects.toMatchObject({statusCode:426,code:"billing_client_update_required"});
   });
 });

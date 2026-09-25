@@ -22,7 +22,11 @@ export type MemberBillingPlan = {
   documentWorkflowAllowance: number | null;
   isUnlimited?: boolean;
   availableForPurchase?: boolean;
+  visibleInCatalog?: boolean;
 };
+
+export const isVisibleMembershipPlan = (plan: MemberBillingPlan) =>
+  plan.visibleInCatalog ?? (plan.availableForPurchase !== false);
 
 export type MemberMembershipState =
   | "none"
@@ -39,8 +43,8 @@ export type MemberMembershipState =
   | string;
 
 export type MemberMembershipPayload = {
-  providerEnvironment: "test";
-  paymentsReal: false;
+  providerEnvironment: "test" | "live";
+  paymentsReal: boolean;
   enforcementMode: string;
   plans: MemberBillingPlan[];
   membership: {

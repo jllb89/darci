@@ -1,4 +1,5 @@
 import { marked } from "marked";
+import {emailButtonStyle, escapeEmailHtml, renderEmailLayout} from "./emailLayoutService";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -35,16 +36,6 @@ export class NotificationTemplateRenderError extends Error {
 }
 
 const PLACEHOLDER_REGEX = /\{\{(\w+)\}\}/g;
-const resolveWebAppBaseUrl = () => {
-  return (
-    process.env.WEB_APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim() ||
-    process.env.APP_BASE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_BASE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    "https://app.staging.darciregistry.dev"
-  ).replace(/\/+$/, "");
-};
 
 const collectPlaceholders = (template: string) => {
   const matches = template.matchAll(PLACEHOLDER_REGEX);
@@ -63,111 +54,6 @@ const interpolate = (template: string, payload: JsonObject): string =>
     return value != null ? String(value) : "";
   });
 
-const getEmailLogoUrl = () => {
-  return `${resolveWebAppBaseUrl()}/icons/navbar/darci_white.svg`;
-};
-
-const wrapEmailHtml = (bodyHtml: string): string => `
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      /* Base content styles */
-      .darci-content p {
-        margin: 0 0 18px;
-      }
-      .darci-content p:last-child {
-        margin-bottom: 0;
-      }
-      .darci-content strong {
-        color: #191919;
-        font-weight: 600;
-      }
-      .darci-content .darci-cta-row {
-        margin: 8px 0 24px;
-      }
-      .darci-content .darci-button {
-        display: block;
-        padding: 14px 0;
-        background: #0aff4a;
-        color: #191919 !important;
-        text-align: center;
-        text-decoration: none;
-        font-weight: 600;
-        font-size: 14px;
-        border: 0;
-      }
-      .darci-content .darci-inline-link {
-        color: #191919;
-        text-decoration: underline;
-        font-weight: 600;
-      }
-      .darci-content ul,
-      .darci-content ol {
-        margin: 0 0 20px;
-        padding-left: 20px;
-      }
-      .darci-content li {
-        margin: 6px 0;
-      }
-      .darci-content hr {
-        border: 0;
-        border-top: 1px solid #d8d8d8;
-        margin: 24px 0;
-      }
-      /* Mobile */
-      @media only screen and (max-width: 620px) {
-        .darci-outer { padding: 16px 8px !important; }
-        .darci-card { width: 100% !important; }
-        .darci-header { padding: 20px 20px !important; }
-        .darci-body { padding: 24px 20px !important; }
-        .darci-footer { padding: 16px 20px !important; }
-        .darci-contact-btn { display: block !important; width: 100% !important; box-sizing: border-box; margin-bottom: 10px !important; padding-right: 0 !important; }
-        .darci-contact-btn td { display: block !important; width: 100% !important; }
-        .darci-content .darci-button { width: 100% !important; box-sizing: border-box !important; }
-      }
-    </style>
-  </head>
-  <body style="margin:0;padding:0;background:#f2f2f2;font-family:Arial,'Helvetica Neue',sans-serif;font-weight:500;">
-    <table class="darci-outer" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f2f2;padding:40px 16px;">
-      <tr>
-        <td align="center">
-          <table class="darci-card" width="640" cellpadding="0" cellspacing="0"
-            style="background:#ffffff;border:1px solid #d8d8d8;max-width:640px;width:100%;">
-            <tr>
-              <td class="darci-header" style="padding:24px 34px;background:#000000;">
-                <table width="100%" cellpadding="0" cellspacing="0">
-                  <tr>
-                    <td align="left">
-                      <img src="${getEmailLogoUrl()}" width="91" height="20" alt="DARCi" style="display:block;border:0;outline:none;text-decoration:none;width:91px;height:auto;color:#ffffff;font-size:16px;line-height:20px;" />
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-            <tr>
-              <td class="darci-body" style="padding:34px;color:#191919;font-size:14px;line-height:1.7;font-weight:500;">
-                <div class="darci-content">
-                  ${bodyHtml}
-                </div>
-              </td>
-            </tr>
-            <tr>
-              <td class="darci-footer" style="background:#f2f2f2;padding:22px 34px;border-top:1px solid #d8d8d8;">
-                <p style="margin:0;color:#7f7f7f;font-size:12px;line-height:18px;font-weight:500;">
-                  DARCi document signing<br/>
-                  Questions? Reply to this email or contact <a href="mailto:support@darciregistry.com" style="color:#191919;text-decoration:underline;">support@darciregistry.com</a>.
-                </p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`.trim();
 
 const firstConfiguredValue = (keys: string[]) => {
   for (const key of keys) {
@@ -215,14 +101,22 @@ const resolveFromAddress = (audienceScope: string | null, templateKey: string): 
 };
 
 const resolveReplyToAddress = () => {
-  return firstConfiguredValue(["NOTIFICATION_REPLY_TO", "RESEND_REPLY_TO_ADDRESS"]) ?? "support@darciregistry.com";
+  return firstConfiguredValue(["NOTIFICATION_REPLY_TO", "RESEND_REPLY_TO_ADDRESS"]) ?? "lopezb.jl@gmail.com";
 };
 
-const enhanceMarkdownEmailHtml = (html: string) => {
-  const withButtons = html.replace(
+const enhanceMarkdownEmailHtml = (html: string, templateKey: string) => {
+  // Older database templates put the review URL inside a sentence rather than
+  // a standalone Markdown link. Give it a useful label without modifying its URL.
+  const labeled = templateKey === "document_ready_for_review_email"
+    ? html.replace(/<p>Your documents are ready for review\.<\/p>\s*/, "")
+      .replace(/<ul>\s*<li>Your DARCi Team<\/li>\s*<\/ul>/, "")
+      .replace(/<a href="([^"]+)">https?:\/\/[^<]+<\/a>/g,
+        (_match, href: string) => `<br/><a class="darci-button" style="${emailButtonStyle};margin-top:20px;" href="${href}">Review documents&nbsp;↗</a>`)
+    : html;
+  const withButtons = labeled.replace(
     /<p>\s*<a href="([^"]+)">([\s\S]*?)<\/a>\s*<\/p>/g,
     (_match, href: string, label: string) =>
-      `<p class="darci-cta-row"><a class="darci-button" href="${href}">${label}</a></p>`,
+      `<p class="darci-cta-row"><a class="darci-button" style="${emailButtonStyle}" href="${href}">${label}</a></p>`,
   );
 
   return withButtons.replace(/<a href=/g, '<a class="darci-inline-link" href=');
@@ -254,8 +148,8 @@ export const renderNotificationTemplate = (
     template.bodyFormat === "html"
       ? text
       : template.bodyFormat === "markdown"
-        ? enhanceMarkdownEmailHtml(marked(text) as string)
-        : `<pre style="white-space:pre-wrap;font-family:inherit;">${text}</pre>`;
+        ? enhanceMarkdownEmailHtml(marked(text) as string, template.templateKey)
+        : `<div style="white-space:pre-wrap;font-family:inherit;">${escapeEmailHtml(text)}</div>`;
 
   const recipientEmail = input.recipientEmail?.trim() || null;
   const recipientDisplayName = input.recipientDisplayName?.trim() || null;
@@ -269,7 +163,7 @@ export const renderNotificationTemplate = (
         : recipientEmail
       : null,
     subject,
-    html: wrapEmailHtml(bodyHtml),
+    html: renderEmailLayout({subject, bodyHtml, replyTo: resolveReplyToAddress()}),
     text,
     missingVariables,
   };

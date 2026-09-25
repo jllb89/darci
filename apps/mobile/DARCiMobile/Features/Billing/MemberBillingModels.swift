@@ -16,6 +16,9 @@ struct MemberBillingPlan: Decodable, Equatable, Identifiable, Sendable {
     let documentWorkflowAllowance: Int?
     var isUnlimited: Bool? = nil
     var availableForPurchase: Bool? = nil
+    var visibleInCatalog: Bool? = nil
+
+    var isVisibleInCatalog: Bool { visibleInCatalog ?? (availableForPurchase != false) }
 
     var allowanceDescription: String {
         isUnlimited == true ? "Unlimited documents" : "\(documentWorkflowAllowance.map(String.init) ?? "—") documents / month"

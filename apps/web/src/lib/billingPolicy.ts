@@ -26,6 +26,13 @@ export const readMemberBillingReasonCode = (
 };
 
 export const getMemberBillingDenialCopy = (reasonCode: MemberBillingReasonCode) => {
+  if (reasonCode === "billing_entitlement_unavailable") {
+    return {
+      title: "We couldn’t check your membership",
+      body: "Please retry shortly. This does not mean you need to buy another membership. If it continues, contact support.",
+      actionLabel: "Check membership status",
+    };
+  }
   if (reasonCode === "billing_workflow_limit_reached") {
     return {
       title: "Monthly document allowance reached",
@@ -48,3 +55,10 @@ export const getMemberBillingDenialCopy = (reasonCode: MemberBillingReasonCode) 
     actionLabel: "View membership plans",
   };
 };
+
+export const getMemberMembershipDenialCopyForStatus = (eligibility: {
+  entitled: boolean;
+  reasonCode: string | null;
+}) => !eligibility.entitled && isMemberBillingReasonCode(eligibility.reasonCode)
+  ? getMemberBillingDenialCopy(eligibility.reasonCode)
+  : null;

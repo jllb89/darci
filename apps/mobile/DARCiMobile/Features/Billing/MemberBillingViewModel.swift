@@ -44,7 +44,7 @@ final class MemberBillingViewModel: ObservableObject {
     }
 
     var offeredPlans: [MemberBillingPlan] {
-        plans.filter { $0.availableForPurchase != false && $0.billingInterval == billingCadence }
+        plans.filter { $0.isVisibleInCatalog && $0.billingInterval == billingCadence }
     }
 
     func selectCadence(_ cadence: String) {
@@ -60,6 +60,7 @@ final class MemberBillingViewModel: ObservableObject {
         payload?.actions.canCheckout == true &&
             payload?.actions.iosCheckoutAvailable == true &&
             ["none", "canceled", "expired", "incomplete_expired"].contains(membership?.state ?? "") &&
+            offeredPlans.contains(where: { $0.priceCode == selectedPriceCode && $0.availableForPurchase != false }) &&
             isLoading == false
     }
 
@@ -124,7 +125,8 @@ final class MemberBillingViewModel: ObservableObject {
     }
 
     func createCheckout() async -> URL? {
-        guard startingPriceCode == nil, canCheckout, offeredPlans.contains(where: { $0.priceCode == selectedPriceCode }) else { return nil }
+        guard startingPriceCode == nil, canCheckout,
+              offeredPlans.contains(where: { $0.priceCode == selectedPriceCode && $0.availableForPurchase != false }) else { return nil }
 
         let priceCode = selectedPriceCode
         startingPriceCode = priceCode
@@ -188,8 +190,8 @@ final class MemberBillingViewModel: ObservableObject {
     }
 
     func refreshAfterReturningToApp() async {
-        guard payload != nil else { return }
-        await load(quietly: true)
+        guard !isLoading else { return }
+        await load(quietly: payload != nil)
     }
 
     private func startPolling() {

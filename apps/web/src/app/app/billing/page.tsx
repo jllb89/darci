@@ -12,6 +12,7 @@ import {
   getMemberMembership,
   isActiveMembershipState,
   isRecoveryMembershipState,
+  isVisibleMembershipPlan,
   type MemberBillingPlan,
   type MemberMembershipPayload,
   type MemberPriceCode,
@@ -238,7 +239,7 @@ function ActiveMembershipManagement({
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-Color-Scheme-1-Border/60 bg-white px-3 py-1.5 text-[11px] font-medium text-Color-Neutral-Darkest">
           <span className="h-1.5 w-1.5 rounded-full bg-Green-Secondary" />
-          Private beta · Stripe test mode
+          {payload.paymentsReal ? "DARCi membership" : "Private beta · Stripe test mode"}
         </span>
       </header>
 
@@ -474,7 +475,7 @@ function PlanCard({
       </ul>
 
       <div className="mt-auto pt-6">
-        {canCheckout ? (
+        {canCheckout && plan.availableForPurchase !== false ? (
           <button
             className="platform-btn-primary flex w-full items-center justify-center px-4 py-3 text-xs font-medium tracking-[0.06em] disabled:cursor-not-allowed disabled:opacity-55"
             disabled={isStarting}
@@ -485,7 +486,7 @@ function PlanCard({
           </button>
         ) : (
           <div className="flex min-h-10 items-center justify-center border-t border-Color-Scheme-1-Border pt-4 text-[11px] font-medium tracking-[0.1em] text-Color-Neutral">
-            {isCurrent ? "CURRENT PLAN" : "PLAN CHANGES COMING SOON"}
+            {isCurrent ? "CURRENT PLAN" : "PURCHASE CURRENTLY UNAVAILABLE"}
           </div>
         )}
       </div>
@@ -645,7 +646,7 @@ export default function BillingPage() {
         <div className="mb-4 md:absolute md:right-0 md:top-0 md:mb-0">
           <span className="inline-flex items-center gap-2 rounded-full border border-Color-Scheme-1-Border/60 bg-white px-3 py-1.5 text-[10px] font-medium tracking-[0.12em]">
             <span className="h-1.5 w-1.5 rounded-full bg-Green-Secondary" />
-            PRIVATE BETA · TEST MODE
+            {payload ? (payload.paymentsReal ? "DARCi MEMBERSHIP" : "PRIVATE BETA · TEST MODE") : "MEMBERSHIP"}
           </span>
         </div>
         <h1 className="mx-auto max-w-[760px] text-2xl font-medium leading-tight md:text-3xl">
@@ -696,7 +697,7 @@ export default function BillingPage() {
         {plans.some(plan => plan.billingInterval === "year") ? <BillingCadence value={cadence} onChange={setCadence} /> : null}
         <p className="mb-5 text-center text-xs leading-5 text-Color-Neutral">Prices in USD, before applicable taxes. Notary fees are separate. One trust package, standalone POA or uploaded notarization counts as one document workflow. Monthly allowances do not roll over. Unlimited remains subject to normal file-size, rate and anti-abuse safeguards.</p>
         <div className="grid gap-5 lg:grid-cols-3">
-          {plans.filter(plan => plan.availableForPurchase !== false && plan.billingInterval === cadence).map((plan) => (
+          {plans.filter(plan => isVisibleMembershipPlan(plan) && plan.billingInterval === cadence).map((plan) => (
             <PlanCard
               canCheckout={canCheckout}
               isCurrent={payload?.membership.priceCode === plan.priceCode}
@@ -709,6 +710,16 @@ export default function BillingPage() {
         </div>
         {isLoading && !payload ? (
           <p className="mt-4 text-center text-xs text-Color-Neutral">Checking membership availability…</p>
+        ) : null}
+        {!isLoading && payload && !plans.some(plan => isVisibleMembershipPlan(plan) && plan.billingInterval === cadence) ? (
+          <BillingErrorNotice message="Membership options are temporarily unavailable. Retry or contact support for testing access." onRetry={() => void loadMembership()} />
+        ) : null}
+        {payload && !canCheckout && !isActiveMembershipState(membershipState) && membershipState !== "activation_pending" ? (
+          <div className="mt-6 text-center text-sm leading-6 text-Color-Neutral" role="status">
+            Membership is required to create documents. Purchase is not currently available for this account.
+            {" "}<a className="underline" href="mailto:lopezb.jl@gmail.com?subject=DARCi%20membership%20access">Contact support for testing access</a>
+            {" "}or <button className="underline" type="button" onClick={() => void loadMembership()}>refresh membership status</button> if it was just activated.
+          </div>
         ) : null}
       </section>
 
@@ -799,7 +810,7 @@ export default function BillingPage() {
         )}
         <a
           className="font-medium underline underline-offset-4"
-          href="mailto:support@darciregistry.com"
+          href="mailto:lopezb.jl@gmail.com?subject=DARCi%20membership%20support"
         >
           Questions? Contact support
         </a>

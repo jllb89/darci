@@ -132,7 +132,14 @@ struct ProfileTypeSelectionView: View {
                                 .background(Color.black)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("profile-apply-notary-button")
                             .padding(.horizontal, scaled(23, in: proxy))
+                            Text("Continue your application on the web. You may need to sign in again.")
+                                .font(DARCiFont.maisonNeue(.book, size: 13))
+                                .foregroundStyle(.black)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, scaled(23, in: proxy))
+                                .padding(.top, 8)
                             .padding(.bottom, scaled(28, in: proxy))
                         }
 

@@ -9,9 +9,11 @@ import { captureAppException, captureAppMessage } from "@/lib/clientTelemetry";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
 import {
   readMemberBillingReasonCode,
+  getMemberBillingDenialCopy,
   type MemberBillingReasonCode,
 } from "@/lib/billingPolicy";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
+import { readIntakeBootstrapFailure } from "@/app/app/start/intakeBootstrap";
 import ProductSelectionBand from "@/app/app/start/ProductSelectionBand";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import { MockDataToggle } from "@/app/app/start/MockDataToggle";
@@ -1042,6 +1044,7 @@ export default function StartDocumentPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submissionErrorMessage, setSubmissionErrorMessage] = useState<string | null>(null);
   const [billingDenialReason, setBillingDenialReason] = useState<MemberBillingReasonCode | null>(null);
+  const [intakeLoadAttempt, setIntakeLoadAttempt] = useState(0);
   const [showContinueValidationDetails, setShowContinueValidationDetails] = useState(false);
   const [missingRequirements, setMissingRequirements] = useState<MissingRequirement[]>([]);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
@@ -1692,6 +1695,8 @@ export default function StartDocumentPage() {
 
     if (selectedProductFlowMode === NOTARIZE_DOCUMENT_MODE_KEY) {
       setMemberForm(null);
+      setBillingDenialReason(null);
+      setSubmissionErrorMessage(null);
       setMissingRequirements([]);
       setErrorMessage(null);
       setIsLoadingMemberForm(false);
@@ -1710,6 +1715,10 @@ export default function StartDocumentPage() {
     const loadMemberForm = async () => {
       setIsLoadingMemberForm(true);
       setErrorMessage(null);
+      setBillingDenialReason(null);
+      setSubmissionErrorMessage(null);
+      setMemberForm(null);
+      syncDraftDocumentId(null);
       setMissingRequirements([]);
       resetQueuedDraftSaves();
       lastServerDraftSignatureRef.current = null;
@@ -1804,11 +1813,12 @@ export default function StartDocumentPage() {
               | DocumentIntakeBootstrapResponsePayload
               | null;
 
-            if (!bootstrapResponse.ok || !bootstrapPayload?.document?.id) {
-              throw new Error(
-                bootstrapPayload?.message ||
-                  "Failed to initialize intake draft persistence",
-              );
+            const bootstrapFailure = readIntakeBootstrapFailure(bootstrapResponse.ok, bootstrapPayload);
+            if (bootstrapFailure) {
+              if (!cancelled) {
+                setBillingDenialReason(bootstrapFailure.billingReasonCode);
+              }
+              throw new Error(bootstrapFailure.message);
             }
           }
         } catch (error) {
@@ -1820,6 +1830,12 @@ export default function StartDocumentPage() {
 
         if (cancelled) {
           return;
+        }
+
+        // Never expose an unpersisted form after bootstrap or resume was denied.
+        // Keep the actual billing reason instead of failing much later at submit.
+        if (bootstrapErrorMessage) {
+          throw new Error(bootstrapErrorMessage);
         }
 
         setMemberForm(payload.memberForm);
@@ -1931,6 +1947,7 @@ export default function StartDocumentPage() {
     };
   }, [
     accessToken,
+    intakeLoadAttempt,
     resetQueuedDraftSaves,
     selectedJurisdiction,
     selectedJurisdictionLabel,
@@ -3121,7 +3138,11 @@ export default function StartDocumentPage() {
       !memberForm ||
       !draftDocumentId
     ) {
-      setSubmissionErrorMessage("Missing context to submit member form.");
+      setSubmissionErrorMessage(billingDenialReason
+        ? getMemberBillingDenialCopy(billingDenialReason).body
+        : !accessToken
+          ? "Please sign in again before continuing."
+          : "Your document draft is not ready. Retry loading the form before continuing.");
       return false;
     }
 
@@ -5426,8 +5447,14 @@ export default function StartDocumentPage() {
                     </div>
                   </div>
 
-                  {errorMessage ? (
+                  {errorMessage && !billingDenialReason ? (
                     <div className="bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</div>
+                  ) : null}
+                  {!memberForm && billingDenialReason ? <BillingPolicyNotice reasonCode={billingDenialReason} /> : null}
+                  {!memberForm && errorMessage && !isLoadingMemberForm ? (
+                    <button type="button" className="text-sm underline" onClick={() => setIntakeLoadAttempt(attempt => attempt + 1)}>
+                      {billingDenialReason ? "I’ve updated my membership — retry" : "Retry loading form"}
+                    </button>
                   ) : null}
 
                   {missingRequirements.length > 0 ? (
@@ -5526,7 +5553,7 @@ export default function StartDocumentPage() {
                           {submissionErrorMessage}
                         </div>
                       ) : null}
-                      {billingDenialReason ? (
+                      {memberForm && billingDenialReason ? (
                         <BillingPolicyNotice reasonCode={billingDenialReason} />
                       ) : null}
 

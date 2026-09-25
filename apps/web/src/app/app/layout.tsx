@@ -154,9 +154,9 @@ function AppLayoutContent({
 
   useEffect(() => {
     if (hasHydrated && !isAuthorized && !isPublicInviteRoute) {
-      router.replace("/start");
+      router.replace(`/start?returnTo=${encodeURIComponent(profileCompletionReturnTo)}`);
     }
-  }, [hasHydrated, isAuthorized, isPublicInviteRoute, router]);
+  }, [hasHydrated, isAuthorized, isPublicInviteRoute, profileCompletionReturnTo, router]);
 
   useEffect(() => {
     if (!hasHydrated || !isAuthorized || !roleHint || isSwitchingRole) {

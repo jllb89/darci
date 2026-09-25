@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { liveBillingAccess, OPERATOR_PRICE_CODE } from "../config/liveBillingAccess";
-import { MEMBER_PRICE_CODES, MEMBER_PRICING_V2, classifyMemberPlanChange, isMemberPricingV2 } from "../config/memberPricing";
+import { MEMBER_PRICE_CODES, classifyMemberPlanChange, isMemberPricingV2 } from "../config/memberPricing";
 import { refreshMemberAllowanceWindow } from "./memberAllowanceWindowService";
 import {
   assertStripeObjectMatchesEnvironment,
@@ -789,7 +789,10 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
   let activationPending = false;
 
   const v2Catalog = (rawCatalog ?? []).filter(price => isMemberPricingV2(price.price_code));
-  const v2Available = v2Catalog.length === MEMBER_PRICING_V2.length;
+  // A restricted rollout can publish a single v2 price. Requiring all six here
+  // hides every published offer (and even an existing member's current plan).
+  // Inactive prices remain excluded by the query; this does not activate sales.
+  const v2Available = v2Catalog.length > 0;
   if (v2Available && input.catalogVersion !== 2) {
     throw new MemberBillingServiceError(426, "billing_client_update_required", "Update DARCi to view monthly, annual and Unlimited memberships. Your existing documents remain available.");
   }
@@ -884,6 +887,9 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
       billingInterval: price.billing_interval,
       intervalCount: price.interval_count,
       isUnlimited: price.is_unlimited === true,
+      // Catalog visibility is independent of the live checkout/cohort gate.
+      // Retired prices remain readable for historical memberships, not new offers.
+      visibleInCatalog: price.available_for_purchase !== false && (v2Available ? isMemberPricingV2(price.price_code) : true),
       availableForPurchase: price.available_for_purchase !== false && (v2Available ? isMemberPricingV2(price.price_code) : true)
         && liveBillingAccess(input.dbUserId, "checkout", price.price_code).allowed,
       documentWorkflowAllowance:

@@ -203,6 +203,7 @@ export type DocumentIntakeDraftResponsePayload = {
 };
 
 export type DocumentIntakeBootstrapResponsePayload = {
+  error?: string;
   created?: boolean;
   document?: DocumentSummary;
   draft?: DocumentIntakeDraft;

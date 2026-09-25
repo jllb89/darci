@@ -20,6 +20,11 @@ enum MobileEnvironment {
             && hosts.contains(url.host?.lowercased() ?? "")
     }
 
+    static func notaryApplicationURL(production: Bool = isProduction) -> URL {
+        let base = production ? "https://app.illuminotary.com" : "https://app.staging.darciregistry.dev"
+        return URL(string: base + "/app/settings")!
+    }
+
     static func verificationURL(_ path: String, production: Bool = isProduction) -> URL? {
         let base = URL(string: production ? "https://app.illuminotary.com" : "https://app.staging.darciregistry.dev")!
         guard let url = URL(string: path, relativeTo: base)?.absoluteURL,

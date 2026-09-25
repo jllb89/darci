@@ -211,7 +211,9 @@ struct AppRootView: View {
                         session: sessionCoordinator.currentSession,
                         onBack: hideProfileSelection,
                         onSelectRole: switchProfileRole,
-                        onBecomeIlluminotary: {}
+                        onBecomeIlluminotary: {
+                            openURL(MobileEnvironment.notaryApplicationURL())
+                        }
                     )
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .topTrailing)),
@@ -605,7 +607,7 @@ struct AppRootView: View {
     }
 
     private func contactMembershipSupport() {
-        guard let url = URL(string: "mailto:support@illuminote.io?subject=DARCi%20membership%20support") else { return }
+        guard let url = URL(string: "mailto:lopezb.jl@gmail.com?subject=DARCi%20membership%20support") else { return }
         openURL(url)
     }
 

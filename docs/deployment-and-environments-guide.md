@@ -101,6 +101,8 @@ No production Stripe/Resend/Maps/APNs keys were copied from staging. Those provi
 
 ## DNS and private access
 
+**24 September tester-access update:** the production app/API HTTPS gate now also permits Claire, Adam and Ann's four explicitly approved IPv4 `/32`s. Existing operator access remains intact. [Current tester inventory and deployment evidence](production-tester-access-2026-09-24.md). Historical operator-only descriptions below describe the earlier setup; signup, purchases and account authorization remain separate gates.
+
 Both app/API CNAMEs point to:
 
 ```text
