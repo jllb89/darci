@@ -1,5 +1,7 @@
 # DARCi Production Readiness Roadmap
 
+**September 25 — paid private-production testing approved:** Jorge clarified that clients are testing and will continue testing in production. This supersedes the staging-only decision and earlier closed-sales instructions for this private cohort. The six approved live member prices, web Checkout/Portal and iOS hosted checkout are being enabled after the protected current-revision release. Private IP restrictions, signup settings, enforcement and existing subscriptions stay intact; no agent-created charge. See [activation procedure and actual deployment status](production-paid-client-testing-2026-09-25.md). Preparation is not activation; physical checkout/Apple Pay and TestFlight update acceptance remain separate.
+
 **Current status — Phase 3 closed for the enabled private-production scope;
 Phase 4 started (23 September).** Engineering acceptance passed, commercial/legal
 approval is confirmed, and Jorge confirmed the 16:29 upload-ready email arrived.

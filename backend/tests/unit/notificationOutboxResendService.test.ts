@@ -495,7 +495,7 @@ describe("notification outbox Resend runtime", () => {
         to: "Casey Signer <casey@example.com>",
         subject: "Ready for Casey",
         text: "Hi Casey, review here: https://app.example.test/review",
-        replyTo: "support@darciregistry.com",
+        replyTo: "lopezb.jl@gmail.com",
         tags: [
           { name: "template_key", value: "document_ready_for_review_email" },
           { name: "job_id", value: "job-1" },

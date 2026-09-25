@@ -1,5 +1,7 @@
 # Client testing: membership and notary application fixes
 
+**Subsequent instruction:** Jorge clarified that the clients are testing in production and need paid live membership there. The earlier staging-only decision below is historical and superseded. Follow [the private production activation record](production-paid-client-testing-2026-09-25.md) for the current release and payment-gate status.
+
 Status: implemented and validated locally; not committed, deployed or uploaded to TestFlight in this pass. No migrations are required. No subscriptions, entitlements, payment gates or customer records were changed.
 
 ## Findings and changes
