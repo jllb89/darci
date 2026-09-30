@@ -1,13 +1,28 @@
 import React from "react";
 
-export type PublicVerificationPayload = { idn: string; hash: string | null; status: "verified" | "unverified" };
+export type PublicVerificationDocument = {id: string; fileName: string; label: string; isFinal: boolean; downloadUrl: string};
+export type PublicVerificationPayload = { idn: string; hash: string | null; status: "verified" | "unverified"; documents?: PublicVerificationDocument[] };
 
-// Discard legacy/internal fields, particularly signed URLs and PDF filenames.
+// Only verified final PDFs from this environment's Storage origin are previewable.
 export function parsePublicVerification(value: unknown): PublicVerificationPayload | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
   if (typeof input.idn !== "string" || !input.idn.trim() || !["verified", "unverified"].includes(String(input.status))) return null;
+  const documents: PublicVerificationDocument[] = [];
+  if (input.status === "verified" && typeof input.hash === "string" && /^[a-f0-9]{64}$/i.test(input.hash) && Array.isArray(input.documents)) {
+    for (const document of input.documents) {
+      if (!document || typeof document !== "object" || document.isFinal !== true || typeof document.id !== "string"
+        || typeof document.fileName !== "string" || typeof document.label !== "string" || typeof document.downloadUrl !== "string") continue;
+      try {
+        const url = new URL(document.downloadUrl);
+        const storage = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
+        if (url.protocol !== "https:" || url.origin !== storage.origin || !url.pathname.startsWith("/storage/v1/object/sign/")) continue;
+        documents.push({id:document.id,fileName:document.fileName,label:document.label,isFinal:true,downloadUrl:url.toString()});
+      } catch { /* Reject malformed/untrusted links rather than embedding them. */ }
+    }
+  }
   return { idn: input.idn,
+    ...(documents.length ? {documents} : {}),
     hash: typeof input.hash === "string" && /^[a-f0-9]{64}$/i.test(input.hash) ? input.hash : null,
     status: input.status as PublicVerificationPayload["status"] };
 }

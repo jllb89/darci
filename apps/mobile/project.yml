@@ -52,6 +52,11 @@ targets:
         CFBundleDisplayName: DARCi
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.illuminote.darci.billing
+            CFBundleURLSchemes:
+              - darci-production
+              - darci-staging
         DARCI_API_BASE_URL: $(DARCI_API_BASE_URL)
         DARCI_WEB_BASE_URL: $(DARCI_WEB_BASE_URL)
         DARCI_ENVIRONMENT: $(DARCI_ENVIRONMENT)

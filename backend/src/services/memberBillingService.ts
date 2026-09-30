@@ -546,6 +546,7 @@ export const createMemberMembershipCheckout = async (input: {
   dbUserId: string;
   priceCode: string;
   idempotencyKey: string;
+  clientPlatform?: "web" | "ios" | undefined;
 }) => {
   const access = assertLiveBillingAccess(input.dbUserId, "checkout", input.priceCode);
   const user = await getAppUser(input.dbUserId);
@@ -653,7 +654,7 @@ export const createMemberMembershipCheckout = async (input: {
     throw new Error("Checkout order ID was not established");
   }
 
-  const { successUrl, cancelUrl } = buildStripeCheckoutReturnUrls();
+  const { successUrl, cancelUrl } = buildStripeCheckoutReturnUrls(input.clientPlatform);
   const session = await getStripeClient().checkout.sessions.create(
     {
       mode: "subscription",

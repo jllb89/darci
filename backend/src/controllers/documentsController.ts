@@ -799,7 +799,7 @@ const signatureRequestSchema = signatureTargetSchema
     fileName: z.string().optional(),
     fileSize: z.number().int().positive().max(MAX_SIGNATURE_BYTES),
     mimeType: z.string().min(1),
-    reuseSourceSignatureId: z.string().trim().min(1).optional(),
+    reuseSourceSignatureId: z.string().trim().min(1).nullish().transform(value => value ?? undefined),
   })
   .refine((data) => ALLOWED_SIGNATURE_MIME_TYPES.has(data.mimeType.toLowerCase()), {
     path: ["mimeType"],
@@ -814,7 +814,7 @@ const signatureCaptureSchema = signatureTargetSchema
     typedKind: z.enum(["name", "initials"]).optional(),
     imageDataUrl: z.string().min(1).optional(),
     savedSignatureId: z.string().trim().min(1).optional(),
-    reuseSourceSignatureId: z.string().trim().min(1).optional(),
+    reuseSourceSignatureId: z.string().trim().min(1).nullish().transform(value => value ?? undefined),
   })
   .superRefine((data, ctx) => {
     if (data.captureMethod === "type") {

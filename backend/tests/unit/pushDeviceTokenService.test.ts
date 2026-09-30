@@ -141,6 +141,42 @@ describe("pushDeviceTokenService", () => {
     );
   });
 
+  const registration = {
+    userId: "user-1", installationId: row.installation_id,
+    environment: "sandbox" as const, appBundleId: row.app_bundle_id,
+    deviceToken: row.device_token, permissionStatus: "authorized" as const,
+  };
+
+  it("releases only a same-owner inactive token claim and retries once", async () => {
+    mocks.singleMock.mockResolvedValueOnce({ data: null, error: { code: "23505" } });
+    const result = await registerPushDeviceToken(registration);
+    expect(result.id).toBe(row.id);
+    expect(mocks.upsertMock).toHaveBeenCalledTimes(2);
+    expect(mocks.updateMock).toHaveBeenCalledWith("device_push_tokens", expect.objectContaining({ device_token: null }));
+    for (const [column, value] of Object.entries({ user_id: "user-1", provider: "apns", environment: "sandbox", app_bundle_id: row.app_bundle_id, device_token: row.device_token, is_active: false })) {
+      expect(mocks.eqMock).toHaveBeenCalledWith("device_push_tokens", column, value);
+    }
+  });
+
+  it("does not reclaim an active or other-account token when no inactive owned row matches", async () => {
+    mocks.singleMock.mockResolvedValueOnce({ data: null, error: { code: "23505" } });
+    mocks.awaitQueryMock.mockResolvedValueOnce({ data: [], error: null });
+    await expect(registerPushDeviceToken(registration)).rejects.toMatchObject({ statusCode: 409, code: "device_token_conflict" });
+    expect(mocks.upsertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed if a concurrent registration still conflicts after release", async () => {
+    mocks.singleMock.mockResolvedValue({ data: null, error: { code: "23505" } });
+    await expect(registerPushDeviceToken(registration)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mocks.upsertMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not release tokens on unrelated storage failures", async () => {
+    mocks.singleMock.mockResolvedValueOnce({ data: null, error: { code: "08006" } });
+    await expect(registerPushDeviceToken(registration)).rejects.toMatchObject({ statusCode: 500 });
+    expect(mocks.updateMock).not.toHaveBeenCalled();
+  });
+
   it("deactivates only rows matching user and installation", async () => {
     const result = await deactivatePushDeviceInstallation({
       userId: "user-1",
@@ -149,7 +185,7 @@ describe("pushDeviceTokenService", () => {
 
     expect(mocks.updateMock).toHaveBeenCalledWith(
       "device_push_tokens",
-      expect.objectContaining({ is_active: false }),
+      expect.objectContaining({ is_active: false, device_token: null }),
     );
     expect(mocks.eqMock).toHaveBeenCalledWith("device_push_tokens", "user_id", "user-1");
     expect(mocks.eqMock).toHaveBeenCalledWith(

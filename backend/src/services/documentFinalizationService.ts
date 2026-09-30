@@ -35,7 +35,7 @@ import { transitionIlluminotarizationWorkflowStatus } from "./illuminotarization
 import { anchorToLedger } from "./ledgerService";
 import { getMeetingByRequestId } from "./meetingService";
 import { isNotaryCommissionCurrent, type NotaryProfileRecord } from "./notaryProfileService";
-import { downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
+import { createDocumentDownloadUrl, downloadDocumentObject, uploadGeneratedDocument } from "./storageService";
 import {
   applyFinalPackageBillingPolicy,
   canViewerAccessFinalPackage,
@@ -2585,8 +2585,10 @@ const buildPublicVerificationDocuments = async (document: DocumentRecord) => {
       const proof = proofItems.find(item => item.version.id === version.id);
       if (!proof) throw new DocumentFinalizationConflictError("Published PDF has no version-bound verification evidence");
       await assertStoredWatermarkEvidence(proof);
-      // Validate exact bytes server-side without minting a transferable URL.
-      return true;
+      // Approved public-link previews: only exact-byte-verified final versions.
+      return { id: version.id, fileName: version.file_name ?? "Final document.pdf",
+        label: version.file_name ?? "Final document", isFinal: true,
+        downloadUrl: (await createDocumentDownloadUrl(version.storage_path!, 300)).signedUrl };
     }),
   );
 };
@@ -2682,7 +2684,7 @@ export const verifyDocumentByIdn = async (input: {
       ledgerTxId: null,
       anchoredAt: null,
       status,
-      documents: [],
+      documents: status === "verified" ? documents : [],
     },
   };
 };

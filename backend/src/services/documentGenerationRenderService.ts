@@ -3107,7 +3107,8 @@ const drawUploadedSignatureAddendumLabel = async (input: {
 
   input.page.drawText(`Signature: ${input.placement.label}`, {
     x: signatureBox.x,
-    y: signatureBox.y + signatureBox.height + 9,
+    // clearSignatureField paints a 10pt bleed; keep the label above that area.
+    y: signatureBox.y + signatureBox.height + 18,
     size: 9,
     font: labelFont,
     color: rgb(0.16, 0.16, 0.16),

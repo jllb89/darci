@@ -61,6 +61,12 @@ final class DocumentSigningViewModel: ObservableObject {
         return signing.outputs.first
     }
 
+    // Preview every output authorized by the signing endpoint, including the
+    // certificate. Preview visibility must not create extra capture obligations.
+    var previewOutputs: [DocumentReviewOutput] {
+        signing?.outputs ?? []
+    }
+
     var canConfirm: Bool {
         signing?.completion.canConfirm == true && isConfirming == false
     }

@@ -1,18 +1,26 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync,writeFileSync} from 'node:fs';
-import {withTesterAccess} from './tester-access.mjs';
+import {withTesterAccess,withAdditionalTesterAccess} from './tester-access.mjs';
 assert(process.argv.includes('--approved-client-ips'));
 process.umask(0o077);
-const aws=(...a)=>JSON.parse(execFileSync('aws',[...a,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']})||'{}');
+const aws=(...a)=>{
+ try{return JSON.parse(execFileSync('aws',[...a,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']})||'{}');}
+ catch(error){const code=String(error.stderr??'').match(/An error occurred \(([^)]+)\)/)?.[1]??'command_failed';throw new Error(`AWS ${a[0]} ${a[1]} failed (${code}); provider payload omitted`);}
+};
 assert.equal(aws('sts','get-caller-identity').Account,'427057633951');
 const stackName='darci-production-runtime',role='darci-production-cfn-release',policyName='temporary-production-tester-routes';
 const stack=aws('cloudformation','describe-stacks','--stack-name',stackName).Stacks[0];assert.equal(stack.StackStatus,'UPDATE_COMPLETE');
 const raw=aws('cloudformation','get-template','--stack-name',stackName).TemplateBody,baseline=typeof raw==='string'?JSON.parse(raw):raw;
-const addresses=['146.75.129.125','23.245.227.237','146.75.154.172','67.170.239.201'];
-const template=withTesterAccess(baseline,addresses),dir=mkdtempSync('.recovery-private/production-tester-access-');
-assert.notDeepEqual(template,baseline,'Already installed; inspect existing rules instead');
-const save=(name,data)=>writeFileSync(`${dir}/${name}.json`,JSON.stringify(data,null,2),{mode:0o600});
+const additions=process.argv.filter(a=>a.startsWith('--add-ip=')).map(a=>a.slice('--add-ip='.length));
+const addresses=additions.length?additions:['146.75.129.125','23.245.227.237','146.75.154.172','67.170.239.201'];
+const template=additions.length?withAdditionalTesterAccess(baseline,addresses):withTesterAccess(baseline,addresses);
+if(JSON.stringify(template)===JSON.stringify(baseline)){console.log('All requested addresses already allowed; no change made');process.exit(0);}
+const addedIds=Object.keys(template.Resources).filter(id=>!baseline.Resources[id]);
+assert(addedIds.length>0);
+for(const [id,resource] of Object.entries(baseline.Resources))assert.deepEqual(template.Resources[id],resource);
+const dir=mkdtempSync('.recovery-private/production-tester-access-');
+const save=(name,data)=>writeFileSync(`${dir}/${name}.json`,JSON.stringify(data,null,name==='template'?0:2),{mode:0o600});
 save('baseline',{stack,template:baseline});save('template',template);
 const listener=aws('cloudformation','describe-stack-resources','--stack-name',stackName).StackResources.find(r=>r.LogicalResourceId==='Https').PhysicalResourceId;
 const expiresAt=new Date(Date.now()+30*60000).toISOString();
@@ -38,17 +46,16 @@ try{
  assert.deepEqual(typeof afterRaw==='string'?JSON.parse(afterRaw):afterRaw,template);
  const resources=aws('cloudformation','describe-stack-resources','--stack-name',stackName).StackResources;
  const rules=aws('elbv2','describe-rules','--listener-arn',listener).Rules;
- for(const service of ['api','web']) for(const group of [1,2]){
-   const id=service+'TesterRoute'+group;
+ for(const id of addedIds){
    const arn=resources.find(r=>r.LogicalResourceId===id)?.PhysicalResourceId;
    const rule=rules.find(r=>r.RuleArn===arn);assert(rule,'Missing live tester rule');
    assert.deepEqual(rule.Conditions.find(c=>c.Field==='source-ip').SourceIpConfig.Values.slice().sort(),
      template.Resources[id].Properties.Conditions.find(c=>c.Field==='source-ip').SourceIpConfig.Values.slice().sort());
-   assert.equal(rule.Conditions.find(c=>c.Field==='host-header').HostHeaderConfig.Values[0],service==='api'?'api.illuminotary.com':'app.illuminotary.com');
+   assert.equal(rule.Conditions.find(c=>c.Field==='host-header').HostHeaderConfig.Values[0],id.startsWith('api')?'api.illuminotary.com':'app.illuminotary.com');
  }
  assert.equal(rules.find(r=>r.IsDefault).Actions[0].FixedResponseConfig.StatusCode,'403');
  save('live-rules',rules);
- const report={at:new Date().toISOString(),passed:true,scope:'Four exact client IPv4 /32s on production app/API HTTPS',imagesAndConfigurationUnchanged:true,addresses};
+ const report={at:new Date().toISOString(),passed:true,scope:'Additive exact client IPv4 /32s on production app/API HTTPS',imagesAndConfigurationUnchanged:true,existingRulesPreserved:true,addresses};
  save('report',report);console.log(JSON.stringify({...report,evidence:dir}));
 }finally{
  const status=aws('cloudformation','describe-stacks','--stack-name',stackName).Stacks[0].StackStatus;

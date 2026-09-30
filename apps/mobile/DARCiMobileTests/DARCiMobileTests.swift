@@ -5,6 +5,34 @@ import XCTest
 import UIKit
 #endif
 
+final class PushRegistrationAttemptTests: XCTestCase {
+    func testMissingCallbackCanRetryOnLaterForegroundWithoutRequestStorm() {
+        var attempt = PushRegistrationAttempt()
+        let start = Date(timeIntervalSince1970: 100)
+        XCTAssertTrue(attempt.begin(at: start, hasToken: false))
+        XCTAssertFalse(attempt.begin(at: start.addingTimeInterval(1), hasToken: false))
+        XCTAssertFalse(attempt.begin(at: start.addingTimeInterval(29), hasToken: false))
+        XCTAssertTrue(attempt.begin(at: start.addingTimeInterval(30), hasToken: false))
+        XCTAssertFalse(attempt.begin(at: start.addingTimeInterval(31), hasToken: false))
+    }
+
+    func testReceivedTokenDoesNotRequestAnotherOSRegistration() {
+        var attempt = PushRegistrationAttempt()
+        let start = Date(timeIntervalSince1970: 100)
+        XCTAssertTrue(attempt.begin(at: start, hasToken: false))
+        XCTAssertFalse(attempt.begin(at: start.addingTimeInterval(60), hasToken: true))
+    }
+
+    func testFailureOrSignOutResetsAttemptForNextSession() {
+        var attempt = PushRegistrationAttempt()
+        let start = Date(timeIntervalSince1970: 100)
+        XCTAssertTrue(attempt.begin(at: start, hasToken: false))
+        attempt.reset()
+        XCTAssertNil(attempt.requestedAt)
+        XCTAssertTrue(attempt.begin(at: start.addingTimeInterval(1), hasToken: false))
+    }
+}
+
 final class DARCiAdaptiveLayoutTests: XCTestCase {
     func testNotarySheetFitsContentAndCapsLongLists() {
         XCTAssertEqual(DARCiAdaptiveLayout.contentFittingSheetHeight(contentHeight: 100, actionsHeight: 86, viewportHeight: 800), 240)
@@ -677,6 +705,31 @@ actor FailingMemberSessionAPIClient: RequestsAPIProviding {
 }
 
 final class DARCiMobileTests: XCTestCase {
+    @MainActor
+    func testSigningPreviewIncludesCertificateWithoutCreatingCaptureObligations() async throws {
+        let outputs = ["trust_certificate", "trust_rrr", "poa_document"].map { key in
+            ["outputKey": key, "outputLabel": key, "versionId": key, "version": 1,
+             "createdAt": "2026-09-29T00:00:00Z", "downloadUrl": "https://example.test/\(key).pdf", "isFinal": false] as [String: Any]
+        }
+        let body: [String: Any] = ["document": ["id": "document-1", "createdAt": "2026-09-29T00:00:00Z"],
+            "signing": ["state": "ready", "approvedOutputKeys": ["trust_certificate", "trust_rrr", "poa_document"],
+                "outputs": outputs, "pendingOutputs": [], "missingOutputKeys": [], "requiresGeneration": false,
+                "allOutputsReady": true, "signatures": [], "groups": [],
+                "completion": ["requiredSignatureCount": 0, "capturedRequiredSignatureCount": 0, "allRequiredSignaturesComplete": true, "canConfirm": false]]]
+        let responseData = try JSONSerialization.data(withJSONObject: body)
+        let urlSession = makeStubbedURLSession { request in
+            return (try XCTUnwrap(HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])), responseData)
+        }
+        let authClient = AuthAPIClient(config: AuthConfig(apiBaseURL: try XCTUnwrap(URL(string: "https://api.example.test"))), urlSession: urlSession)
+        let model = DocumentSigningViewModel(documentId: "document-1", apiClient: DocumentIntakeAPIClient(authClient: authClient, urlSession: urlSession))
+        await model.load(session: makeAuthSession())
+        defer { model.stop() }
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.previewOutputs.map(\.outputKey), ["trust_certificate", "trust_rrr", "poa_document"])
+        XCTAssertTrue(model.visibleSignatures.isEmpty)
+        XCTAssertFalse(model.shouldShowCaptureControls)
+    }
+
     func testMemberSessionDeepLinkParsesUniversalHandoff() throws {
         let url = try XCTUnwrap(URL(string: "https://app.staging.darciregistry.dev/open/requests/request-123?intendedEmail=member%40example.com"))
 

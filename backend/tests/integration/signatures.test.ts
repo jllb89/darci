@@ -401,6 +401,7 @@ describe("member signature capture", () => {
         fileName: "sig.png",
         fileSize: 1024,
         mimeType: "image/png",
+        reuseSourceSignatureId: null,
       },
       "requests a signature upload",
       token
@@ -709,7 +710,7 @@ describe("member signature capture", () => {
     );
   });
 
-  it("does not leave a signature captured when applying it to the PDF fails", async () => {
+  it.each([undefined, null])("does not leave a signature captured when PDF application fails (reuse: %s)", async reuseSourceSignatureId => {
     mocks.getDocumentByIdMock.mockResolvedValue({
       id: "doc-1",
       owner_id: "owner-1",
@@ -763,6 +764,7 @@ describe("member signature capture", () => {
         captureMethod: "type",
         typedValue: "Owner One",
         typedKind: "name",
+        reuseSourceSignatureId,
       },
       "rolls back failed PDF signature application",
       token,
@@ -954,6 +956,7 @@ describe("member signature capture", () => {
         captureMethod: "type",
         typedValue: "Taylor Trust",
         typedKind: "name",
+        reuseSourceSignatureId: null,
       },
       "captures trust registration and mirrors certificate",
       token,

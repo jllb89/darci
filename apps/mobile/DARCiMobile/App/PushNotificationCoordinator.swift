@@ -3,6 +3,21 @@ import OSLog
 import UIKit
 import UserNotifications
 
+/// A request is not a token. A missing OS callback must not suppress every
+/// subsequent foreground attempt for the lifetime of the process.
+struct PushRegistrationAttempt {
+    private(set) var requestedAt: Date?
+
+    mutating func begin(at now: Date, hasToken: Bool) -> Bool {
+        guard !hasToken else { return false }
+        if let requestedAt, now.timeIntervalSince(requestedAt) < 30 { return false }
+        requestedAt = now
+        return true
+    }
+
+    mutating func reset() { requestedAt = nil }
+}
+
 @MainActor
 final class PushNotificationCoordinator: NSObject, ObservableObject {
     private static let logger = Logger(subsystem: "com.illuminote.darci", category: "push")
@@ -48,7 +63,7 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     private var currentSession: AuthSession?
     private var currentDeviceToken: String?
     private var didOfferPermissionPrompt = false
-    private var hasRequestedRemoteNotifications = false
+    private var registrationAttempt = PushRegistrationAttempt()
     private var refreshTask: Task<Void, Never>?
     private var permissionSyncInFlightKey: PermissionSyncKey?
     private var lastSuccessfulPermissionSyncKey: PermissionSyncKey?
@@ -127,6 +142,11 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
         refreshTask = nil
     }
 
+    func refreshPermissionAndSync(session: AuthSession?) async {
+        currentSession = session
+        await refreshPermissionAndSync()
+    }
+
     private func performRefreshPermissionAndSync() async {
         let settings = await notificationCenter.notificationSettings()
         let status = Self.permissionStatus(from: settings.authorizationStatus)
@@ -141,11 +161,19 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     }
 
     func deactivateForSignOut() async {
-        guard let accessToken = currentSession?.accessToken else {
+        // Clear all registration state even if the session was already removed.
+        defer {
             currentSession = nil
             currentDeviceToken = nil
-            return
+            registrationAttempt.reset()
+            refreshTask?.cancel()
+            refreshTask = nil
+            permissionSyncInFlightKey = nil
+            lastSuccessfulPermissionSyncKey = nil
+            tokenRegistrationInFlightKey = nil
+            lastSuccessfulTokenRegistrationKey = nil
         }
+        guard let accessToken = currentSession?.accessToken else { return }
 
         do {
             let installationId = try installationStore.installationId()
@@ -154,15 +182,6 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
             lastRegistrationError = "push_deactivation_failed"
         }
 
-        currentSession = nil
-        currentDeviceToken = nil
-        hasRequestedRemoteNotifications = false
-        refreshTask?.cancel()
-        refreshTask = nil
-        permissionSyncInFlightKey = nil
-        lastSuccessfulPermissionSyncKey = nil
-        tokenRegistrationInFlightKey = nil
-        lastSuccessfulTokenRegistrationKey = nil
     }
 
     func clearPendingRoute(_ route: PushNotificationRoute) {
@@ -197,6 +216,7 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     }
 
     private func didFailToRegisterForRemoteNotifications(error: Error) {
+        registrationAttempt.reset()
         Self.diagnostic("apns_registration_failed error=\(String(describing: error))")
         lastRegistrationError = "apns_registration_failed"
     }
@@ -301,8 +321,8 @@ final class PushNotificationCoordinator: NSObject, ObservableObject {
     }
 
     private func registerForRemoteNotificationsIfNeeded() {
-        guard hasRequestedRemoteNotifications == false else { return }
-        hasRequestedRemoteNotifications = true
+        guard registrationAttempt.begin(at: Date(), hasToken: currentDeviceToken != nil) else { return }
+        Self.diagnostic("apns_registration_requested")
         UIApplication.shared.registerForRemoteNotifications()
     }
 

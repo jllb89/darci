@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: "object-src 'self' blob:; base-uri 'self'; frame-ancestors 'none'" },
         ],
       },
+      {
+        source: "/verify/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
       ...["/.well-known/apple-app-site-association", "/apple-app-site-association"].map((source) => ({
         source,
         headers: [

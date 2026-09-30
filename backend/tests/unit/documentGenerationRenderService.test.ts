@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { protectPdf } from "../helpers/protectedPdf";
 import {
   PDFDocument as PdfLibDocument,
+  PDFPage,
 } from "pdf-lib";
 
 import {
@@ -18,6 +19,7 @@ import {
 } from "../../src/services/documentGenerationRenderService";
 
 describe("documentGenerationRenderService", () => {
+  afterEach(() => vi.restoreAllMocks());
   it("replaces deferred preview placeholders with member-facing text", () => {
     const rendered = renderLegalTemplateText({
       templateSource: "DARCi No. << DarciNo >>\nVerification: {{QR Code}}\nState: << TrustState >>",
@@ -894,6 +896,8 @@ describe("documentGenerationRenderService", () => {
   });
 
   it("stamps the uploaded-document addendum when the source PDF is protected", async () => {
+    const text = vi.spyOn(PDFPage.prototype, "drawText");
+    const rectangles = vi.spyOn(PDFPage.prototype, "drawRectangle");
     const sourcePdf = await PdfLibDocument.create();
     sourcePdf.addPage([612, 792]);
     const protectedPdfBytes = await protectPdf(await sourcePdf.save());
@@ -933,5 +937,11 @@ describe("documentGenerationRenderService", () => {
 
     expect(stampedPdf.getPageCount()).toBe(2);
     expect(stampedPdf.isEncrypted).toBe(false);
+    const label = text.mock.calls.find(([value]) => value === "Signature: Document owner")?.[1];
+    const clear = rectangles.mock.calls.find(([rect]) => rect?.width === 320)?.[0];
+    expect(label).toBeDefined();
+    expect(clear).toBeDefined();
+    // Include the text's descender margin, not just its baseline.
+    expect((label?.y ?? 0) - 3).toBeGreaterThan((clear?.y ?? 0) + (clear?.height ?? 0));
   });
 });

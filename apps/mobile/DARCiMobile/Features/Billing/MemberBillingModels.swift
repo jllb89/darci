@@ -129,6 +129,7 @@ extension MemberMembershipPayload.Membership {
 struct MemberCheckoutRequest: Encodable, Equatable, Sendable {
     let priceCode: String
     let idempotencyToken: String
+    let clientPlatform: String = "ios"
 }
 
 struct MemberCheckoutResponse: Decodable, Equatable, Sendable {
@@ -159,8 +160,11 @@ struct MemberBillingReturn: Equatable, Identifiable, Sendable {
 
 enum MemberBillingDeepLink {
     static func result(from url: URL, production: Bool = MobileEnvironment.isProduction) -> String? {
-        guard MobileEnvironment.acceptsWebURL(url, production: production),
-              url.path == "/app",
+        let webReturn = MobileEnvironment.acceptsWebURL(url, production: production) && url.path == "/app"
+        let appReturn = url.scheme == (production ? "darci-production" : "darci-staging")
+            && url.host == "billing-return" && url.path.isEmpty
+            && url.user == nil && url.password == nil && url.port == nil
+        guard webReturn || appReturn,
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let result = components.queryItems?.first(where: { $0.name == "billing" })?.value?
                 .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),

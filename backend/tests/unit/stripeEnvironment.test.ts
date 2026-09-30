@@ -1,7 +1,14 @@
 import {describe,it,expect,afterEach,vi} from 'vitest';
-import {getStripeEnvironment,getStripeClient,assertStripeObjectMatchesEnvironment} from '../../src/config/stripe';
+import {getStripeEnvironment,getStripeClient,assertStripeObjectMatchesEnvironment,buildStripeCheckoutReturnUrls} from '../../src/config/stripe';
 afterEach(()=>vi.unstubAllEnvs());
 describe('Stripe environment isolation',()=>{
+  it('uses an app-return bridge only for explicit iOS checkout',()=>{
+    vi.stubEnv('STRIPE_RETURN_URL','https://app.illuminotary.com/app');
+    expect(buildStripeCheckoutReturnUrls().successUrl).toBe('https://app.illuminotary.com/app?billing=success&session_id={CHECKOUT_SESSION_ID}');
+    expect(buildStripeCheckoutReturnUrls('ios').successUrl).toBe('https://app.illuminotary.com/billing/return?billing=success&session_id={CHECKOUT_SESSION_ID}');
+    expect(buildStripeCheckoutReturnUrls('ios').cancelUrl).toBe('https://app.illuminotary.com/billing/return?billing=canceled');
+    expect(buildStripeCheckoutReturnUrls('ios').portalReturnUrl).toBe('https://app.illuminotary.com/app');
+  });
   it('blocks test entitlements in production',()=>{
     vi.stubEnv('APP_ENV','production');vi.stubEnv('STRIPE_PROVIDER_ENVIRONMENT','test');
     expect(()=>getStripeEnvironment()).toThrow('Production');

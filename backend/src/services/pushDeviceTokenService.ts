@@ -149,7 +149,7 @@ export const registerPushDeviceToken = async (input: {
 }) => {
   assertSupabaseConfigured();
   const now = new Date().toISOString();
-  const { data, error } = await supabaseAdmin
+  const persistRegistration = () => supabaseAdmin
     .from("device_push_tokens")
     .upsert(
       {
@@ -175,6 +175,28 @@ export const registerPushDeviceToken = async (input: {
     )
     .select(devicePushTokenSelect)
     .single();
+
+  let { data, error } = await persistRegistration();
+  if (error?.code === "23505") {
+    // Old sign-outs retained their unique token even while inactive. Release
+    // only this authenticated owner's inactive claim, never another account's
+    // token or an active installation. The predicates also protect a row that
+    // was reactivated concurrently. Retry once; uniqueness still fails closed.
+    const released = await supabaseAdmin
+      .from("device_push_tokens")
+      .update({ device_token: null, updated_at: now })
+      .eq("user_id", input.userId)
+      .eq("provider", "apns")
+      .eq("environment", input.environment)
+      .eq("app_bundle_id", input.appBundleId)
+      .eq("device_token", input.deviceToken)
+      .eq("is_active", false)
+      .select("id");
+    handleSupabaseError(released.error);
+    if (released.data?.length) {
+      ({ data, error } = await persistRegistration());
+    }
+  }
 
   handleSupabaseError(error);
   if (!data) {
@@ -269,6 +291,7 @@ export const deactivatePushDeviceInstallation = async (input: {
     .from("device_push_tokens")
     .update({
       is_active: false,
+      device_token: null,
       invalidated_at: now,
       updated_at: now,
     })

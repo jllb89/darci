@@ -144,7 +144,7 @@ struct AppRootView: View {
             guard phase == .active else { return }
             Task {
                 await sessionCoordinator.refreshSessionIfNeeded()
-                await pushCoordinator.refreshPermissionAndSync()
+                await pushCoordinator.refreshPermissionAndSync(session: sessionCoordinator.currentSession)
                 await notificationCenterViewModel.load(for: sessionCoordinator.currentSession)
                 if billingPresentationCoordinator.activePresentation == nil,
                    let session = sessionCoordinator.currentSession {

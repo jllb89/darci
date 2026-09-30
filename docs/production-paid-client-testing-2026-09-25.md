@@ -1,5 +1,20 @@
 # Paid client testing in private production — September 25
 
+## Activated and verified — September 27
+
+**Production paid membership is enabled.** The protected release `36174873042` succeeded for revision `9a0c453296ec139677f830df823c7061dc8a1d25`. The application deployment had completed, but the separate runtime/catalog activation had not run; that was the cause of the reported visible Starter plan with purchase unavailable. Logging out could not fix a closed server-side sales gate.
+
+- Activated all six approved v2 prices and removed legacy prices from new purchase availability; existing subscriptions were not changed.
+- CloudFormation completed successfully; API/worker are stable with `BILLING_LIVE_ACCESS_MODE=open`, `IOS_MEMBER_CHECKOUT_ENABLED=true`, and billing enforcement retained.
+- Authenticated production membership GET returned HTTP 200 at **2026-09-27 22:06 UTC**, with `paymentsReal=true`, all six exact live prices purchasable, and iOS checkout available. Verified using the previously approved synthetic operator's member workspace, not a client account. Its existing active subscription correctly prevents buying a duplicate and permits billing management.
+- Added `157.131.202.3/32` and `185.98.169.47/32` to both app/API HTTPS routing; `146.75.154.172/32` was already granted and is preserved. All existing resources/parameters and default-deny routing remain intact. Temporary listener-scoped deployment permission was removed after verification.
+- **104 production infrastructure tests passed**, including additive access, duplicate-IP handling and preservation of existing grants.
+- No charges, subscriptions or Checkout sessions were created in this pass. A new client's completed payment, physical Apple Pay and installed TestFlight behavior are still client acceptance checks, not claimed as tested here.
+
+Private operational evidence: `.recovery-private/production-private-sales-GknNDe/result.json`, `api-verification.json`, and `.recovery-private/production-tester-access-qpDjVr/report.json`. No credentials are included in this document.
+
+Clients can refresh web billing or close/reopen the membership screen in the current production-configured iOS build. This configuration change requires no additional web deployment or TestFlight binary. A genuinely staging-configured build still needs replacement; production settings do not retarget an installed app.
+
 ## Approval and scope
 
 Jorge clarified that clients **are testing and will continue testing in production** and asked for live membership to work there. This supersedes the staging-only testing decision in the earlier September 25 findings. Purchases use real Stripe payments made by each client; no complimentary entitlement, automatic subscription, test-card live transaction or agent-created charge is authorized.

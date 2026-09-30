@@ -66,12 +66,14 @@ export const getStripeReturnUrl = () => {
   return url;
 };
 
-export const buildStripeCheckoutReturnUrls = () => {
+export const buildStripeCheckoutReturnUrls = (clientPlatform?: "web" | "ios") => {
   const success = getStripeReturnUrl();
+  if (clientPlatform === "ios") success.pathname = "/billing/return";
   success.searchParams.set("billing", "success");
   success.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
 
   const cancel = getStripeReturnUrl();
+  if (clientPlatform === "ios") cancel.pathname = "/billing/return";
   cancel.searchParams.set("billing", "canceled");
 
   return {

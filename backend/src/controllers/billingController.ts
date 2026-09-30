@@ -14,6 +14,7 @@ const allowedMemberPriceCodes: ReadonlySet<string> = new Set(MEMBER_PRICE_CODES)
 const checkoutSchema = z.object({
   priceCode: z.string().refine(value => allowedMemberPriceCodes.has(value)),
   idempotencyToken: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/),
+  clientPlatform: z.enum(["web", "ios"]).optional(),
 }).strict();
 
 const planChangeSchema = z.object({
@@ -57,6 +58,7 @@ export const createMemberCheckout = async (req: Request, res: Response) => {
       dbUserId: req.user.dbUserId,
       priceCode: parsed.data.priceCode,
       idempotencyKey: parsed.data.idempotencyToken,
+      clientPlatform: parsed.data.clientPlatform,
     });
     return res.status(result.reused ? 200 : 201).json(result);
   } catch (error) {

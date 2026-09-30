@@ -139,6 +139,18 @@ enum AccessTokenClaims {
         guard let subject = payload(first)?["sub"] as? String, !subject.isEmpty else { return false }
         return subject == (payload(second)?["sub"] as? String)
     }
+
+    static func preferredAccessToken(requested: String, stored: String?) -> String {
+        guard let stored, sameAccount(requested, stored),
+              let requestedClaims = payload(requested), let storedClaims = payload(stored),
+              requestedClaims["iss"] as? String == storedClaims["iss"] as? String,
+              let requestedExpiry = requestedClaims["exp"] as? Double,
+              let storedExpiry = storedClaims["exp"] as? Double,
+              storedExpiry > requestedExpiry else { return requested }
+        // A delayed Keychain write must never replace a fresh in-memory token
+        // with the older (possibly expired) credential it is about to replace.
+        return stored
+    }
 }
 
 struct AuthVerifyResponse: Decodable, Equatable, Sendable {

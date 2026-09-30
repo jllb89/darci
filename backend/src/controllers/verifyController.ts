@@ -53,14 +53,16 @@ export const verifyDocument = async (req: Request, res: Response) => {
     });
   }
 
-  // Public verification is a proof summary, never a document-delivery route.
-  // Keep an explicit allowlist even if the internal result later gains fields.
+  // Public-link previews are approved for released, verified final versions only.
+  // Keep an explicit allowlist: never serialize internal evidence or identity data.
   return res.status(200).json({
     idn: verification.result.idn,
     hash: verification.result.hash,
     status: verification.result.status,
     ledgerTxId: null,
     anchoredAt: null,
-    documents: [],
+    documents: verification.result.status === "verified"
+      ? verification.result.documents.filter(document => document.isFinal === true).map(document => ({id: document.id, fileName: document.fileName,
+        label: document.label, isFinal: document.isFinal, downloadUrl: document.downloadUrl})) : [],
   });
 };

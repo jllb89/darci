@@ -91,7 +91,7 @@ describe("Phase 6 document finalization endpoints", () => {
     });
   });
 
-  it.each([false, true])("returns only public proof, never PDF URLs or private fields (signed in: %s)", async signedIn => {
+  it.each([false, true])("returns approved final previews but no internal evidence (signed in: %s)", async signedIn => {
     mocks.verifyDocumentByIdnMock.mockResolvedValue({
       verificationCheck: {
         id: "verify-check-1",
@@ -129,12 +129,23 @@ describe("Phase 6 document finalization endpoints", () => {
       ledgerTxId: null,
       anchoredAt: null,
       status: "verified",
-      documents: [],
+      documents: [{id: "version-1", fileName: "certificate-finalized-v3.pdf", label: "Certificate of Trust", isFinal: true,
+        downloadUrl: "https://signed.example/certificate.pdf"}],
     });
     expect(response.headers["cache-control"]).toContain("no-store");
-    expect(response.text).not.toContain("signed.example");
-    expect(response.text).not.toContain("certificate-finalized");
+    expect(response.text).toContain("signed.example");
+    expect(response.text).not.toContain("versionId");
+    expect(response.text).not.toContain("ledger_AB12CD34EF56");
     expect(mocks.recordAuditEventMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never exposes previews when verification fails, even if an upstream payload includes a URL", async () => {
+    mocks.verifyDocumentByIdnMock.mockResolvedValue({verificationCheck:{id:"check"}, result:{idn:"AB12CD34EF56", hash:null,
+      status:"unverified",documents:[{id:"version",isFinal:true,downloadUrl:"https://private.invalid/final.pdf"}]}});
+    const response = await request(app).get("/verify/AB12CD34EF56");
+    expect(response.status).toBe(200);
+    expect(response.body.documents).toEqual([]);
+    expect(JSON.stringify(response.body)).not.toContain("private.invalid");
   });
 
   it("returns not found when verification data is missing", async () => {

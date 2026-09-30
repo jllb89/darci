@@ -263,10 +263,7 @@ struct DocumentSigningView: View {
     }
 
     private var outputChoices: [DocumentReviewOutput] {
-        let visibleOutputKeys = Set(viewModel.visibleSignatures.map(\.outputKey))
-        let outputs = viewModel.signing?.outputs ?? []
-        guard visibleOutputKeys.isEmpty == false else { return outputs }
-        return outputs.filter { visibleOutputKeys.contains($0.outputKey) }
+        viewModel.previewOutputs
     }
 
     private var outputSelector: some View {

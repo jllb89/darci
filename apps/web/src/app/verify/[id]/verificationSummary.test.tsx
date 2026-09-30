@@ -1,9 +1,23 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parsePublicVerification, PublicVerificationSummary } from "./verificationSummary";
 
 describe("public verification privacy", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("allows only verified final previews signed by this environment's storage", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://storage.example.test");
+    const document = {id: "final-1", fileName: "Final.pdf", label: "Final document", isFinal: true,
+      downloadUrl: "https://storage.example.test/storage/v1/object/sign/documents/final.pdf?token=test"};
+    const proof = {idn: "PUBLIC123456", hash: "a".repeat(64), status: "verified", documents: [document]};
+    expect(parsePublicVerification(proof)?.documents).toEqual([document]);
+    expect(parsePublicVerification({...proof, status: "unverified"})?.documents).toBeUndefined();
+    expect(parsePublicVerification({...proof, hash: "invalid"})?.documents).toBeUndefined();
+    for (const change of [{isFinal:false}, {downloadUrl:"https://other.example.test/storage/v1/object/sign/final.pdf"},
+      {downloadUrl:"https://storage.example.test/storage/v1/object/public/final.pdf"}]) {
+      expect(parsePublicVerification({...proof, documents:[{...document,...change}]})?.documents).toBeUndefined();
+    }
+  });
   it("discards legacy document URLs and renders proof without a PDF surface", () => {
     const payload = parsePublicVerification({ idn: "PUBLIC123456", hash: "a".repeat(64), status: "verified",
       documents: [{ downloadUrl: "https://private.invalid/secret.pdf?token=private", fileName: "private-name.pdf" }] });

@@ -1,8 +1,21 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildRuntime} from './runtime.mjs';
-import {withTesterAccess} from './tester-access.mjs';
+import {withTesterAccess,withAdditionalTesterAccess} from './tester-access.mjs';
 const ips = ['146.75.129.125', '23.245.227.237', '146.75.154.172', '67.170.239.201', '67.170.239.201'];
+test('additional grants preserve existing access and skip already allowed addresses',()=>{
+  const base=withTesterAccess(buildRuntime(),ips);
+  const addresses=['157.131.202.3','185.98.169.47','146.75.154.172'];
+  const next=withAdditionalTesterAccess(base,addresses);
+  const added=Object.keys(next.Resources).filter(id=>!base.Resources[id]);
+  assert.equal(added.length,4);
+  assert.deepEqual(withAdditionalTesterAccess(next,addresses),next);
+  const priorities=added.map(id=>next.Resources[id].Properties.Priority);
+  assert.equal(new Set(priorities).size,4);
+  for(const id of added){assert.equal(next.Resources[id].Properties.Conditions.find(c=>c.Field==='source-ip').SourceIpConfig.Values.length,1);delete next.Resources[id];}
+  assert.deepEqual(next,base);
+  for(const invalid of [[],['0.0.0.0/0'],['::1'],['bad']])assert.throws(()=>withAdditionalTesterAccess(base,invalid));
+});
 test('adds only exact tester HTTPS rules and preserves all existing resources/configuration', () => {
   const before = buildRuntime(), after = withTesterAccess(before, ips);
   for (const service of ['api', 'web']) {

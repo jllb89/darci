@@ -213,7 +213,7 @@ struct AuthAPIClient: Sendable {
             // Use the rotated credential only when it belongs to that account.
             let stored = try? KeychainAuthSessionStore().load()
             let matchingSession = stored.flatMap { AccessTokenClaims.sameAccount(accessToken, $0.accessToken) ? $0 : nil }
-            let currentToken = matchingSession?.accessToken ?? accessToken
+            let currentToken = AccessTokenClaims.preferredAccessToken(requested: accessToken, stored: matchingSession?.accessToken)
             request.setValue("Bearer \(currentToken)", forHTTPHeaderField: "Authorization")
             if let profile = activeProfile ?? matchingSession?.user.role,
                ["member", "pro", "notary"].contains(profile) {
