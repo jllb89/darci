@@ -5,14 +5,15 @@ import {bootstrap, retryableImageFailure, sanitize} from './supabase-ci-bootstra
 const ok = stdout => ({status: 0, stdout, stderr: ''});
 const error = stderr => ({status: 1, stdout: '', stderr});
 const registryError = 'failed to pull image ghcr.io/supabase/postgres: unexpected EOF';
-function exercise(results) {
-  const calls = [], files = new Map(), messages = [];
+function exercise(results, env = {SUPABASE_INTERNAL_IMAGE_REGISTRY: 'public.ecr.aws', PATH: '/test/bin'}) {
+  const calls = [], environments = [], files = new Map(), messages = [];
   const code = bootstrap('/tmp/disposable', {
-    run: args => { calls.push(args); assert.ok(results.length, 'unexpected CLI call'); return results.shift(); },
+    env,
+    run: (args, commandEnv) => { calls.push(args); environments.push(commandEnv); assert.ok(results.length, 'unexpected CLI call'); return results.shift(); },
     write: (path, content, options) => { files.set(path, content); assert.equal(options.mode, 0o600); },
     log: text => messages.push(text),
   });
-  return {code, calls, files, logs: messages.join('\n'), diagnostics: files.get('/tmp/disposable/bootstrap.sanitized.log')};
+  return {code, calls, environments, files, logs: messages.join('\n'), diagnostics: files.get('/tmp/disposable/bootstrap.sanitized.log')};
 }
 
 test('credentials and ANSI sequences are redacted while SQL errors remain useful', () => {
@@ -38,7 +39,20 @@ test('an explicit transient image failure retries once then proceeds normally', 
   const result = exercise([error(registryError), ok('installed'), ok('{}')]);
   assert.equal(result.code, 0);
   assert.deepEqual(result.calls.map(c => c[0]), ['start', 'start', 'status']);
+  assert.deepEqual(result.environments.map(e => e.SUPABASE_INTERNAL_IMAGE_REGISTRY), ['public.ecr.aws', 'ghcr.io', 'ghcr.io']);
+  assert.deepEqual(result.calls[0], result.calls[1]);
+  assert.ok(result.environments.every(e => e.PATH === '/test/bin'));
   assert.match(result.diagnostics, /unexpected EOF/);
+});
+
+test('registry fallback is bounded, preserves custom registries and does not mutate caller env', () => {
+  for (const [registry, expected] of [['ghcr.io', 'public.ecr.aws'], ['custom.example', 'custom.example'], [undefined, 'ghcr.io']]) {
+    const env = registry ? {SUPABASE_INTERNAL_IMAGE_REGISTRY: registry} : {};
+    const original = {...env};
+    const result = exercise([error(registryError), ok('installed'), ok('{}')], env);
+    assert.equal(result.environments[1].SUPABASE_INTERNAL_IMAGE_REGISTRY, expected);
+    assert.deepEqual(env, original);
+  }
 });
 
 test('persistent registry failure stops after two attempts and retains diagnostics', () => {

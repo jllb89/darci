@@ -21,7 +21,8 @@ export function retryableImageFailure(output) {
 }
 
 export function bootstrap(workdir, {
-  run = args => spawnSync('supabase', args, {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024}),
+  env = process.env,
+  run = (args, commandEnv) => spawnSync('supabase', args, {env: commandEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024}),
   write = writeFileSync,
   log = console.log,
 } = {}) {
@@ -36,15 +37,21 @@ export function bootstrap(workdir, {
     log('Supabase bootstrap failed. Full sanitized diagnostics are saved in the database-bootstrap artifact.');
     return result.status || 1;
   };
+  let commandEnv = {...env};
   for (let attempt = 1; attempt <= 2; attempt++) {
     log(`Starting disposable Supabase (attempt ${attempt}/2).`);
-    const result = run(['start', '--workdir', workdir, '-x', 'studio,imgproxy,logflare,vector,supavisor,realtime,edge-runtime']);
+    const result = run(['start', '--workdir', workdir, '-x', 'studio,imgproxy,logflare,vector,supavisor,realtime,edge-runtime'], commandEnv);
     record(`start attempt ${attempt}`, result);
     if (result.status === 0) break;
     if (attempt === 2 || !retryableImageFailure(`${result.stdout ?? ''}\n${result.stderr ?? ''}`)) return fail(result);
-    log('Transient container-image download failure; retrying once with the same CLI and migrations.');
+    const registry = (commandEnv.SUPABASE_INTERNAL_IMAGE_REGISTRY || 'public.ecr.aws').toLowerCase();
+    // Official Supabase mirrors, identical CLI-pinned image tags. Retrying the
+    // same exhausted anonymous registry quota cannot recover this CI runner.
+    const mirror = registry === 'public.ecr.aws' ? 'ghcr.io' : registry === 'ghcr.io' ? 'public.ecr.aws' : registry;
+    commandEnv = {...commandEnv, SUPABASE_INTERNAL_IMAGE_REGISTRY: mirror};
+    log(`Transient container-image download failure; retrying once via ${mirror} with the same CLI and migrations.`);
   }
-  const status = run(['status', '--workdir', workdir, '-o', 'json']);
+  const status = run(['status', '--workdir', workdir, '-o', 'json'], commandEnv);
   // stdout is credential-bearing JSON: keep it private for the API tests, never in diagnostics.
   record('status', status, false);
   if (status.status !== 0) return fail(status);

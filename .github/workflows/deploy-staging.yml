@@ -309,6 +309,15 @@ jobs:
             --ignorefile /dev/null --exit-code 1 --format json --output "$RUNNER_TEMP/image-scan.json"
           printf '%s\n' "$digest" > "$RUNNER_TEMP/image-digest.txt"
 
+      - name: Preserve failed scan diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-scan-${{ matrix.repository }}
+          path: ${{ runner.temp }}/image-scan.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Preserve passed image digest and scan evidence
         uses: actions/upload-artifact@v4
         with:

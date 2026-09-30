@@ -1,22 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+
+const subscribe = (onChange: () => void) => {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+};
+const serverSnapshot = () => null;
+const appLinkSnapshot = () => {
+  const result = new URLSearchParams(window.location.search).get("billing");
+  if (result !== "success" && result !== "canceled") return null;
+  const host = window.location.hostname;
+  const scheme = host === "app.illuminotary.com" ? "darci-production"
+    : ["app.staging.darciregistry.dev", "app.darciregistry.dev", "localhost"].includes(host) ? "darci-staging" : null;
+  return scheme ? `${scheme}://billing-return?billing=${result}` : null;
+};
 
 export default function MobileBillingReturnPage() {
-  const [appLink, setAppLink] = useState<string | null>(null);
+  const appLink = useSyncExternalStore(subscribe, appLinkSnapshot, serverSnapshot);
   useEffect(() => {
-    const result = new URLSearchParams(window.location.search).get("billing");
-    if (result !== "success" && result !== "canceled") return;
-    const host = window.location.hostname;
-    const scheme = host === "app.illuminotary.com" ? "darci-production"
-      : ["app.staging.darciregistry.dev", "app.darciregistry.dev", "localhost"].includes(host) ? "darci-staging" : null;
-    if (!scheme) return;
-    const link = `${scheme}://billing-return?billing=${result}`;
-    setAppLink(link);
+    if (!appLink) return;
     // Safari can retain HTTPS redirects in-browser instead of opening a universal
     // link. A user-tappable custom-scheme fallback is retained if auto-open is blocked.
-    window.location.assign(link);
-  }, []);
+    window.location.assign(appLink);
+  }, [appLink]);
   return <main className="flex min-h-screen items-center justify-center bg-white px-6 text-black">
     <section className="max-w-md space-y-6">
       <h1 className="font-display text-3xl font-normal">Return to DARCi</h1>
