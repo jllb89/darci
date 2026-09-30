@@ -24,7 +24,8 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV SERVICE_NAME=api
-RUN apk upgrade --no-cache && apk add --no-cache qpdf poppler-utils font-liberation && fc-cache -f
+# Require the patched XML parser even when reusing build caches (CVE-2026-93990).
+RUN apk upgrade --no-cache && apk add --no-cache 'libexpat>=2.8.5-r0' qpdf poppler-utils font-liberation && fc-cache -f
 ENV XDG_CACHE_HOME=/tmp/darci-cache
 # Packages are installed in the builder; the running API needs no package manager.
 RUN npm uninstall --global npm
