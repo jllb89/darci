@@ -473,8 +473,7 @@ struct AppRootView: View {
                 onProfileAction: showProfileSelection,
                 onSettingsAction: showUserSettings,
                 onReviewRequest: openNotaryReview,
-                onStartSession: openNotarySession,
-                onViewCompletedDocument: openNotarySession
+                onStartSession: openNotarySession
             )
         }
     }

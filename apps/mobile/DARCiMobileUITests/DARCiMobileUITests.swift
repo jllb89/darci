@@ -702,6 +702,20 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedNotaryCardDoesNotOfferDocumentAccess() throws {
+        let app = makeApp(restoreSession: true, notarySession: true)
+        app.launchEnvironment["DARCI_MOCK_NOTARY_COMPLETED"] = "1"
+        app.launch()
+        let completedTab = app.buttons["COMPLETED"]
+        XCTAssertTrue(completedTab.waitForExistence(timeout: 5))
+        completedTab.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "OH26MOCKSESSION")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["notary-completed-view-document-mock-session-request"].exists)
+        XCTAssertFalse(app.buttons["VIEW DOCUMENT"].exists)
+        XCTAssertFalse(app.buttons["notary-ready-start-mock-session-request"].exists)
+    }
+
+    @MainActor
     private func storyText(_ app: XCUIApplication, _ label: String) -> XCUIElement {
         app.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch
     }

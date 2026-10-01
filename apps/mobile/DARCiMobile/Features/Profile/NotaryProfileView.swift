@@ -7,7 +7,6 @@ struct NotaryProfileView: View {
     private let onSettingsAction: () -> Void
     private let onReviewRequest: (NotaryQueueRequestSummary) -> Void
     private let onStartSession: (NotaryQueueRequestSummary) -> Void
-    private let onViewCompletedDocument: (NotaryQueueRequestSummary) -> Void
 
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: NotaryProfileViewModel
@@ -19,15 +18,13 @@ struct NotaryProfileView: View {
         onProfileAction: @escaping () -> Void,
         onSettingsAction: @escaping () -> Void,
         onReviewRequest: @escaping (NotaryQueueRequestSummary) -> Void = { _ in },
-        onStartSession: @escaping (NotaryQueueRequestSummary) -> Void = { _ in },
-        onViewCompletedDocument: @escaping (NotaryQueueRequestSummary) -> Void = { _ in }
+        onStartSession: @escaping (NotaryQueueRequestSummary) -> Void = { _ in }
     ) {
         self.session = session
         self.onProfileAction = onProfileAction
         self.onSettingsAction = onSettingsAction
         self.onReviewRequest = onReviewRequest
         self.onStartSession = onStartSession
-        self.onViewCompletedDocument = onViewCompletedDocument
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
@@ -169,8 +166,7 @@ struct NotaryProfileView: View {
                         request: request,
                         tab: selectedTab,
                         onReview: { onReviewRequest(request) },
-                        onStartSession: { onStartSession(request) },
-                        onViewCompletedDocument: { onViewCompletedDocument(request) }
+                        onStartSession: { onStartSession(request) }
                     )
                 }
             }
@@ -238,7 +234,6 @@ private struct NotaryQueueRequestCard: View {
     let tab: NotaryQueueTab
     let onReview: () -> Void
     let onStartSession: () -> Void
-    let onViewCompletedDocument: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -279,9 +274,6 @@ private struct NotaryQueueRequestCard: View {
                         .font(DARCiFont.maisonNeue(.mono, size: 10))
                         .lineSpacing(13)
                         .foregroundStyle(.white)
-
-                        NotaryCardActionButton(title: "VIEW DOCUMENT", action: onViewCompletedDocument)
-                            .accessibilityIdentifier("notary-completed-view-document-\(request.id)")
                     }
                 } else if tab == .ready {
                     NotaryCardActionButton(title: "START IN-PERSON SESSION", action: onStartSession)

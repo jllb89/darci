@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeFileSync } from "node:fs";
+import * as storageService from "../../src/services/storageService";
+import UPNG from "@pdf-lib/upng";
 import { protectPdf } from "../helpers/protectedPdf";
 import {
   PDFDocument as PdfLibDocument,
@@ -943,5 +946,42 @@ describe("documentGenerationRenderService", () => {
     expect(clear).toBeDefined();
     // Include the text's descender margin, not just its baseline.
     expect((label?.y ?? 0) - 3).toBeGreaterThan((clear?.y ?? 0) + (clear?.height ?? 0));
+    const paragraph = text.mock.calls.find(([value]) => value.startsWith("Signatures for this uploaded"))?.[1];
+    expect(paragraph?.maxWidth).toBe(468);
+    expect(paragraph?.lineHeight).toBe(12);
+  });
+
+  it.each([["draw", 600, 120], ["upload", 80, 200], [null, 200, 200]] as const)("contains %s signature assets within their field, including opaque legacy assets", async (captureMethod, width, height) => {
+    // Real opaque PNG: its white background must never paint over the label/date.
+    const pixels = new Uint8Array(width * height * 4).fill(255);
+    for (let x = 5; x < width - 5; x++) {
+      const y = Math.round(height / 2 + Math.sin(x / width * 28) * height / 3);
+      for (let dy = -2; dy <= 2; dy++) {
+        const offset = ((y + dy) * width + x) * 4;
+        pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = 20;
+      }
+    }
+    const asset = Buffer.from(UPNG.encode([pixels.buffer], width, height, 0));
+    vi.spyOn(storageService, "downloadSignatureAsset").mockResolvedValue(asset);
+    const images = vi.spyOn(PDFPage.prototype, "drawImage");
+    const source = await PdfLibDocument.create();
+    source.addPage([612, 792]);
+    const stamped = await stampSignatureOnPdf({
+      pdfBytes: Buffer.from(await source.save()),
+      placement: { pageNumber: 1, label: "Legacy saved signature", includeDate: true,
+        signatureRect: {x:72,y:190,width:292,height:44}, dateRect: {x:392,y:190,width:148,height:44} },
+      signatureRecord: {id:"test",document_id:"test",generation_run_id:"test",document_output_signer_id:"test",signer_id:"test",
+        signature_type:"member",storage_path:"test/legacy.png",capture_method:captureMethod,typed_value:null,typed_kind:null,
+        mime_type:"image/png",size_bytes:asset.length,status:"captured",metadata:{},captured_at:"2026-10-01T12:00:00Z",created_at:"2026-10-01T12:00:00Z"},
+      uploadedNotarizationAddendum: {appendPage:true},
+    });
+    const draw = images.mock.calls.at(-1)?.[1];
+    expect(draw).toBeDefined();
+    expect(draw!.x).toBeGreaterThanOrEqual(76);
+    expect(draw!.y).toBeGreaterThanOrEqual(562);
+    expect(draw!.x! + draw!.width!).toBeLessThanOrEqual(360);
+    expect(draw!.y! + draw!.height!).toBeLessThanOrEqual(598);
+    expect((await PdfLibDocument.load(stamped)).getPageCount()).toBe(2);
+    if (captureMethod === "draw" && process.env.DARCI_PDF_VISUAL_OUTPUT) writeFileSync(process.env.DARCI_PDF_VISUAL_OUTPUT, stamped);
   });
 });

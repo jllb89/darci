@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { VerificationIdentifier } from "@/components/app/VerificationIdentifier";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useAppToast } from "@/components/app/AppToastContext";
@@ -513,7 +514,7 @@ export default function RequestWorkspacePage() {
   const isInitialLoading = isLoading && !payload;
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <Link className="text-sm text-Color-Neutral transition hover:text-Color-Scheme-1-Text" href="/app/requests">
@@ -543,7 +544,7 @@ export default function RequestWorkspacePage() {
 
       {!isInitialLoading && payload ? (
         <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.52fr)]">
-          <section className="space-y-4">
+          <section className="min-w-0 space-y-4">
             {selectedDocument?.downloadUrl ? (
               <PdfDocumentPreview
                 className={`${previewPanelHeightClass} w-full rounded-[20px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
@@ -583,7 +584,7 @@ export default function RequestWorkspacePage() {
             ) : null}
           </section>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <SessionTimeline steps={sessionTimelineSteps} />
 
             {canCheckIn ? (
@@ -608,9 +609,9 @@ export default function RequestWorkspacePage() {
                 <CompletionStep done={isFinalized} label="SHA-256 verified" />
                 <CompletionStep done={isVerificationReady} label="Verification ready" />
               </div>
-              <div className="mt-3 grid gap-1 break-words">
-                <div>Hash: {finalization?.hash ?? "-"}</div>
-                <div>Ledger TX: {finalization?.ledgerTxId ?? "-"}</div>
+              <div className="mt-3 grid min-w-0 gap-1 break-words">
+                <VerificationIdentifier label="Hash" value={finalization?.hash} />
+                <VerificationIdentifier label="Ledger TX" value={finalization?.ledgerTxId} />
                 <div>Anchored: {formatDateTime(finalization?.anchoredAt ?? null)}</div>
                 <div>Last checked: {formatDateTime(finalization?.latestStatusAt ?? null)}</div>
               </div>

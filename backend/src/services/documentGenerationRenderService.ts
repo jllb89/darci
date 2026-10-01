@@ -3089,6 +3089,8 @@ const drawUploadedSignatureAddendumHeader = async (pdf: PdfLibDocument) => {
       y: 694,
       size: 9,
       font: bodyFont,
+      maxWidth: 468,
+      lineHeight: 12,
       color: rgb(0.28, 0.28, 0.28),
     },
   );
@@ -3172,12 +3174,11 @@ export const stampSignatureOnPdf = async (input: {
 
   if (signatureMethod === "type" && input.signatureRecord.typed_value) {
     const typedFont = await pdf.embedFont(StandardFonts.TimesRomanItalic);
-    const typedScale = 1.5;
     const fontSize = fitTextToRect({
       text: input.signatureRecord.typed_value,
       font: typedFont,
       width: signatureBox.width,
-      height: signatureBox.height * typedScale,
+      height: signatureBox.height,
       maxSize: 39,
     });
     const textHeight = typedFont.heightAtSize(fontSize);
@@ -3194,21 +3195,22 @@ export const stampSignatureOnPdf = async (input: {
     const embeddedImage = input.signatureRecord.mime_type === "image/jpeg"
       ? await pdf.embedJpg(assetBytes)
       : await pdf.embedPng(assetBytes);
-    const imageScale = 1.5;
-    const imageInsetX = signatureMethod === "draw" ? -4 : -2;
-    const imageInsetY = signatureMethod === "draw" ? -4 : -2;
+    // Saved legacy assets can have opaque backgrounds or little whitespace.
+    // Fit the entire asset inside its field; never enlarge it into nearby labels.
+    const imageInsetX = 4;
+    const imageInsetY = 4;
     const maxWidth = Math.max(signatureBox.width - imageInsetX * 2, 1);
     const maxHeight = Math.max(signatureBox.height - imageInsetY * 2, 1);
     const scale = Math.min(
       maxWidth / embeddedImage.width,
       maxHeight / embeddedImage.height,
-    ) * imageScale;
+    );
     const imageWidth = embeddedImage.width * scale;
     const imageHeight = embeddedImage.height * scale;
 
     page.drawImage(embeddedImage, {
       x: signatureBox.x + (signatureBox.width - imageWidth) / 2,
-      y: signatureBox.y + (signatureBox.height - imageHeight) / 2 + 2,
+      y: signatureBox.y + (signatureBox.height - imageHeight) / 2,
       width: imageWidth,
       height: imageHeight,
     });

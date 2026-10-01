@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { VerificationIdentifier } from "@/components/app/VerificationIdentifier";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -2667,7 +2668,7 @@ export default function NotaryRequestWorkspacePage() {
   }, [activeAction, loadContext, shouldRunSamePlaceFallbackRefresh]);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-3">
           <Link className="inline-flex items-center gap-1 text-sm font-medium text-Color-Neutral transition hover:text-Color-Scheme-1-Text" href="/app/notary">
@@ -2700,7 +2701,7 @@ export default function NotaryRequestWorkspacePage() {
         </div>
       ) : (
         <div className="mt-12 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.52fr)]">
-          <section className="space-y-4">
+          <section className="min-w-0 space-y-4">
             {previewDocumentSource?.downloadUrl ? (
               <PdfDocumentPreview
                 className={`${previewPanelHeightClass} w-full rounded-[20px] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]`}
@@ -2747,7 +2748,7 @@ export default function NotaryRequestWorkspacePage() {
           </section>
 
           {context.capabilities.canReviewRequest ? (
-          <section className="rounded-lg bg-Color-Neutral-Lightest p-4 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
+          <section className="min-w-0 rounded-lg bg-Color-Neutral-Lightest p-4 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
             <div className="text-sm font-medium text-Color-Scheme-1-Text">Review decision</div>
             <form className="mt-4 space-y-4" onSubmit={submitDecision}>
               <div className="text-xs leading-5 text-Color-Neutral">
@@ -2788,9 +2789,9 @@ export default function NotaryRequestWorkspacePage() {
             </form>
           </section>
           ) : (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
           <SessionTimeline steps={sessionTimelineSteps} />
-          <section className="rounded-lg bg-Color-Neutral-Lightest p-4 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
+          <section className="min-w-0 rounded-lg bg-Color-Neutral-Lightest p-4 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-medium uppercase tracking-wide text-Color-Neutral">Operator step</div>
@@ -3118,14 +3119,8 @@ export default function NotaryRequestWorkspacePage() {
                       <CompletionStep done={isVerificationReady} label="Verification ready" />
                     </div>
                     <div className="mt-3 grid min-w-0 gap-1">
-                      <div className="min-w-0">
-                        <span className="font-medium text-Color-Scheme-1-Text">Hash: </span>
-                        <span className="font-mono break-all text-[11px] leading-5">{context.finalization.hash ?? "-"}</span>
-                      </div>
-                      <div className="min-w-0">
-                        <span className="font-medium text-Color-Scheme-1-Text">Ledger TX: </span>
-                        <span className="font-mono break-all text-[11px] leading-5">{context.finalization.ledgerTxId ?? "-"}</span>
-                      </div>
+                      <VerificationIdentifier label="Hash" value={context.finalization.hash} />
+                      <VerificationIdentifier label="Ledger TX" value={context.finalization.ledgerTxId} />
                       <div>Anchored: {formatDateTime(context.finalization.anchoredAt)}</div>
                       <div>Last checked: {formatDateTime(context.finalization.lastCheckedAt)}</div>
                     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { VerificationIdentifier } from "@/components/app/VerificationIdentifier";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { refreshStoredAuth, useStoredAuth } from "@/lib/auth";
@@ -165,7 +166,7 @@ export default function VerificationDetailPage() {
   }, [loadDetail]);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div>
         <div className="text-2xl font-medium">{payload?.verification.idn ?? idn}</div>
         <div className="text-sm text-Color-Neutral">
@@ -181,7 +182,7 @@ export default function VerificationDetailPage() {
 
       {!isLoading && payload ? (
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
               <div className="text-sm font-medium">Verification summary</div>
               <div className="mt-4 grid gap-3 text-sm text-Color-Neutral md:grid-cols-2">
@@ -191,8 +192,8 @@ export default function VerificationDetailPage() {
                 <div>Status: {payload.verification.status}</div>
                 <div>Anchored: {formatDateTime(payload.verification.anchoredAt)}</div>
                 <div>Last checked: {formatDateTime(payload.verification.lastCheckedAt)}</div>
-                <div>Ledger TX: {payload.verification.ledgerTxId ?? "-"}</div>
-                <div>Hash: {payload.verification.hash ?? "-"}</div>
+                <VerificationIdentifier label="Ledger TX" value={payload.verification.ledgerTxId} />
+                <VerificationIdentifier label="Hash" value={payload.verification.hash} />
               </div>
             </div>
 
@@ -209,7 +210,7 @@ export default function VerificationDetailPage() {
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <div className="rounded-lg border border-Color-Scheme-1-Border/40 p-4">
               <div className="text-sm font-medium">Request context</div>
               <div className="mt-4 space-y-2 text-sm text-Color-Neutral">

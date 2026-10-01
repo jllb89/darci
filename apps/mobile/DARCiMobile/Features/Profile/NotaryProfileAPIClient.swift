@@ -157,7 +157,18 @@ struct MockNotaryProfileAPIClient: NotaryProfileAPIProviding, Sendable {
     }
 
     func listNotaryRequests(limit: Int, offset: Int, accessToken: String) async throws -> NotaryQueueResponse {
-        usesSessionFixture ? Self.sessionQueueFixture : response
+        if usesSessionFixture && ProcessInfo.processInfo.environment["DARCI_MOCK_NOTARY_COMPLETED"] == "1" {
+            let encoded = try JSONEncoder().encode(Self.sessionQueueFixture)
+            var fixture = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            var requests = fixture["requests"] as! [[String: Any]]
+            var request = requests[0]["request"] as! [String: Any]
+            request["status"] = "completed"
+            request["queueStatus"] = "completed"
+            requests[0]["request"] = request
+            fixture["requests"] = requests
+            return try JSONDecoder().decode(NotaryQueueResponse.self, from: JSONSerialization.data(withJSONObject: fixture))
+        }
+        return usesSessionFixture ? Self.sessionQueueFixture : response
     }
 
     func getNotaryRequestContext(requestId: String, accessToken: String) async throws -> NotaryRequestContextResponse {
