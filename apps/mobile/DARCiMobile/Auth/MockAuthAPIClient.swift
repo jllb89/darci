@@ -5,6 +5,14 @@ struct MockAuthAPIClient: AuthAPIProviding, Sendable {
     var cooldownSeconds = 60
     var profileCompletionRequired = ProcessInfo.processInfo.environment["DARCI_MOCK_AUTH_EXISTING_USER"] != "1"
 
+    func requestPhoneLinkEmail(email: String, phoneLinkToken: String, returnTo: String?) async throws -> AuthOTPStartResponse {
+        try await requestEmailOTP(email: email, returnTo: returnTo)
+    }
+
+    func verifyPhoneLinkEmail(email: String, token: String, phoneLinkToken: String, returnTo: String?) async throws -> AuthVerifyResponse {
+        try await verifyEmailOTP(email: email, token: token, returnTo: returnTo)
+    }
+
     func requestEmailOTP(email: String, returnTo: String?) async throws -> AuthOTPStartResponse {
         AuthOTPStartResponse(status: "ok", message: "Email code sent", otpLength: otpLength, cooldownSeconds: cooldownSeconds)
     }

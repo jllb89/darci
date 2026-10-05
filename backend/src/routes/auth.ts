@@ -5,6 +5,8 @@ import {
 	requestEmailOtp,
 	requestMagicLink,
 	requestPhoneOtp,
+	requestPhoneLinkEmail,
+	verifyPhoneLinkEmail,
 	refresh,
 	requestPasswordRecovery,
 	resendConfirmation,
@@ -24,6 +26,8 @@ router.post("/otp/start", requestEmailOtp);
 router.post("/otp/verify", verifyEmailOtp);
 router.post("/otp/phone/start", requestPhoneOtp);
 router.post("/otp/phone/verify", verifyPhoneOtp);
+router.post("/otp/phone/link/start", requestPhoneLinkEmail);
+router.post("/otp/phone/link/verify", verifyPhoneLinkEmail);
 router.post("/password/recovery", requestPasswordRecovery);
 router.post("/password/reset", resetPassword);
 router.post("/refresh", refresh);

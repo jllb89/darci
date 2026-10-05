@@ -23,6 +23,7 @@ import {
 } from "@/lib/auth";
 import { buildAuthCallbackUrl, sanitizeAuthReturnTo } from "@/lib/authRedirects";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import { otpContinuation, otpVerifyRequest } from "./otpFlow";
 import {
   getNextOtpFocusIndexAfterInput,
   getOtpCodeForAutoSubmit,
@@ -55,6 +56,7 @@ type AuthSessionResponsePayload = {
   profileCompletionRequired?: boolean;
   message?: string;
   details?: Array<{ message?: string }>;
+  phoneLink?: { token: string; message?: string };
   stepUp?: {
     method: "email";
     identifier: string;
@@ -160,6 +162,8 @@ function StartAuthPageContent() {
   const [authStep, setAuthStep] = useState<AuthStep>("identifier");
   const [identifier, setIdentifier] = useState("");
   const [challenge, setChallenge] = useState<IdentifierChallenge | null>(null);
+  // Short-lived proof stays in memory only, never localStorage or a URL.
+  const [phoneLinkToken, setPhoneLinkToken] = useState<string | null>(null);
   const [otpDigits, setOtpDigits] = useState<string[]>(() =>
     Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""),
   );
@@ -194,6 +198,7 @@ function StartAuthPageContent() {
   }, [intendedEmail]);
 
   const showIntendedEmailMismatch = useCallback((user: StoredUser) => {
+    setPhoneLinkToken(null);
     setSessionMismatchUser(user);
     setIdentifier(intendedEmail);
     setPasswordEmail(intendedEmail);
@@ -220,6 +225,7 @@ function StartAuthPageContent() {
   }, [intendedEmail, isNotaryReturnTo]);
 
   const showUnscopedNotarySessionGuard = useCallback((user: StoredUser) => {
+    setPhoneLinkToken(null);
     setNotarySessionGuardUser(user);
     setPendingAuthSession(null);
     setChallenge(null);
@@ -451,11 +457,12 @@ function StartAuthPageContent() {
     let nextCooldownSeconds = DEFAULT_RESEND_COOLDOWN_SECONDS;
 
     if (nextChallenge.kind === "email") {
-      const response = await fetch(`${apiBaseUrl}/auth/otp/start`, {
+      const response = await fetch(`${apiBaseUrl}${phoneLinkToken ? "/auth/otp/phone/link/start" : "/auth/otp/start"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: nextChallenge.value,
+          ...(phoneLinkToken ? { phoneLinkToken } : {}),
           returnTo,
         }),
       });
@@ -504,6 +511,9 @@ function StartAuthPageContent() {
     const nextChallenge = resolveIdentifier(identifier);
     if (!nextChallenge) {
       throw new Error("Enter a valid email address or phone number.");
+    }
+    if (phoneLinkToken && nextChallenge.kind !== "email") {
+      throw new Error("Enter your existing account email to finish linking your verified phone.");
     }
 
     const nextOtpLength = await requestOtpForChallenge(nextChallenge);
@@ -556,28 +566,35 @@ function StartAuthPageContent() {
       throw new Error("Enter the code we sent you.");
     }
 
-    if (challenge.kind === "email") {
-      const response = await fetch(`${apiBaseUrl}/auth/otp/verify`, {
+      const verification = otpVerifyRequest(challenge, token, returnTo, phoneLinkToken);
+      const response = await fetch(`${apiBaseUrl}${verification.path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: challenge.value,
-          token,
-          returnTo,
-        }),
+        body: JSON.stringify(verification.body),
       });
 
       const payload = (await response.json().catch(() => null)) as
         | AuthSessionResponsePayload
         | null;
 
-      if (response.ok && payload?.stepUp?.method === "email") {
-        const stepUpEmail = normalizeEmail(payload.stepUp.identifier);
-        if (!emailPattern.test(stepUpEmail)) {
-          throw new Error("The linked account email could not be verified. Sign in with email instead.");
-        }
+      const continuation = response.ok ? otpContinuation(payload) : null;
+      if (continuation?.kind === "link-email") {
+        setPhoneLinkToken(continuation.token);
+        setIdentifier("");
+        setChallenge(null);
+        setOtpDigits(Array.from({ length: DEFAULT_OTP_LENGTH }, () => ""));
+        setAuthStep("identifier");
+        setResendCountdownSeconds(0);
+        setNoticeMessage(continuation.message ?? "Phone verified. Enter your existing account email.");
+        lastAutoSubmittedOtpCodeRef.current = null;
+        return;
+      }
 
-        const stepUpOtpLength = normalizeOtpLength(payload.stepUp.otpLength);
+      if (continuation?.kind === "verify-email") {
+        const { stepUp } = continuation;
+        const stepUpEmail = stepUp.identifier;
+
+        const stepUpOtpLength = normalizeOtpLength(stepUp.otpLength);
         setChallenge({
           kind: "email",
           value: stepUpEmail,
@@ -586,10 +603,10 @@ function StartAuthPageContent() {
         setPasswordEmail(stepUpEmail);
         setOtpDigits(Array.from({ length: stepUpOtpLength }, () => ""));
         setResendCountdownSeconds(
-          normalizeResendCooldownSeconds(payload.stepUp.cooldownSeconds),
+          normalizeResendCooldownSeconds(stepUp.cooldownSeconds),
         );
         setNoticeMessage(
-          payload.stepUp.message ?? "Enter the code sent to the email linked to this phone number.",
+          stepUp.message ?? "Enter the code sent to the email linked to this phone number.",
         );
         lastAutoSubmittedOtpCodeRef.current = null;
         requestAnimationFrame(() => {
@@ -609,35 +626,8 @@ function StartAuthPageContent() {
         );
       }
 
+      setPhoneLinkToken(null);
       await finishVerifiedSession(payload, challenge);
-    } else {
-      const response = await fetch(`${apiBaseUrl}/auth/otp/phone/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone: challenge.value,
-          token,
-          returnTo,
-        }),
-      });
-
-      const payload = (await response.json().catch(() => null)) as
-        | AuthSessionResponsePayload
-        | null;
-
-      if (!response.ok || !payload?.accessToken || !payload.user) {
-        const validationMessage = payload?.details?.[0]?.message;
-        throw new Error(
-          getOtpVerificationFailureMessage({
-            status: response.status,
-            message: payload?.message,
-            validationMessage,
-          }),
-        );
-      }
-
-      await finishVerifiedSession(payload, challenge);
-    }
   };
 
   const updateOtpDigitsFromInput = (value: string, index: number) => {
@@ -1019,6 +1009,7 @@ function StartAuthPageContent() {
   };
 
   const usePasswordFallback = () => {
+    setPhoneLinkToken(null);
     resetMessages();
     setAuthStep("password");
     setPasswordEmail(challenge?.kind === "email" ? challenge.value : "");
@@ -1026,6 +1017,7 @@ function StartAuthPageContent() {
   };
 
   const useDifferentIdentifier = () => {
+    setPhoneLinkToken(null);
     resetMessages();
     setAuthStep("identifier");
     setChallenge(null);
@@ -1110,6 +1102,8 @@ function StartAuthPageContent() {
     ? "This notary request belongs to a different signed-in email."
     : authStep === "profile"
     ? "Add your name and contact details before entering your workspace."
+    : phoneLinkToken && authStep === "identifier"
+    ? "Your phone is verified. Enter the email for your existing DARCi account. We will send a second code before linking them."
     : authStep === "otp" && challenge
     ? `Verification code sent to ${challenge.displayValue}`
     : returnTo.startsWith("/app/invite")
@@ -1230,20 +1224,21 @@ function StartAuthPageContent() {
                     {authStep === "identifier" ? (
                       <div>
                         <label className="mb-2 block text-sm font-medium">
-                          Email or phone number
+                          {phoneLinkToken ? "Existing account email" : "Email or phone number"}
                         </label>
                         <input
                           autoComplete="username"
                           className="w-full border border-Color-Scheme-1-Border px-4 py-3 text-sm outline-none transition focus:border-Color-Scheme-1-Text"
-                          placeholder="name@example.com or +1 202 555 0147"
-                          type="text"
+                          placeholder={phoneLinkToken ? "name@example.com" : "name@example.com or +1 202 555 0147"}
+                          type={phoneLinkToken ? "email" : "text"}
                           value={identifier}
                           onChange={(event) => setIdentifier(event.target.value)}
                           required
                         />
                         <p className="mt-2 text-xs leading-5 text-Color-Neutral">
-                          Email gets an email code. Mobile gets an SMS code.
+                          {phoneLinkToken ? "Verify both contacts to keep your existing documents and membership on the same account." : "Email gets an email code. Mobile gets an SMS code."}
                         </p>
+                        {phoneLinkToken ? <button type="button" className="mt-3 text-sm underline" onClick={useDifferentIdentifier}>Cancel linking and sign in another way</button> : null}
                       </div>
                     ) : null}
 

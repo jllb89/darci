@@ -27,6 +27,18 @@ struct AuthPhoneOTPVerifyRequest: Encodable, Equatable, Sendable {
     let returnTo: String?
 }
 
+struct AuthPhoneLinkEmailRequest: Encodable, Sendable {
+    let email: String
+    let phoneLinkToken: String
+    let token: String?
+    let returnTo: String?
+}
+
+struct AuthPhoneLinkChallenge: Decodable, Equatable, Sendable {
+    let token: String
+    let message: String?
+}
+
 struct AuthRefreshRequest: Encodable, Equatable, Sendable {
     let refreshToken: String
 }
@@ -159,6 +171,7 @@ struct AuthVerifyResponse: Decodable, Equatable, Sendable {
     let user: AuthenticatedUser?
     let profileCompletionRequired: Bool?
     let stepUp: AuthStepUpChallenge?
+    var phoneLink: AuthPhoneLinkChallenge? = nil
 
     var session: AuthSession? {
         guard let accessToken, let refreshToken, let user else { return nil }

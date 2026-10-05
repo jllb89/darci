@@ -11,6 +11,22 @@ const mocks = vi.hoisted(() => ({
   toUserResponseMock: vi.fn(),
   recordAuditEventMock: vi.fn(),
   findRecentAuditEventByEmailMock: vi.fn(),
+  requestLinkSms: vi.fn(),
+  verifyLinkSms: vi.fn(),
+  readProof: vi.fn(),
+  bindEmail: vi.fn(),
+  attemptEmail: vi.fn(),
+  consumeProof: vi.fn(),
+}));
+
+vi.mock("../../src/services/phoneLinkService", () => ({
+  PhoneLinkError: class extends Error { constructor(public statusCode: number, message: string) { super(message); } },
+  phoneLinkService: {
+    requestSms: mocks.requestLinkSms, verifySms: mocks.verifyLinkSms,
+    readProof: mocks.readProof, bindEmail: mocks.bindEmail,
+    attemptEmail: mocks.attemptEmail, consumeProof: mocks.consumeProof,
+    withAccountLock: (_id: string, run: () => Promise<unknown>) => run(),
+  },
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -70,6 +86,7 @@ describe("auth controller Phase 1", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.verifyLinkSms.mockResolvedValue(null);
     process.env.SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_ANON_KEY = "anon-key";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
@@ -686,6 +703,130 @@ describe("auth controller Phase 1", () => {
       message: "SMS code sent",
       otpLength: 8,
       cooldownSeconds: 60,
+    });
+  });
+
+  it("sends a non-account-creating SMS challenge only when production signup is disabled", async () => {
+    const provider = vi.fn().mockResolvedValue({ error: { code: "signup_disabled", message: "Signups not allowed for this instance" } });
+    mocks.createClientMock.mockReturnValue({ auth: { signInWithOtp: provider } });
+    mocks.requestLinkSms.mockResolvedValue(undefined);
+    const { requestPhoneOtp } = await import("../../src/controllers/authController.ts");
+    const response = buildResponse();
+    await requestPhoneOtp({ headers: {}, body: { phone: "+12025550147" } } as Request, response.res);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(mocks.requestLinkSms).toHaveBeenCalledWith("+12025550147");
+    expect(mocks.ensureUserIdentityFromAuthMock).not.toHaveBeenCalled();
+  });
+
+  it("does not send a second SMS when the normal provider fails ambiguously", async () => {
+    mocks.createClientMock.mockReturnValue({ auth: { signInWithOtp: vi.fn().mockResolvedValue({ error: { message: "Upstream timed out" } }) } });
+    const { requestPhoneOtp } = await import("../../src/controllers/authController.ts");
+    const response = buildResponse();
+    await requestPhoneOtp({ headers: {}, body: { phone: "+12025550147" } } as Request, response.res);
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(mocks.requestLinkSms).not.toHaveBeenCalled();
+  });
+
+  it("returns only a phone proof, never an app session, after fallback SMS verification", async () => {
+    mocks.createClientMock.mockReturnValue({ auth: { verifyOtp: vi.fn().mockResolvedValue({ data: {}, error: { message: "Invalid code" } }) } });
+    mocks.verifyLinkSms.mockResolvedValue("a".repeat(64));
+    const { verifyPhoneOtp } = await import("../../src/controllers/authController.ts");
+    const response = buildResponse();
+    await verifyPhoneOtp({ headers: {}, body: { phone: "+12025550147", token: "12345678" } } as Request, response.res);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(response.json.mock.calls[0]?.[0]).toEqual({ phoneLink: { token: "a".repeat(64), message: expect.any(String) } });
+    expect(mocks.ensureUserIdentityFromAuthMock).not.toHaveBeenCalled();
+  });
+
+  describe("two-contact account linking", () => {
+    const phone = "+15555550123";
+    const email = "member@example.com";
+    const phoneLinkToken = "a".repeat(64);
+    const linkedAuthUser = { id: "auth-user-1", email, phone, email_confirmed_at: "2026-10-05T00:00:00Z", phone_confirmed_at: "2026-10-05T00:00:00Z", user_metadata: {} };
+    const setup = () => {
+      const verifyOtp = vi.fn().mockResolvedValue({ data: { user: linkedAuthUser, session: { access_token: "access", refresh_token: "refresh" } }, error: null });
+      const getUserById = vi.fn().mockResolvedValue({ data: { user: { ...linkedAuthUser, phone: null } }, error: null });
+      const updateUserById = vi.fn().mockResolvedValue({ data: { user: linkedAuthUser }, error: null });
+      const generateLink = vi.fn().mockResolvedValue({ data: { properties: { email_otp: "12345678" }, user: linkedAuthUser }, error: null });
+      const maybeSingle = vi.fn().mockResolvedValue({ data: { id: "db-user-1", supabase_user_id: "auth-user-1", status: "active" }, error: null });
+      const limit = vi.fn().mockResolvedValue({ data: [{ id: "db-user-1", email, phone }], error: null });
+      const query = { select: vi.fn(), eq: vi.fn(), in: vi.fn(), maybeSingle, limit };
+      query.select.mockReturnValue(query); query.eq.mockReturnValue(query); query.in.mockReturnValue(query);
+      mocks.createClientMock.mockReturnValue({ auth: { verifyOtp, admin: { getUserById, updateUserById, generateLink } }, from: () => query });
+      mocks.readProof.mockResolvedValue({ phone });
+      mocks.bindEmail.mockResolvedValue(undefined);
+      mocks.attemptEmail.mockResolvedValue({ phone, email, authId: "auth-user-1" });
+      mocks.consumeProof.mockResolvedValue(undefined);
+      mocks.resendSendMock.mockResolvedValue({ data: { id: "email-1" }, error: null });
+      return { verifyOtp, getUserById, updateUserById, generateLink, maybeSingle, limit };
+    };
+    const req = () => ({ headers: {}, body: { email, phoneLinkToken, token: "12345678" } }) as Request;
+
+    it("binds email delivery to an existing active account after phone proof", async () => {
+      const api = setup();
+      const { requestPhoneLinkEmail } = await import("../../src/controllers/authController.ts");
+      const response = buildResponse();
+      await requestPhoneLinkEmail(req(), response.res);
+      expect(response.status).toHaveBeenCalledWith(200);
+      expect(mocks.bindEmail).toHaveBeenCalledWith(phoneLinkToken, email, "auth-user-1");
+      expect(api.generateLink).toHaveBeenCalledTimes(1);
+      expect(api.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("does not deliver an OTP if the email identity changed during generation", async () => {
+      const api = setup();
+      api.generateLink.mockResolvedValue({ data: { properties: { email_otp: "12345678" }, user: { ...linkedAuthUser, id: "different-account" } }, error: null });
+      const { requestPhoneLinkEmail } = await import("../../src/controllers/authController.ts");
+      const response = buildResponse();
+      await requestPhoneLinkEmail(req(), response.res);
+      expect(response.status).toHaveBeenCalledWith(503);
+      expect(mocks.resendSendMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["unknown", "inactive", "different-phone", "other-owner"])("does not create/link accounts or send email for %s", async (reason) => {
+      const api = setup();
+      if (reason === "unknown") api.maybeSingle.mockResolvedValue({ data: null, error: null } as never);
+      if (reason === "inactive") api.maybeSingle.mockResolvedValue({ data: { id: "db-user-1", supabase_user_id: "auth-user-1", status: "suspended" }, error: null });
+      if (reason === "different-phone") api.getUserById.mockResolvedValue({ data: { user: { ...linkedAuthUser, phone: "+12025550148" } }, error: null } as never);
+      if (reason === "other-owner") api.limit.mockResolvedValue({ data: [{ id: "other-user", email: "other@example.com", phone }], error: null });
+      const { requestPhoneLinkEmail } = await import("../../src/controllers/authController.ts");
+      const response = buildResponse();
+      await requestPhoneLinkEmail(req(), response.res);
+      expect(response.status).toHaveBeenCalledWith(200);
+      expect(mocks.bindEmail).toHaveBeenCalledWith(phoneLinkToken, email, null);
+      expect(api.generateLink).not.toHaveBeenCalled();
+      expect(api.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("confirms the phone on the same account only after both proofs, preserving account identity", async () => {
+      const api = setup();
+      const { verifyPhoneLinkEmail } = await import("../../src/controllers/authController.ts");
+      const response = buildResponse();
+      await verifyPhoneLinkEmail(req(), response.res);
+      expect(response.status).toHaveBeenCalledWith(200);
+      expect(mocks.consumeProof).toHaveBeenCalledWith(phoneLinkToken, email, "auth-user-1");
+      expect(api.updateUserById).toHaveBeenCalledWith("auth-user-1", { phone, phone_confirm: true });
+      expect(mocks.ensureUserIdentityFromAuthMock).toHaveBeenCalledWith(expect.objectContaining({ supabaseUserId: "auth-user-1", phone }));
+      expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ accessToken: "access" }));
+    });
+
+    it.each(["wrong-code", "wrong-account", "unconfirmed-email", "replayed-proof", "changed-phone", "inactive", "other-owner", "provider-conflict"])("fails closed for %s", async (reason) => {
+      const api = setup();
+      if (reason === "wrong-code") api.verifyOtp.mockResolvedValue({ data: {}, error: { message: "Invalid" } } as never);
+      if (reason === "wrong-account") api.verifyOtp.mockResolvedValue({ data: { user: { ...linkedAuthUser, id: "other" }, session: { access_token: "access", refresh_token: "refresh" } }, error: null });
+      if (reason === "unconfirmed-email") api.verifyOtp.mockResolvedValue({ data: { user: { ...linkedAuthUser, email_confirmed_at: "" }, session: { access_token: "access", refresh_token: "refresh" } }, error: null });
+      if (reason === "replayed-proof") mocks.consumeProof.mockRejectedValue(new Error("Already used"));
+      if (reason === "changed-phone") api.getUserById.mockResolvedValue({ data: { user: { ...linkedAuthUser, phone: "+12025550148" } }, error: null } as never);
+      if (reason === "inactive") mocks.getUserIdentityContextBySupabaseIdMock.mockResolvedValue({ ...buildProfile(), status: "suspended" });
+      if (reason === "other-owner") api.limit.mockResolvedValue({ data: [{ id: "other-user", email: "other@example.com", phone }], error: null });
+      if (reason === "provider-conflict") api.updateUserById.mockResolvedValue({ data: {}, error: { message: "Phone already exists" } } as never);
+      const { verifyPhoneLinkEmail } = await import("../../src/controllers/authController.ts");
+      const response = buildResponse();
+      await verifyPhoneLinkEmail(req(), response.res);
+      expect(response.status).not.toHaveBeenCalledWith(200);
+      expect(response.json.mock.calls[0]?.[0]).not.toHaveProperty("accessToken");
+      if (reason !== "provider-conflict") expect(api.updateUserById).not.toHaveBeenCalled();
+      expect(mocks.ensureUserIdentityFromAuthMock).not.toHaveBeenCalled();
     });
   });
 

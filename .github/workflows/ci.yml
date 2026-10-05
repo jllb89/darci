@@ -27,7 +27,7 @@ jobs:
           cache-dependency-path: |
             backend/package-lock.json
             packages/types/package-lock.json
-      - run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils
+      - run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils redis-server
       - run: npm ci && npm run build
         working-directory: packages/types
       - run: npm ci
@@ -50,6 +50,8 @@ jobs:
       PHASE1_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
     steps:
       - uses: actions/checkout@v4
+      - name: Install isolated phone verification test store
+        run: sudo apt-get update && sudo apt-get install -y redis-server
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -89,6 +91,7 @@ jobs:
           node backend/scripts/test-phase1-auth-session-sql.mjs --confirm-isolated
           node backend/scripts/test-private-realtime-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-auth-session-api.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
+          node backend/scripts/test-phone-link-local.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
           node backend/scripts/test-phase1-billing-sql.mjs --confirm-isolated
           node backend/scripts/test-legacy-reverification-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-storage-boundary.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated

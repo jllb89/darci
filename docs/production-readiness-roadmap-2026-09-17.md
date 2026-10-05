@@ -1,5 +1,15 @@
 # DARCi Production Readiness Roadmap
 
+**October 5 — phone and email linking repair:** the production web SMS incident
+was a closed-signup rejection for a profile-only phone, before SMS handoff. The
+repair preserves closed signup, verifies SMS ownership before asking for the
+existing account email, requires its second OTP, and links the verified phone to
+the same account. Web step-up handling and the native email-entry continuation
+are covered by regressions. Real local Supabase linking and disposable Redis
+replay/expiry/concurrency checks passed. Deployment and a new TestFlight build
+are required before affected-client acceptance can close.
+[Repair scope and acceptance](production-phone-linking-2026-10-05.md).
+
 **September 30 — operator push conflict resolved live:** unlocked-phone diagnostics proved APNs issued a token but the API returned 409 because the inactive September 23 operator-test fixture retained that token. Jorge approved clearing only that exact stale claim with an audit note; the physical build 23 then registered successfully. **One labeled push was accepted by APNs (HTTP 200), and Jorge confirmed receipt on his phone. Operator push delivery is passed.** General backend prevention (clear tokens on deactivation; recover same-owner inactive conflicts without taking active/other-account tokens) is fixed locally and awaits release. TypeScript build and 30 focused push/outbox tests passed. No client messages were replayed. [Exact evidence](production-client-matrix-fixes-2026-09-29.md#operational-evidence).
 
 **September 30 — push investigation resumed:** fresh operator login and authorized-permission sync succeeded, but build 23 still has no registered APNs token; no test notification was sent. Production APNs remains enabled and nine APNs deliveries are recorded as opened on other registered devices. Added local recovery for a missing OS callback (cooldown-limited retry on later foreground refresh), complete sign-out registration reset, and persisted billing URL schemes in the project generator. **130 iOS unit tests, four mobile configuration tests and four focused infrastructure tests passed.** Application release/new TestFlight and the operator handset test remain pending; this is not a production deployment. [Current evidence and handoff](production-client-matrix-fixes-2026-09-29.md#september-30-resumed-diagnostics).

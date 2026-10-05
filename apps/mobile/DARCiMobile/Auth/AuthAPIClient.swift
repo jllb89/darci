@@ -13,6 +13,8 @@ enum AuthAPIError: Error, Equatable {
 }
 
 protocol AuthAPIProviding: Sendable {
+    func requestPhoneLinkEmail(email: String, phoneLinkToken: String, returnTo: String?) async throws -> AuthOTPStartResponse
+    func verifyPhoneLinkEmail(email: String, token: String, phoneLinkToken: String, returnTo: String?) async throws -> AuthVerifyResponse
     func requestEmailOTP(email: String, returnTo: String?) async throws -> AuthOTPStartResponse
     func requestPhoneOTP(phone: String, returnTo: String?) async throws -> AuthOTPStartResponse
     func verifyEmailOTP(email: String, token: String, returnTo: String?) async throws -> AuthVerifyResponse
@@ -53,6 +55,14 @@ struct AuthAPIClient: Sendable {
             path: "/auth/otp/start",
             body: AuthEmailOTPStartRequest(email: email, returnTo: returnTo)
         )
+    }
+
+    func requestPhoneLinkEmail(email: String, phoneLinkToken: String, returnTo: String? = nil) async throws -> AuthOTPStartResponse {
+        try await send(path: "/auth/otp/phone/link/start", body: AuthPhoneLinkEmailRequest(email: email, phoneLinkToken: phoneLinkToken, token: nil, returnTo: returnTo))
+    }
+
+    func verifyPhoneLinkEmail(email: String, token: String, phoneLinkToken: String, returnTo: String? = nil) async throws -> AuthVerifyResponse {
+        try await send(path: "/auth/otp/phone/link/verify", body: AuthPhoneLinkEmailRequest(email: email, phoneLinkToken: phoneLinkToken, token: token, returnTo: returnTo))
     }
 
     func requestPhoneOTP(phone: String, returnTo: String? = nil) async throws -> AuthOTPStartResponse {

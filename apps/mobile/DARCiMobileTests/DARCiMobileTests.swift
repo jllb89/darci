@@ -199,6 +199,7 @@ final class AuthURLProtocolStub: URLProtocol {
 }
 
 struct TestAuthAPIClient: AuthAPIProviding {
+    var linkVerifyResponse: AuthVerifyResponse?
     var otpStartResponse = AuthOTPStartResponse(status: "ok", message: "Code sent", otpLength: 8, cooldownSeconds: 60)
     var verifyResponse: AuthVerifyResponse = AuthVerifyResponse(
         accessToken: "access-token",
@@ -260,6 +261,7 @@ struct TestAuthAPIClient: AuthAPIProviding {
     var profileErrors: [Error] = []
 
     nonisolated(unsafe) static var requestedEmail: String?
+    nonisolated(unsafe) static var phoneLinkProof: String?
     nonisolated(unsafe) static var requestedPhone: String?
     nonisolated(unsafe) static var verifiedEmail: String?
     nonisolated(unsafe) static var verifiedPhone: String?
@@ -270,6 +272,7 @@ struct TestAuthAPIClient: AuthAPIProviding {
 
     static func reset() {
         requestedEmail = nil
+        phoneLinkProof = nil
         requestedPhone = nil
         verifiedEmail = nil
         verifiedPhone = nil
@@ -283,6 +286,17 @@ struct TestAuthAPIClient: AuthAPIProviding {
         Self.requestedEmail = email
         if let otpStartError { throw otpStartError }
         return otpStartResponse
+    }
+
+    func requestPhoneLinkEmail(email: String, phoneLinkToken: String, returnTo: String?) async throws -> AuthOTPStartResponse {
+        Self.phoneLinkProof = phoneLinkToken
+        return try await requestEmailOTP(email: email, returnTo: returnTo)
+    }
+
+    func verifyPhoneLinkEmail(email: String, token: String, phoneLinkToken: String, returnTo: String?) async throws -> AuthVerifyResponse {
+        Self.phoneLinkProof = phoneLinkToken
+        if let linkVerifyResponse { return linkVerifyResponse }
+        return try await verifyEmailOTP(email: email, token: token, returnTo: returnTo)
     }
 
     func requestPhoneOTP(phone: String, returnTo: String?) async throws -> AuthOTPStartResponse {
@@ -2645,6 +2659,40 @@ final class DARCiMobileTests: XCTestCase {
         XCTAssertEqual(TestAuthAPIClient.requestedEmail, "member@example.com")
         XCTAssertEqual(viewModel.challenge?.method, .email)
         XCTAssertEqual(viewModel.challenge?.identifier, "member@example.com")
+    }
+
+    @MainActor
+    func testPhoneLinkRequiresEmailProofBeforeSavingSession() async throws {
+        TestAuthAPIClient.reset()
+        let proof = String(repeating: "a", count: 64)
+        let phoneResponse = try JSONDecoder().decode(AuthVerifyResponse.self, from: Data("{\"phoneLink\":{\"token\":\"\(proof)\",\"message\":\"Enter your account email\"}}".utf8))
+        let emailResponse = AuthVerifyResponse(accessToken: "linked-access", refreshToken: "linked-refresh", user: makeAuthenticatedUser(), profileCompletionRequired: false, stepUp: nil)
+        let store = InMemoryAuthSessionStore()
+        let viewModel = AuthenticationViewModel(apiClient: TestAuthAPIClient(linkVerifyResponse: emailResponse, verifyResponse: phoneResponse), sessionStore: store)
+        _ = await viewModel.requestOTP(method: .phone, rawIdentifier: "2025550147")
+        let phoneRoute = await viewModel.verifyOTP(token: "12345678")
+        XCTAssertEqual(phoneRoute, .linkEmail)
+        XCTAssertNil(try store.load())
+        XCTAssertNil(viewModel.verifiedSession)
+        _ = await viewModel.requestOTP(method: .email, rawIdentifier: " Member@Example.COM ")
+        XCTAssertEqual(TestAuthAPIClient.phoneLinkProof, proof)
+        XCTAssertEqual(TestAuthAPIClient.requestedEmail, "member@example.com")
+        let emailRoute = await viewModel.verifyOTP(token: "12345678")
+        XCTAssertEqual(emailRoute, .success)
+        XCTAssertEqual(try store.load()?.accessToken, "linked-access")
+    }
+
+    @MainActor
+    func testCancelPhoneLinkClearsProofBeforeOrdinaryEmailLogin() async {
+        TestAuthAPIClient.reset()
+        let phoneResponse = AuthVerifyResponse(accessToken: nil, refreshToken: nil, user: nil, profileCompletionRequired: nil, stepUp: nil, phoneLink: AuthPhoneLinkChallenge(token: String(repeating: "a", count: 64), message: nil))
+        let viewModel = AuthenticationViewModel(apiClient: TestAuthAPIClient(verifyResponse: phoneResponse), sessionStore: InMemoryAuthSessionStore())
+        _ = await viewModel.requestOTP(method: .phone, rawIdentifier: "2025550147")
+        _ = await viewModel.verifyOTP(token: "12345678")
+        viewModel.clearChallenge()
+        _ = await viewModel.requestOTP(method: .email, rawIdentifier: "member@example.com")
+        XCTAssertNil(TestAuthAPIClient.phoneLinkProof)
+        XCTAssertEqual(TestAuthAPIClient.requestedEmail, "member@example.com")
     }
 
     @MainActor

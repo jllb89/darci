@@ -26,6 +26,8 @@ const publicPaths = [
   "/auth/otp/verify",
   "/auth/otp/phone/start",
   "/auth/otp/phone/verify",
+  "/auth/otp/phone/link/start",
+  "/auth/otp/phone/link/verify",
   "/auth/resend-confirmation",
   "/auth/password/recovery",
 ];

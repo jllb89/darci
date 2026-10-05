@@ -11,6 +11,7 @@ struct AuthenticationChallenge: Equatable {
 enum AuthenticationVerificationRoute: Equatable {
     case completeProfile
     case stepUpEmail
+    case linkEmail
     case success
 }
 
@@ -28,6 +29,8 @@ final class AuthenticationViewModel: ObservableObject {
     private let apiClient: AuthAPIProviding
     private let sessionStore: AuthSessionStore
     private let defaultOTPLength: Int
+    // This proof is not an authenticated session and must never enter Keychain.
+    private var phoneLinkToken: String?
 
     init(
         apiClient: AuthAPIProviding = AuthAPIClient(),
@@ -86,8 +89,13 @@ final class AuthenticationViewModel: ObservableObject {
             let response: AuthOTPStartResponse
             switch method {
             case .email:
-                response = try await apiClient.requestEmailOTP(email: identifier, returnTo: returnTo)
+                if let phoneLinkToken {
+                    response = try await apiClient.requestPhoneLinkEmail(email: identifier, phoneLinkToken: phoneLinkToken, returnTo: returnTo)
+                } else {
+                    response = try await apiClient.requestEmailOTP(email: identifier, returnTo: returnTo)
+                }
             case .phone:
+                phoneLinkToken = nil
                 response = try await apiClient.requestPhoneOTP(phone: identifier, returnTo: returnTo)
             }
 
@@ -130,17 +138,25 @@ final class AuthenticationViewModel: ObservableObject {
             let response: AuthVerifyResponse
             switch currentChallenge.method {
             case .email:
-                response = try await apiClient.verifyEmailOTP(
-                    email: currentChallenge.identifier,
-                    token: sanitizedToken,
-                    returnTo: returnTo
-                )
+                if let phoneLinkToken {
+                    response = try await apiClient.verifyPhoneLinkEmail(email: currentChallenge.identifier, token: sanitizedToken, phoneLinkToken: phoneLinkToken, returnTo: returnTo)
+                } else {
+                    response = try await apiClient.verifyEmailOTP(email: currentChallenge.identifier, token: sanitizedToken, returnTo: returnTo)
+                }
             case .phone:
                 response = try await apiClient.verifyPhoneOTP(
                     phone: currentChallenge.identifier,
                     token: sanitizedToken,
                     returnTo: returnTo
                 )
+            }
+
+            if let link = response.phoneLink {
+                phoneLinkToken = link.token
+                challenge = nil
+                resendCooldownSeconds = nil
+                globalError = link.message ?? "Phone verified. Enter your existing account email to link it securely."
+                return .linkEmail
             }
 
             if let stepUp = response.stepUp {
@@ -161,6 +177,7 @@ final class AuthenticationViewModel: ObservableObject {
             }
 
             try save(session: session)
+            phoneLinkToken = nil
             return response.profileCompletionRequired == true ? .completeProfile : .success
         } catch {
             apply(error: error, wrongCodeIsFieldError: true)
@@ -215,6 +232,7 @@ final class AuthenticationViewModel: ObservableObject {
     }
 
     func clearChallenge() {
+        phoneLinkToken = nil
         challenge = nil
         verifiedSession = nil
         resendCooldownSeconds = nil

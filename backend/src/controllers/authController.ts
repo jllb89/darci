@@ -26,6 +26,7 @@ import {
 import { sendValidationError } from "../utils/validation";
 import { normalizePhoneForComparison, normalizePhoneForStorage } from "../utils/phone";
 import { reportAuthIssue } from "../telemetry/authTelemetry";
+import { PhoneLinkError, phoneLinkService } from "../services/phoneLinkService";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseAnonKey =
@@ -800,6 +801,7 @@ const generateAndSendCustomOtpEmail = async (input: {
   redirectTo: string;
   logContext: AuthOtpLogContext;
   senderConfig?: ConfiguredOtpEmailSenderConfig;
+  expectedAuthId?: string;
 }) => {
   let providerError: string | null = null;
   let generatedOtp = "";
@@ -819,6 +821,10 @@ const generateAndSendCustomOtpEmail = async (input: {
     });
 
     generatedOtp = generated.data.properties?.email_otp?.trim() ?? "";
+    if (input.expectedAuthId && generated.data.user?.id !== input.expectedAuthId) {
+      generatedOtp = "";
+      providerError = "account_changed_during_verification";
+    }
     if (generated.error) {
       providerError = generated.error.message ?? "supabase_generate_link_failed";
       logAuthOtpEvent("error", "supabase_generate_link_failed", {
@@ -2266,6 +2272,89 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   }
 };
 
+const phoneLinkEmailSchema = emailActionSchema.extend({ phoneLinkToken: z.string().regex(/^[a-f0-9]{64}$/) });
+const phoneLinkVerifySchema = phoneLinkEmailSchema.extend({ token: z.string().trim().min(4).max(32) });
+const validatePhoneLinkRequest = (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) return false;
+  if (!validateOrigin(req) || !validateCsrfToken(req) || !validateRequestSignature(req)) {
+    res.status(403).json({ error: "forbidden", message: "Invalid request" });
+    return false;
+  }
+  return true;
+};
+const sendPhoneLinkError = (req: Request, res: Response, error: unknown) => {
+  const status = error instanceof PhoneLinkError ? error.statusCode : 503;
+  // Provider exceptions may contain identifiers. Report only the operation/status.
+  reportAuthIssue({ area: "session", operation: "phone_link", reason: "verification_failed", level: status >= 500 ? "error" : "warning", requestId: getRequestTraceId(req), statusCode: status });
+  return res.status(status).json({ error: status === 429 ? "rate_limited" : "phone_link_failed", message: error instanceof PhoneLinkError ? error.message : "Account verification is temporarily unavailable. Please try again shortly." });
+};
+
+export const requestPhoneLinkEmail = async (req: Request, res: Response) => {
+  if (!validatePhoneLinkRequest(req, res)) return;
+  const parsed = phoneLinkEmailSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return sendValidationError(res, parsed.error);
+  const email = normalizeEmailForAuthAction(parsed.data.email);
+  try {
+    const proof = await phoneLinkService.readProof(parsed.data.phoneLinkToken);
+    const { data: target, error } = await supabaseAdmin.from("users").select("id, supabase_user_id, status").eq("email", email).maybeSingle();
+    if (error) throw new Error("Account lookup unavailable");
+    let authId: string | null = null;
+    if (target?.supabase_user_id && isActiveAppAccountStatus(target.status)) {
+      const auth = await supabaseAdmin.auth.admin.getUserById(target.supabase_user_id);
+      if (auth.error) throw new Error("Account lookup unavailable");
+      if (auth.data.user?.email?.toLowerCase() === email && (!auth.data.user.phone || normalizePhoneForComparison(auth.data.user.phone) === normalizePhoneForComparison(proof.phone))) {
+        const owner = await findLinkedUserByPhoneForStepUp(proof.phone);
+        if (!owner || owner.id === target.id) authId = target.supabase_user_id;
+      }
+    }
+    // Bind even an ineligible email, so a phone proof cannot enumerate accounts.
+    await phoneLinkService.bindEmail(parsed.data.phoneLinkToken, email, authId);
+    if (authId) {
+      const delivery = await generateAndSendCustomOtpEmail({ email,
+        expectedAuthId: authId,
+        redirectTo: buildAuthActionRedirectUrl(req, { intent: "otp", returnTo: parsed.data.returnTo ?? null }),
+        logContext: buildAuthOtpLogContext(req, { email, returnTo: parsed.data.returnTo ?? null }),
+      });
+      if (!delivery.delivered) throw new PhoneLinkError(503, "Unable to send the account verification email. Please try again shortly.");
+      await recordAuthEvent({ action: authAuditActionNames.otpRequested, actorSupabaseId: authId, metadata: { auth_flow: "phone_link", request_id: getRequestTraceId(req), resend_message_id: delivery.resendMessageId } });
+      return res.status(200).json({ status: "ok", message: "If these contacts can be linked, a code has been sent to your account email. Otherwise, sign in with email or contact support.", otpLength: delivery.otpLength, cooldownSeconds: 60 });
+    }
+    return res.status(200).json({ status: "ok", message: "If these contacts can be linked, a code has been sent to your account email. Otherwise, sign in with email or contact support.", otpLength: 8, cooldownSeconds: 60 });
+  } catch (error) { return sendPhoneLinkError(req, res, error); }
+};
+
+export const verifyPhoneLinkEmail = async (req: Request, res: Response) => {
+  if (!validatePhoneLinkRequest(req, res)) return;
+  const parsed = phoneLinkVerifySchema.safeParse(req.body ?? {});
+  if (!parsed.success) return sendValidationError(res, parsed.error);
+  const email = normalizeEmailForAuthAction(parsed.data.email);
+  try {
+    const proof = await phoneLinkService.attemptEmail(parsed.data.phoneLinkToken, email);
+    if (!proof.authId) throw new PhoneLinkError(401, "Invalid or expired code. Sign in with your existing account email or start again.");
+    const { data, error } = await supabasePublic.auth.verifyOtp({ email, token: normalizeOtpToken(parsed.data.token), type: "email" });
+    if (error || !data.session || !data.user || data.user.id !== proof.authId || data.user.email?.toLowerCase() !== email || !data.user.email_confirmed_at) {
+      throw new PhoneLinkError(401, "Invalid or expired code.");
+    }
+    await phoneLinkService.consumeProof(parsed.data.phoneLinkToken, email, data.user.id);
+    const { user, session } = data;
+    return await phoneLinkService.withAccountLock(user.id, async () => {
+      const profile = await getUserIdentityContextBySupabaseId(user.id);
+      if (!profile || !isActiveAppAccountStatus(profile.status)) throw new PhoneLinkError(403, "This account is not available. Please contact support.");
+      const current = await supabaseAdmin.auth.admin.getUserById(user.id);
+      if (current.error || !current.data.user || current.data.user.email?.toLowerCase() !== email) throw new PhoneLinkError(409, "Account details changed. Please sign in with email and try again.");
+      if (current.data.user.phone && normalizePhoneForComparison(current.data.user.phone) !== normalizePhoneForComparison(proof.phone)) throw new PhoneLinkError(409, "This account already uses a different phone number. Sign in with email to manage it.");
+      const owner = await findLinkedUserByPhoneForStepUp(proof.phone);
+      if (owner && owner.id !== profile.id) throw new PhoneLinkError(409, "These contacts belong to different accounts. Please contact support.");
+      const updated = await supabaseAdmin.auth.admin.updateUserById(user.id, { phone: proof.phone, phone_confirm: true });
+      if (updated.error || !updated.data.user) throw new PhoneLinkError(409, "The phone could not be linked. Sign in with email or contact support.");
+      const synced = await syncProfileFromAuthUser({ user: updated.data.user, emailFallback: email, phoneFallback: proof.phone, defaultActiveRole: "member" });
+      if (!ensureActiveAccount(synced, res)) return;
+      await recordAuthEvent({ action: "auth.phone_linked", actorSupabaseId: user.id, metadata: { request_id: getRequestTraceId(req), phone_hash: hashPhoneForLogs(proof.phone), verified_contacts: ["phone", "email"] } });
+      return res.status(200).json({ accessToken: session.access_token, refreshToken: session.refresh_token, user: toUserResponse(synced), profileCompletionRequired: !isUserProfileComplete(synced) });
+    });
+  } catch (error) { return sendPhoneLinkError(req, res, error); }
+};
+
 export const requestPhoneOtp = async (req: Request, res: Response) => {
   if (!ensureConfigured(res)) {
     return;
@@ -2356,6 +2445,17 @@ export const requestPhoneOtp = async (req: Request, res: Response) => {
   const { error } = phoneOtpResult;
 
   if (error) {
+    // Closed signup must not prevent an existing email-account owner from
+    // proving their phone. This challenge creates no Supabase user/session.
+    if (error.code === "signup_disabled" || /signups not allowed for this instance/i.test(error.message)) {
+      try {
+        await phoneLinkService.requestSms(phone);
+        logPhoneOtpEvent("info", "phone_link_sms_accepted", req, { phone, provider: "aws" });
+        return res.status(200).json({ status: "ok", message: "SMS code sent. After verifying it, enter your existing account email.", otpLength: 8, cooldownSeconds: 60 });
+      } catch (linkError) {
+        return sendPhoneLinkError(req, res, linkError);
+      }
+    }
     await recordAuthEvent({
       action: authAuditActionNames.otpFailed,
       metadata: {
@@ -2478,6 +2578,14 @@ export const verifyPhoneOtp = async (req: Request, res: Response) => {
   const { data, error } = phoneVerification;
 
   if (error || !data.session || !data.user) {
+    try {
+      const proofToken = await phoneLinkService.verifySms(phone, token);
+      if (proofToken) {
+        return res.status(200).json({ phoneLink: { token: proofToken, message: "Phone verified. Enter your existing account email to link it securely." } });
+      }
+    } catch (linkError) {
+      return sendPhoneLinkError(req, res, linkError);
+    }
     await recordAuthEvent({
       action: authAuditActionNames.otpFailed,
       metadata: {

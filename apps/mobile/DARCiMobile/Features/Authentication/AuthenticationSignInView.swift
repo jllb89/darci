@@ -920,7 +920,7 @@ struct AuthenticationSignInView: View {
     private func resetInputLayout() {
         focusedField = nil
         isEmailPlaceholderVisible = false
-        viewModel.clearErrors()
+        viewModel.clearChallenge()
 
         withAnimation(.easeInOut(duration: 0.32)) {
             activeInputMode = nil
@@ -973,6 +973,14 @@ struct AuthenticationSignInView: View {
             case .stepUpEmail:
                 otpCode = ""
                 focusedField = .otp
+            case .linkEmail:
+                otpCode = ""
+                emailAddress = ""
+                activeInputMode = .email
+                isHeadlineCollapsed = true
+                isEntryFadingForOTP = false
+                authenticationStep = .entry
+                focusedField = .email
             case .success:
                 showSuccess()
             }
