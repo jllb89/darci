@@ -18,6 +18,7 @@ import {
   runStripeWebhookRetentionCleanup,
 } from "../services/billingOperationsService";
 import { refreshDueMemberAllowanceWindows } from "../services/memberAllowanceWindowService";
+import { queueDueMemberRenewalNotices } from "../services/memberRenewalNoticeService";
 
 type HashingJobData = {
   documentId: string;
@@ -372,6 +373,12 @@ const runBillingReconciliationOnce = async () => {
   billingReconciliationRunInFlight = true;
   try {
     await refreshDueMemberAllowanceWindows();
+    try {
+      await queueDueMemberRenewalNotices();
+    } catch (error) {
+      captureException(error, { tags: { service: "worker", operation: "member_renewal_reminder_scan" } });
+      console.error("Membership reminder scan failed", error instanceof Error ? error.message : error);
+    }
     const report = await getBillingOperationsReport({ includeProvider: true, webhookLimit: 500 });
     if (report.readiness.blockingIssueCount > 0) {
       const error = new Error(`Billing reconciliation found ${report.readiness.blockingIssueCount} blocking issue(s)`);

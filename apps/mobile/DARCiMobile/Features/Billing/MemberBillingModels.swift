@@ -1,5 +1,24 @@
 import Foundation
 
+struct MemberRenewalNotice: Decodable, Equatable, Sendable, Identifiable {
+    let id: String
+    let kind: String
+    let chargeAt: String
+    let title: String
+    let message: String
+
+    var isUpcoming: Bool {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: chargeAt) else { return false }
+        return date > Date()
+    }
+}
+
+struct MemberRenewalNoticeResponse: Decodable, Sendable {
+    let notice: MemberRenewalNotice?
+}
+
 enum MemberBillingPriceCode {
     static let starter = "member_starter_monthly"
     static let plus = "member_plus_monthly"

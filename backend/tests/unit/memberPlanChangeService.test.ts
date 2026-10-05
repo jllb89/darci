@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(), retrieveSubscription: vi.fn(), createSchedule: vi.fn(),
-  retrieveSchedule: vi.fn(), updateSchedule: vi.fn(),
+  retrieveSchedule: vi.fn(), updateSchedule: vi.fn(), updateSubscription: vi.fn(),
 }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: () => ({ from: mocks.from }) }));
 vi.mock("../../src/config/stripe", () => ({
   getStripeEnvironment: () => "test",
   assertStripeObjectMatchesEnvironment: vi.fn(),
   getStripeClient: () => ({
-    subscriptions: { retrieve: mocks.retrieveSubscription },
+    subscriptions: { retrieve: mocks.retrieveSubscription, update: mocks.updateSubscription },
     subscriptionSchedules: { create: mocks.createSchedule, retrieve: mocks.retrieveSchedule, update: mocks.updateSchedule },
   }),
 }));
@@ -51,8 +51,8 @@ describe("member downgrade provider contract", () => {
     expect(mocks.updateSchedule).toHaveBeenCalledWith("sched_fixture", expect.objectContaining({
       metadata: { darci_environment: "test", darci_billing_account_id: "account-fixture", darci_plan_change_kind: "downgrade" },
       phases: [
-        expect.objectContaining({ start_date: start, end_date: end, items: [{ price: "price_plus", quantity: 1 }], proration_behavior: "none" }),
-        expect.objectContaining({ start_date: end, items: [{ price: "price_starter", quantity: 1 }], proration_behavior: "none" }),
+        expect.objectContaining({ start_date: start, end_date: end, items: [{ price: "price_plus", quantity: 1, discounts: [] }], proration_behavior: "none" }),
+        expect.objectContaining({ start_date: end, items: [{ price: "price_starter", quantity: 1, discounts: [] }], proration_behavior: "none" }),
       ],
     }), { idempotencyKey: "darci:test:plan-change:downgrade-fixture:downgrade" });
     expect(result).toMatchObject({ changeType: "downgrade", status: "scheduled", effectiveAt: new Date(end * 1000).toISOString() });
@@ -66,6 +66,33 @@ describe("member downgrade provider contract", () => {
     expect(mocks.createSchedule).not.toHaveBeenCalled();
     expect(mocks.retrieveSchedule).toHaveBeenCalledWith("sched_existing");
     expect(mocks.updateSchedule.mock.calls[0]?.[0]).toBe("sched_existing");
+  });
+  it("reuses existing subscription and item discounts instead of restarting coupons", async () => {
+    const provider = await mocks.retrieveSubscription();
+    provider.discounts = [{ id: "di_subscription", end }];
+    provider.items.data[0].discounts = ["di_item"];
+    mocks.retrieveSubscription.mockResolvedValue(provider);
+    await changeMemberMembershipPlan({ dbUserId: "user-fixture", targetPriceCode: "member_starter_monthly", idempotencyKey: "discount-down" });
+    for (const phase of mocks.updateSchedule.mock.calls[0]![1].phases) {
+      expect(phase.discounts).toEqual([{ discount: "di_subscription" }]);
+      expect(phase.items[0].discounts).toEqual([{ discount: "di_item" }]);
+      expect(JSON.stringify(phase)).not.toContain('"coupon"');
+    }
+  });
+  it("leaves existing discounts untouched on a prorated upgrade", async () => {
+    records.billing_subscription_items = { price_code_snapshot: "member_starter_monthly", usage_limit_quantity: 3 };
+    records.billing_catalog_prices = { id: "catalog-plus", price_code: "member_plus_monthly", usage_limit_quantity: 10 };
+    const provider = await mocks.retrieveSubscription();
+    provider.discounts = ["di_existing"];
+    provider.items.data[0].id = "si_fixture";
+    mocks.retrieveSubscription.mockResolvedValue(provider);
+    mocks.updateSubscription.mockResolvedValue({ id: "sub_fixture" });
+    const result = await changeMemberMembershipPlan({ dbUserId: "user-fixture", targetPriceCode: "member_plus_monthly", idempotencyKey: "discount-up" });
+    expect(result).toMatchObject({ changeType: "upgrade", status: "pending_webhook" });
+    const params = mocks.updateSubscription.mock.calls[0]![1];
+    expect(params).toMatchObject({ proration_behavior: "always_invoice", payment_behavior: "pending_if_incomplete" });
+    expect(params).not.toHaveProperty("discounts");
+    expect(params.items[0]).not.toHaveProperty("discounts");
   });
   it("defers a monthly-to-annual change and uses a full annual target phase", async () => {
     records.billing_catalog_prices = {id:"catalog-annual",price_code:"member_plus_annual_v2",usage_limit_quantity:25,billing_interval:"year",is_unlimited:false};

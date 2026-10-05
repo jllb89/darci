@@ -174,6 +174,21 @@ export const getMemberMembership = async (accessToken: string) => {
   );
 };
 
+export type MemberRenewalNotice = {
+  id: string;
+  kind: "trial_ending" | "discount_ending";
+  chargeAt: string;
+  estimatedAmountCents: number;
+  currency: string;
+  title: string;
+  message: string;
+};
+
+export const getMemberRenewalNotice = async (accessToken: string) => {
+  const response = await requestWithTokenRefresh("/billing/member-membership/renewal-notice", accessToken);
+  return readResponse<{ notice: MemberRenewalNotice | null }>(response, "We could not load your renewal reminder.");
+};
+
 export const createMemberCheckout = async (
   accessToken: string,
   priceCode: MemberPriceCode,

@@ -13,6 +13,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useAppToast } from "@/components/app/AppToastContext";
+import { MemberProfileEditor } from "@/components/app/MemberProfileEditor";
 import { useStoredAuth, useStoredUser } from "@/lib/auth";
 import { fetchWithTokenRefresh, notaryApiBaseUrl, readApiErrorMessage } from "@/lib/notaryWorkspace";
 import type { JurisdictionOption, MemberFormJurisdictionsPayload } from "@/app/app/start/startPageTypes";
@@ -1891,8 +1892,8 @@ export default function SettingsPage() {
         <div className="text-2xl font-medium">Settings</div>
         <div className="text-sm text-Color-Neutral">
           {isAdmin
-            ? "Review notary applications and manage approvals."
-            : "Request notary approval from your member profile."}
+            ? "Manage your profile, review notary applications and manage approvals."
+            : "Manage your member profile and request notary approval."}
         </div>
       </div>
 
@@ -1904,7 +1905,7 @@ export default function SettingsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-Color-Scheme-1-Text">Member profile</div>
-              <div className="mt-1 text-xs text-Color-Neutral">Name, email, and phone are already captured in the member flow.</div>
+              <div className="mt-1 text-xs text-Color-Neutral">Update your name and contact details. Email and phone changes require verification.</div>
             </div>
             {application ? (
               <span className="rounded-full bg-Color-Neutral-Lightest px-3 py-1 text-xs font-medium text-Color-Scheme-1-Text">
@@ -1913,11 +1914,7 @@ export default function SettingsPage() {
             ) : null}
           </div>
 
-          <div className="grid gap-3 rounded-xl bg-Color-Neutral-Lightest/70 p-4 text-sm">
-            <div>Name: {formatPersonName(user?.firstName ?? null, user?.lastName ?? null)}</div>
-            <div>Email: {user?.email ?? "-"}</div>
-            <div>Phone: {user?.phone ?? "-"}</div>
-          </div>
+          <MemberProfileEditor key={user?.id ?? "signed-out"} />
 
           <div className="space-y-4 rounded-xl bg-Color-Neutral-Lightest/60 p-4">
             <div className="text-sm font-medium text-Color-Scheme-1-Text">

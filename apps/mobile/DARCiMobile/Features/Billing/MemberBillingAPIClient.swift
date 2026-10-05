@@ -1,6 +1,7 @@
 import Foundation
 
 protocol MemberBillingAPIProviding: Sendable {
+    func getRenewalNotice(accessToken: String) async throws -> MemberRenewalNoticeResponse
     func getMembership(accessToken: String) async throws -> MemberMembershipPayload
     func createCheckout(priceCode: String, idempotencyToken: String, accessToken: String) async throws -> MemberCheckoutResponse
     func createPortalSession(accessToken: String) async throws -> MemberBillingPortalResponse
@@ -8,12 +9,18 @@ protocol MemberBillingAPIProviding: Sendable {
 }
 
 extension MemberBillingAPIProviding {
+    func getRenewalNotice(accessToken: String) async throws -> MemberRenewalNoticeResponse {
+        MemberRenewalNoticeResponse(notice: nil)
+    }
     func changePlan(priceCode: String, idempotencyToken: String, accessToken: String) async throws -> MemberPlanChangeResponse {
         throw AuthAPIError.validation(message: "Plan changes are unavailable in this test client.")
     }
 }
 
 struct MemberBillingAPIClient: MemberBillingAPIProviding, Sendable {
+    func getRenewalNotice(accessToken: String) async throws -> MemberRenewalNoticeResponse {
+        try await authClient.get(path: "/billing/member-membership/renewal-notice", accessToken: accessToken)
+    }
     func changePlan(priceCode: String, idempotencyToken: String, accessToken: String) async throws -> MemberPlanChangeResponse {
         try await authClient.post(path: "/billing/member-membership/plan-change", body: MemberPlanChangeRequest(targetPriceCode: priceCode, idempotencyToken: idempotencyToken), accessToken: accessToken)
     }

@@ -1,0 +1,59 @@
+{
+  "status": "Figma-source concept drafts; validate against shipping build before submission",
+  "dimensions": [
+    1320,
+    2868
+  ],
+  "font_outline_approval": true,
+  "screens": [
+    {
+      "frame": 1,
+      "headline": "Make it official.",
+      "subtitle": "Important documents. A clear next step.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    },
+    {
+      "frame": 2,
+      "headline": "Start with what matters.",
+      "subtitle": "Trusts, powers of attorney, and documents you upload.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    },
+    {
+      "frame": 3,
+      "headline": "Know what you\u2019re signing.",
+      "subtitle": "See your documents before you add your signature.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    },
+    {
+      "frame": 4,
+      "headline": "Your signature. Your choice.",
+      "subtitle": "Draw, type or use a saved signature.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    },
+    {
+      "frame": 5,
+      "headline": "A real notary. In person.",
+      "subtitle": "Choose a notary and complete your in-person session.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    },
+    {
+      "frame": 6,
+      "headline": "Your documents. All together.",
+      "subtitle": "Find your completed package without the paper chase.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    },
+    {
+      "frame": 7,
+      "headline": "Proof you can share.",
+      "subtitle": "A public verification link for your completed document.",
+      "font": "Maison Neue Light / Book; ABC Favorit Mono Regular",
+      "letter_spacing": 0
+    }
+  ]
+}

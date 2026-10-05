@@ -170,7 +170,7 @@ const syncSubscription = async (subscriptionId: string, eventId: string) => {
     p_order_id: subscription.metadata.darci_order_id || null,
     p_invoice_id: invoice?.id ?? null,
     p_invoice_status: invoice?.status ?? null,
-    p_invoice_amount_cents: invoice?.amount_paid ?? invoice?.amount_due ?? 0,
+    p_invoice_amount_cents: invoice?.status === "paid" ? invoice.amount_paid : invoice?.amount_due ?? 0,
     p_invoice_currency: invoice?.currency?.toUpperCase() ?? subscription.currency.toUpperCase(),
     p_event_id: eventId,
     p_provider_environment: getStripeEnvironment(),
@@ -244,6 +244,20 @@ const processStripeEvent = async (event: Stripe.Event) => {
     const subscriptionId = stripeId(session.subscription);
     if (!subscriptionId) throw new Error("Completed subscription Checkout has no Subscription");
     await syncSubscription(subscriptionId, event.id);
+    // Checkout totals are authoritative for the original order. Renewal and
+    // proration invoices must not rewrite that order with a later charge.
+    const orderId = session.metadata?.darci_order_id ?? session.client_reference_id;
+    const accountId = session.metadata?.darci_billing_account_id;
+    if (orderId && accountId && typeof session.amount_total === "number" && typeof session.amount_subtotal === "number") {
+      const { error } = await supabaseAdmin.from("billing_orders").update({
+        subtotal_amount_cents: session.amount_subtotal,
+        discount_amount_cents: session.total_details?.amount_discount ?? 0,
+        tax_amount_cents: session.total_details?.amount_tax ?? 0,
+        total_amount_cents: session.amount_total,
+      }).eq("id", orderId).eq("billing_account_id", accountId)
+        .eq("provider_environment", getStripeEnvironment()).eq("provider_checkout_session_id", session.id);
+      if (error) throw new Error(`Checkout totals synchronization failed: ${error.message}`);
+    }
     return "processed" as const;
   }
 

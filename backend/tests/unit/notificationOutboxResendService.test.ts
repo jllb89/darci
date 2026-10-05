@@ -9,6 +9,9 @@ const snsMocks = vi.hoisted(() => ({
   publishMock: vi.fn(),
 }));
 
+const renewalMocks = vi.hoisted(() => ({ getNotice: vi.fn() }));
+vi.mock("../../src/services/memberRenewalNoticeService", () => ({ getStripeRenewalNotice: renewalMocks.getNotice }));
+
 const apnsMocks = vi.hoisted(() => {
   class MockApnsClientError extends Error {
     constructor(
@@ -437,6 +440,7 @@ const seedOutbox = (overrides?: {
 
 describe("notification outbox Resend runtime", () => {
   beforeEach(() => {
+    renewalMocks.getNotice.mockReset();
     process.env.RESEND_API_KEY = "re_test_key";
     process.env.AWS_REGION = "us-east-1";
     process.env.NOTIFICATION_OUTBOX_RETRY_BASE_SECONDS = "300";
@@ -460,6 +464,22 @@ describe("notification outbox Resend runtime", () => {
     supabaseMocks.client.from.mockImplementation(
       (table: keyof typeof supabaseMocks.state) => new FakeSupabaseQueryBuilder(table),
     );
+  });
+
+  it("suppresses an offer-ending email if cancellation/expiry makes it no longer due", async () => {
+    seedOutbox({ job: { metadata: { billingReminder: true }, payload_json: { subscriptionId: "sub_test", ownerUserId: "user-1", chargeAt: "2026-05-01T12:00:00.000Z" } } });
+    renewalMocks.getNotice.mockResolvedValue(null);
+    await runDueNotificationJobs({ workerId: "test", now: nowIso });
+    expect(resendMocks.sendEmailMock).not.toHaveBeenCalled();
+    expect(supabaseMocks.state.notification_deliveries[0]).toMatchObject({ status: "suppressed", error_code: "billing_reminder_no_longer_due" });
+  });
+
+  it("does not send a billing reminder when provider revalidation fails", async () => {
+    seedOutbox({ job: { metadata: { billingReminder: true }, payload_json: { subscriptionId: "sub_test", ownerUserId: "user-1", chargeAt: "2026-05-01T12:00:00.000Z" } } });
+    renewalMocks.getNotice.mockRejectedValue(new Error("Stripe unavailable"));
+    await runDueNotificationJobs({ workerId: "test", now: nowIso });
+    expect(resendMocks.sendEmailMock).not.toHaveBeenCalled();
+    expect(supabaseMocks.state.notification_deliveries[0].status).toBe("failed");
   });
 
   afterEach(() => {

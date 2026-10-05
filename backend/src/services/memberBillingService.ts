@@ -414,13 +414,17 @@ export const changeMemberMembershipPlan = async (input: {
         {
           start_date: phaseStart,
           end_date: phaseEnd,
-          items: [{ price: currentProviderPriceId, quantity: 1 }],
+          items: [{ price: currentProviderPriceId, quantity: 1, discounts: (subscription.items.data[0]!.discounts ?? []).map(discount => ({ discount: typeof discount === "string" ? discount : discount.id })) }],
+          // Reuse applied discounts, never reapply the coupon (which resets its duration).
+          discounts: (subscription.discounts ?? []).map(discount => ({ discount: typeof discount === "string" ? discount : discount.id })),
+          ...(subscription.status === "trialing" && subscription.trial_end ? { trial_end: subscription.trial_end } : {}),
           proration_behavior: "none",
         },
         {
           start_date: phaseEnd,
           duration: { interval: targetPrice.billing_interval ?? "month", interval_count: 1 },
-          items: [{ price: targetMapping.provider_price_id, quantity: 1 }],
+          items: [{ price: targetMapping.provider_price_id, quantity: 1, discounts: (subscription.items.data[0]!.discounts ?? []).map(discount => ({ discount: typeof discount === "string" ? discount : discount.id })) }],
+          discounts: (subscription.discounts ?? []).map(discount => ({ discount: typeof discount === "string" ? discount : discount.id })),
           proration_behavior: "none",
           metadata: {
             darci_plan_change_kind: changeType,
@@ -664,7 +668,7 @@ export const createMemberMembershipCheckout = async (input: {
       line_items: [{ price: mapping.provider_price_id, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      allow_promotion_codes: false,
+      allow_promotion_codes: true,
       payment_method_collection: "always",
       metadata: {
         darci_environment: getStripeEnvironment(),

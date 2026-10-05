@@ -32,6 +32,7 @@ struct AppRootView: View {
     @State private var shouldReturnToNotificationCenterAfterRoute = false
     @State private var isPushPermissionPromptPresented = false
     @State private var homeBannerMessage: String?
+    @State private var renewalNotice: MemberRenewalNotice?
     @State private var memberBillingReturnEvent: MemberBillingReturn?
     @State private var settingsInitialContent: UserSettingsContentScreen?
     @State private var shouldPreserveIntakeAfterReview = false
@@ -171,6 +172,27 @@ struct AppRootView: View {
                 }
             )
         }
+        .task(id: renewalNoticeContextKey) {
+            renewalNotice = nil
+            guard canPresentRenewalNotice, let session = sessionCoordinator.currentSession else { return }
+            let owner = session.user.id
+            while !Task.isCancelled {
+                if let response = try? await memberBillingAPIClient.getRenewalNotice(accessToken: sessionCoordinator.currentSession?.accessToken ?? session.accessToken),
+                   !Task.isCancelled, sessionCoordinator.currentSession?.user.id == owner, canPresentRenewalNotice {
+                    if let notice = response.notice, notice.isUpcoming,
+                       !UserDefaults.standard.bool(forKey: "darci.renewalNotice.\(owner).\(notice.id)") {
+                        renewalNotice = notice
+                    } else { renewalNotice = nil }
+                }
+                do { try await Task.sleep(for: .seconds(300)) } catch { return }
+            }
+        }
+        .alert(renewalNotice?.title ?? "Membership reminder", isPresented: Binding(
+            get: { renewalNotice != nil }, set: { if !$0 { dismissRenewalNotice() } }
+        )) {
+            Button("Review membership") { dismissRenewalNotice(); showMembershipFromSettings() }
+            Button("Got it", role: .cancel) { dismissRenewalNotice() }
+        } message: { Text(renewalNotice?.message ?? "") }
         // Intake owns its accessory so its UIKit date and SwiftUI fields share
         // a single Done action. Other screens (including login) inherit this one.
         .toolbar {
@@ -415,6 +437,24 @@ struct AppRootView: View {
             || notarySessionRoute != nil
             || memberSessionRoute != nil
             || isNotificationCenterPresented
+    }
+
+    private var canPresentRenewalNotice: Bool {
+        launchPhase == .signedIn && selectedTab == .home && scenePhase == .active
+            && MobileProfileRole.activeRole(for: sessionCoordinator.currentSession?.user) == .member
+            && !hasPriorityMembershipRoute && !isProfileSelectionPresented && !isUserSettingsPresented
+            && !isPushPermissionPromptPresented && billingPresentationCoordinator.activePresentation == nil
+    }
+
+    private var renewalNoticeContextKey: String {
+        "\(sessionCoordinator.currentSession?.user.id ?? "signed-out"):\(canPresentRenewalNotice)"
+    }
+
+    private func dismissRenewalNotice() {
+        if let notice = renewalNotice, let userId = sessionCoordinator.currentSession?.user.id {
+            UserDefaults.standard.set(true, forKey: "darci.renewalNotice.\(userId).\(notice.id)")
+        }
+        renewalNotice = nil
     }
 
     @ViewBuilder

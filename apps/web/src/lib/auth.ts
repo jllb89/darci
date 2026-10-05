@@ -278,16 +278,22 @@ export const syncStoredAuthFromSession = async (input: {
   accessToken: string;
   refreshToken?: string | null;
   intent?: "signup" | "magic-link" | "otp" | "oauth" | null;
+  force?: boolean;
+  expectedUserId?: string;
 }) => {
+  if (input.expectedUserId && getStoredAuth().user?.id !== input.expectedUserId) {
+    throw new Error("Your account changed. Reload Settings before continuing.");
+  }
   const syncKey = [
     input.accessToken,
     input.refreshToken ?? "",
     input.intent ?? "",
+    input.expectedUserId ?? "",
   ].join(":");
   const now = Date.now();
 
   if (
-    lastSessionSyncKey === syncKey &&
+    !input.force && lastSessionSyncKey === syncKey &&
     now - lastSessionSyncAt < SESSION_SYNC_COOLDOWN_MS
   ) {
     return getStoredAuth();
@@ -334,6 +340,11 @@ export const syncStoredAuthFromSession = async (input: {
           message?: string;
         }
       | null;
+
+    if (input.expectedUserId && (getStoredAuth().user?.id !== input.expectedUserId ||
+      (payload?.user && payload.user.id !== input.expectedUserId))) {
+      throw new Error("Your account changed. Reload Settings before continuing.");
+    }
 
     if (!response.ok || !payload?.accessToken || !payload.user) {
       reportWebAuthIssue({

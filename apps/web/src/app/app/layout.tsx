@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AppSidebar from "@/components/app/AppSidebar";
 import AppTopbarBreadcrumb from "@/components/app/AppTopbarBreadcrumb";
+import MemberRenewalNotice from "@/components/app/MemberRenewalNotice";
 import {
   AppToastProvider,
   type AppToastInput,
@@ -366,6 +367,9 @@ function AppLayoutContent({
 
   return (
     <AppToastProvider value={toastContextValue}>
+      {pathname === "/app" && accessToken && user?.id && (role === "member" || role === "pro") && (
+        <MemberRenewalNotice key={user.id} accessToken={accessToken} userId={user.id} />
+      )}
       <div className="flex h-screen bg-Color-Neutral-Lightest text-Color-Scheme-1-Text">
         {toast ? (
           <div className="pointer-events-none fixed inset-x-0 top-0 z-[9999]">

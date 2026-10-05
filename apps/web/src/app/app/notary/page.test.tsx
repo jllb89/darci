@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { NotaryQueueRequestSummary } from "@/lib/notaryWorkspace";
-import { RequestRow } from "./page";
+import { RequestRow } from "./RequestRow";
 
 const request = {
   request: {
@@ -35,6 +35,11 @@ const request = {
 } as NotaryQueueRequestSummary;
 
 describe("notary request row", () => {
+  it("keeps reusable components out of the Next.js page export contract", async () => {
+    const page = await import("./page");
+    expect(Object.keys(page)).toEqual(["default"]);
+  });
+
   it("does not link completed requests to the document workspace", () => {
     const html = renderToStaticMarkup(<RequestRow request={request} tab="completed" />);
 

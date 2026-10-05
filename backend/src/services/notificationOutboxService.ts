@@ -2306,6 +2306,20 @@ const processClaimedNotificationJob = async (input: {
       delivery.status === "failed" ? delivery.attempt_number + 1 : delivery.attempt_number;
 
     try {
+      if (objectOrEmpty(input.job.metadata).billingReminder === true) {
+        const payload = objectOrEmpty(input.job.payload_json);
+        if (typeof payload.subscriptionId !== "string" || typeof payload.ownerUserId !== "string"
+          || delivery.target_user_id !== payload.ownerUserId) throw new Error("Invalid billing reminder recipient");
+        const { getStripeRenewalNotice } = await import("./memberRenewalNoticeService.js");
+        const notice = await getStripeRenewalNotice(payload.subscriptionId, payload.ownerUserId);
+        if (!notice || notice.chargeAt !== payload.chargeAt) {
+          await updateNotificationDelivery(delivery.id, { status: "suppressed", error_code: "billing_reminder_no_longer_due", error_message: "Subscription changed or reminder expired" });
+          continue;
+        }
+        // Recheck at send time, including retries: never send a stale estimate
+        // after cancellation, a new promotion, or a plan change.
+        input.job = { ...input.job, payload_json: { ...payload, title: notice.title, message: notice.message, noticeId: notice.id } };
+      }
       const adapter = resolveProviderAdapter(delivery);
       const dispatch = await adapter.send({
         job: input.job,

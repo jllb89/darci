@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { MemberRenewalNotice } from "./memberRenewalNotice";
 import { createClient } from "@supabase/supabase-js";
 import {
   resolveEmailNotificationProvider,
@@ -125,6 +126,14 @@ type QueueNotificationResult = {
 };
 
 const fallbackNotificationTemplates: Record<string, FallbackNotificationTemplate> = {
+  member_renewal_reminder_email: {
+    template_key: "member_renewal_reminder_email", template_version: "2026.10.05.v1", locale: "en-US",
+    channel: "email", template_kind: "transactional", audience_scope: "client", trigger_event: "membership.offer_ending", invite_kind: null,
+    subject_template: "{{title}} — DARCi membership",
+    body_template: "Hi {{firstName}},\n\n{{message}}\n\n[Review or cancel membership]({{billingUrl}})\n\n— Your DARCi Team",
+    body_format: "markdown", variables_schema: { required: ["firstName", "title", "message", "billingUrl"] },
+    is_active: true, source_reference: "runtime:member_renewal_reminder", metadata: { seed_source: "runtime_member_renewal_reminder" },
+  },
   notary_request_received_email: {
     template_key: "notary_request_received_email",
     template_version: "2026.06.03.v1",
@@ -1272,6 +1281,21 @@ const queueSuppressedPushCompanionNotification = async (input: {
 
     throw error;
   }
+};
+
+export const queueMemberRenewalNoticeEmail = async (input: { ownerUserId: string; subscriptionId: string; notice: MemberRenewalNotice }) => {
+  const owner = await getUserById(input.ownerUserId);
+  if (!owner?.email) return null;
+  return queueSingleChannelTemplatedNotification({
+    templateKey: "member_renewal_reminder_email", channel: "email", jobKind: "transactional",
+    // Amount changes must not cause repeated emails. App notices can show a revised estimate.
+    dedupeKey: `member-renewal:${input.subscriptionId}:${input.notice.chargeAt}`,
+    payload: { firstName: owner.first_name || "there", title: input.notice.title, message: input.notice.message,
+      billingUrl: buildAppUrl("/app/billing"), noticeId: input.notice.id, chargeAt: input.notice.chargeAt,
+      subscriptionId: input.subscriptionId, ownerUserId: input.ownerUserId },
+    recipients: [{ targetUserId: owner.id, email: owner.email }],
+    metadata: { billingReminder: true },
+  });
 };
 
 const queueTemplatedNotification = async (

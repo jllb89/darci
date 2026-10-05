@@ -9,6 +9,7 @@ import {
 } from "../services/memberBillingService";
 import { captureMessage } from "../utils/sentry";
 import { MEMBER_PRICE_CODES } from "../config/memberPricing";
+import { getMemberRenewalNotice } from "../services/memberRenewalNoticeService";
 const allowedMemberPriceCodes: ReadonlySet<string> = new Set(MEMBER_PRICE_CODES);
 
 const checkoutSchema = z.object({
@@ -32,6 +33,13 @@ const respondWithError = (res: Response, error: unknown) => {
 
 const hasMemberBillingContext = (req: Request) => {
   return req.user?.role === "member" || req.user?.role === "pro";
+};
+
+export const getRenewalNotice = async (req: Request, res: Response) => {
+  if (!req.user?.dbUserId || !hasMemberBillingContext(req)) return res.status(403).json({ message: "Member billing context required" });
+  res.set("Cache-Control", "no-store");
+  try { return res.json({ notice: await getMemberRenewalNotice(req.user.dbUserId) }); }
+  catch (error) { return respondWithError(res, error); }
 };
 
 export const createMemberCheckout = async (req: Request, res: Response) => {

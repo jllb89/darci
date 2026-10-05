@@ -1,0 +1,82 @@
+[
+  {
+    "number": 1,
+    "kind": "home",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/01-home.svg",
+    "headline": "Make it official.",
+    "photo": {
+      "x": 0,
+      "y": 820,
+      "width": 1320,
+      "height": 705,
+      "asset": "advantages/a1.webp"
+    },
+    "phone_rotation": 0
+  },
+  {
+    "number": 2,
+    "kind": "form",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/02-form.svg",
+    "headline": "Start with what matters.",
+    "photo": null,
+    "phone_rotation": 0
+  },
+  {
+    "number": 3,
+    "kind": "review",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/03-review.svg",
+    "headline": "Know what you\u2019re signing.",
+    "photo": {
+      "x": 0,
+      "y": 820,
+      "width": 1320,
+      "height": 705,
+      "asset": "advantages/a2.webp"
+    },
+    "phone_rotation": 0
+  },
+  {
+    "number": 4,
+    "kind": "sign",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/04-sign.svg",
+    "headline": "Your signature. Your choice.",
+    "photo": null,
+    "phone_rotation": 0
+  },
+  {
+    "number": 5,
+    "kind": "notary",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/05-notary.svg",
+    "headline": "A real notary. In person.",
+    "photo": {
+      "x": 0,
+      "y": 820,
+      "width": 1320,
+      "height": 705,
+      "asset": "cta/cta3.webp"
+    },
+    "phone_rotation": 0
+  },
+  {
+    "number": 6,
+    "kind": "complete",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/06-complete.svg",
+    "headline": "Your documents. All together.",
+    "photo": null,
+    "phone_rotation": 0
+  },
+  {
+    "number": 7,
+    "kind": "verify",
+    "file": "/Users/jorge/Desktop/darci/docs/design/app-store-moodboard/moodboard-revision/07-verify.svg",
+    "headline": "Proof you can share.",
+    "photo": {
+      "x": 0,
+      "y": 820,
+      "width": 1320,
+      "height": 705,
+      "asset": "cta/cta2.webp"
+    },
+    "phone_rotation": 0
+  }
+]

@@ -1,6 +1,27 @@
 import XCTest
 @testable import DARCiMobile
 
+final class MemberRenewalNoticeTests: XCTestCase {
+    func testDecodesUpcomingReminderAndIgnoresAdditionalServerFields() throws {
+        let json = #"{"notice":{"id":"sub:discount:1","kind":"discount_ending","chargeAt":"2099-10-08T12:00:00.000Z","title":"Your promotional pricing is ending","message":"Review membership.","estimatedAmountCents":999,"currency":"USD"}}"#
+        let result = try JSONDecoder().decode(MemberRenewalNoticeResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(result.notice?.kind, "discount_ending")
+        XCTAssertEqual(result.notice?.isUpcoming, true)
+    }
+
+    func testExpiredAndMalformedDatesDoNotPresentReminder() {
+        for date in ["2020-01-01T00:00:00.000Z", "invalid"] {
+            let notice = MemberRenewalNotice(id: "test", kind: "trial_ending", chargeAt: date, title: "Trial ending", message: "Test")
+            XCTAssertFalse(notice.isUpcoming)
+        }
+    }
+
+    func testNoReminderResponseIsValid() throws {
+        let result = try JSONDecoder().decode(MemberRenewalNoticeResponse.self, from: Data(#"{"notice":null}"#.utf8))
+        XCTAssertNil(result.notice)
+    }
+}
+
 #if canImport(UIKit)
 import UIKit
 #endif
