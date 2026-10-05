@@ -80,7 +80,7 @@ const splitRequests = (requests: NotaryQueueRequestSummary[]) => {
   } satisfies Record<QueueTab, NotaryQueueRequestSummary[]>;
 };
 
-function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
+export function RequestRow({ request, tab }: { request: NotaryQueueRequestSummary; tab: QueueTab }) {
   const memberName = request.owner?.displayName ?? request.owner?.email ?? "Member pending";
   const queueStatus = resolveQueueStatus(request);
   const rowStatus = formatStatusLabel(queueStatus);
@@ -89,11 +89,8 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
   const finalizationStatus = formatStatusLabel(request.finalization.latestStatus);
   const nextAction = request.nextAction ? formatStatusLabel(request.nextAction) : null;
 
-  return (
-    <Link
-      className="grid gap-3 px-3 py-4 text-sm transition hover:bg-Color-Neutral-Lightest lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.5fr)_minmax(12rem,0.7fr)]"
-      href={`/app/notary/requests/${encodeURIComponent(request.request.id)}`}
-    >
+  const rowContent = (
+    <>
       <div className="min-w-0">
         <div className="truncate font-medium text-Color-Scheme-1-Text">{memberName}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -120,6 +117,21 @@ function RequestRow({ request }: { request: NotaryQueueRequestSummary }) {
         <div className="truncate text-xs text-Color-Neutral">Submitted {formatDateTime(request.request.submittedAt)}</div>
         <div className="mt-1 truncate text-xs text-Color-Neutral">Anchored {formatDateTime(request.finalization.anchoredAt)}</div>
       </div>
+    </>
+  );
+
+  const rowClassName = "grid gap-3 px-3 py-4 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(10rem,0.5fr)_minmax(12rem,0.7fr)]";
+
+  if (tab === "completed") {
+    return <div className={rowClassName}>{rowContent}</div>;
+  }
+
+  return (
+    <Link
+      className={`${rowClassName} transition hover:bg-Color-Neutral-Lightest`}
+      href={`/app/notary/requests/${encodeURIComponent(request.request.id)}`}
+    >
+      {rowContent}
     </Link>
   );
 }
@@ -238,7 +250,7 @@ export default function NotaryHomePage() {
             </div>
             <div className="divide-y divide-Color-Scheme-1-Border/20">
               {visibleRequests.map((request) => (
-                <RequestRow key={request.request.id} request={request} />
+                <RequestRow key={request.request.id} request={request} tab={activeTab} />
               ))}
             </div>
           </div>
