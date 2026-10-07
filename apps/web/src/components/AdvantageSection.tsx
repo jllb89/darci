@@ -8,7 +8,7 @@ const advantageItems = [
     label: "Notarize",
     title: "Digital original",
     description:
-      "Members get documents notarized in hours instead of days. Notaries handle more work without burning out.",
+      "Prepare your documents and signatures digitally, then meet your notary for the required in-person acknowledgment.",
     image: "/images/advantages/a1.webp",
   },
   {
@@ -21,10 +21,10 @@ const advantageItems = [
   },
   {
     index: "03",
-    label: "Anchor",
+    label: "Record",
     title: "Proof that lasts",
     description:
-      "Members complete notarization faster. Notaries handle more volume without exhaustion. The work moves at a pace that feels natural, not rushed.",
+      "Keep the finalized document together with its recorded integrity evidence and public verification link.",
     image: "/images/advantages/a3.webp",
   },
   {
@@ -47,14 +47,29 @@ export default function AdvantageSection() {
           <div className="text-Color-Scheme-1-Text text-base font-regular font-sans leading-6">
             Advantage
           </div>
-          <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
+          <h2 className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
             Why DARCi wins
-          </div>
+          </h2>
           <div className="text-Color-Scheme-1-Text text-base font-medium font-sans leading-6">
             Speed without sacrificing legal rigor
           </div>
         </div>
-        <div className="flex min-h-[800px] flex-col overflow-hidden  lg:h-[620px] lg:flex-row">
+        <div className="space-y-3 lg:hidden">
+          {advantageItems.map((item, idx) => (
+            <details key={item.label} open={idx === 0} className="group min-w-0 bg-Green-Secondary p-6">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 font-display text-2xl [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-offset-4">
+                <span className="min-w-0 [overflow-wrap:anywhere]">{item.index} · {item.label}</span>
+                <span aria-hidden="true" className="shrink-0 group-open:rotate-45">+</span>
+              </summary>
+              <div className="space-y-6 pt-6">
+                <h3 className="font-display text-3xl font-medium leading-tight">{item.title}</h3>
+                <p className="text-sm leading-6">{item.description}</p>
+                <img className="aspect-[4/3] w-full object-cover" src={item.image} alt="" />
+              </div>
+            </details>
+          ))}
+        </div>
+        <div className="hidden overflow-hidden lg:flex lg:h-[620px]">
           {advantageItems.map((item, idx) => {
             const isOpen = activeIndex === idx;
 
@@ -62,11 +77,12 @@ export default function AdvantageSection() {
               <button
                 key={item.label}
                 type="button"
+                aria-expanded={isOpen}
                 onClick={() => setActiveIndex(idx)}
                 onPointerEnter={() => setActiveIndex(idx)}
                 onFocus={() => setActiveIndex(idx)}
                 onPointerDown={() => setActiveIndex(idx)}
-                className={`flex w-full min-w-0 items-stretch bg-Green-Secondary text-left transition-[flex] duration-700 lg:h-full lg:w-auto ${
+                className={`flex w-full min-w-0 items-stretch bg-Green-Secondary text-left transition-[flex] duration-700 motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-4 lg:h-full lg:w-auto ${
                   idx < advantageItems.length - 1
                     ? "lg:border-r lg:border-Color-Neutral-Darker/40"
                     : ""
@@ -91,7 +107,7 @@ export default function AdvantageSection() {
                   aria-hidden={!isOpen}
                 >
                   <div className="max-w-[520px] space-y-6">
-                    <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-[52.8px] tracking-wide md:text-5xl">
+                    <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-[52.8px] md:text-5xl">
                       {item.title}
                     </div>
                     <div className="text-Color-Scheme-1-Text text-sm font-regular font-sans leading-6">

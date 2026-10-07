@@ -1,5 +1,17 @@
 # DARCi Production Readiness Roadmap
 
+**October 7 — public production network access deployed:** Jorge approved opening
+both `app.illuminotary.com` and `api.illuminotary.com`. Normal app/client API access
+no longer depends on tester IPs; internal and diagnostic routes remain restricted.
+Authentication, document permissions, admin controls, enforced billing, WAF,
+signup and payment configuration are unchanged. **114 infrastructure tests passed**;
+live sign-in/readiness, 401 authentication rejection, CORS, HTTPS redirect and
+unknown-host denial checks passed. CloudFormation completed and temporary release
+permissions were removed. This supersedes historical private-network statements
+below, not signup or payment settings. No new TestFlight build is needed for this
+network-only change. Off-network device confirmation remains a user-side check.
+[Scope, evidence and rollback](production-public-access-2026-10-07.md).
+
 **October 5 — phone and email linking repair:** the production web SMS incident
 was a closed-signup rejection for a profile-only phone, before SMS handoff. The
 repair preserves closed signup, verifies SMS ownership before asking for the

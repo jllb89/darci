@@ -1,5 +1,12 @@
 # Private-production tester network access — 24 September 2026
 
+**Superseded for normal app access on 7 October:** public app/client API network
+access is now deployed. Testers no longer need an approved IP to reach the web app
+or production mobile API. Existing IP rules remain for operational access;
+account authorization and signup settings are unchanged. Public HTTP now redirects
+to HTTPS. The dated configuration below is historical, not the current access
+restriction. See [current scope and verification](production-public-access-2026-10-07.md).
+
 Deployed and verified at 17:48 UTC. CloudFormation completed successfully; exact live listener-rule readback passed.
 
 | Tester | Approved public IPv4 addresses |

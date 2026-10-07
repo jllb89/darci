@@ -1,568 +1,162 @@
+import Link from "next/link";
 import AdvantageSection from "@/components/AdvantageSection";
+import LandingIcon from "@/components/LandingIcon";
 import Navbar from "@/components/Navbar";
 import PricingSection from "@/components/PricingSection";
+
+const essentials = [
+  { icon: "document", title: "Digital original", body: "Create, sign, and keep your documents digitally." },
+  { icon: "send", title: "Send codes, not files", body: "Recipients get secure access without email attachments." },
+  { icon: "verify", title: "Verified by ID, checked anytime", body: "Check the finalized document against its recorded SHA-256 fingerprint." },
+  { icon: "seal", title: "Illuminotary seals the record", body: "A commissioned notary confirms identity and intent in person." },
+] as const;
+
+const workflow = [
+  { icon: "upload", title: "Choose your product or upload your documents", body: "Create a Trust package or POA, or upload a document for notarization." },
+  { icon: "identifier", title: "Review your documents and unique document ID", body: "Check the information before continuing. Uploaded-document signatures are optional." },
+  { icon: "signature", title: "Sign and meet your illuminotary", body: "Complete any required signatures, choose a notary, and arrange your in-person session." },
+  { icon: "globe", title: "Verify the completed record", body: "Once finalized, share the public verification link to check the document's integrity." },
+] as const;
+
+const faqs = [
+  { question: "What is IPEN acknowledgment?", answer: "IPEN is in-person electronic notarization. You meet with a notary to confirm identity and intent, while DARCi supports the digital document and acknowledgment workflow." },
+  { question: "How does document verification work?", answer: "After notarization, DARCi records a SHA-256 fingerprint of the finalized document. Verification checks whether a file matches those recorded bytes. This launch does not use an external ledger; a matching hash is an integrity check, not independent proof of identity or legal validity." },
+  { question: "Is DARCi legally compliant?", answer: "DARCi supports jurisdiction-specific in-person electronic notarization workflows. Availability and requirements depend on the jurisdiction and document. Your notary reviews the applicable requirements; a digital integrity record alone does not establish legal validity." },
+  { question: "How long does illuminotarization take?", answer: "Timing depends on document preparation, signatures, notary availability, and your in-person appointment. After the notary completes the session, DARCi processes the final package and records its integrity evidence." },
+  { question: "Can anyone verify my documents?", answer: "You can share a public verification link for a finalized document. The verification record describes its status and recorded integrity evidence; a matching hash alone does not establish legal validity." },
+];
+
+const headingClass = "font-display text-4xl font-medium leading-tight [overflow-wrap:anywhere] md:text-5xl";
+const focusClass = "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-current";
+
+function CallToAction({ image, title, body, white = false }: { image: string; title: string; body: string; white?: boolean }) {
+  return (
+    <section className="relative bg-black bg-cover bg-center px-6 py-20 md:px-16 md:py-28" style={{ backgroundImage: `url('${image}')` }}>
+      <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+      <div className="relative mx-auto flex max-w-[1280px] flex-col gap-12 text-white lg:flex-row lg:gap-20">
+        <h2 className={`min-w-0 flex-1 ${headingClass}`}>{title}</h2>
+        <div className="min-w-0 flex-1 space-y-8">
+          <p className="text-base leading-6">{body}</p>
+          <Link href="/start" className={`inline-flex min-h-12 items-center gap-3 px-6 py-3 text-sm font-medium text-black ${focusClass} ${white ? "bg-white" : "bg-Green"}`}>
+            Get started <LandingIcon name="arrow" className="h-5 w-5" />
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function Home() {
   return (
     <div className="w-full bg-Color-Neutral-Lightest text-Color-Scheme-1-Text">
-      <div className="w-full">
-        <Navbar showLogout={false} />
-
-        <div
-          className="relative w-full bg-black/40 bg-cover bg-center px-6 py-24 md:px-24 md:py-48"
-          style={{
-            backgroundImage: "url('/images/hero/hero.webp')",
-          }}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative mx-auto flex w-full max-w-[1280px] flex-col gap-16">
-            <div className="flex flex-col gap-12 lg:flex-row lg:items-stretch lg:gap-20">
-              <div className="flex-1 space-y-8">
-                <div
-                  className="font-display"
-                  style={{
-                    color: "#ffffff",
-                    fontSize: "3rem",
-                    fontStyle: "light",
-                    fontWeight: 400,
-                    lineHeight: "120%",
-                    /* letterSpacing: "-0.1575rem", */
-                  }}
-                >
-                  Introducing illuminotarization: Notarization that moves at your speed.
-                </div>
-                <div className="flex flex-wrap items-start gap-4">
-                  <div
-                    data-alternate="True"
-                    data-icon-position="No icon"
-                    data-small="False"
-                    data-style="Primary"
-                    className="flex items-center gap-2 bg-Green px-6 py-3"
-                  >
-                    <div className="text-Color-Neutral-Darkest text-sm font-medium font-sans leading-6">
-                      Get started
-                    </div>
-                  </div>
-                  <div
-                    data-alternate="True"
-                    data-icon-position="No icon"
-                    data-small="False"
-                    data-style="Secondary"
-                    className="flex items-center gap-2 bg-white/20 px-6 py-3"
-                  >
-                    <div className="text-Color-White text-sm font-medium font-sans leading-6">
-                      Learn more
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="flex-1 flex flex-col justify-end">
-                <div className="text-Color-White text-body-400">
-                  Notarization simplified. Create, sign, verify, and authenticate documents without the wait.
-                </div>
+      <Navbar showLogout={false} />
+      <main id="main-content">
+        <section className="relative bg-black bg-cover bg-center px-6 py-24 md:px-24 md:py-48" style={{ backgroundImage: "url('/images/hero/hero.webp')" }}>
+          <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+          <div className="relative mx-auto flex max-w-[1280px] flex-col gap-12 text-white lg:flex-row lg:items-end lg:gap-20">
+            <div className="min-w-0 flex-1 space-y-8">
+              <h1 className="font-display text-4xl font-normal leading-[1.2] [overflow-wrap:anywhere] md:text-5xl">Introducing illuminotarization: Notarization that moves at your speed.</h1>
+              <div className="flex flex-wrap gap-4">
+                <Link href="/start" className={`inline-flex min-h-12 items-center bg-Green px-6 py-3 text-sm font-medium text-black ${focusClass}`}>Get started</Link>
+                <a href="#features" className={`inline-flex min-h-12 items-center bg-white/20 px-6 py-3 text-sm font-medium ${focusClass}`}>Learn more</a>
               </div>
             </div>
+            <p className="min-w-0 flex-1 text-base leading-6">Notarization simplified. Create, sign, verify, and authenticate documents with a guided digital workflow and an in-person notary session.</p>
           </div>
-        </div>
+        </section>
 
-        <div className="w-full bg-Color-Neutral-Lightest px-6 py-20 md:px-16 md:py-28">
-          <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-20">
+        <section id="features" className="scroll-mt-24 px-6 py-20 md:px-16 md:py-28">
+          <div className="mx-auto flex max-w-[1280px] flex-col gap-16">
             <div className="flex flex-col gap-10 lg:flex-row lg:gap-20">
-              <div className="flex-1 space-y-4">
-                <div className="text-Color-Scheme-1-Text text-base font-regular font-sans leading-6">
-                  Essentials
-                </div>
-                <div
-                  className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]"
-                  style={{ letterSpacing: "-0.1rem" }}
-                >
-                  The mechanics that make illuminotarization work.
-                </div>
+              <div className="min-w-0 flex-1 space-y-4">
+                <p className="text-base leading-6">Essentials</p>
+                <h2 className={headingClass}>The mechanics that make illuminotarization work.</h2>
               </div>
-              <div className="flex-1 text-Color-Scheme-1-Text text-body-400">
-                DARCI strips away the friction. You get a notary&apos;s seal and a
-                document that holds up in court, but without the waiting room and
-                the paperwork shuffle.
-              </div>
+              <p className="min-w-0 flex-1 text-base leading-6">DARCi brings document preparation, signatures, and in-person notarization together. Your notary reviews the requirements for your document and jurisdiction.</p>
             </div>
-            <div className="flex flex-col">
-              <div className="flex flex-col border-t border-Color-Scheme-1-Border lg:flex-row">
-                {[
-                  {
-                    title: "Digital original",
-                    body: "No paper, printer, pens, or scans.",
-                  },
-                  {
-                    title: "Send codes, not files",
-                    body: "Recipients get secure access without email attachments",
-                  },
-                  {
-                    title: "Verified by ID, checked anytime",
-                    body: "Public endpoint confirms authenticity in seconds",
-                  },
-                  {
-                    title: "Illuminotary seals the record",
-                    body: "Commissioned notary confirms identity and intent.",
-                  },
-                ].map((item, index) => (
-                  <div
-                    key={item.title}
-                    className={`flex-1 border-Color-Scheme-1-Border px-4 py-8 ${
-                      index < 3 ? "lg:border-r" : ""
-                    }`}
-                  >
-                    <div className="flex flex-col gap-6">
-                      <div className="relative h-12 w-12 overflow-hidden">
-                        <div className="absolute left-[6px] top-[4px] h-10 w-9 bg-Color-Scheme-1-Text" />
-                      </div>
-                      <div className="flex flex-col gap-4">
-                        <div className="text-Color-Scheme-1-Text text-2xl font-medium font-display leading-10 tracking-tight md:text-3xl">
-                          {item.title}
-                        </div>
-                        <div className="text-Color-Scheme-1-Text text-base font-normal font-roboto leading-6">
-                          {item.body}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="grid border-t border-Color-Scheme-1-Border sm:grid-cols-2 lg:grid-cols-4">
+              {essentials.map((item, index) => (
+                <article key={item.title} className={`min-w-0 space-y-6 px-4 py-8 ${index < 3 ? "lg:border-r lg:border-Color-Scheme-1-Border" : ""}`}>
+                  <LandingIcon name={item.icon} />
+                  <h3 className="font-display text-2xl font-medium leading-tight md:text-3xl">{item.title}</h3>
+                  <p className="text-base leading-6">{item.body}</p>
+                </article>
+              ))}
             </div>
-            <div className="flex items-center gap-6">
-              <div
-                data-alternate="False"
-                data-icon-position="Trailing"
-                data-small="False"
-                data-style="Link"
-                className="flex items-center gap-2 overflow-hidden"
-              >
-                <div className="text-Color-Neutral-Darkest text-base font-medium font-sans leading-6">
-                  start right now
-                </div>
-                <img
-                  src="/icons/navbar/body/chevron-right.svg"
-                  alt=""
-                  className="h-3 w-3"
-                />
-              </div>
-            </div>
+            <Link href="/start" className={`inline-flex min-h-11 w-fit items-center gap-2 text-base underline underline-offset-4 ${focusClass}`}>
+              Start right now <LandingIcon name="arrow" className="h-5 w-5" />
+            </Link>
           </div>
-        </div>
+        </section>
 
-        <div
-          className="relative w-full bg-black/40 bg-cover bg-center px-6 py-20 md:px-16 md:py-28"
-          style={{
-            backgroundImage:
-              "url('/images/cta/cta1.webp')",
-          }}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative mx-auto flex w-full max-w-[1280px] flex-col gap-12 lg:flex-row lg:gap-20">
-            <div className="flex-1">
-              <div className="text-Color-White text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                Ready to illuminotarize?
-              </div>
-            </div>
-            <div className="flex-1 space-y-8">
-              <div className="text-Color-White text-base font-regular font-sans leading-6">
-                Select one of our products and see how DARCI moves at your speed.
-              </div>
-              <div className="flex flex-wrap items-start gap-4">
-                <div
-                  data-alternate="True"
-                  data-icon-position="No icon"
-                  data-small="False"
-                  data-style="Primary"
-                  className="flex items-center gap-2 bg-Color-White px-6 py-3 outline outline-1 outline-Color-White"
-                >
-                  <div className="text-Color-Neutral-Darkest text-sm font-medium font-sans leading-6">
-                    Get started
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <CallToAction image="/images/cta/cta1.webp" title="Ready to illuminotarize?" body="Select one of our products and see how DARCi moves at your speed." white />
 
-        <div className="w-full bg-Color-Neutral-Lightest px-6 py-20 md:px-16 md:py-28">
-          <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-16">
-            <div className="flex flex-col gap-10 lg:flex-row lg:gap-20">
-              <div className="flex-1 space-y-6">
-                <div className="text-Color-Scheme-1-Text text-base font-regular font-sans leading-6">
-                  Workflow
-                </div>
-                <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                  The illuminotary digital experience.
-                </div>
-              </div>
-              <div className="flex-1 space-y-6">
-                {[
-                  {
-                    title: "Choose your product or upload your documents",
-                    body: "Start from scratch or use what fits",
-                  },
-                  {
-                    title: "DARCI generates your unique document ID",
-                    body: "Your file gets ready for what comes next",
-                  },
-                  {
-                    title: "Add your signature electronically",
-                    body: "The notary needs this before they can proceed",
-                  },
-                  {
-                    title: "Authentication made public",
-                    body:
-                      "By anyone, anywhere, and anytime.",
-                  },
-                ].map((step, index) => (
-                  <div key={step.title} className="flex gap-10">
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="relative h-12 w-12 overflow-hidden">
-                        <div className="absolute left-[6px] top-[4px] h-10 w-9 bg-Color-Scheme-1-Text" />
-                      </div>
-                      {index < 3 ? (
-                        <div className="h-24 w-0 bg-Color-Scheme-1-Border outline outline-Color-Scheme-1-Border" />
-                      ) : null}
-                    </div>
-                    <div className="flex-1 space-y-4">
-                      <div className="text-Color-Scheme-1-Text text-xl font-medium font-display leading-8 tracking-tight">
-                        {step.title}
-                      </div>
-                      <div className="text-Color-Scheme-1-Text text-sm font-regular font-sans leading-6">
-                        {step.body}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        <section id="how-it-works" className="scroll-mt-24 px-6 py-20 md:px-16 md:py-28">
+          <div className="mx-auto flex max-w-[1280px] flex-col gap-10 lg:flex-row lg:gap-20">
+            <div className="min-w-0 flex-1 space-y-6">
+              <p className="text-base leading-6">Workflow</p>
+              <h2 className={headingClass}>The illuminotary digital experience.</h2>
             </div>
+            <ol className="min-w-0 flex-1 space-y-10">
+              {workflow.map((step) => (
+                <li key={step.title} className="flex gap-5 md:gap-10">
+                  <LandingIcon name={step.icon} />
+                  <div className="min-w-0 space-y-4">
+                    <h3 className="font-display text-xl font-medium leading-8">{step.title}</h3>
+                    <p className="text-sm leading-6">{step.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
           </div>
-        </div>
+        </section>
 
         <AdvantageSection />
-
-        <div className="w-full bg-Color-Scheme-1-Background px-6 py-20 md:px-16 md:py-28">
-          <div className="mx-auto flex w-full max-w-[1280px] items-center justify-center">
-            <div className="w-full max-w-[768px] space-y-8 text-center">
-              <div
-                data-alternate="False"
-                data-logo="2"
-                className="relative mx-auto h-12 w-28 overflow-hidden"
-              >
-                <div className="absolute h-5 w-28 bg-Color-Scheme-1-Text" />
-              </div>
-              <div className="text-Color-Scheme-1-Text text-2xl font-medium font-display leading-10 tracking-tight md:text-3xl">
-                &quot;DARCI cut our notarization time in half. My clients get verified
-                documents the same day instead of waiting a week, and I&apos;m not exhausted
-                by the end of my shift.&quot;
-              </div>
-              <div className="mx-auto flex w-72 flex-col items-center gap-4">
-                <img className="h-16 w-16 rounded-full" src="https://placehold.co/64x64" alt="Sarah Mitchell" />
-                <div className="text-Color-Scheme-1-Text text-base font-medium font-sans leading-6">
-                  Sarah Mitchell
-                </div>
-                <div className="text-Color-Scheme-1-Text text-sm font-medium font-sans leading-6">
-                  Notary public, California
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="relative w-full bg-black/40 bg-cover bg-center px-6 py-20 md:px-16 md:py-28"
-          style={{
-            backgroundImage:
-              "url('/images/cta/cta2.webp')",
-          }}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative mx-auto flex w-full max-w-[1280px] flex-col gap-12 lg:flex-row lg:gap-20">
-            <div className="flex-1">
-              <div className="text-Color-White text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                Your illuminotary work starts now
-              </div>
-            </div>
-            <div className="flex-1 space-y-8">
-              <div className="text-Color-White text-base font-regular font-sans leading-6">
-                DARCI strips away the waiting. Sign up today and notarize your first
-                document in minutes, not days. The legal weight stays the same. The
-                speed doesn&apos;t.
-              </div>
-              <div className="flex items-start gap-4">
-                <div
-                  data-alternate="True"
-                  data-icon-position="No icon"
-                  data-small="False"
-                  data-style="Primary"
-                  className="flex items-center gap-2 bg-Green px-6 py-3 outline outline-1 outline-Green"
-                >
-                  <div className="text-Color-Neutral-Darkest text-sm font-medium font-sans leading-6">
-                    Get started
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
+        {/* No testimonial is published until its attribution and permission are confirmed. */}
+        <CallToAction image="/images/cta/cta2.webp" title="Your illuminotary work starts now" body="Prepare your documents digitally, complete the required signatures, and arrange your appointment with a qualified notary." />
         <PricingSection />
+        <CallToAction image="/images/cta/cta3.webp" title="Move faster without compromise" body="DARCi guides the document workflow so you can focus on what matters. Explore membership and start your next document." />
 
-        <div
-          className="relative w-full bg-black/40 bg-cover bg-center px-6 py-20 md:px-16 md:py-28"
-          style={{
-            backgroundImage:
-              "url('/images/cta/cta3.webp')",
-          }}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative mx-auto flex w-full max-w-[1280px] flex-col gap-12 lg:flex-row lg:gap-20">
-            <div className="flex-1">
-              <div className="text-Color-White text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                Move faster without compromise
-              </div>
+        <section id="questions" className="scroll-mt-24 bg-white px-6 py-20 md:px-16 md:py-28">
+          <div className="mx-auto flex max-w-[1280px] flex-col gap-12 lg:flex-row lg:gap-20">
+            <div className="min-w-0 flex-1 space-y-6">
+              <h2 className={headingClass}>Questions</h2>
+              <p className="text-base leading-6">Find answers about DARCi, notarization, and how our platform works.</p>
+              <a href="mailto:support@illuminote.io" className={`inline-flex min-h-12 items-center gap-3 bg-Color-Neutral-Lighter px-6 py-3 text-sm ${focusClass}`}>Contact support <LandingIcon name="arrow" className="h-5 w-5" /></a>
             </div>
-            <div className="flex-1 space-y-8">
-              <div className="text-Color-White text-base font-medium font-sans leading-6">
-                DARCI handles the heavy lifting so you can focus on what matters.
-                Start notarizing today and feel the difference speed and security
-                make.
-              </div>
-              <div className="flex items-start gap-4">
-                <div
-                  data-alternate="True"
-                  data-icon-position="No icon"
-                  data-small="False"
-                  data-style="Primary"
-                  className="flex items-center gap-2 bg-Green px-6 py-3 outline outline-1 outline-Green"
-                >
-                  <div className="text-Color-Neutral-Darkest text-sm font-medium font-sans leading-6">
-                    Get started
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="w-full bg-Color-Scheme-1-Background px-6 py-20 md:px-16 md:py-28">
-          <div className="mx-auto flex w-full max-w-[1280px] flex-col items-center gap-10 text-center">
-            <div className="space-y-6">
-              <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-6xl md:leading-[62.4px]">
-                Stay ahead
-              </div>
-              <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-6xl md:leading-[62.4px]">
-                in digital notarization
-              </div>
-              <div className="text-Color-Scheme-1-Text text-base font-regular font-sans leading-6">
-                Get updates on new features and notarization insights delivered to
-                your inbox
-              </div>
-            </div>
-            <div className="w-full max-w-[520px] space-y-3">
-              <div className="flex flex-col gap-4 sm:flex-row">
-                <div className="flex-1 p-3 outline outline-1 outline-Color-Neutral-Darkest">
-                  <input
-                    className="w-full bg-transparent text-sm font-medium font-sans leading-6 text-black/60 outline-none"
-                    placeholder="Enter your email"
-                    type="email"
-                  />
-                </div>
-                <div className="flex items-center gap-2 bg-Color-Neutral-Darkest px-6 py-3 outline outline-1 outline-Color-Neutral-Darkest">
-                  <div className="text-Color-White text-sm font-medium font-sans leading-6">
-                    Subscribe
-                  </div>
-                </div>
-              </div>
-              <div className="text-Color-Scheme-1-Text text-xs font-medium font-sans leading-5">
-                By subscribing you agree to our terms and privacy policy
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="w-full bg-Color-Scheme-1-Background px-6 py-20 md:px-16 md:py-28">
-          <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-16 lg:flex-row lg:gap-20">
-            <div className="w-full max-w-[500px] space-y-8">
-              <div className="space-y-6">
-                <div className="text-Color-Scheme-1-Text text-4xl font-medium font-display leading-tight md:text-5xl md:leading-[62.4px]">
-                  Questions
-                </div>
-                <div className="text-Color-Scheme-1-Text text-base font-medium font-sans leading-6">
-                  Find answers about DARCI, notarization, and how our platform works
-                </div>
-              </div>
-              <div>
-                <div
-                  data-alternate="False"
-                  data-icon-position="No icon"
-                  data-small="False"
-                  data-style="Secondary"
-                  className="flex items-center gap-2 bg-Color-Neutral-Lighter px-6 py-3"
-                >
-                  <div className="text-Color-Neutral-Darkest text-sm font-medium font-sans leading-6">
-                    Contact us
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex-1 border-b border-Color-Scheme-1-Border/20">
-              {[
-                {
-                  question: "What is IPEN acknowledgment?",
-                  answer:
-                    "IPEN is in-person electronic notarization. It combines face-to-face verification with digital workflows, giving you the legal rigor of traditional notarization without the delays. You meet with a notary to confirm identity and intent, then the process moves entirely digital from there.",
-                },
-                {
-                  question: "How does document verification work?",
-                  answer:
-                    "After notarization, DARCi records a SHA-256 fingerprint of the finalized document. Verification can check whether a file matches those recorded bytes. This launch does not use an external ledger; a matching hash is an integrity check, not independent proof of identity or legal validity.",
-                },
-                {
-                  question: "Is DARCI legally compliant?",
-                  answer:
-                    "DARCi supports jurisdiction-specific in-person electronic notarization workflows. Availability and requirements depend on the jurisdiction and document. Your notary reviews the applicable requirements; a digital integrity record alone does not establish legal validity.",
-                },
-                {
-                  question: "How long does illuminotarization take?",
-                  answer:
-                    "The in-person acknowledgment takes minutes. Once you meet with a notary, the digital workflow completes in seconds. Final processing includes document hashing and integrity verification.",
-                },
-                {
-                  question: "Can anyone verify my documents?",
-                  answer:
-                    "Yes. DARCI includes a public verification endpoint. Anyone with your document can check its authenticity anytime. This gives your clients and partners confidence without requiring them to contact you or use special software.",
-                },
-              ].map((faq) => (
-                <div key={faq.question} className="border-t border-Color-Scheme-1-Border/20 py-5">
-                  <div className="flex items-center gap-6">
-                    <div className="flex-1 text-Color-Scheme-1-Text text-3xl font-medium font-display leading-tight md:text-4xl md:leading-[50.4px]">
-                      {faq.question}
-                    </div>
-                    <div className="relative h-8 w-8 overflow-hidden">
-                      <div className="absolute left-[8.3px] top-[10.94px] h-2 w-4 border border-Color-Scheme-1-Text bg-Color-Scheme-1-Text" />
-                    </div>
-                  </div>
-                  <div className="pb-6 pt-4">
-                    <div className="text-Color-Scheme-1-Text text-sm font-medium font-sans leading-6">
-                      {faq.answer}
-                    </div>
-                  </div>
-                </div>
+            <div className="min-w-0 flex-1 border-b border-Color-Scheme-1-Border">
+              {faqs.map((faq) => (
+                <details key={faq.question} className="group border-t border-Color-Scheme-1-Border py-5">
+                  <summary className={`flex min-h-11 cursor-pointer list-none items-center justify-between gap-6 [&::-webkit-details-marker]:hidden ${focusClass}`}>
+                    <h3 className="min-w-0 font-display text-2xl font-medium leading-tight [overflow-wrap:anywhere] md:text-3xl">{faq.question}</h3>
+                    <LandingIcon name="plus" className="h-6 w-6 transition-transform group-open:rotate-45 motion-reduce:transition-none" />
+                  </summary>
+                  <p className="pt-4 text-sm leading-6">{faq.answer}</p>
+                </details>
               ))}
             </div>
           </div>
-        </div>
+        </section>
+      </main>
 
-        <div className="w-full bg-black px-6 py-16 md:px-16">
-          <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-20">
-            <div className="flex flex-col gap-12 lg:flex-row lg:gap-32">
-              <div className="flex flex-1 items-start">
-                <img
-                  src="/icons/navbar/darci_white.svg"
-                  alt="DARCI"
-                  className="h-5 w-auto"
-                />
-              </div>
-              <div className="flex flex-1 flex-col gap-4">
-                <div className="font-sans text-xs font-light leading-5 text-white/80">
-                  Product
-                </div>
-                {[
-                  "Features",
-                  "How it works",
-                  "Pricing",
-                  "Security",
-                  "Company",
-                ].map((item) => (
-                  <div key={item} className="font-sans text-xs font-light leading-5 text-white/60">
-                    {item}
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-1 flex-col gap-4">
-                <div className="font-sans text-xs font-light leading-5 text-white/80">
-                  About
-                </div>
-                {[
-                  "Blog",
-                  "Contact",
-                ].map((item) => (
-                  <div key={item} className="font-sans text-xs font-light leading-5 text-white/60">
-                    {item}
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-1 flex-col gap-4">
-                <div className="font-sans text-xs font-light leading-5 text-white/80">
-                  Guides
-                </div>
-                {[
-                  "Support",
-                  "Legal",
-                ].map((item) => (
-                  <div key={item} className="font-sans text-xs font-light leading-5 text-white/60">
-                    {item}
-                  </div>
-                ))}
-              </div>
-              <div className="w-full max-w-sm space-y-6">
-                <div className="space-y-4">
-                  <div className="font-sans text-xs font-light leading-5 text-white/80">
-                    Updates
-                  </div>
-                  <div className="font-sans text-xs font-light leading-5 text-white/60">
-                    Get notified when we release new features and improvements.
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="flex flex-col gap-4 sm:flex-row">
-                    <div className="flex-1 bg-white/10 p-3">
-                      <div className="font-sans text-xs font-light leading-5 text-white/45">
-                        your@email.com
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 bg-white px-5 py-3">
-                      <div className="font-sans text-xs font-normal leading-5 text-black">
-                        Subscribe
-                      </div>
-                    </div>
-                  </div>
-                  <div className="font-sans text-xs font-light leading-5 text-white/50">
-                    By subscribing you agree to our Privacy Policy and consent to
-                    receive updates from DARCI.
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-8">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-6 font-sans text-xs font-light leading-5 text-white/55 lg:flex-row">
-                  <span>© 2024 DARCI. All rights reserved.</span>
-                  <div className="flex flex-wrap gap-6">
-                    <span className="underline">Privacy Policy</span>
-                    <span className="underline">Terms of Service</span>
-                    <span className="underline">Cookie Settings</span>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  {[
-                    { label: "Facebook", src: "/footer/Facebook.svg" },
-                    { label: "Instagram", src: "/footer/Instagram.svg" },
-                    { label: "LinkedIn", src: "/footer/LinkedIn.svg" },
-                    { label: "X", src: "/footer/X.svg" },
-                    { label: "YouTube", src: "/footer/Youtube.svg" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex h-6 w-6 items-center justify-center opacity-70">
-                      <img src={item.src} alt={item.label} className="h-5 w-5" />
-                    </div>
-                  ))}
-                </div>
-              </div>
+      <footer className="bg-black px-6 py-16 text-white md:px-16">
+        <div className="mx-auto max-w-[1280px] space-y-12">
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+            <Link href="/" aria-label="DARCi home" className={`w-fit ${focusClass}`}><img src="/icons/navbar/darci_white.svg" alt="DARCi" className="h-5 w-auto" /></Link>
+            <nav aria-label="Footer product navigation" className="flex flex-col items-start gap-2 text-sm">
+              <p className="mb-2 text-white/60">Product</p>
+              {[{label:"Features",href:"#features"},{label:"How it works",href:"#how-it-works"},{label:"Pricing",href:"#pricing"},{label:"Questions",href:"#questions"}].map(item => <a key={item.href} href={item.href} className={`inline-flex min-h-11 items-center hover:underline ${focusClass}`}>{item.label}</a>)}
+            </nav>
+            <div id="contact" className="flex min-w-0 scroll-mt-24 flex-col items-start gap-2 text-sm">
+              <p className="mb-2 text-white/60">Get in touch</p>
+              <a href="mailto:support@illuminote.io" className={`inline-flex min-h-11 items-center break-all hover:underline ${focusClass}`}>support@illuminote.io</a>
+              <a href="mailto:incidentreports@illuminote.io" className={`inline-flex min-h-11 flex-col items-start justify-center gap-1 break-all hover:underline ${focusClass}`}><span className="text-xs text-white/60">Report an incident</span>incidentreports@illuminote.io</a>
+              <Link href="/privacy" className={`inline-flex min-h-11 items-center underline underline-offset-4 ${focusClass}`}>Privacy Policy</Link>
             </div>
           </div>
+          <p className="border-t border-white/20 pt-8 text-xs text-white/60">© {new Date().getFullYear()} DARCi. All rights reserved.</p>
         </div>
-      </div>
+      </footer>
     </div>
   );
 }

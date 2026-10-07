@@ -36,11 +36,11 @@ const includedFeatures = [
 
 export default function PricingSection() {
   return (
-    <section className="bg-white px-6 py-24 text-Color-Scheme-1-Text md:px-10 md:py-32" id="pricing">
+    <section className="scroll-mt-24 bg-white px-6 py-24 text-Color-Scheme-1-Text md:px-10 md:py-32" id="pricing">
       <div className="mx-auto max-w-7xl">
         <div className="max-w-3xl">
-          <div className="text-xs font-medium uppercase tracking-[0.18em] text-Color-Neutral">
-            DARCi membership
+          <div className="text-xs font-medium tracking-[0.18em] text-Color-Neutral">
+            DARCi MEMBERSHIP
           </div>
           <h2 className="mt-5 text-4xl font-medium leading-[1.06] tracking-[-0.03em] md:text-6xl">
             One membership. Choose your document allowance.
@@ -107,7 +107,6 @@ export default function PricingSection() {
 
         <p className="mt-8 text-xs leading-5 text-Color-Neutral">
           USD, before applicable taxes. Notary fees are separate. Annual plans retain the same monthly allowance; unused workflows do not roll over. Notaries and invited signees do not pay DARCi.
-          Private-beta Checkout uses Stripe test mode, so no real funds move.
         </p>
       </div>
     </section>

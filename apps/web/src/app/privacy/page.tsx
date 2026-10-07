@@ -17,7 +17,7 @@ const sections = [
   },
   {
     title: "Contact",
-    body: "For privacy questions or account support, contact support@darciregistry.com.",
+    body: "For privacy questions or account support, contact support@illuminote.io. To report an incident, contact incidentreports@illuminote.io.",
   },
 ];
 
@@ -26,8 +26,8 @@ export default function PrivacyPage() {
     <main className="min-h-screen bg-Color-Neutral-Lightest px-6 py-16 text-Color-Scheme-1-Text md:px-12">
       <article className="mx-auto flex w-full max-w-3xl flex-col gap-10">
         <header className="flex flex-col gap-4 border-b border-Color-Scheme-1-Border pb-8">
-          <p className="text-sm font-medium uppercase tracking-[0.08em] text-Color-Neutral-Darkest/70">
-            DARCi Registry
+          <p className="text-sm font-medium tracking-[0.08em] text-Color-Neutral-Darkest/70">
+            DARCi REGISTRY
           </p>
           <h1 className="font-display text-4xl font-medium leading-tight md:text-5xl">
             Privacy Policy
