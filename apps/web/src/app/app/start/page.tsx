@@ -14,6 +14,7 @@ import {
 } from "@/lib/billingPolicy";
 import { HelpTooltip } from "@/app/app/start/HelpTooltip";
 import { readIntakeBootstrapFailure } from "@/app/app/start/intakeBootstrap";
+import { intakeInitializationKey, mergeIntakeConflictAnswers } from "@/app/app/start/intakeInitialization";
 import ProductSelectionBand from "@/app/app/start/ProductSelectionBand";
 import ProcessBand from "@/app/app/start/ProcessBand";
 import { MockDataToggle } from "@/app/app/start/MockDataToggle";
@@ -1068,6 +1069,7 @@ export default function StartDocumentPage() {
   const draftSaveTimerRef = useRef<number | null>(null);
   const draftSaveQueueRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const addressSessionTokensRef = useRef<Record<string, string>>({});
+  const initializedIntakeKeyRef = useRef<string | null>(null);
 
   const syncDraftDocumentId = useCallback((nextDraftDocumentId: string | null) => {
     draftDocumentIdRef.current = nextDraftDocumentId;
@@ -1422,22 +1424,15 @@ export default function StartDocumentPage() {
               latestResponse.ok &&
               latestPayload?.draft
             ) {
-              const mergedFormValues = {
-                ...sanitizeFormValuesRecord(latestPayload.draft.answers),
-                ...snapshot.formValues,
-              };
-              const syncedCurrentFormStep = coerceDraftFormStep(
-                latestPayload.draft.currentStep,
-                snapshot.productFlowMode,
-              );
-
-              setFormValues(mergedFormValues);
-              setCurrentFormStep(syncedCurrentFormStep);
+              const serverValues = sanitizeFormValuesRecord(latestPayload.draft.answers);
+              // A stale autosave must not move the user back to the server's
+              // earlier step or overwrite edits made while this request ran.
+              setFormValues((current) => mergeIntakeConflictAnswers(serverValues, current));
               syncDraftRevision(latestPayload.draft.revision);
               setDraftUpdatedAt(latestPayload.draft.updatedAt);
               lastServerDraftSignatureRef.current = buildDraftSignature(
-                syncedCurrentFormStep,
-                mergedFormValues,
+                coerceDraftFormStep(latestPayload.draft.currentStep, snapshot.productFlowMode),
+                serverValues,
               );
             }
 
@@ -1690,6 +1685,18 @@ export default function StartDocumentPage() {
 
   useEffect(() => {
     if (!accessToken || !selectedProductFlowMode || !selectedJurisdiction) {
+      initializedIntakeKeyRef.current = null;
+      return;
+    }
+
+    const initializationKey = intakeInitializationKey({
+      ownerId: user?.id ?? "",
+      mode: selectedProductFlowMode,
+      jurisdiction: selectedJurisdiction,
+      resumeDocumentId,
+      retryAttempt: intakeLoadAttempt,
+    });
+    if (initializedIntakeKeyRef.current === initializationKey) {
       return;
     }
 
@@ -1707,6 +1714,7 @@ export default function StartDocumentPage() {
       syncDraftDocumentId(null);
       syncDraftRevision(null);
       setDraftUpdatedAt(null);
+      initializedIntakeKeyRef.current = initializationKey;
       return;
     }
 
@@ -1917,6 +1925,7 @@ export default function StartDocumentPage() {
             durationMs: 5000,
           });
         }
+        initializedIntakeKeyRef.current = initializationKey;
       } catch (error) {
         if (!cancelled) {
           setMemberForm(null);
@@ -1956,6 +1965,7 @@ export default function StartDocumentPage() {
     showToast,
     syncDraftDocumentId,
     syncDraftRevision,
+    user?.id,
   ]);
 
   useEffect(() => {

@@ -185,6 +185,7 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     var reviewProductFlowMode = "poa_only"
     var reviewDocumentType = "poa_document"
     var failsResave = false
+    var failsIntakeSubmitWithConflict = false
     var signingStatus = "pending_signature"
     var availableNotaryCount = 1
 
@@ -243,7 +244,10 @@ struct MockDocumentIntakeAPIClient: DocumentIntakeAPIProviding, Sendable {
     }
 
     func submitDocumentIntakeDraft(documentId: String, request: DocumentIntakeSubmitRequest, accessToken: String) async throws -> DocumentIntakeSubmitResponse {
-        DocumentIntakeSubmitResponse(
+        if failsIntakeSubmitWithConflict {
+            throw AuthAPIError.unexpectedStatus(statusCode: 409, message: "Draft revision mismatch")
+        }
+        return DocumentIntakeSubmitResponse(
             draft: DocumentIntakeDraft(
                 documentId: documentId,
                 ownerId: "user-1",

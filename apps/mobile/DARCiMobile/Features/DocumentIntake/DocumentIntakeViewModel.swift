@@ -1102,7 +1102,15 @@ final class DocumentIntakeViewModel: ObservableObject {
             draftNotice = "Intake submitted. Review is next."
         } catch AuthAPIError.unexpectedStatus(let statusCode, _) where statusCode == 409 {
             if let documentId {
-                await reloadDraftAfterConflict(documentId: documentId, accessToken: accessToken)
+                await reloadDraftAfterConflict(
+                    documentId: documentId,
+                    accessToken: accessToken,
+                    preservingAnswers: submitAnswers,
+                    preferredStep: submitStep
+                )
+                if errorMessage == nil {
+                    errorMessage = "Your draft changed while submitting. Your answers are preserved. Tap Continue to try again."
+                }
             } else {
                 errorMessage = "Draft changed elsewhere. Try continuing again."
             }

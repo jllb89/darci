@@ -1879,6 +1879,68 @@ final class DARCiMobileTests: XCTestCase {
     }
 
     @MainActor
+    func testPOASubmissionConflictPreservesFinalStepAndUnsavedAnswers() async {
+        let staleDraft = DocumentIntakeDraft(
+            documentId: "document-1", ownerId: "user-1", productFlowMode: "poa_only",
+            jurisdiction: "CA", currentStep: "general_information",
+            rulesSnapshotVersion: DocumentIntakeViewModel.rulesSnapshotVersion,
+            answers: [:], canonicalAnswers: nil, revision: 5, createdAt: nil, updatedAt: nil
+        )
+        let viewModel = DocumentIntakeViewModel(apiClient: MockDocumentIntakeAPIClient(
+            resumedDraft: staleDraft, failsIntakeSubmitWithConflict: true
+        ))
+        let session = makeAuthSession()
+        await viewModel.start(modeKey: "poa_only", session: session)
+        await viewModel.continueTapped(session: session)
+        viewModel.principal.fullLegalName = "Test Principal"
+        viewModel.principal.addressLine1 = "123 Example Street"
+        viewModel.principal.contact.email = "principal@example.com"
+        viewModel.principal.contact.phone = "4155550123"
+        await viewModel.continueTapped(session: session)
+        viewModel.agent.fullLegalName = "Test Agent"
+        viewModel.agent.addressLine1 = "456 Example Street"
+        viewModel.agent.contact.email = "agent@example.com"
+        viewModel.agent.contact.phone = "4155550456"
+        await viewModel.continueTapped(session: session)
+        viewModel.selectedAgentSignatureAuthority = viewModel.agentSignatureAuthorityOptions.first?.id ?? "jointly"
+        viewModel.selectAllAuthorityScopes()
+        viewModel.specialInstructions = "Preserve these unsaved final instructions."
+        XCTAssertEqual(viewModel.step, .authority)
+        XCTAssertTrue(viewModel.canContinue)
+
+        await viewModel.continueTapped(session: session)
+
+        XCTAssertEqual(viewModel.step, .authority)
+        XCTAssertEqual(viewModel.principal.fullLegalName, "Test Principal")
+        XCTAssertEqual(viewModel.agent.fullLegalName, "Test Agent")
+        XCTAssertEqual(viewModel.specialInstructions, "Preserve these unsaved final instructions.")
+        XCTAssertTrue(viewModel.canContinue)
+        XCTAssertFalse(viewModel.isSubmitted)
+        XCTAssertNil(viewModel.submittedDocumentId)
+        XCTAssertTrue(viewModel.errorMessage?.contains("answers are preserved") == true)
+    }
+
+    @MainActor
+    func testPOASessionRefreshDoesNotRestartCompletedForm() async {
+        let viewModel = DocumentIntakeViewModel(apiClient: MockDocumentIntakeAPIClient())
+        let session = makeAuthSession()
+        await viewModel.start(modeKey: "poa_only", session: session)
+        await viewModel.continueTapped(session: session)
+        viewModel.principal.fullLegalName = "Test Principal"
+        viewModel.specialInstructions = "Keep my current edits."
+        let refreshedSession = AuthSession(
+            accessToken: "refreshed-token", refreshToken: session.refreshToken,
+            user: session.user
+        )
+
+        await viewModel.start(modeKey: "poa_only", session: refreshedSession)
+
+        XCTAssertEqual(viewModel.step, .principal)
+        XCTAssertEqual(viewModel.principal.fullLegalName, "Test Principal")
+        XCTAssertEqual(viewModel.specialInstructions, "Keep my current edits.")
+    }
+
+    @MainActor
     func testIndependentPOAIncludesSpecialInstructionsInDraftAnswers() async throws {
         let viewModel = DocumentIntakeViewModel(apiClient: MockDocumentIntakeAPIClient())
 
