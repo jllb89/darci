@@ -11,12 +11,14 @@ let checks=0;
 try {
   await db.query('begin');
   await db.query(readFileSync(new URL('../../supabase/migrations/20261013215749_app_review_document_allowance.sql',import.meta.url),'utf8'));
+  await db.query(readFileSync(new URL('../../supabase/migrations/20261013221517_app_review_direct_api_isolation.sql',import.meta.url),'utf8'));
   for(const role of ['anon','authenticated']){
     const {rows}=await db.query("select has_function_privilege($1,'public.consume_app_review_document_workflow(uuid,uuid,uuid,text,text,text,uuid)','EXECUTE') ok",[role]);
     assert.equal(rows[0].ok,false);checks++;
   }
-  const u=randomUUID(),auth=randomUUID(),a=randomUUID(),e=randomUUID(),other=randomUUID();
-  await db.query("insert into public.users(id,supabase_user_id,email,status) values($1,$2,'apple-review@illuminotary.com','active'),($3,$4,'isolated-review-other@example.invalid','active')",[u,auth,other,randomUUID()]);
+  const u=randomUUID(),auth=randomUUID(),a=randomUUID(),e=randomUUID(),other=randomUUID(),otherAuth=randomUUID();
+  await db.query("insert into public.users(id,supabase_user_id,email,status) values($1,$2,'apple-review@illuminotary.com','active'),($3,$4,'isolated-review-other@example.invalid','active')",[u,auth,other,otherAuth]);
+  await db.query("insert into public.notary_profiles(user_id,metadata) values($1,'{\"synthetic\":true}')",[u]);
   await db.query("insert into public.billing_accounts(id,owner_user_id,is_default,metadata) values($1,$2,true,$3)",[a,u,JSON.stringify({source:'app_review',auth_id:auth})]);
   await db.query("insert into public.billing_entitlements(id,billing_account_id,owner_user_id,entitlement_type,status,quantity_total,starts_at,ends_at,metadata) values($1,$2,$3,'document_workflow_capacity','active',25,now()-interval '1 hour',now()+interval '29 days','{\"source\":\"app_review\"}')",[e,a,u]);
   const doc=async owner=>{const id=randomUUID();await db.query("insert into public.documents(id,owner_id,document_type,jurisdiction,status) values($1,$2,'poa','US-CA','draft')",[id,owner]);return id;};
@@ -43,6 +45,14 @@ try {
   await db.query('reset role');
   const n=(await db.query('select count(*)::int n from public.billing_usage_events where entitlement_id=$1',[e])).rows[0].n;
   assert.equal(n,25);checks++;
+  await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:auth,role:'authenticated',email:'apple-review@illuminotary.com',app_metadata:{app_review:{version:1}}})]);
+  await db.query('set local role authenticated');
+  assert.equal((await db.query('select id from public.users where id=$1',[u])).rowCount,0);checks++;
+  assert.equal((await db.query("update public.users set status='active' where id=$1",[u])).rowCount,0);checks++;
+  assert.equal((await db.query("update public.notary_profiles set commission_number='NOT_A_REAL_COMMISSION' where user_id=$1",[u])).rowCount,0);checks++;
+  await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:otherAuth,role:'authenticated',email:'isolated-review-other@example.invalid',user_metadata:{app_review:true}})]);
+  assert.equal((await db.query('select id from public.users where id=$1',[other])).rowCount,1);checks++;
+  await db.query('reset role');
   await db.query('rollback');
   console.log(JSON.stringify({passed:true,checks,rolledBack:true,providerCalls:0,scope:'Service-only grant, ownership, deadline, drift/idempotency and 25-document limit'}));
 }finally{await db.query('rollback');await db.end();}

@@ -11,7 +11,8 @@ const source=JSON.parse(aws('secretsmanager','get-secret-value','--secret-id','/
 assert.equal(source.SUPABASE_URL,'https://jdrgluisxhgegdsesman.supabase.co');
 const url=new URL(source.DATABASE_URL);url.hostname='aws-0-us-east-1.pooler.supabase.com';url.username='postgres.jdrgluisxhgegdsesman';url.port='5432';url.search='';
 const db=new Client({connectionString:url.toString(),ssl:{rejectUnauthorized:true,ca:readFileSync('infra/recovery/supabase-ca.crt','utf8')},connectionTimeoutMillis:15000});
-const version='20261013215749',name='app_review_document_allowance';
+const isolation=process.argv.includes('--direct-api-isolation');
+const version=isolation?'20261013221517':'20261013215749',name=isolation?'app_review_direct_api_isolation':'app_review_document_allowance';
 const sql=readFileSync(`supabase/migrations/${version}_${name}.sql`,'utf8');
 try{
   await db.connect();
@@ -32,7 +33,7 @@ try{
     await db.query("notify pgrst,'reload schema'");await db.query('commit');
     const report={at:new Date().toISOString(),version,applied:true,rehearsed:true,securityInvoker:true,
       onlyServiceRoleCanExecute:true,paidBillingFunctionUnchanged:true,sqlSha256:createHash('sha256').update(sql).digest('hex')};
-    writeFileSync('.recovery-private/apple-review-2026-10-13/migration-receipt.json',JSON.stringify(report,null,2),{mode:0o600});
+    writeFileSync(`.recovery-private/apple-review-2026-10-13/migration-${version}.json`,JSON.stringify(report,null,2),{mode:0o600});
     console.log(JSON.stringify(report));
   }
 }catch(e){await db.query('rollback').catch(()=>{});console.error(JSON.stringify({failed:true,code:e.code??'assertion',reason:'Review migration stopped; sensitive connection details omitted'}));process.exitCode=1;}
