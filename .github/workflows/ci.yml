@@ -93,6 +93,7 @@ jobs:
           node backend/scripts/test-phase1-auth-session-api.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
           node backend/scripts/test-phone-link-local.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
           node backend/scripts/test-phase1-billing-sql.mjs --confirm-isolated
+          node backend/scripts/test-app-review-allowance-sql.mjs --confirm-isolated
           node backend/scripts/test-legacy-reverification-sql.mjs --confirm-isolated
           node backend/scripts/test-phase1-storage-boundary.mjs "$DARCI_SQL_DRILL_ROOT/status.json" --confirm-isolated
       - name: Preserve sanitized bootstrap diagnostics

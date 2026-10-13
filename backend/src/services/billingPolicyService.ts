@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { refreshMemberAllowanceWindow } from "./memberAllowanceWindowService";
+import { getAppReviewConfig } from "../auth/appReviewAccess";
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -357,7 +358,9 @@ export const consumeMemberDocumentWorkflow = async (input: {
     return { transitionHandled: false, decision, usage: null };
   }
 
-  const { data, error } = await supabaseAdmin.rpc("consume_member_document_workflow", {
+  const review = getAppReviewConfig();
+  const { data, error } = await supabaseAdmin.rpc(review?.userId === input.ownerUserId
+    ? "consume_app_review_document_workflow" : "consume_member_document_workflow", {
     p_billing_account_id: decision.billingAccountId,
     p_entitlement_id: decision.entitlementId,
     p_document_id: input.documentId,

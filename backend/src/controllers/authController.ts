@@ -27,6 +27,7 @@ import { sendValidationError } from "../utils/validation";
 import { normalizePhoneForComparison, normalizePhoneForStorage } from "../utils/phone";
 import { reportAuthIssue } from "../telemetry/authTelemetry";
 import { PhoneLinkError, phoneLinkService } from "../services/phoneLinkService";
+import { APP_REVIEW_EMAIL, AppReviewAccessError, createAppReviewSession, isReviewSessionAllowed, requireAppReviewConfig } from "../auth/appReviewAccess";
 
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 const supabaseAnonKey =
@@ -988,6 +989,21 @@ const syncProfileFromAuthUser = async (input: {
   lastNameFallback?: string | null;
   defaultActiveRole?: RuntimeRole | null;
 }) => {
+  if (input.user.app_metadata?.app_review || input.user.email?.toLowerCase() === APP_REVIEW_EMAIL) {
+    const config = requireAppReviewConfig();
+    if (!isReviewSessionAllowed({ sub: input.user.id, email: input.user.email, app_metadata: input.user.app_metadata })) {
+      throw new AppReviewAccessError(403, "App Review access is unavailable or expired.");
+    }
+    const profile = await getUserIdentityContextBySupabaseId(config.authId);
+    if (!profile || profile.id !== config.userId || profile.status !== "active"
+      || !profile.availableRoles.includes("member")
+      || profile.availableRoles.some(role => !["member", "notary"].includes(role))) {
+      throw new AppReviewAccessError(403, "App Review identity is unavailable.");
+    }
+    // Preserve the fictional fixture phone without marking it Auth-verified or
+    // sending anything to it. Also preserve the selected profile across refresh.
+    return profile;
+  }
   const authEmail = getNonBlankString(input.user.email) ?? getNonBlankString(input.emailFallback);
   const authPhone = getNonBlankString(input.user.phone) ?? getNonBlankString(input.phoneFallback);
   const emailConfirmedAt =
@@ -1930,6 +1946,16 @@ export const requestEmailOtp = async (req: Request, res: Response) => {
   const { returnTo } = parsed.data;
   const email = normalizeEmailForAuthAction(parsed.data.email);
   const logContext = buildAuthOtpLogContext(req, { email, returnTo: returnTo ?? null });
+  if (email === APP_REVIEW_EMAIL) {
+    try {
+      requireAppReviewConfig();
+      await recordAuthEvent({ action: "auth.app_review_challenge", metadata: { email } });
+      return res.status(200).json({ status: "ok", otpLength: 8, cooldownSeconds: 60,
+        message: "Enter the App Review access code provided in App Store Connect. No email is sent for this test account." });
+    } catch {
+      return res.status(403).json({ error: "review_access_unavailable", message: "App Review access is unavailable or expired." });
+    }
+  }
   const resendFailureMode = getResendFailureMode();
   const otpEmailSenderConfig = getOtpEmailSenderConfig();
 
@@ -2170,22 +2196,35 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   const email = normalizeEmailForAuthAction(parsed.data.email);
   const token = normalizeOtpToken(parsed.data.token);
   let verificationResult: Awaited<ReturnType<typeof supabasePublic.auth.verifyOtp>>;
+  let reviewProfile: UserIdentityContext | null = null;
 
   try {
-    verificationResult = await supabasePublic.auth.verifyOtp({
-      email,
-      token,
-      type: "magiclink",
-    });
-
-    if (verificationResult.error || !verificationResult.data.session || !verificationResult.data.user) {
+    if (email === APP_REVIEW_EMAIL) {
+      const config = requireAppReviewConfig();
+      const identity = await getUserIdentityContextBySupabaseId(config.authId);
+      if (!identity || identity.id !== config.userId || identity.status !== "active"
+        || !identity.availableRoles.includes("member")
+        || identity.availableRoles.some(role => !["member", "notary"].includes(role))) {
+        throw new AppReviewAccessError(403, "App Review identity is unavailable.");
+      }
+      reviewProfile = identity;
+      verificationResult = await createAppReviewSession(token);
+    } else {
       verificationResult = await supabasePublic.auth.verifyOtp({
-        email,
-        token,
-        type: "email",
+        email, token, type: "magiclink",
       });
+      if (verificationResult.error || !verificationResult.data.session || !verificationResult.data.user) {
+        verificationResult = await supabasePublic.auth.verifyOtp({ email, token, type: "email" });
+      }
     }
   } catch (verifyError) {
+    if (email === APP_REVIEW_EMAIL) {
+      const status = verifyError instanceof AppReviewAccessError ? verifyError.statusCode : 503;
+      await recordAuthEvent({ action: "auth.app_review_rejected", metadata: { email, status } });
+      if (status === 429) res.setHeader("Retry-After", "900");
+      return res.status(status).json({ error: status === 429 ? "rate_limited" : "review_sign_in_failed",
+        message: verifyError instanceof AppReviewAccessError ? verifyError.message : "Review sign-in is temporarily unavailable." });
+    }
     logAuthOtpEvent("warn", "verify_provider_threw", {
       ...buildAuthOtpLogContext(req, { email, returnTo: parsed.data.returnTo ?? null }),
       error: getErrorLogDetails(verifyError),
@@ -2231,7 +2270,7 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
   }
 
   try {
-    const profile = await syncProfileFromAuthUser({
+    const profile = reviewProfile ?? await syncProfileFromAuthUser({
       user: data.user,
       emailFallback: email,
       defaultActiveRole: "member",
@@ -2245,7 +2284,7 @@ export const verifyEmailOtp = async (req: Request, res: Response) => {
     await recordAuthEvent({
       action: authAuditActionNames.otpVerified,
       actorSupabaseId: data.user.id,
-      metadata: { email },
+      metadata: { email, ...(email === APP_REVIEW_EMAIL ? { authentication_method: "app_review_credential" } : {}) },
     });
 
     return res.status(200).json({

@@ -134,6 +134,34 @@ describe("auth controller Phase 1", () => {
     expect(JSON.stringify(response.json.mock.calls)).not.toContain("PRIVATE PROVIDER DETAIL");
   });
 
+  it("starts the dedicated review challenge without delivering mail or generating a normal OTP", async () => {
+    const expiresAt = new Date(Date.now() + 86400000).toISOString();
+    process.env.APP_REVIEW_ACCESS_CONFIG = JSON.stringify({ enabled: true, email: "apple-review@illuminotary.com",
+      authId: "11223344-1111-4111-8111-112233445566", userId: "11223344-2222-4222-8222-112233445566",
+      expiresAt, salt: "ab".repeat(16), codeHash: "ab".repeat(32) });
+    try {
+      const verifyOtp = vi.fn(), generateLink = vi.fn();
+      mocks.createClientMock.mockReturnValue({ auth: { verifyOtp, admin: { generateLink } } });
+      const { requestEmailOtp } = await import("../../src/controllers/authController");
+      const response = buildResponse();
+      await requestEmailOtp({ headers: {}, body: { email: "apple-review@illuminotary.com" },
+        method: "POST", path: "/auth/otp/start" } as unknown as Request, response.res);
+      expect(response.status).toHaveBeenCalledWith(200);
+      expect(response.json).toHaveBeenCalledWith(expect.objectContaining({ otpLength: 8,
+        message: expect.stringContaining("No email is sent") }));
+      expect(generateLink).not.toHaveBeenCalled(); expect(mocks.resendSendMock).not.toHaveBeenCalled();
+    } finally { delete process.env.APP_REVIEW_ACCESS_CONFIG; }
+  });
+
+  it("does not fall back to ordinary OTP for a disabled review credential", async () => {
+    delete process.env.APP_REVIEW_ACCESS_CONFIG;
+    const verifyOtp = vi.fn(); mocks.createClientMock.mockReturnValue({ auth: { verifyOtp } });
+    const { verifyEmailOtp } = await import("../../src/controllers/authController");
+    const response = buildResponse();
+    await verifyEmailOtp({ headers: {}, body: { email: "apple-review@illuminotary.com", token: "12345678" } } as unknown as Request, response.res);
+    expect(response.status).toHaveBeenCalledWith(403); expect(verifyOtp).not.toHaveBeenCalled();
+  });
+
   it("keeps genuinely rejected refresh credentials unauthorized", async()=>{
     mocks.createClientMock.mockReturnValue({auth:{refreshSession:vi.fn().mockResolvedValue({data:{session:null,user:null},error:{status:400,message:"Invalid refresh token"}})}});
     const {refresh}=await import("../../src/controllers/authController");const response=buildResponse();

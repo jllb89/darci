@@ -13,6 +13,8 @@ import { getUserIdentityContextBySupabaseId, normalizeRuntimeRole } from "../ser
 import { reportAuthIssue } from "../telemetry/authTelemetry";
 import { isAuthSessionActive } from "../services/authSessionService";
 import { AuthDependencyError } from "../auth/readAuthDependency";
+import { isReviewSessionAllowed } from "../auth/appReviewAccess";
+import { enforceAppReviewScope } from "./appReviewScope";
 
 const publicPaths = [
   "/health",
@@ -171,6 +173,9 @@ export const requireAuth = async (
       decoded = payload as JwtPayload;
     }
     const isServiceCredential = decoded.role === "service_role";
+    if (!isServiceCredential && !isReviewSessionAllowed(decoded as Record<string, unknown>)) {
+      return res.status(403).json({ error: "review_access_unavailable", message: "App Review access is unavailable or expired." });
+    }
     if (!isServiceCredential && (decoded.role === "anon" || typeof decoded.sub !== "string" || !decoded.sub.trim())) {
       throw new jwt.JsonWebTokenError("An authenticated user subject is required");
     }
@@ -341,6 +346,7 @@ export const requireAuth = async (
     }
 
     req.user = user;
+    if (enforceAppReviewScope(req, res)) return;
   } catch (error) {
     console.warn("Auth token verification failed", {
       path: req.path,

@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { liveBillingAccess, OPERATOR_PRICE_CODE } from "../config/liveBillingAccess";
 import { MEMBER_PRICE_CODES, classifyMemberPlanChange, isMemberPricingV2 } from "../config/memberPricing";
 import { refreshMemberAllowanceWindow } from "./memberAllowanceWindowService";
+import { getAppReviewConfig } from "../auth/appReviewAccess";
 import {
   assertStripeObjectMatchesEnvironment,
   getStripeEnvironment,
@@ -864,6 +865,16 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
   ]);
   if (heldError) throw new Error(`Held final-package status lookup failed: ${heldError.message}`);
 
+  const reviewAllowance = getAppReviewConfig()?.userId === input.dbUserId && !subscription;
+  if (reviewAllowance && policy.entitlementId) {
+    const result = await supabaseAdmin.from("billing_entitlements")
+      .select("id, status, quantity_total, quantity_used, is_unlimited, starts_at, ends_at")
+      .eq("id", policy.entitlementId).eq("owner_user_id", input.dbUserId)
+      .eq("metadata->>source", "app_review").maybeSingle();
+    if (result.error) throw new Error("Review allowance lookup failed");
+    entitlement = result.data;
+  }
+
   const total = typeof entitlement?.quantity_total === "number" ? entitlement.quantity_total : null;
   const used = typeof entitlement?.quantity_used === "number" ? entitlement.quantity_used : 0;
   const remaining = total === null ? null : Math.max(total - used, 0);
@@ -901,14 +912,14 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
         price.usage_limit_quantity ?? price.included_entitlement_quantity,
     })),
     membership: {
-      state: activationPending ? "activation_pending" : subscriptionStatus ?? "none",
+      state: reviewAllowance ? "review_access" : activationPending ? "activation_pending" : subscriptionStatus ?? "none",
       subscriptionStatus,
       priceCode: typeof subscriptionItem?.price_code_snapshot === "string"
         ? subscriptionItem.price_code_snapshot
         : null,
       planName: typeof subscriptionItem?.display_name_snapshot === "string"
         ? subscriptionItem.display_name_snapshot
-        : null,
+        : reviewAllowance ? "App Review — 25 test documents (no charge)" : null,
       pendingPlanChange: scheduledTargetPriceCode ? {
         type: planChange?.type === "cadence_change" ? "cadence_change" : planChange?.type === "downgrade" ? "downgrade" : "upgrade",
         status: planChange?.status === "scheduled" ? "scheduled" : "pending_webhook",
@@ -940,9 +951,9 @@ export const getMemberMembershipStatus = async (input: { dbUserId: string; catal
       reasonCode: policy.reasonCode,
     },
     actions: {
-      canCheckout: (!subscription || ENDED_SUBSCRIPTION_STATUSES.has(subscriptionStatus ?? "")) && !activationPending
+      canCheckout: !reviewAllowance && (!subscription || ENDED_SUBSCRIPTION_STATUSES.has(subscriptionStatus ?? "")) && !activationPending
         && liveBillingAccess(input.dbUserId, "checkout", OPERATOR_PRICE_CODE).allowed,
-      iosCheckoutAvailable: process.env.IOS_MEMBER_CHECKOUT_ENABLED === "true"
+      iosCheckoutAvailable: !reviewAllowance && process.env.IOS_MEMBER_CHECKOUT_ENABLED === "true"
         && liveBillingAccess(input.dbUserId, "checkout", OPERATOR_PRICE_CODE).allowed,
       canOpenPortal: Boolean(subscription) && liveBillingAccess(input.dbUserId, "portal").allowed,
       planChangeAvailable: ["active", "trialing"].includes(subscriptionStatus ?? "")
