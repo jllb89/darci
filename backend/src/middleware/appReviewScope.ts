@@ -13,6 +13,10 @@ export function enforceAppReviewScope(req: Request, res: Response): boolean {
   }
   const path = req.path.replace(/\/$/, "");
   const method = req.method;
+  // These POSTs are read-only provider lookups, not rule/configuration writes.
+  // Keep the exception exact: never allow arbitrary POST /rules operations.
+  const isAddressLookup = method === "POST"
+    && /^\/rules\/member-form\/(?:US-)?(?:CA|OH)\/address-(autocomplete|details)$/.test(path);
   if (path === "/notary/requests" && method === "GET" && req.user.role === "notary") {
     res.status(200).json({ requests: [], meetings: [],
       counts: { pending: 0, scheduled: 0, readyForInPerson: 0, completed: 0, total: 0 },
@@ -26,6 +30,7 @@ export function enforceAppReviewScope(req: Request, res: Response): boolean {
     || (path.startsWith("/auth/") && ["/auth/logout", "/auth/refresh"].includes(path))
     || (path.startsWith("/dashboard") && method === "GET")
     || ((path === "/rules" || path.startsWith("/rules/")) && method === "GET")
+    || isAddressLookup
     || path.startsWith("/notifications/") || path === "/notifications"
     || ((path === "/documents" || path.startsWith("/documents/"))
       && !/\/(submit-notarization|append-acknowledgment|watermark|signature-reminders)(\/|$)/.test(path)

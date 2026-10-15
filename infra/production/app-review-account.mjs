@@ -4,6 +4,7 @@ import {randomUUID,randomBytes,randomInt,scryptSync} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {createRequire} from 'node:module';
+import {createAppReviewWindow} from './app-review-window.mjs';
 const require=createRequire(import.meta.url),{createClient}=require('../../backend/node_modules/@supabase/supabase-js');
 process.umask(0o077);
 assert(process.argv.includes('--approved-review-account'));
@@ -27,7 +28,7 @@ if(existsSync(configPath)){
   assert(!existing,'A review identity already exists; inspect it rather than taking over an account');
   const code=randomInt(0,100_000_000).toString().padStart(8,'0');
   const salt=randomBytes(16).toString('hex');
-  const startsAt=new Date().toISOString(),expiresAt=new Date(Date.now()+30*86400000).toISOString();
+  const {startsAt,expiresAt}=createAppReviewWindow();
   config={enabled:true,email:'apple-review@illuminotary.com',authId:randomUUID(),userId:randomUUID(),expiresAt,salt,
     codeHash:scryptSync(code,Buffer.from(salt,'hex'),32).toString('hex')};
   receipt={startsAt,expiresAt,authId:null,userId:config.userId,billingAccountId:randomUUID(),entitlementId:randomUUID(),stage:'prepared'};

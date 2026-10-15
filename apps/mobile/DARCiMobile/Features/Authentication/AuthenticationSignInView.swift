@@ -173,21 +173,13 @@ struct AuthenticationSignInView: View {
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
-    private let otpBoxLayout: [(x: CGFloat, width: CGFloat)] = [
-        (-174.5, 45),
-        (-124.5, 43),
-        (-75, 44),
-        (-25.5, 43),
-        (23.5, 43),
-        (73, 44),
-        (122.5, 43),
-        (172.5, 45)
-    ]
+    private var otpDigitCount: Int { min(max(viewModel.challenge?.otpLength ?? 8, 1), 8) }
 
     @State private var phoneNumber = ""
     @State private var selectedPhoneCountry = PhoneNumberFormatting.defaultCountry
     @State private var emailAddress = ""
     @State private var otpCode = ""
+    @State private var isOTPInputFocused = false
     @State private var profileName = ""
     @State private var profileLastName = ""
     @State private var profileEmail = ""
@@ -231,13 +223,6 @@ struct AuthenticationSignInView: View {
                 activatePhoneInputLayout()
             } else if newField == .email {
                 activateEmailInputLayout()
-            }
-        }
-        .onChange(of: otpCode) { _, newValue in
-            let sanitized = String(newValue.filter(\.isNumber).prefix(otpBoxLayout.count))
-
-            if sanitized != newValue {
-                otpCode = sanitized
             }
         }
         .sheet(isPresented: $isPhoneCountryPickerPresented) {
@@ -364,13 +349,7 @@ struct AuthenticationSignInView: View {
                     .accessibilityLabel(content.accessibilitySupportingText)
 
                 if dynamicTypeSize.isAccessibilitySize {
-                    TextField("", text: $otpCode)
-                        .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .foregroundStyle(.white)
-                        .tint(.white)
-                        .focused($focusedField, equals: .otp)
+                    otpInput(in: proxy, visibleText: true)
                         .padding(.horizontal, scaled(18, in: proxy))
                         .frame(maxWidth: .infinity, minHeight: scaled(76, in: proxy))
                         .background(Color(red: 0.10, green: 0.10, blue: 0.10))
@@ -601,29 +580,19 @@ struct AuthenticationSignInView: View {
 
     private func otpCodeBoxes(in proxy: GeometryProxy) -> some View {
         ZStack {
-            ForEach(otpBoxLayout.indices, id: \.self) { index in
-                let box = otpBoxLayout[index]
-
-                Rectangle()
-                    .fill(Color(red: 0.10, green: 0.10, blue: 0.10))
-                    .frame(width: scaled(box.width, in: proxy), height: scaled(65, in: proxy))
-                    .position(x: scaled(197.5 + box.x, in: proxy), y: scaled(32.5, in: proxy))
-                    .accessibilityHidden(true)
-
-                Text(otpCharacter(at: index))
-                    .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
-                    .foregroundStyle(.white)
-                    .frame(width: scaled(box.width, in: proxy), height: scaled(65, in: proxy))
-                    .position(x: scaled(197.5 + box.x, in: proxy), y: scaled(32.5, in: proxy))
-                    .accessibilityHidden(true)
+            HStack(spacing: scaled(5, in: proxy)) {
+                ForEach(0..<otpDigitCount, id: \.self) { index in
+                    Text(otpCharacter(at: index))
+                        .font(DARCiFont.maisonNeue(.book, size: scaled(28, in: proxy)))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: scaled(65, in: proxy))
+                        .background(Color(red: 0.10, green: 0.10, blue: 0.10))
+                        .accessibilityHidden(true)
+                }
             }
 
-            TextField("", text: $otpCode)
-                .keyboardType(.numberPad)
-                .textContentType(.oneTimeCode)
-                .foregroundStyle(.clear)
-                .tint(.clear)
-                .focused($focusedField, equals: .otp)
+            otpInput(in: proxy, visibleText: false)
                 .frame(width: scaled(395, in: proxy), height: scaled(65, in: proxy))
                 .accessibilityLabel("One-time code")
                 .accessibilityIdentifier("otp-code-field")
@@ -631,10 +600,20 @@ struct AuthenticationSignInView: View {
         .frame(width: scaled(395, in: proxy), height: scaled(65, in: proxy))
         .contentShape(Rectangle())
         .onTapGesture {
-            focusedField = .otp
+            isOTPInputFocused = true
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("otp-code-boxes")
+    }
+
+    private func otpInput(in proxy: GeometryProxy, visibleText: Bool) -> some View {
+        OTPCodeInput(
+            text: $otpCode,
+            isFocused: $isOTPInputFocused,
+            maximumLength: otpDigitCount,
+            visibleText: visibleText,
+            fontSize: scaled(28, in: proxy)
+        )
     }
 
     private func verifyCodeButton(in proxy: GeometryProxy) -> some View {
@@ -942,6 +921,7 @@ struct AuthenticationSignInView: View {
 
     private func showOTP() {
         focusedField = nil
+        isOTPInputFocused = false
 
         withAnimation(.easeInOut(duration: 0.22)) {
             isEntryFadingForOTP = true
@@ -953,7 +933,7 @@ struct AuthenticationSignInView: View {
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                focusedField = .otp
+                isOTPInputFocused = true
                 isEntryFadingForOTP = false
             }
         }
@@ -972,8 +952,9 @@ struct AuthenticationSignInView: View {
                 showCompleteInfo()
             case .stepUpEmail:
                 otpCode = ""
-                focusedField = .otp
+                isOTPInputFocused = true
             case .linkEmail:
+                isOTPInputFocused = false
                 otpCode = ""
                 emailAddress = ""
                 activeInputMode = .email
@@ -989,6 +970,7 @@ struct AuthenticationSignInView: View {
 
     private func showCompleteInfo() {
         focusedField = nil
+        isOTPInputFocused = false
         hydrateVerifiedContactFields()
 
         withAnimation(.easeInOut(duration: 0.24)) {
@@ -1023,6 +1005,7 @@ struct AuthenticationSignInView: View {
 
     private func showSuccess() {
         focusedField = nil
+        isOTPInputFocused = false
 
         withAnimation(.easeInOut(duration: 0.24)) {
             authenticationStep = .success
@@ -1030,6 +1013,7 @@ struct AuthenticationSignInView: View {
     }
 
     private func returnFromOTP() {
+        isOTPInputFocused = false
         viewModel.clearErrors()
         isEntryFadingForOTP = false
 
@@ -1039,6 +1023,7 @@ struct AuthenticationSignInView: View {
     }
 
     private func toggleInputModeFromOTP() {
+        isOTPInputFocused = false
         viewModel.clearChallenge()
         otpCode = ""
 
@@ -1110,6 +1095,113 @@ struct AuthenticationSignInView: View {
 
     private func scale(in proxy: GeometryProxy) -> CGFloat {
         DARCiAdaptiveLayout.authenticationScale(viewportWidth: proxy.size.width)
+    }
+}
+
+enum OTPCodeEditing {
+    static func digits(in value: String) -> String {
+        value.compactMap(\.wholeNumberValue).filter { (0...9).contains($0) }.map(String.init).joined()
+    }
+
+    static func applying(current: String, range: NSRange, replacement: String, maximumLength: Int) -> String {
+        guard maximumLength > 0, let textRange = Range(range, in: current) else { return current }
+        let incoming = digits(in: replacement)
+        guard replacement.isEmpty || !incoming.isEmpty else { return current }
+        // A complete pasted/AutoFill code replaces a partial code atomically.
+        if incoming.count == maximumLength { return incoming }
+        let proposed = current.replacingCharacters(in: textRange, with: incoming)
+        // Ignore overflow instead of truncating, which can delete existing digits
+        // when iOS positions an invisible insertion point inside the code.
+        return proposed.count <= maximumLength ? proposed : current
+    }
+}
+
+struct OTPCodeInput: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let maximumLength: Int
+    let visibleText: Bool
+    let fontSize: CGFloat
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField(frame: .zero)
+        field.delegate = context.coordinator
+        context.coordinator.field = field
+        field.keyboardType = .numberPad
+        field.textContentType = .oneTimeCode
+        field.autocorrectionType = .no
+        field.spellCheckingType = .no
+        field.autocapitalizationType = .none
+        field.backgroundColor = .clear
+        field.accessibilityLabel = "One-time code"
+        field.accessibilityIdentifier = "otp-code-field"
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let accessory = UIToolbar()
+        accessory.sizeToFit()
+        accessory.tintColor = .systemBlue
+        let done = UIBarButtonItem(title: "Done", style: .done, target: context.coordinator, action: #selector(Coordinator.dismissKeyboard))
+        done.accessibilityIdentifier = "auth-otp-keyboard-done"
+        accessory.items = [UIBarButtonItem(systemItem: .flexibleSpace), done]
+        field.inputAccessoryView = accessory
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.parent = self
+        field.font = UIFont(name: DARCiFont.MaisonNeue.book.postScriptName, size: fontSize) ?? .systemFont(ofSize: fontSize)
+        field.textColor = visibleText ? .white : .clear
+        field.tintColor = visibleText ? .white : .clear
+        if field.text != text {
+            field.text = text
+            context.coordinator.moveHiddenCursorToEnd(field)
+        }
+        if isFocused, !field.isFirstResponder, field.window != nil { field.becomeFirstResponder() }
+        if !isFocused, field.isFirstResponder { field.resignFirstResponder() }
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: OTPCodeInput
+        weak var field: UITextField?
+        private var correctingSelection = false
+
+        init(parent: OTPCodeInput) { self.parent = parent }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            if !parent.isFocused { parent.isFocused = true }
+            moveHiddenCursorToEnd(textField)
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            if parent.isFocused { parent.isFocused = false }
+        }
+
+        func textFieldDidChangeSelection(_ textField: UITextField) { moveHiddenCursorToEnd(textField) }
+
+        func moveHiddenCursorToEnd(_ textField: UITextField) {
+            guard !parent.visibleText, !correctingSelection,
+                  let selection = textField.selectedTextRange,
+                  textField.offset(from: textField.beginningOfDocument, to: selection.start) != (textField.text ?? "").count
+                    || !selection.isEmpty else { return }
+            correctingSelection = true
+            let end = textField.endOfDocument
+            textField.selectedTextRange = textField.textRange(from: end, to: end)
+            correctingSelection = false
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            let current = textField.text ?? ""
+            let next = OTPCodeEditing.applying(current: current, range: range, replacement: string, maximumLength: parent.maximumLength)
+            if next != current {
+                textField.text = next
+                parent.text = next
+            }
+            moveHiddenCursorToEnd(textField)
+            return false
+        }
+
+        @objc func dismissKeyboard() { field?.resignFirstResponder() }
     }
 }
 

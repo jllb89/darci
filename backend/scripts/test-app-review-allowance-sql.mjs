@@ -20,7 +20,7 @@ try {
   await db.query("insert into public.users(id,supabase_user_id,email,status) values($1,$2,'apple-review@illuminotary.com','active'),($3,$4,'isolated-review-other@example.invalid','active')",[u,auth,other,otherAuth]);
   await db.query("insert into public.notary_profiles(user_id,metadata) values($1,'{\"synthetic\":true}')",[u]);
   await db.query("insert into public.billing_accounts(id,owner_user_id,is_default,metadata) values($1,$2,true,$3)",[a,u,JSON.stringify({source:'app_review',auth_id:auth})]);
-  await db.query("insert into public.billing_entitlements(id,billing_account_id,owner_user_id,entitlement_type,status,quantity_total,starts_at,ends_at,metadata) values($1,$2,$3,'document_workflow_capacity','active',25,now()-interval '1 hour',now()+interval '29 days','{\"source\":\"app_review\"}')",[e,a,u]);
+  await db.query("insert into public.billing_entitlements(id,billing_account_id,owner_user_id,entitlement_type,status,quantity_total,starts_at,ends_at,metadata) values($1,$2,$3,'document_workflow_capacity','active',25,now()-interval '1 hour',now()+interval '29 days 23 hours 8 milliseconds','{\"source\":\"app_review\"}')",[e,a,u]);
   const doc=async owner=>{const id=randomUUID();await db.query("insert into public.documents(id,owner_id,document_type,jurisdiction,status) values($1,$2,'poa','US-CA','draft')",[id,owner]);return id;};
   const call=(id,expected='draft',next='pending_signature')=>db.query('select * from public.consume_app_review_document_workflow($1,$2,$3,$4,$5,$6,$7)',[a,e,id,`document:${id}:first_submission`,expected,next,u]);
   const rejects=async(fn,pattern)=>{
@@ -29,6 +29,13 @@ try {
   };
   const foreign=await doc(other),first=await doc(u);
   await db.query('set local role service_role');
+  // Reproduce the deployed fixture's eight-millisecond overflow, then rehearse
+  // shortening its window without extending expiry or weakening SQL guards.
+  await rejects(()=>call(first),/BILLING_PERIOD_NOT_ACTIVE/);
+  const before=(await db.query('select ends_at,quantity_used,quantity_total from public.billing_entitlements where id=$1',[e])).rows[0];
+  await db.query("update public.billing_entitlements set starts_at=ends_at-interval '30 days' where id=$1",[e]);
+  const after=(await db.query('select ends_at,quantity_used,quantity_total from public.billing_entitlements where id=$1',[e])).rows[0];
+  assert.deepEqual(after,before);checks++;
   await rejects(()=>call(foreign),/BILLING_DOCUMENT_OWNER_MISMATCH/);
   await rejects(()=>call(first,null),/BILLING_DOCUMENT_TRANSITION_NOT_ALLOWED/);
   await rejects(()=>call(first,'draft','completed'),/BILLING_DOCUMENT_TRANSITION_NOT_ALLOWED/);

@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import DARCiMobile
 
 final class MemberRenewalNoticeTests: XCTestCase {
@@ -3357,6 +3359,54 @@ private struct TestHomeAPIClient: HomeAPIProviding {
         }
 
         return response
+    }
+}
+
+final class OTPCodeEditingTests: XCTestCase {
+    func testTypingAllEightDigitsPreservesLeadingZerosAndPrefix() {
+        var code = ""
+        for digit in "00123456" {
+            let before = code
+            code = OTPCodeEditing.applying(current: code, range: NSRange(location: code.count, length: 0), replacement: String(digit), maximumLength: 8)
+            XCTAssertEqual(code, before + String(digit))
+        }
+        XCTAssertEqual(code, "00123456")
+    }
+
+    func testOverflowNeverTruncatesExistingDigitsEvenWithAnInteriorCursor() {
+        for location in 0...8 {
+            XCTAssertEqual(OTPCodeEditing.applying(current: "00123456", range: NSRange(location: location, length: 0), replacement: "9", maximumLength: 8), "00123456")
+        }
+    }
+
+    func testFullPastedOrAutofilledCodeReplacesPartialCodeAtomically() {
+        for partial in ["", "001234", "12345678"] {
+            XCTAssertEqual(OTPCodeEditing.applying(current: partial, range: NSRange(location: partial.count, length: 0), replacement: "00 987 654", maximumLength: 8), "00987654")
+        }
+        XCTAssertEqual(OTPCodeEditing.applying(current: "1234", range: NSRange(location: 4, length: 0), replacement: "001234", maximumLength: 6), "001234")
+    }
+
+    func testBackspaceAndCorrectionPreserveTheOtherDigits() {
+        let deleted = OTPCodeEditing.applying(current: "00123456", range: NSRange(location: 7, length: 1), replacement: "", maximumLength: 8)
+        XCTAssertEqual(deleted, "0012345")
+        XCTAssertEqual(OTPCodeEditing.applying(current: deleted, range: NSRange(location: 7, length: 0), replacement: "7", maximumLength: 8), "00123457")
+        XCTAssertEqual(OTPCodeEditing.applying(current: deleted, range: NSRange(location: 99, length: 0), replacement: "8", maximumLength: 8), deleted)
+    }
+
+    @MainActor
+    func testHiddenInputCannotLeaveItsInsertionPointInsideEarlierDigits() throws {
+        var code = "001234"
+        let input = OTPCodeInput(text: Binding(get: { code }, set: { code = $0 }), isFocused: .constant(true), maximumLength: 8, visibleText: false, fontSize: 28)
+        let coordinator = input.makeCoordinator()
+        let field = UITextField()
+        field.text = code
+        let beginning = field.beginningOfDocument
+        field.selectedTextRange = field.textRange(from: beginning, to: beginning)
+        coordinator.textFieldDidChangeSelection(field)
+        XCTAssertEqual(field.offset(from: beginning, to: try XCTUnwrap(field.selectedTextRange).start), 6)
+        XCTAssertFalse(coordinator.textField(field, shouldChangeCharactersIn: NSRange(location: 6, length: 0), replacementString: "56"))
+        XCTAssertEqual(code, "00123456")
+        XCTAssertEqual(field.text, code)
     }
 }
 

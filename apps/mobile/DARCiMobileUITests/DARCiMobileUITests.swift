@@ -67,6 +67,39 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testOTPRepeatedTypingRetappingAndBackspacePreserveAllDigits() throws {
+        let app = makeApp()
+        app.launch()
+        app.buttons["Start"].tap()
+        XCTAssertTrue(app.buttons["Close onboarding"].waitForExistence(timeout: 5))
+        app.buttons["Close onboarding"].tap()
+        app.buttons["Use email instead."].tap()
+        let email = app.textFields["Enter your email here"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5))
+        email.tap()
+        email.typeText("otp-fixture@example.com")
+        app.buttons["auth-continue-button"].tap()
+        let otp = app.textFields["otp-code-field"]
+        XCTAssertTrue(otp.waitForExistence(timeout: 5))
+        otp.tap()
+        for digit in "001234" { app.typeText(String(digit)) }
+        XCTAssertEqual(otp.value as? String, "001234")
+        // Tapping a visual box must not put an invisible caret in old digits.
+        otp.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.5)).tap()
+        app.typeText("56")
+        XCTAssertEqual(otp.value as? String, "00123456")
+        app.typeText("9")
+        XCTAssertEqual(otp.value as? String, "00123456")
+        app.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertEqual(otp.value as? String, "0012345")
+        app.typeText("7")
+        XCTAssertEqual(otp.value as? String, "00123457")
+        XCTAssertEqual(app.buttons.matching(identifier: "Done").count, 1)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
     func testLoginKeyboardKeepsFullWidthAndSingleDismissButton() throws {
         let app = makeApp()
         app.launch()

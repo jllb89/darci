@@ -94,6 +94,24 @@ describe("scoped App Review credential", () => {
   });
 });
 describe("App Review production isolation", () => {
+  it.each(["CA", "OH", "US-CA", "US-OH"])("allows only the read-only address POSTs for %s", jurisdiction => {
+    for (const operation of ["autocomplete", "details"]) {
+      const req = request(`/rules/member-form/${jurisdiction}/address-${operation}`, "POST", "notary");
+      expect(enforceAppReviewScope(req, response() as unknown as Response)).toBe(false);
+      expect(req.user?.role).toBe("member");
+    }
+  });
+  it.each([
+    ["/rules/member-form/US-CA/validate", "POST"],
+    ["/rules/member-form/US-TX/address-autocomplete", "POST"],
+    ["/rules/member-form/US-CA/address-details/extra", "POST"],
+    ["/rules/member-form/US-CA/address-details", "PUT"],
+    ["/rules/member-form/US-CA/address-autocomplete", "DELETE"],
+  ])("keeps unrelated rules operations blocked: %s %s", (path, method) => {
+    const res = response();
+    expect(enforceAppReviewScope(request(path, method), res as unknown as Response)).toBe(true);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
   it.each(["/admin/users", "/internal/jobs", "/billing/member-membership/checkout", "/invites",
     "/notary/idn/resolve", "/notary/requests/client/sign", "/documents/client/submit-notarization",
     "/documents/client/watermark", "/documents/client/signature-reminders", "/users/me/notary-application"])
