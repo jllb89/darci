@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
 
 export const scanPolicy = ['--scanners', 'vuln', '--severity', 'HIGH,CRITICAL', '--ignorefile', '/dev/null', '--exit-code', '1'];
 const digest = /^sha256:[a-f0-9]{64}$/;
@@ -26,9 +27,22 @@ export function scanRuntimeImage({imageRef, reportPath, archivePath, run = (tool
     return result.stdout?.trim();
   };
   checked('docker', ['pull', imageRef]);
-  const imageId = checked('docker', ['image', 'inspect', imageRef, '--format', '{{.Id}}'], true);
-  assert.match(imageId, digest);
-  checked('docker', ['save', imageId, '-o', archivePath]);
+  const dockerImageId = checked('docker', ['image', 'inspect', imageRef, '--format', '{{.Id}}'], true);
+  assert.match(dockerImageId, digest);
+  checked('docker', ['save', dockerImageId, '-o', archivePath]);
+  // Classic Docker reports a config ID; the containerd image store may report
+  // an OCI index ID instead. Trivy uses the config digest in either case.
+  // Read/hash the exact saved configuration rather than dropping ID validation.
+  const manifest = JSON.parse(checked('tar', ['-xOf', archivePath, 'manifest.json'], true));
+  assert(Array.isArray(manifest) && manifest.length === 1, 'Exactly one runtime image is required');
+  const configPath = manifest[0].Config;
+  assert.match(configPath, /^(?:blobs\/sha256\/[a-f0-9]{64}|[a-f0-9]{64}\.json)$/);
+  const configResult = run('tar', ['-xOf', archivePath, configPath], true);
+  assert.equal(configResult.status, 0, 'Cannot read saved image configuration');
+  const imageId = 'sha256:' + createHash('sha256').update(configResult.stdout).digest('hex');
+  assert.equal(configPath.replace('blobs/sha256/', '').replace(/\.json$/, ''), imageId.slice(7), 'Archive config checksum mismatch');
+  const config = JSON.parse(configResult.stdout);
+  assert.equal(config.os, 'linux'); assert.equal(config.architecture, 'arm64');
   const scan = run('trivy', ['image', '--input', archivePath, ...scanPolicy, '--format', 'json', '--output', reportPath]);
   if (scan.status !== 0) {
     // JSON artifacts are useful for machines; show the actionable package/fix
@@ -44,7 +58,7 @@ export function scanRuntimeImage({imageRef, reportPath, archivePath, run = (tool
     assert.fail('trivy failed; deployment must remain blocked. See scanner report.');
   }
   validateImageReport(read(reportPath), imageId);
-  const receipt = {schemaVersion: 1, imageRef, imageId, reportPath, passed: true, at: new Date().toISOString()};
+  const receipt = {schemaVersion: 1, imageRef, imageId, dockerImageId, reportPath, passed: true, at: new Date().toISOString()};
   return receipt;
 }
 
