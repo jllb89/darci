@@ -67,6 +67,7 @@ struct MockMemberBillingAPIClient: MemberBillingAPIProviding, Sendable {
         let checkoutEnabled = environment["DARCI_MOCK_IOS_CHECKOUT_ENABLED"] == "1"
         let state = environment["DARCI_MOCK_MEMBER_BILLING_STATE"] ?? "none"
         let isActive = state == "active" || state == "trialing"
+        let isReview = state == "review_access"
 
         return MemberMembershipPayload(
             providerEnvironment: "test",
@@ -77,28 +78,28 @@ struct MockMemberBillingAPIClient: MemberBillingAPIProviding, Sendable {
                 state: state,
                 subscriptionStatus: isActive ? state : nil,
                 priceCode: isActive ? MemberBillingPriceCode.plus : nil,
-                planName: isActive ? "Plus" : nil,
+                planName: isActive ? "Plus" : isReview ? "App Review — 25 test documents (no charge)" : nil,
                 pendingPlanChange: nil,
                 currentPeriodStart: isActive ? "2026-08-01T00:00:00.000Z" : nil,
                 currentPeriodEnd: isActive ? "2026-09-01T00:00:00.000Z" : nil,
                 cancelAtPeriodEnd: false,
                 allowance: .init(
-                    total: isActive ? 10 : nil,
+                    total: isActive ? 10 : isReview ? 25 : nil,
                     used: isActive ? 4 : 0,
-                    remaining: isActive ? 6 : nil,
+                    remaining: isActive ? 6 : isReview ? 25 : nil,
                     exhausted: false
                 ),
                 heldFinalPackageCount: 0
             ),
             eligibility: .init(
                 canCreateWorkflow: true,
-                entitled: isActive,
+                entitled: isActive || isReview,
                 wouldBlock: false,
                 reasonCode: isActive ? "billing_allowed" : "billing_observe_mode"
             ),
             actions: .init(
-                canCheckout: isActive == false,
-                iosCheckoutAvailable: checkoutEnabled,
+                canCheckout: isActive == false && isReview == false,
+                iosCheckoutAvailable: checkoutEnabled && isReview == false,
                 canOpenPortal: isActive,
                 planChangeAvailable: isActive,
                 planChangeReason: nil

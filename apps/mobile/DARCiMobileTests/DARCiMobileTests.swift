@@ -3554,6 +3554,47 @@ final class MemberBillingTests: XCTestCase {
 
 @MainActor
 final class MemberBillingPresentationCoordinatorTests: XCTestCase {
+    func testReviewAllowanceDoesNotShowSubscriptionPromptOrBlockCreation() async {
+        let review = payload(state: "review_access", checkoutAvailable: false)
+        let coordinator = makeCoordinator(payload: review)
+
+        await coordinator.handleAuthenticatedEntry(session: session(), hasPriorityRoute: false)
+        XCTAssertNil(coordinator.homePrompt)
+        XCTAssertNil(coordinator.activePresentation)
+        let decision = await coordinator.requestProductCreation(modeKey: "poa_only", session: session())
+        XCTAssertEqual(decision, .allowed)
+        XCTAssertNil(coordinator.activePresentation)
+        XCTAssertFalse(review.membership.isActive, "Synthetic review access is not a paid subscription")
+    }
+
+    func testReviewAllowanceStillHonorsExhaustionAndServerDenial() async {
+        for review in [
+            payload(state: "review_access", checkoutAvailable: false, canCreateWorkflow: false),
+            payload(state: "review_access", checkoutAvailable: false, allowanceExhausted: true),
+        ] {
+            let coordinator = makeCoordinator(payload: review)
+            let decision = await coordinator.requestProductCreation(modeKey: "poa_only", session: session())
+            XCTAssertEqual(decision, .presentedMembership)
+            XCTAssertEqual(coordinator.activePresentation?.trigger, .productCreation)
+            XCTAssertNil(coordinator.recordMembershipUpdate(review))
+        }
+    }
+
+    func testReviewAllowanceUpdateResumesPendingProductWithoutPurchase() async {
+        let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
+        _ = await coordinator.requestProductCreation(modeKey: "poa_only", session: session())
+        let resumed = coordinator.recordMembershipUpdate(payload(state: "review_access", checkoutAvailable: false))
+        XCTAssertEqual(resumed, "poa_only")
+        XCTAssertNil(coordinator.activePresentation)
+        XCTAssertNil(coordinator.homePrompt)
+    }
+
+    func testUnknownMembershipStateDoesNotGrantReviewAccess() async {
+        let coordinator = makeCoordinator(payload: payload(state: "unknown", checkoutAvailable: false))
+        let decision = await coordinator.requestProductCreation(modeKey: "poa_only", session: session())
+        XCTAssertEqual(decision, .presentedMembership)
+    }
+
     func testAuthenticationPresentsAvailableMembershipOnce() async {
         let coordinator = makeCoordinator(payload: payload(state: "none", checkoutAvailable: true))
 
@@ -3716,6 +3757,8 @@ final class MemberBillingPresentationCoordinatorTests: XCTestCase {
         allowanceExhausted: Bool = false
     ) -> MemberMembershipPayload {
         let isActive = state == "active" || state == "trialing"
+        let isReview = state == "review_access"
+        let total = isReview ? 25 : 10
         return MemberMembershipPayload(
             providerEnvironment: "test",
             paymentsReal: false,
@@ -3725,27 +3768,27 @@ final class MemberBillingPresentationCoordinatorTests: XCTestCase {
                 state: state,
                 subscriptionStatus: isActive ? state : nil,
                 priceCode: isActive ? MemberBillingPriceCode.plus : nil,
-                planName: isActive ? "Plus" : nil,
+                planName: isActive ? "Plus" : isReview ? "App Review — 25 test documents (no charge)" : nil,
                 pendingPlanChange: nil,
                 currentPeriodStart: nil,
                 currentPeriodEnd: nil,
                 cancelAtPeriodEnd: false,
                 allowance: .init(
-                    total: isActive ? 10 : nil,
-                    used: allowanceExhausted ? 10 : 0,
-                    remaining: isActive ? (allowanceExhausted ? 0 : 10) : nil,
+                    total: isActive || isReview ? total : nil,
+                    used: allowanceExhausted ? total : 0,
+                    remaining: isActive || isReview ? (allowanceExhausted ? 0 : total) : nil,
                     exhausted: allowanceExhausted
                 ),
                 heldFinalPackageCount: 0
             ),
             eligibility: .init(
                 canCreateWorkflow: canCreateWorkflow,
-                entitled: isActive,
+                entitled: isActive || isReview,
                 wouldBlock: false,
                 reasonCode: isActive ? "billing_allowed" : "billing_observe_mode"
             ),
             actions: .init(
-                canCheckout: isActive == false,
+                canCheckout: isActive == false && isReview == false,
                 iosCheckoutAvailable: checkoutAvailable,
                 canOpenPortal: isActive,
                 planChangeAvailable: isActive,

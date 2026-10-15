@@ -46,7 +46,16 @@ struct MemberBillingView: View {
     var body: some View {
         GeometryReader { proxy in
             Group {
-                if let membership = viewModel.membership, membership.isActive {
+                if let membership = viewModel.membership, membership.isReviewAccess {
+                    statusScreen(
+                        eyebrow: "APP REVIEW ACCESS",
+                        title: "Test documents. No purchase needed.",
+                        body: reviewAccessCopy(membership),
+                        membership: membership,
+                        showsSpinner: false,
+                        proxy: proxy
+                    )
+                } else if let membership = viewModel.membership, membership.isActive {
                     activeMembership(membership, proxy: proxy)
                 } else if let membership = viewModel.membership, membership.isPendingActivation {
                     statusScreen(
@@ -625,6 +634,15 @@ struct MemberBillingView: View {
         .padding(.horizontal, 25 * scale)
         .background(Color.black)
         .accessibilityIdentifier("member-billing-active-screen")
+    }
+
+    private func reviewAccessCopy(_ membership: MemberMembershipPayload.Membership) -> String {
+        let remaining = membership.allowance.remaining ?? 0
+        let usage = "\(remaining) of \(membership.allowance.total ?? 0) TEST documents remain."
+        let access = viewModel.payload?.permitsWorkflowCreation == true
+            ? "Return Home to create a TEST document using fictional information only."
+            : "New TEST document creation is unavailable. Contact support for assistance."
+        return "\(usage) \(access) This temporary allowance is not a paid subscription and does not renew. Real notarizations are unavailable for this account."
     }
 
     private func recoveryScreen(

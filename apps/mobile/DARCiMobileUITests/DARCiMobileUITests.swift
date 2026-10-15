@@ -653,6 +653,36 @@ final class DARCiMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testReviewAccessOpensPOAWithoutSubscriptionAndShowsNoChargeStatus() throws {
+        let app = makeApp(restoreSession: true, billingState: "review_access")
+        app.launch()
+        XCTAssertTrue(app.buttons["home-settings-button"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["home-membership-prompt"].exists)
+
+        app.buttons["home-settings-button"].tap()
+        let billingButton = app.buttons["settings-membership-billing-button"]
+        XCTAssertTrue(billingButton.waitForExistence(timeout: 5))
+        billingButton.tap()
+        XCTAssertTrue(app.staticTexts["Test documents. No purchase needed."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Make it official."].exists)
+        XCTAssertFalse(app.buttons["member-billing-portal-button"].exists)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "app-review-no-charge-allowance"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        // Relaunch the same restored fixture to exercise the Home product gate.
+        app.terminate()
+        app.launch()
+        let poa = app.buttons["home-product-card-poa_only"]
+        XCTAssertTrue(poa.waitForExistence(timeout: 10))
+        if !poa.isHittable { app.swipeUp() }
+        poa.tap()
+        XCTAssertTrue(app.staticTexts["New power of attorney."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Make it official."].exists)
+    }
+
+    @MainActor
     func testRestoredMemberSeesPersistentPromptAndProductCreationGate() throws {
         let app = makeApp(restoreSession: true, billingCheckoutEnabled: true)
         app.launch()

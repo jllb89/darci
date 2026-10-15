@@ -84,7 +84,7 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
     }
 
     var homePrompt: MemberBillingHomePrompt? {
-        guard let payload, payload.membership.isActive == false else { return nil }
+        guard let payload, !payload.membership.isActive, !payload.membership.isReviewAccess else { return nil }
 
         if payload.membership.isPendingActivation {
             return MemberBillingHomePrompt(
@@ -178,9 +178,8 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
             return .allowed
         }
 
-        if currentPayload.membership.isActive {
-            guard currentPayload.eligibility.canCreateWorkflow,
-                  currentPayload.membership.allowance.exhausted == false else {
+        if currentPayload.membership.isActive || currentPayload.membership.isReviewAccess {
+            guard currentPayload.permitsWorkflowCreation else {
                 pendingProductModeKey = nil
                 present(trigger: .productCreation, session: session)
                 return .presentedMembership
@@ -219,7 +218,7 @@ final class MemberBillingPresentationCoordinator: ObservableObject {
 
     func recordMembershipUpdate(_ nextPayload: MemberMembershipPayload) -> String? {
         payload = nextPayload
-        guard nextPayload.membership.isActive, let pendingProductModeKey else { return nil }
+        guard nextPayload.permitsWorkflowCreation, let pendingProductModeKey else { return nil }
         self.pendingProductModeKey = nil
         activePresentation = nil
         presentedUserId = nil

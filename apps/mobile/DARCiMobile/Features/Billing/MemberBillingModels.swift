@@ -85,6 +85,13 @@ struct MemberMembershipPayload: Decodable, Equatable, Sendable {
     let eligibility: Eligibility
     let actions: Actions
 
+    // Only the server-issued membership state and eligibility grant creation.
+    // Review access is limited synthetic capacity, never a paid subscription.
+    var permitsWorkflowCreation: Bool {
+        (membership.isActive || membership.isReviewAccess)
+            && eligibility.canCreateWorkflow && !membership.allowance.exhausted
+    }
+
     struct Membership: Decodable, Equatable, Sendable {
         let state: String
         let subscriptionStatus: String?
@@ -132,6 +139,10 @@ struct MemberMembershipPayload: Decodable, Equatable, Sendable {
 }
 
 extension MemberMembershipPayload.Membership {
+    var isReviewAccess: Bool {
+        state == "review_access"
+    }
+
     var isActive: Bool {
         state == "active" || state == "trialing"
     }
