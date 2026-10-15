@@ -95,6 +95,57 @@ returned **OK naturally at 10:29:51 Mexico City time**, with actions still enabl
 No queue purge, alarm override, source/PDF change or production change occurred.
 Production's twice-daily backups remain current and unchanged.
 
+## Production deployment and billing correction — completed
+
+Jorge approved the production environment. Revision
+`5b90a27325026f6c1047b69302ad2c20dee5b910` passed its
+[exact-commit CI](https://github.com/jllb89/darci/actions/runs/38778978972) and
+[production release, attempt 2](https://github.com/jllb89/darci/actions/runs/38778977891).
+Attempt 1 failed during the web image's ECR upload, before any service promotion;
+the unchanged retry passed. All three immutable images passed both the shared
+Trivy policy (zero HIGH/CRITICAL findings) and the additional ECR gate.
+The verified release receipt records API29 (2 tasks), worker29 (1) and web18 (2),
+all healthy with completed rollouts and exact scanned digests. The deployed
+template, non-image parameters, pinned secret version, service capacity, network
+and payment configuration match the pre-release baseline. API readiness and web
+return HTTP 200; unsigned Stripe ingress still returns HTTP 400.
+
+At **11:59:02 Mexico City time**, only the two approved October 4 inbox records
+were replayed through the tested handler and resolved as `ignored`:
+
+- `evt_1UMvFWETAqmB3GAqmq4E75PR` — `customer.subscription.updated`.
+- `evt_1UMwCGETAqmB3GAqAR3uSOzf` — `invoice.paid`.
+
+The provider subscription was rechecked before each replay: created January 2022,
+no DARCi metadata markers and zero local subscription/price mappings. Original
+dead-letter rows, eight-attempt failure evidence and before/after fingerprints
+are preserved privately. Each record has both its operator replay audit and a
+`billing.stripe_webhook_ignored_unrelated` completion audit, correlated by operation
+`7b46964e-f52f-4d27-bc9d-c26118549bb2`.
+
+Canonical row fingerprints are unchanged across eight tables: billing accounts
+(10), subscriptions (8), subscription items (8), entitlements (9), usage events
+(44), orders (11), payment transactions (8), and document release controls (39).
+The unrelated Stripe subscription's provider-state fingerprint is also unchanged.
+No charge/refund, subscription change, notification, PDF or signature change was
+performed. Read-only live reconciliation completed: **8 internal / 8 provider
+subscriptions, zero issues, zero held packages and zero webhook backlog**.
+Its separate team-lifecycle acceptance flag remains unset; this technical result
+does not complete the user-owned consolidated acceptance run or change enforcement.
+
+## Production billing alarm — natural recovery verified
+
+`darci-recovery-production-app-billing` returned **OK at 12:04:18 Mexico City time**
+(18:04:18 UTC), October 15. CloudWatch's state history records an actual
+`ALARM -> OK` transition on a zero-failure datapoint. Five genuine completed worker
+watchdog probes followed the correction; no subsequent worker billing critical
+signals were found. Fresh `BillingFailures=0` metrics and API/web HTTP 200 checks
+are retained in `production-final-closeout-verification.json` under the private
+evidence directory. Unsigned Stripe ingress remains HTTP 400.
+
+Alarm actions stayed enabled. No `SetAlarmState`, injected success metric,
+detector disablement, queue purge or dismissal of real DARCi events was used.
+
 ## Remaining gates
 
 - [x] Exact-revision CI, all three image scans and staging rollout pass.
@@ -102,10 +153,10 @@ Production's twice-daily backups remain current and unchanged.
       webhook-scope acceptance pass; no client or live-payment mutation.
 - [x] New staging backup completes; retain evidence before acknowledging its old alert.
 - [x] Jorge's requested manual staging check / production go-ahead.
-- [ ] Only after staging acceptance: approved production release and verification.
-- [ ] Audit/reclassify only the two proven unrelated production inbox events;
+- [x] Only after staging acceptance: approved production release and verification.
+- [x] Audit/reclassify only the two proven unrelated production inbox events;
       preserve their previous failure evidence and verify billing state is unchanged.
-- [ ] Let the production billing alarm recover through genuine probes; do not
+- [x] Let the production billing alarm recover through genuine probes; do not
       disable the detector, remove real dead-letter detection or inject success.
 
 App Review is owned by Jorge in parallel. Broader browser-session hardening and

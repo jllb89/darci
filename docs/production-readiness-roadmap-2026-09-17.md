@@ -1,14 +1,20 @@
 # DARCi Production Readiness Roadmap
 
-**October 15 — staging accepted; production release and audited correction approved:**
-Revision `751a334` passed exact-commit CI, three clean image scans, stable deployed
-digests, API/web readiness, real isolated test-mode Stripe callbacks, duplicate
-handling and zero-issue staging reconciliation. The staging recovery retry also
-completed all 2,571 objects; its old alert was retained/acknowledged and recovered
-to OK naturally. **Jorge confirmed staging looks good and approved the production
-release behind the existing GitHub approval gate, then audited closure of only the
-two unrelated Stripe events and natural billing-alarm recovery. Production release
-and correction remain pending until their actual evidence is recorded.**
+**October 15 — production deployed; exact billing correction and natural alarm recovery verified:**
+After Jorge's staging acceptance and production approval, revision `5b90a27`
+passed [CI](https://github.com/jllb89/darci/actions/runs/38778978972) and
+[production release attempt 2](https://github.com/jllb89/darci/actions/runs/38778977891).
+API29 (2), worker29 (1) and web18 (2) run the exact scanned digests with zero
+HIGH/CRITICAL findings; runtime configuration/access/payment settings are unchanged.
+Only the two approved unrelated October 4 Stripe inbox events were audited and
+resolved as `ignored`; all eight billing/release-table fingerprints and the
+unrelated provider subscription remain unchanged. Live reconciliation completed:
+**8 internal / 8 provider subscriptions, zero issues/backlog/held packages**.
+The production billing alarm returned **OK naturally at 12:04:18 Mexico City time**,
+with actions enabled, five genuine completed watchdog probes and zero subsequent
+worker billing signals. No detector was disabled or alarm state forced.
+The staging recovery retry completed all 2,571 objects;
+its old alert was retained/acknowledged and recovered to OK naturally.
 
 Jorge approved fixing the
 staging image-scan failures and recurring billing alert, with **staging deployment
@@ -18,9 +24,10 @@ Trivy policy in staging and production (production's ECR gate remains additional
 The live billing alarm traces to two unrelated October 4 Stripe events for a
 2022 subscription, with no DARCi subscription/price mapping. The fix ignores only
 unmapped, unmarked subscriptions; mapped or DARCi-marked failures remain actionable.
-**Production records/configuration are unchanged; the two retained dead letters
-still require audited resolution after staging acceptance.** App Review is being
-handled by Jorge; consolidated acceptance follows, not a reopening of Phases 1–3.
+The exact two inbox corrections and their audits are the only production billing
+record changes; no subscriptions, charges, entitlements or documents changed.
+App Review is being handled by Jorge; consolidated acceptance follows, not a
+reopening of Phases 1–3.
 [Scope, test evidence and outstanding release gates](production-stability-closeout-2026-10-15.md).
 
 **October 7 — public production network access deployed:** Jorge approved opening
