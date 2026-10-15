@@ -114,12 +114,41 @@ const normalizeSubscriptionStatus = (
   return status;
 };
 
-const syncSubscription = async (subscriptionId: string, eventId: string) => {
+const hasDarciMetadata = (metadata: Stripe.Metadata | null | undefined) =>
+  Object.keys(metadata ?? {}).some((key) => key.startsWith("darci_"));
+
+const checkoutBelongsToDarci = async (session: Stripe.Checkout.Session) => {
+  if (hasDarciMetadata(session.metadata)) return true;
+  const { data, error } = await supabaseAdmin.from("billing_orders").select("id")
+    .eq("provider_environment", getStripeEnvironment())
+    .eq("provider_checkout_session_id", session.id).limit(1);
+  if (error) throw new Error("Stripe Checkout scope lookup failed");
+  return !!data?.length;
+};
+
+const syncSubscription = async (subscriptionId: string, eventId: string, hasDarciReference = false) => {
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
     expand: ["latest_invoice"],
   });
   assertStripeObjectMatchesEnvironment(subscription, "Stripe Subscription");
+
+  // Stripe accounts can contain subscriptions from unrelated products. Ignore
+  // only positively unmapped objects, never broken/missing metadata on our own.
+  if (!hasDarciReference && !hasDarciMetadata(subscription.metadata)
+    && !subscription.items.data.some((item) => hasDarciMetadata(item.price.metadata))) {
+    const priceIds = subscription.items.data.map((item) => item.price.id);
+    const [mappedSubscription, mappedPrices] = await Promise.all([
+      supabaseAdmin.from("billing_subscriptions").select("id")
+        .eq("provider", "stripe").eq("provider_environment", getStripeEnvironment())
+        .eq("provider_subscription_id", subscription.id).limit(1),
+      priceIds.length ? supabaseAdmin.from("billing_provider_price_mappings").select("id")
+        .eq("provider", "stripe").eq("provider_environment", getStripeEnvironment())
+        .in("provider_price_id", priceIds).limit(1) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (mappedSubscription.error || mappedPrices.error) throw new Error("Stripe subscription scope lookup failed");
+    if (!mappedSubscription.data?.length && !mappedPrices.data?.length) return null;
+  }
 
   if (subscription.items.data.length !== 1) {
     throw new Error("DARCi member subscription must contain exactly one Stripe item");
@@ -204,7 +233,7 @@ export const resyncStripeMemberSubscription = async (input: {
   ) {
     throw new Error("Only mapped Stripe test member subscriptions may be resynchronized");
   }
-  const snapshot = await syncSubscription(subscription.provider_subscription_id, input.sourceId);
+  const snapshot = await syncSubscription(subscription.provider_subscription_id, input.sourceId, true);
   return {
     internalSubscriptionId: subscription.id,
     providerSubscriptionId: subscription.provider_subscription_id,
@@ -241,9 +270,13 @@ const processStripeEvent = async (event: Stripe.Event) => {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
+    const belongsToDarci = await checkoutBelongsToDarci(session);
     const subscriptionId = stripeId(session.subscription);
-    if (!subscriptionId) throw new Error("Completed subscription Checkout has no Subscription");
-    await syncSubscription(subscriptionId, event.id);
+    if (!subscriptionId) {
+      if (!belongsToDarci) return "ignored" as const;
+      throw new Error("Completed subscription Checkout has no Subscription");
+    }
+    if (await syncSubscription(subscriptionId, event.id, belongsToDarci) === null) return "ignored" as const;
     // Checkout totals are authoritative for the original order. Renewal and
     // proration invoices must not rewrite that order with a later charge.
     const orderId = session.metadata?.darci_order_id ?? session.client_reference_id;
@@ -262,13 +295,15 @@ const processStripeEvent = async (event: Stripe.Event) => {
   }
 
   if (event.type === "checkout.session.expired") {
-    await expireCheckoutOrder(event.data.object as Stripe.Checkout.Session, event.id);
+    const session = event.data.object as Stripe.Checkout.Session;
+    if (!await checkoutBelongsToDarci(session)) return "ignored" as const;
+    await expireCheckoutOrder(session, event.id);
     return "processed" as const;
   }
 
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
-    await syncSubscription(subscription.id, event.id);
+    if (await syncSubscription(subscription.id, event.id, hasDarciMetadata(subscription.metadata)) === null) return "ignored" as const;
     return "processed" as const;
   }
 
@@ -276,7 +311,8 @@ const processStripeEvent = async (event: Stripe.Event) => {
     const invoice = event.data.object as Stripe.Invoice;
     const subscriptionId = invoiceSubscriptionId(invoice);
     if (!subscriptionId) return "ignored" as const;
-    await syncSubscription(subscriptionId, event.id);
+    if (await syncSubscription(subscriptionId, event.id,
+      hasDarciMetadata(invoice.metadata) || hasDarciMetadata(invoice.parent?.subscription_details?.metadata)) === null) return "ignored" as const;
     return "processed" as const;
   }
 

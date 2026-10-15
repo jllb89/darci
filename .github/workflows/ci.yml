@@ -41,7 +41,7 @@ jobs:
       - name: Validate production isolation templates
         run: node --test ../infra/production/*.test.mjs
       - name: Validate workflow deployment boundaries
-        run: node --test ../scripts/workflow-gates.test.mjs ../scripts/workflow-structure.test.mjs ../scripts/supabase-ci-bootstrap.test.mjs
+        run: node --test ../scripts/workflow-gates.test.mjs ../scripts/workflow-structure.test.mjs ../scripts/supabase-ci-bootstrap.test.mjs ../scripts/scan-runtime-image.test.mjs
 
   database-security:
     runs-on: ubuntu-24.04

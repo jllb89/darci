@@ -3,6 +3,7 @@ import { buildCriticalSignal, classifyCriticalSignal } from "../../src/telemetry
 
 describe("independent critical alert boundary", () => {
   it('retains only bounded diagnostic labels, never provider error text',()=>{
+    expect(buildCriticalSignal('billing',{diagnostic:{reason:'queue_backlog',probe:'stripeOverdue'}}).diagnostic).toEqual({reason:'queue_backlog',probe:'stripeOverdue'});
     const signal=buildCriticalSignal('platform',{diagnostic:{reason:'queue_probe_failed',probe:'stripeOverdue',checks:['redis','private@example.test','redis'],consecutive:2}});
     expect(signal.diagnostic).toEqual({reason:'queue_probe_failed',probe:'stripeOverdue',checks:['redis'],consecutive:2});
     expect(buildCriticalSignal('platform',{diagnostic:{reason:'private provider URL'}})).not.toHaveProperty('diagnostic');

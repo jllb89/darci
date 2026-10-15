@@ -26,7 +26,7 @@ if(process.argv.includes('--public-config')) assert.equal(results.runtimeTracked
 for(const service of ['api','worker','web']) {
   const dockerfile=service==='web'?'apps/web/Dockerfile':service==='worker'?'backend/Dockerfile.worker':'backend/Dockerfile';
   const uri=`${registry}/darci-production-${service}:${tag}`;
-  const args=['buildx','build','--platform','linux/arm64','--provenance=false','--push','--tag',uri,'--file',dockerfile,
+  const args=['buildx','build','--pull','--platform','linux/arm64','--provenance=false','--push','--tag',uri,'--file',dockerfile,
     '--label',`org.opencontainers.image.revision=${results.revision}`,'--label',`io.darci.runtime-diff-sha256=${results.runtimeTrackedDiffSha256}`];
   if(service==='web') for(const name of Object.keys(publicEnv)) args.push('--build-arg',name);
   args.push('.');

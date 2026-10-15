@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { checkOperationalReadiness } from "./operationalHealthService";
 import { buildCriticalSignal, emitCriticalSignal, type CriticalCategory } from "../telemetry/criticalSignals";
+import { getStripeEnvironment } from "../config/stripe";
 
 export type WatchdogSnapshot = {
   ready: boolean;
@@ -38,7 +39,7 @@ export async function readWatchdogSnapshot(): Promise<WatchdogSnapshot> {
     checkOperationalReadiness(),
     db.from("notification_jobs").select("id").in("status", ["queued", "scheduled", "processing"]).lt("scheduled_for", overdue).limit(1).abortSignal(AbortSignal.timeout(5000)),
     db.from("notification_jobs").select("id").in("status", ["failed", "partially_sent"]).gte("updated_at", recent).limit(1).abortSignal(AbortSignal.timeout(5000)),
-    db.from("stripe_webhook_events").select("id").in("status", ["received", "processing", "failed", "dead_lettered"]).lt("received_at", overdue).limit(1).abortSignal(AbortSignal.timeout(5000)),
+    db.from("stripe_webhook_events").select("id").eq("provider_environment", getStripeEnvironment()).in("status", ["received", "processing", "failed", "dead_lettered"]).lt("received_at", overdue).limit(1).abortSignal(AbortSignal.timeout(5000)),
     db.from("document_generation_runs").select("id").or(generationOverdueFilter(overdue)).limit(1).abortSignal(AbortSignal.timeout(5000)),
   ]);
   for (const [probe, result] of [['notificationOverdue', notifications], ['notificationFailed', failures], ['stripeOverdue', stripe], ['generationOverdue', generation]] as const) {
@@ -64,7 +65,10 @@ export function createOperationalWatchdogRunner() {
       const snapshot = await readWatchdogSnapshot();
       if (!snapshot.ready) platformFailure({reason:'dependency_unready', checks:snapshot.unreadyDependencies ?? []});
       else consecutivePlatformFailures = 0;
-      for (const category of evaluateWatchdog(snapshot)) if(category !== 'platform') emitCriticalSignal(category);
+      for (const category of evaluateWatchdog(snapshot)) {
+        if (category === 'billing') emitCriticalSignal(category, { diagnostic: { reason: 'queue_backlog', probe: 'stripeOverdue' } });
+        else if (category !== 'platform') emitCriticalSignal(category);
+      }
       // Only a completed probe emits a heartbeat. Five missing probes still page.
       console.log(JSON.stringify({ kind: "darci_watchdog_heartbeat", at: new Date().toISOString() }));
     } catch(error) {

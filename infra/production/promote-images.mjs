@@ -2,12 +2,15 @@
 import assert from 'node:assert/strict';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
+import {join} from 'node:path';
+import {validateImageReport} from '../../scripts/scan-runtime-image.mjs';
 import {readReleaseSnapshot, verifyReleaseSnapshot} from './release-verification.mjs';
 const aws=(...args)=>JSON.parse(execFileSync('aws',[...args,'--region','us-east-1','--output','json'],{encoding:'utf8',stdio:['ignore','pipe','inherit']}));
 assert.equal(process.env.GITHUB_REF,'refs/heads/master');
 assert.equal(process.env.GITHUB_REPOSITORY,'jllb89/darci');
 assert.equal(aws('sts','get-caller-identity').Account,'427057633951');
 const m=JSON.parse(readFileSync(process.argv[2],'utf8'));
+const scanDirectory=process.argv[3]; assert(scanDirectory, 'Exact-digest application and OS scan evidence required');
 assert.equal(m.revision,process.env.GITHUB_SHA);
 assert.equal(m.runtimeTrackedChanges,false,'Automated promotion requires clean runtime source');
 const before=readReleaseSnapshot(aws);
@@ -17,6 +20,11 @@ const parameters=stack.Parameters.map(p=>({ParameterKey:p.ParameterKey,UsePrevio
 for(const service of ['api','worker','web']) {
   const uri=m.images[service];
   assert(new RegExp(`^427057633951\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/darci-production-${service}@sha256:[a-f0-9]{64}$`).test(uri));
+  const reportPath=join(scanDirectory,`${service}.json`);
+  const receipt=JSON.parse(readFileSync(reportPath+'.receipt.json','utf8'));
+  assert.equal(receipt.passed,true); assert.equal(receipt.imageRef,uri);
+  assert.match(receipt.imageId,/^sha256:[a-f0-9]{64}$/);
+  validateImageReport(JSON.parse(readFileSync(reportPath,'utf8')),receipt.imageId);
   let scan;
   for(let i=0;i<24;i++) {
     // Scan registration can lag a successful push. A bounded retry still fails

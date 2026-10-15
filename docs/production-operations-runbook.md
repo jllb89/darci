@@ -52,6 +52,16 @@ Treat a missing material audit as an integrity incident. Verify the related tran
 
 ### billing
 
+**15 October scope correction:** `queue_backlog/stripeOverdue` means the current
+environment has an unresolved old Stripe inbox event; repeated signals are not a
+count of failed customer payments. Shared-account events without DARCi metadata
+are ignored only after confirming no local subscription, price or Checkout
+mapping. Any DARCi marker/mapping or unavailable lookup retains fail-closed
+handling. Do not delete a failed event or disable dead-letter detection. Before
+an authorized audited replay, verify the exact provider object and preserve the
+previous error/state; prove that unrelated events become `ignored` without
+entitlement/subscription/payment changes. See the [October closeout](production-stability-closeout-2026-10-15.md).
+
 Check the admin reconciliation report, durable webhook inbox and held-release eligibility. The watchdog flags inbox events older than five minutes in received/processing/failed/dead-letter states; the existing reconciliation worker checks provider drift and eligible-but-held packages. Use recent TOTP, a support reason and an idempotency key for relevant operator recovery. Never charge a client, issue a refund, change a plan or reverse client usage merely as an alert drill.
 
 ### retention

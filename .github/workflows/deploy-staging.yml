@@ -125,6 +125,7 @@ jobs:
               - '.github/workflows/deploy-staging.yml'
               - '.github/workflows/ci.yml'
               - 'scripts/workflow-gates.mjs'
+              - 'scripts/scan-runtime-image.mjs'
               - '.dockerignore'
 
       - name: Build matrix
@@ -262,6 +263,7 @@ jobs:
           # shellcheck disable=SC2054
           buildx_command=(
             docker buildx build
+            --pull
             --progress=plain
             --platform linux/arm64
             -f "${{ matrix.dockerfile }}"
@@ -302,11 +304,7 @@ jobs:
           digest=$(aws ecr describe-images --repository-name "$IMAGE_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           image_ref="$ECR_REGISTRY/$IMAGE_REPOSITORY@$digest"
-          docker pull "$image_ref"
-          image_id=$(docker image inspect "$image_ref" --format '{{.Id}}')
-          docker save "$image_id" -o "$RUNNER_TEMP/runtime-image.tar"
-          trivy image --input "$RUNNER_TEMP/runtime-image.tar" --scanners vuln --severity HIGH,CRITICAL \
-            --ignorefile /dev/null --exit-code 1 --format json --output "$RUNNER_TEMP/image-scan.json"
+          node scripts/scan-runtime-image.mjs "$image_ref" "$RUNNER_TEMP/image-scan.json" "$RUNNER_TEMP/runtime-image.tar"
           printf '%s\n' "$digest" > "$RUNNER_TEMP/image-digest.txt"
 
       - name: Preserve failed scan diagnostics
@@ -324,6 +322,7 @@ jobs:
           name: verified-${{ matrix.repository }}
           path: |
             ${{ runner.temp }}/image-scan.json
+            ${{ runner.temp }}/image-scan.json.receipt.json
             ${{ runner.temp }}/image-digest.txt
           retention-days: 14
 

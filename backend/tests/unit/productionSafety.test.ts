@@ -9,7 +9,10 @@ describe('production safety',()=>{
   it('redacts bearer paths and query credentials',()=>{
     expect(safeRequestPath('/invites/public/secret/claim?token=private')).toBe('/invites/public/[redacted]/claim');
     expect(safeRequestPath('/verify/ABC123?key=secret')).toBe('/verify/[idn]');
-    expect(safeRequestId('bad\r\nheader')).not.toContain('bad');
+    // A random UUID can legitimately contain the hex substring "bad".
+    const replacement = safeRequestId('bad\r\nheader');
+    expect(replacement).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(replacement).not.toMatch(/[\r\n]/);
   });
   it('covers sensitive routes without blocking provider callbacks',()=>{
     for(const p of ['/auth/otp/start','/invites/public/token/claim','/verify/id','/documents/id/sign','/billing/member/checkout','/notary/requests/id/session/advance']) expect(abusePolicy('POST',p)).not.toBeNull();

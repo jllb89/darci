@@ -65,7 +65,11 @@ After these files have been committed/pushed and server CI has passed:
 3. Review the pending deployment to the `production` environment and approve the intended revision.
 4. The workflow requires passing `types`, `backend`, `web` and `database-security` jobs for that exact SHA; it does not rebuild iOS or rerun server tests unnecessarily.
 5. It builds three ARM64 images. The web image is rebuilt with **production** public URLs/key; do not reuse the staging web bundle.
-6. It resolves immutable ECR digests and requires completed scans with zero HIGH/CRITICAL findings.
+6. It resolves immutable ECR digests and runs the same pinned Trivy OS/Node-package
+   policy as staging, with zero HIGH/CRITICAL findings and no suppressions. The
+   promotion command requires matching image-ID/digest scan receipts and retains
+   the additional completed ECR scan gate. `production-image-scans` preserves
+   reports and receipts, including failed scans; never bypass a rejected report.
 7. CloudFormation updates **only the three image parameters**, keeping the previous template, secret version, IP allowlist and closed-payment configuration.
 8. ECS rolls tasks with readiness checks and a deployment circuit breaker with rollback enabled. The workflow verifies actual running digests/task health, completed rollouts/counts and unchanged template, non-image parameters and service configuration.
 9. From the approved network, check the app, API readiness, document access denials and monitoring. Full product acceptance is separate from a green service rollout.

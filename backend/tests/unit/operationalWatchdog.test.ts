@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks=vi.hoisted(()=>({health:vi.fn(),query:vi.fn(),signal:vi.fn(),chains:[] as Array<Record<string,ReturnType<typeof vi.fn>>>}));
-vi.mock("@supabase/supabase-js",()=>({createClient:()=>({from:()=>{const q:Record<string,ReturnType<typeof vi.fn>>={};for(const key of ['select','in','lt','gte','or','limit'])q[key]=vi.fn(()=>q);q.abortSignal=vi.fn(()=>mocks.query());mocks.chains.push(q);return q;}})}));
+vi.mock("@supabase/supabase-js",()=>({createClient:()=>({from:()=>{const q:Record<string,ReturnType<typeof vi.fn>>={};for(const key of ['select','eq','in','lt','gte','or','limit'])q[key]=vi.fn(()=>q);q.abortSignal=vi.fn(()=>mocks.query());mocks.chains.push(q);return q;}})}));
 vi.mock("../../src/services/operationalHealthService",()=>({checkOperationalReadiness:mocks.health}));
 vi.mock("../../src/telemetry/criticalSignals",async importOriginal=>({...await importOriginal<typeof import('../../src/telemetry/criticalSignals')>(),emitCriticalSignal:mocks.signal}));
 import { createOperationalWatchdogRunner, evaluateWatchdog, generationOverdueFilter, readWatchdogSnapshot } from "../../src/services/operationalWatchdogService";
@@ -18,6 +18,19 @@ describe("operational watchdog thresholds", () => {
     expect(await readWatchdogSnapshot()).toEqual(healthy);
     expect(mocks.chains).toHaveLength(4);
     for(const q of mocks.chains){expect(q.select).toHaveBeenCalledWith('id');expect(q.limit).toHaveBeenCalledWith(1);expect(q.abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));}
+  });
+  it('scopes billing backlog to the current environment without hiding dead letters', async()=>{
+    await readWatchdogSnapshot();
+    expect(mocks.chains[2]!.eq).toHaveBeenCalledWith('provider_environment','test');
+    expect(mocks.chains[2]!.in).toHaveBeenCalledWith('status',['received','processing','failed','dead_lettered']);
+  });
+  it('labels durable billing backlog without debouncing or leaking provider data',async()=>{
+    const log=vi.spyOn(console,'log').mockImplementation(()=>{});
+    try {
+      mocks.query.mockResolvedValueOnce({data:[],error:null}).mockResolvedValueOnce({data:[],error:null}).mockResolvedValueOnce({data:[{id:'private-event'}],error:null});
+      await createOperationalWatchdogRunner()();
+      expect(mocks.signal).toHaveBeenCalledExactlyOnceWith('billing',{diagnostic:{reason:'queue_backlog',probe:'stripeOverdue'}});
+    } finally {log.mockRestore();}
   });
   it("does not emit a success heartbeat when a queue cannot be read",async()=>{
     mocks.query.mockResolvedValue({data:null,error:{message:'PRIVATE DATABASE DETAIL'}});

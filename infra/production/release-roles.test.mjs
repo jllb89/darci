@@ -22,6 +22,9 @@ test('production workflow is manual, exact-CI gated, serial and protected',()=>{
   assert(promote.includes('--use-previous-template')); assert(promote.includes('UsePreviousValue:true'));
   assert(promote.includes("assert.equal(m.revision,process.env.GITHUB_SHA)"));
   assert(promote.includes('verifyReleaseSnapshot'));
+  assert(promote.includes('validateImageReport'));
+  assert(promote.includes('receipt.imageRef,uri'));
+  assert(source.includes('production-image-scans'));
   assert(source.includes('production-release-receipt'));
   assert(source.includes('if: always()'));
 });

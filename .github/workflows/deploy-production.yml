@@ -43,8 +43,31 @@ jobs:
         with:
           name: production-image-manifest
           path: /tmp/production-images.json
+      - name: Install the same pinned image scanner as staging
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.74.0
+          cache: false
+          path: ${{ runner.temp }}/scanner
+      - name: Scan each exact production digest with the staging security policy
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/production-scans"
+          for service in api worker web; do
+            image_ref=$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/production-images.json")).images[process.argv[1]]' "$service")
+            node scripts/scan-runtime-image.mjs "$image_ref" "$RUNNER_TEMP/production-scans/$service.json" "$RUNNER_TEMP/production-scans/$service.tar"
+            rm "$RUNNER_TEMP/production-scans/$service.tar"
+          done
+      - name: Preserve production scanner evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-image-scans
+          path: ${{ runner.temp }}/production-scans/*.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Scan and promote images; preserve network and payment gates
-        run: node infra/production/promote-images.mjs /tmp/production-images.json
+        run: node infra/production/promote-images.mjs /tmp/production-images.json "$RUNNER_TEMP/production-scans"
       - name: Preserve release verification evidence
         if: always()
         uses: actions/upload-artifact@v4

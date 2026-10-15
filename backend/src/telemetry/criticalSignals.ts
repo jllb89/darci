@@ -9,7 +9,7 @@ type Context = {
   diagnostic?: { reason: string; probe?: string; checks?: string[]; consecutive?: number };
 };
 
-const watchdogReasons = new Set(['dependency_unready', 'queue_probe_failed', 'probe_failed']);
+const watchdogReasons = new Set(['dependency_unready', 'queue_probe_failed', 'probe_failed', 'queue_backlog']);
 const watchdogChecks = new Set(['database', 'configuration', 'identityProtection', 'redis', 'worker']);
 const watchdogProbes = new Set(['notificationOverdue', 'notificationFailed', 'stripeOverdue', 'generationOverdue']);
 function safeDiagnostic(value: Context['diagnostic']) {

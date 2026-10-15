@@ -2,10 +2,10 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildRuntime} from './runtime.mjs';
 import {readFileSync} from 'node:fs';
-test('API and worker require the patched XML parser in their PDF runtime',()=>{
+test('API and worker require patched XML and TIFF parsers in their PDF runtime',()=>{
   for(const path of ['../../backend/Dockerfile','../../backend/Dockerfile.worker']) {
     const text=readFileSync(new URL(path,import.meta.url),'utf8');
-    assert.match(text, /apk add --no-cache 'libexpat>=2\.8\.5-r0' qpdf poppler-utils font-liberation/);
+    assert.match(text, /apk add --no-cache 'libexpat>=2\.8\.5-r0' 'tiff>=4\.7\.2-r0' qpdf poppler-utils font-liberation/);
   }
 });
 test('edge denies by default, restricts approved operator address and uses exact production TLS',()=>{

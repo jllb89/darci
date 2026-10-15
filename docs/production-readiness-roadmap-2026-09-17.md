@@ -1,5 +1,18 @@
 # DARCi Production Readiness Roadmap
 
+**October 15 — focused stability/security closeout:** Jorge approved fixing the
+staging image-scan failures and recurring billing alert, with **staging deployment
+and testing before any production release**. Local patches update Next.js to
+16.3.8, require patched TIFF in both PDF runtimes, and require the same exact-image
+Trivy policy in staging and production (production's ECR gate remains additional).
+The live billing alarm traces to two unrelated October 4 Stripe events for a
+2022 subscription, with no DARCi subscription/price mapping. The fix ignores only
+unmapped, unmarked subscriptions; mapped or DARCi-marked failures remain actionable.
+**Production records/configuration are unchanged; the two retained dead letters
+still require audited resolution after staging acceptance.** App Review is being
+handled by Jorge; consolidated acceptance follows, not a reopening of Phases 1–3.
+[Scope, test evidence and outstanding release gates](production-stability-closeout-2026-10-15.md).
+
 **October 7 — public production network access deployed:** Jorge approved opening
 both `app.illuminotary.com` and `api.illuminotary.com`. Normal app/client API access
 no longer depends on tester IPs; internal and diagnostic routes remain restricted.

@@ -58,8 +58,13 @@ test('prerequisites gate candidate builds, which run alongside validation', () =
 });
 
 test('digest scans and database-security tests remain mandatory', () => {
-  assert.match(job(deploy, 'build-images'), /--scanners vuln --severity HIGH,CRITICAL/);
-  assert.match(job(deploy, 'build-images'), /--ignorefile \/dev\/null --exit-code 1/);
+  assert.match(job(deploy, 'build-images'), /node scripts\/scan-runtime-image\.mjs/);
+  const production = read('deploy-production');
+  assert.match(production, /node scripts\/scan-runtime-image\.mjs/);
+  for (const source of [deploy, production]) assert.match(source, /version: v0\.74\.0/);
+  assert(production.indexOf('node scripts/scan-runtime-image.mjs') < production.indexOf('node infra/production/promote-images.mjs'));
+  const scanner = readFileSync(new URL('./scan-runtime-image.mjs', import.meta.url), 'utf8');
+  assert.match(scanner, /'--scanners', 'vuln', '--severity', 'HIGH,CRITICAL', '--ignorefile', '\/dev\/null', '--exit-code', '1'/);
   assert.doesNotMatch(job(deploy, 'build-images'), /:staging-latest/);
   assert.match(ci, /test-phase1-storage-boundary\.mjs/);
   assert.match(ci, /test-phase1-billing-sql\.mjs/);
