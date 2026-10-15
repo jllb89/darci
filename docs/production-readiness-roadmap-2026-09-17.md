@@ -1,8 +1,18 @@
 # DARCi Production Readiness Roadmap
 
-**October 15 — focused stability/security closeout:** Jorge approved fixing the
+**October 15 — staging accepted; production release and audited correction approved:**
+Revision `751a334` passed exact-commit CI, three clean image scans, stable deployed
+digests, API/web readiness, real isolated test-mode Stripe callbacks, duplicate
+handling and zero-issue staging reconciliation. The staging recovery retry also
+completed all 2,571 objects; its old alert was retained/acknowledged and recovered
+to OK naturally. **Jorge confirmed staging looks good and approved the production
+release behind the existing GitHub approval gate, then audited closure of only the
+two unrelated Stripe events and natural billing-alarm recovery. Production release
+and correction remain pending until their actual evidence is recorded.**
+
+Jorge approved fixing the
 staging image-scan failures and recurring billing alert, with **staging deployment
-and testing before any production release**. Local patches update Next.js to
+and testing before any production release**. The patches update Next.js to
 16.3.8, require patched TIFF in both PDF runtimes, and require the same exact-image
 Trivy policy in staging and production (production's ECR gate remains additional).
 The live billing alarm traces to two unrelated October 4 Stripe events for a

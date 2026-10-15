@@ -8,6 +8,11 @@ No production release, Stripe inbox correction, subscription change, charge,
 client notification, PDF mutation, or App Review submission is authorized by the
 staging deployment itself. Preserve the unrelated local Apple review draft.
 
+**Follow-up authorization:** Jorge confirmed staging looks good and requested
+pushing the roadmap, deploying through the normal production approval, then
+closing only the two unrelated Stripe events and verifying natural billing-alarm
+recovery. This does not authorize subscription/charge/document changes.
+
 ## Root causes and changes
 
 - Three recent staging releases were rejected by HIGH-severity image findings:
@@ -42,31 +47,61 @@ staging deployment itself. Preserve the unrelated local Apple review draft.
 - Backend TypeScript compilation passes; **952 backend tests pass** on Node 24.
 - **138 web tests pass**; patched Next.js production build passes. Lint has zero
   errors and two preexisting hook-dependency warnings outside this patch.
-- **163 infrastructure/workflow tests pass**; workflow YAML parses and diff
+- **165 infrastructure/workflow tests pass**; workflow YAML parses and diff
   whitespace checks pass. The shared scanner rejects tags, mismatched/incomplete
   reports, HIGH findings, and Docker/scanner failures.
-- Local API/worker image checks and deployed staging acceptance are in progress;
-  they are not recorded as passed until their actual results are available.
+- Local API/worker images have zero HIGH/CRITICAL findings against the refreshed
+  vulnerability database. The API's network-isolated unsigned PDF creation,
+  qpdf check and Poppler render smoke passes.
+
+## Deployed staging acceptance — completed
+
+Exact application/scanner revision: `751a334d91efd70266bedefb9498e3b804b808d5`.
+[CI](https://github.com/jllb89/darci/actions/runs/38768452589) and
+[staging deployment](https://github.com/jllb89/darci/actions/runs/38768452468)
+passed. Running API129, worker115 and web80 match the three successful immutable
+digest/verified-config scan receipts; all rollouts completed with desired capacity.
+The published runtime includes TIFF 4.7.2-r0 and Next.js 16.3.8. API readiness/web
+return HTTP 200, and unsigned Stripe ingress still returns HTTP 400.
+
+A clearly labeled unrelated Stripe **test-mode** subscription generated real
+`customer.subscription.created`, `customer.subscription.deleted`, and
+`invoice.paid` callbacks; all became `ignored`. A signed duplicate returned
+`duplicate=true`, preserving the inbox records. No DARCi subscription or price
+mapping was created. No email/payment method was supplied, no real charge was
+made, the trial was canceled, its price/product archived, and the synthetic Stripe
+customer deleted. Callback evidence remains retained in staging.
+
+Read-only staging reconciliation completed its provider scan: **22 internal / 22
+provider subscriptions, zero issues, zero webhook backlog and zero held packages**.
+Staging's existing observe-mode/acceptance configuration was not changed.
+Private receipts/reports are under
+`.recovery-private/readiness-audit-2026-10-15/` (ignored; no keys in reports).
 
 ## Recovery alert investigation
 
-The staging recovery failure queue contains an alert for task
+The staging recovery failure queue contained an alert for task
 `84a811562db74956bdad2686f6e9b9e8`. It stopped after more than 2,400/2,571 object
 copies because a source storage read failed. No incomplete manifest was accepted.
 HEAD checks for positions 2,400–2,424 now all return HTTP 200; the original failure
 did not retain an HTTP status, so its exact provider cause is unknown.
 
-An existing-resource staging backup retry was launched as task
-`23e09c282d384030845fc4b74ed28ae8`. Verify its completed manifest and exit status
-before acknowledging the exact old queue message. Do not purge the queue or force
-an alarm state. Production's twice-daily backups remain current and unchanged.
+An existing-resource staging backup retry, task
+`23e09c282d384030845fc4b74ed28ae8`, **completed successfully**: all 2,571 objects,
+937,766,811 total bytes, 163.289 seconds. Its exact versioned complete manifest,
+checksums and task exit zero were verified. The old alert was retained privately
+and only that exact queue message acknowledged; the queue is empty. Its alarm
+returned **OK naturally at 10:29:51 Mexico City time**, with actions still enabled.
+No queue purge, alarm override, source/PDF change or production change occurred.
+Production's twice-daily backups remain current and unchanged.
 
 ## Remaining gates
 
-- [ ] Exact-revision CI, all three image scans and staging rollout pass.
-- [ ] Deployed staging read-only health/billing reconciliation plus isolated
+- [x] Exact-revision CI, all three image scans and staging rollout pass.
+- [x] Deployed staging read-only health/billing reconciliation plus isolated
       webhook-scope acceptance pass; no client or live-payment mutation.
-- [ ] New staging backup completes; retain evidence before acknowledging its old alert.
+- [x] New staging backup completes; retain evidence before acknowledging its old alert.
+- [x] Jorge's requested manual staging check / production go-ahead.
 - [ ] Only after staging acceptance: approved production release and verification.
 - [ ] Audit/reclassify only the two proven unrelated production inbox events;
       preserve their previous failure evidence and verify billing state is unchanged.
