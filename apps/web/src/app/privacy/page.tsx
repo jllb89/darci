@@ -37,6 +37,7 @@ export default function PrivacyPage() {
                 ["Document Number", privacyPolicyMetadata.number],
                 ["Document Name", privacyPolicyMetadata.name],
                 ["Effective Date", privacyPolicyMetadata.effectiveDate],
+                ["Last Updated", privacyPolicyMetadata.lastUpdated],
                 ["Document Status", privacyPolicyMetadata.status],
               ].map(([label, value]) => (
                 <div key={label} className="space-y-1">
@@ -71,6 +72,7 @@ export default function PrivacyPage() {
         <div className="mx-auto flex max-w-4xl flex-col gap-4 sm:flex-row sm:justify-between">
           <a href="mailto:support@illuminote.io" className={`break-all underline underline-offset-4 ${focusClass}`}>support@illuminote.io</a>
           <a href="mailto:incidentreports@illuminote.io" className={`break-all underline underline-offset-4 ${focusClass}`}>Report an incident</a>
+          <Link href="/terms" className={`underline underline-offset-4 ${focusClass}`}>Terms and Conditions</Link>
         </div>
       </footer>
     </div>

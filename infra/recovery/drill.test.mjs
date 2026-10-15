@@ -66,6 +66,22 @@ test('selective queue recovery is synthetic, isolated and preserves provider que
   assert.doesNotMatch(s,/flushall|flushdb|obliterate|set-alarm-state/i);
 });
 
+test('full-volume recovery proves exact served bytes and keeps restored evidence/providers quarantined',()=>{
+  const s=script('recovery-representative-functional-drill.mjs');
+  assert.match(s,/--approved-production-volume/);
+  assert.match(s,/runtime\.target\?\.production===true/);
+  assert.match(s,/assert\.equal\(manifest\.complete,true\)/);
+  assert(s.includes("assert.equal(JSON.parse(await docker(['network','inspect',runtime.name]))[0].Internal,true)"));
+  assert.match(s,/Object\.keys\(c\.HostConfig\.PortBindings/);
+  assert.match(s,/allBytes\.checked,manifest\.objects\.length/);
+  assert.match(s,/digest\('hex'\),o\.hash/);
+  assert.match(s,/url\.hostname,'gateway'/);
+  assert.match(s,/actualProtectedRowsVerified:v\.rows\.length/);
+  assert.match(s,/assert\.deepEqual\(await fingerprint\(\),before\)/);
+  assert.match(s,/finally\{if\(original&&objectPath\)await writeFile\(objectPath,original\);\}/);
+  assert.doesNotMatch(s,/get-secret-value|set-alarm-state|flushall|flushdb|sk_live_/);
+});
+
 test('staging deliberately disables unverified OTLP on API and worker without disabling AWS signals',()=>{
   const workflow=readFileSync(new URL('../../.github/workflows/deploy-staging.yml',import.meta.url),'utf8');
   assert.equal((workflow.match(/OTEL_SDK_DISABLED: "1"/g)??[]).length,2);
@@ -75,6 +91,9 @@ test('staging deliberately disables unverified OTLP on API and worker without di
 test('recovered access matrix uses internal-only real APIs and synthetic bound identities',()=>{
   const s=script('recovery-access-drill.mjs');
   assert.match(s,/\.Internal,true/);
+  assert.match(s,/Object\.keys\(c\.HostConfig\.PortBindings/);
+  assert.match(s,/assert\.equal\(process\.env\.RECOVERY_QUARANTINE,'true'\)/);
+  assert.match(s,/assert\(!process\.env\.STRIPE_SECRET_KEY&&!process\.env\.RESEND_API_KEY&&!process\.env\.APNS_PRIVATE_KEY\)/);
   assert.match(s,/ownerRow\.email==='recovery-'\+input\.fixture\+'@example\.invalid'/);
   assert.match(s,/claimed_user_id:signer\.id/);
   assert.match(s,/status:'revoked'/);

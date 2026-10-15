@@ -1,5 +1,39 @@
 # DARCi Production Readiness Roadmap
 
+**October 15 — representative-volume recovery passed; approved Terms publication prepared:**
+All **266 objects / 254 readable PDFs / 51 completed hashes** recovered exactly;
+the restored production images passed ten functional groups, three selective queue
+groups and **32 authorization requests**. Measured complete recovery including
+the additional key/context check: **23m29**, against 4h; snapshot age **10h35**,
+against 24h. Three unmatched Auth records are closed accounts, not lost active
+users. There were no persisted identity ciphertexts; key verification was synthetic
+and matched local production configuration, not a claim of real-row decryption.
+Production data/provider queues stayed untouched and eight local drill containers
+were stopped. [Recovery closeout](production-recovery-rto-2026-10-15.md).
+Jorge approved the replacement Terms and three precise PP15 corrections on logging,
+public final previews and retention; source text and regressions are ready locally.
+Staging/production publication verification and a new native build remain pending.
+No blanket reapproval of completed Phases 1–3 is requested.
+
+**October 15 — consolidated engineering acceptance executed; device matrix open:**
+[Acceptance results and exact manual checklist](production-consolidated-acceptance-2026-10-15.md).
+Fourteen hosted checks passed; the actual iOS Terms link redirects to a **404** and
+remains a failed publication gate. Fresh local regression: **952 backend / 138 web
+tests**, **158 infrastructure tests**, seven mobile-config/summary helper tests,
+build/types/catalog/KPI checks pass; lint has zero errors/two preexisting warnings.
+Production has **109/109 migrations**, RLS on **98/98 public tables**, clean live
+billing reconciliation and **22 enabled alarms OK**. All **51 completed PDF hash
+records across 39 documents / 194 pages** match exact bytes and pass native syntax
+and page-read checks; all 39 completed documents have consistent release/hash/version
+records. Both latest 266-object backup manifests are complete/versioned; the later
+full restore/RTO proof is recorded above. The local signed production **0.1.0 (28)** archive's endpoints,
+signature, APNs/domain/privacy metadata and iOS source provenance pass. **Signup
+remains intentionally closed; live purchases are open with enforced billing.**
+No production business data/configuration, charge, client notification or App Review
+submission was changed. Manual device/product/role results, Terms publication,
+and explicit signup/launch decisions are not waived. Representative-volume
+restore/RTO is now passed by the separately scoped drill above.
+
 **October 15 — production deployed; exact billing correction and natural alarm recovery verified:**
 After Jorge's staging acceptance and production approval, revision `5b90a27`
 passed [CI](https://github.com/jllb89/darci/actions/runs/38778978972) and
@@ -626,7 +660,7 @@ Current detailed evidence: [Phase 2 execution record](production-phase2-executio
 - [x] Install production backup/monitoring controls and complete the isolated unsigned-fixture database/object/application/worker recovery drill.
 - [x] Verify the first automatic 02:00 Mexico City production backup and independently recover its three exact, readable PDFs plus database archive index (23 September). This is not yet consecutive-run or production-volume acceptance.
 - [x] Confirm two consecutive scheduled production backups at 02:00/14:00 Mexico City on 23 September, complete manifests and successful Scheduler task provenance. The second manifest inventories six objects; the 18:50 on-demand run was not counted as scheduled cadence.
-- [ ] Complete representative-volume recovery/RTO acceptance and a newly scoped/approved expanded restore. The second full restore command was safety-blocked because it also downloads database/key material; only its manifest metadata was fetched afterward. Prior three-PDF recovery evidence remains valid, not repeated or expanded by this check.
+- [x] Complete the newly scoped full-volume production restore/RTO acceptance on 15 October: **266 exact objects, 254 readable PDFs, 51 matching completed hashes**, recovered Auth/Storage/API/worker, ten functional groups, three selective queue groups and 32 access requests. Full exercise including key/context follow-up **23m29**, snapshot age **10h35**, within 4h/24h. No actual identity ciphertexts were present; synthetic key/context and local-config equality passed. The old September safety stop remains historical, not bypassed. [Evidence and limits](production-recovery-rto-2026-10-15.md).
 
 **Exit:** private production candidate healthy through dependency checks; release/rollback and restore evidence attached; no beta resource references. Phase 2 preparation can overlap Phase 1, but public traffic waits for both.
 
@@ -700,6 +734,12 @@ this live configuration fix. Jorge must request fresh codes and confirm login.
 **Exit:** traceable release candidate per platform; no staging/localhost URLs or secrets; approval/review requirements met before public iOS availability. Web rollout need not wait on unrelated iOS improvements, but must pass its own complete production gate.
 
 ### Phase 5 — Production-shaped acceptance and go/no-go
+
+**15 October consolidated pass:** engineering-side results and the numbered manual
+matrix now live in the [consolidated acceptance register](production-consolidated-acceptance-2026-10-15.md).
+Completed read-only checks support the open gates below; they do not mark the full
+CA/OH × product × platform matrix, human-visible notification/OTP, real-money edge
+cases, outage/rotation drills or a representative full restore complete.
 
 Use dedicated test identities/documents. Never use real customer legal acts just to exercise failure injection.
 

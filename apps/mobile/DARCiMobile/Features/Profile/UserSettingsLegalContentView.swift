@@ -75,7 +75,7 @@ struct UserSettingsLegalContentView: View {
 
     private var privacyContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            titleBlock(title: "Privacy Policy", subtitle: "LAST UPDATED  AUG 11, 2026")
+            titleBlock(title: "Privacy Policy", subtitle: "LAST UPDATED  OCT 15, 2026")
                 .padding(.top, 42)
 
             HStack(spacing: 0) {
@@ -84,7 +84,7 @@ struct UserSettingsLegalContentView: View {
                     .clipShape(Capsule())
 
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Your data remains under your control.")
+                    Text("Understand how DARCi handles your data.")
                         .font(DARCiFont.maisonNeue(.medium, size: 15))
                         .foregroundStyle(.white)
                         .lineSpacing(5)
@@ -104,15 +104,21 @@ struct UserSettingsLegalContentView: View {
 
             legalSections(privacySections)
                 .padding(.top, 72)
+
+            Link("Read the full Privacy Policy", destination: MobileEnvironment.webBaseURL.appendingPathComponent("privacy"))
+                .font(DARCiFont.maisonNeue(.medium, size: 15))
+                .foregroundStyle(accent)
+                .frame(minHeight: 44, alignment: .leading)
+                .padding(.top, 40)
         }
     }
 
     private var termsContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            titleBlock(title: "Terms & Conditions", subtitle: "LAST UPDATED  AUG 11, 2026")
+            titleBlock(title: "Terms & Conditions", subtitle: "DARCi SERVICE AGREEMENT")
                 .padding(.top, 42)
 
-            Text("These terms describe the rules for using DARCi and its document services.")
+            Text("Read the full Terms and Conditions for DARCi accounts, document workflows, in-person notarization, membership and verification.")
                 .font(DARCiFont.maisonNeue(.book, size: 13))
                 .foregroundStyle(secondaryText)
                 .lineSpacing(6)
@@ -124,20 +130,17 @@ struct UserSettingsLegalContentView: View {
                 .frame(height: 1)
                 .padding(.top, 52)
 
-            legalSections(termsSections, spacing: 64)
+            Link(destination: MobileEnvironment.termsURL()) {
+                HStack(spacing: 12) {
+                    Text("Read Terms and Conditions")
+                        .font(DARCiFont.maisonNeue(.medium, size: 15))
+                    Image(systemName: "arrow.up.right")
+                }
+                .foregroundStyle(accent)
+                .frame(minHeight: 44, alignment: .leading)
+            }
                 .padding(.top, 42)
-
-            Rectangle()
-                .fill(divider)
-                .frame(height: 1)
-                .padding(.top, 68)
-
-            Text("Interface copy for review. Final legal terms should be approved by qualified counsel.")
-                .font(DARCiFont.maisonNeue(.book, size: 11.5))
-                .foregroundStyle(mutedText)
-                .lineSpacing(5.5)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 28)
+                .accessibilityIdentifier("settings.terms.fullAgreement")
         }
     }
 
@@ -329,40 +332,13 @@ private let privacySections: [LegalSectionItem] = [
         id: "privacy-documents",
         number: "03",
         title: "Documents and storage",
-        body: "Access is limited by role and purpose. Retention and deletion follow service, security, and legal requirements."
+        body: "Draft and workflow access is limited by role and purpose. Released final PDFs may be viewed and saved through their public verification link or IDN. Retention and deletion follow service, security, and legal requirements."
     ),
     LegalSectionItem(
         id: "privacy-choices",
         number: "04",
         title: "Your choices",
         body: "You may review account details, manage permissions, request support, or ask about access and deletion."
-    ),
-]
-
-private let termsSections: [LegalSectionItem] = [
-    LegalSectionItem(
-        id: "terms-acceptance",
-        number: "01",
-        title: "Acceptance of terms",
-        body: "By creating an account or using DARCi, you agree to these terms and the policies referenced here."
-    ),
-    LegalSectionItem(
-        id: "terms-services",
-        number: "02",
-        title: "DARCi services",
-        body: "DARCi provides tools to prepare, manage, sign, and track document and notarization requests."
-    ),
-    LegalSectionItem(
-        id: "terms-account",
-        number: "03",
-        title: "Account responsibilities",
-        body: "Keep your account information accurate, protect your credentials, and review every document before submitting it."
-    ),
-    LegalSectionItem(
-        id: "terms-payments",
-        number: "04",
-        title: "Documents and payments",
-        body: "Service availability, fees, refunds, and completion depend on the request, participants, and applicable requirements."
     ),
 ]
 
@@ -395,7 +371,7 @@ private let faqs: [FAQItem] = [
     FAQItem(
         id: "trust-storage",
         question: "Does DARCi store my trust?",
-        answer: "Yes. Your registered trust is securely stored within the DARCi platform. Your document is only accessible to authorized users and is not publicly available."
+        answer: "Yes. DARCi stores your documents. Draft and workflow access is restricted, but released final PDFs can be viewed and saved without signing in through their public verification link or IDN."
     ),
     FAQItem(
         id: "dynamic-poa",

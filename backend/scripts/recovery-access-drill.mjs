@@ -11,9 +11,10 @@ assert(runtime.success&&queued.customerQueuesUnchanged&&queued.snapshotId===runt
 assert(/^darci-app-recovery-[a-f0-9]{8}$/.test(runtime.name));
 const exec=promisify(execFile);
 assert.equal(JSON.parse((await exec('docker',['network','inspect',runtime.name])).stdout)[0].Internal,true);
+for(const name of runtime.containers){const c=JSON.parse((await exec('docker',['inspect',name])).stdout)[0];assert.deepEqual(Object.keys(c.NetworkSettings.Networks),[runtime.name]);assert.equal(Object.keys(c.HostConfig.PortBindings??{}).length,0);}
 const source=String.raw`
 const assert=require('node:assert/strict'),{randomUUID,createHash}=require('node:crypto'),{createClient}=require('@supabase/supabase-js');
-assert.equal(process.env.APP_ENV,'recovery');assert.equal(new URL(process.env.SUPABASE_URL).hostname,'gateway');
+assert(['recovery','production'].includes(process.env.APP_ENV));assert.equal(process.env.RECOVERY_QUARANTINE,'true');assert.equal(new URL(process.env.SUPABASE_URL).hostname,'gateway');assert(!process.env.STRIPE_SECRET_KEY&&!process.env.RESEND_API_KEY&&!process.env.APNS_PRIVATE_KEY);
 const input=INPUT;
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false}}),roles=require('./dist/services/userRoleService');
 const ok=r=>{assert(!r.error,JSON.stringify({code:r.error?.code,status:r.error?.status,message:r.error?.message}));return r.data;};

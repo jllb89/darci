@@ -37,6 +37,12 @@ final class ProductionEnvironmentTests: XCTestCase {
         XCTAssertEqual(MobileEnvironment.notaryApplicationURL(production: false).absoluteString, "https://app.staging.darciregistry.dev/app/settings")
         XCTAssertNil(MobileEnvironment.notaryApplicationURL().query)
     }
+
+    func testTermsUseTheMatchingEnvironmentWithoutSessionTokens() {
+        XCTAssertEqual(MobileEnvironment.termsURL(production: true).absoluteString, "https://app.illuminotary.com/terms")
+        XCTAssertEqual(MobileEnvironment.termsURL(production: false).absoluteString, "https://app.staging.darciregistry.dev/terms")
+        XCTAssertNil(MobileEnvironment.termsURL().query)
+    }
     func testProductionLinksStayInProduction() throws {
         let id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         XCTAssertEqual(MemberDocumentDeepLink.route(from: try XCTUnwrap(URL(string: "https://app.illuminotary.com/app/documents/\(id)")), production: true), .memberDocument(documentId: id, notificationId: nil))

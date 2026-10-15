@@ -152,6 +152,7 @@ export default function Home() {
               <a href="mailto:support@illuminote.io" className={`inline-flex min-h-11 items-center break-all hover:underline ${focusClass}`}>support@illuminote.io</a>
               <a href="mailto:incidentreports@illuminote.io" className={`inline-flex min-h-11 flex-col items-start justify-center gap-1 break-all hover:underline ${focusClass}`}><span className="text-xs text-white/60">Report an incident</span>incidentreports@illuminote.io</a>
               <Link href="/privacy" className={`inline-flex min-h-11 items-center underline underline-offset-4 ${focusClass}`}>Privacy Policy</Link>
+              <Link href="/terms" className={`inline-flex min-h-11 items-center underline underline-offset-4 ${focusClass}`}>Terms and Conditions</Link>
             </div>
           </div>
           <p className="border-t border-white/20 pt-8 text-xs text-white/60">© {new Date().getFullYear()} DARCi. All rights reserved.</p>
